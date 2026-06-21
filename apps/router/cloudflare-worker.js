@@ -1,13 +1,19 @@
 /**
- * Cloudflare Worker — SitePresso subdomain router
+ * Cloudflare Worker — HRMS subdomain router
  *
- * Routes tenant subdomains → the correct Vercel project, for BOTH
- * environments off a single Worker (host-aware):
- *   • staging  → *.aapkatech.com   → api.aapkatech.com  + sitepresso-*       projects
- *   • prod     → *.sitepresso.com  → api.sitepresso.com + sitepresso-prod-*  projects
+ * Routes hosts → the correct Vercel project, for BOTH environments off a single
+ * Worker (host-aware). HR is a SINGLE vertical with three fixed surfaces:
+ *   • hr.com / www / reserved subdomains → PLATFORM project (marketing + signup
+ *     + onboarding + super-admin on admin.<domain>)
+ *   • app.<domain>                       → HR_ADMIN project (tenant HR console)
+ *   • <slug>.<domain> OR bound custom domain → ESS project (white-label
+ *     Employee Self-Service; tenant resolved by Host)
  *
- * The environment is derived from the request hostname, so the same
- * Worker is attached to both zone routes (see wrangler.toml).
+ *   • staging  → *.aapkatech.com   → api.aapkatech.com  + hr-*       projects
+ *   • prod     → *.hr.com          → api.hr.com         + hr-prod-*  projects
+ *
+ * The environment is derived from the request hostname, so the same Worker is
+ * attached to both zone routes (see wrangler.toml).
  */
 
 // Per-environment config. Keyed by platform apex domain.
@@ -15,74 +21,29 @@ const ENVS = {
   'aapkatech.com': {
     BACKEND_API: 'https://api.aapkatech.com',
     PLATFORM_DOMAIN: 'app.aapkatech.com',
-    PLATFORM_VERCEL: 'https://sitepresso-platform.vercel.app',
-    VERCEL_URLS: {
-      booking: {
-        public:   'https://sitepresso-business.vercel.app',
-        staff:    'https://sitepresso-booking-staff.vercel.app',
-        customer: 'https://sitepresso-booking-customer.vercel.app',
-      },
-      shop: {
-        public:          'https://sitepresso-shop-public.vercel.app',
-        'staff/manager': 'https://sitepresso-shop-manager.vercel.app',
-        'staff/delivery':'https://sitepresso-shop-delivery.vercel.app',
-        customer:        'https://sitepresso-shop-customer.vercel.app',
-      },
-      web: {
-        public:   'https://sitepresso-web-public.vercel.app',
-        staff:    'https://sitepresso-web-staff.vercel.app',
-        customer: 'https://sitepresso-web-customer.vercel.app',
-      },
-    },
+    PLATFORM_VERCEL: 'https://hr-platform.vercel.app',
+    HR_ADMIN_VERCEL: 'https://hr-admin.vercel.app',
+    ESS_VERCEL:      'https://hr-ess.vercel.app',
   },
-  'sitepresso.com': {
-    BACKEND_API: 'https://api.sitepresso.com',
-    PLATFORM_DOMAIN: 'app.sitepresso.com',
-    PLATFORM_VERCEL: 'https://sitepresso-prod-platform.vercel.app',
-    VERCEL_URLS: {
-      booking: {
-        public:   'https://sitepresso-prod-booking-public.vercel.app',
-        staff:    'https://sitepresso-prod-booking-staff.vercel.app',
-        customer: 'https://sitepresso-prod-booking-customer.vercel.app',
-      },
-      shop: {
-        public:          'https://sitepresso-prod-shop-public.vercel.app',
-        'staff/manager': 'https://sitepresso-prod-shop-manager.vercel.app',
-        'staff/delivery':'https://sitepresso-prod-shop-delivery.vercel.app',
-        customer:        'https://sitepresso-prod-shop-customer.vercel.app',
-      },
-      web: {
-        public:   'https://sitepresso-prod-web-public.vercel.app',
-        staff:    'https://sitepresso-prod-web-staff.vercel.app',
-        customer: 'https://sitepresso-prod-web-customer.vercel.app',
-      },
-    },
+  'hr.com': {
+    BACKEND_API: 'https://api.hr.com',
+    PLATFORM_DOMAIN: 'app.hr.com',
+    PLATFORM_VERCEL: 'https://hr-prod-platform.vercel.app',
+    HR_ADMIN_VERCEL: 'https://hr-prod-admin.vercel.app',
+    ESS_VERCEL:      'https://hr-prod-ess.vercel.app',
   },
 };
 
-const CUSTOMER_PATHS = {
-  booking: ['dashboard'],
-  shop:    ['account', 'orders'],
-  web:     ['enquiries'],
-};
-
-// Static-asset namespaces. Every sub-app shares one tenant host, but each is
-// a separate Vercel build with its own /_next/* hashes. A non-public sub-app
-// (e.g. customer at /account) sets `assetPrefix` in its next.config so its
-// chunks load under one of these prefixes; we route the whole prefix to that
-// sub-app. Without it /_next/* falls through to `public` → 404 → unstyled
-// page. Vertical-agnostic: the prefix maps to a sub-app KEY, and
-// resolveSubAppKey only honours it if that key exists for the resolved
-// vertical (so e.g. manager-static is a no-op outside `shop`). Keep in sync
-// with `assetPrefix` in each non-public sub-app's next.config.js.
+// Static-asset namespace. The ESS sub-app is a separate Vercel build with its
+// own /_next/* hashes; it sets `assetPrefix` (/ess-static) in its next.config so
+// its chunks load under that prefix. With a single tenant app every tenant-host
+// path already lands on the ESS project, so this is documentation of the
+// contract more than a fan-out. Keep in sync with the ESS next.config.
 const ASSET_PREFIX_SUBAPP = {
-  'customer-static': 'customer',
-  'staff-static':    'staff',
-  'manager-static':  'staff/manager',
-  'delivery-static': 'staff/delivery',
+  'ess-static': 'ess',
 };
 
-const RESERVED = new Set(['www', 'api', 'admin', 'app', 'mail', 'platform', 'm']);
+const RESERVED = new Set(['www', 'api', 'admin', 'app', 'mail', 'platform', 'm', 'hr']);
 const TENANT_ADMIN_PATH_RE = /^\/admin(?:\/|$)/;
 
 // KV namespace bound as ROUTER_CACHE in worker settings (60s TTL)
@@ -210,78 +171,21 @@ function tenantNotFoundResponse(host, apex) {
   });
 }
 
-function resolveSubAppKey(vertical, pathname, vercelUrls) {
-  const stripped = pathname.replace(/^\//, '');
-  const subApps = vercelUrls[vertical] || {};
-
-  // Asset-prefix routing: keep a sub-app's /_next/* chunks with the sub-app
-  // that rendered the HTML. Checked first so it can't be shadowed by a
-  // tenant path that happens to share a leading segment.
-  const assetSubKey = ASSET_PREFIX_SUBAPP[stripped.split('/')[0]];
-  if (assetSubKey && subApps[assetSubKey]) {
-    return assetSubKey;
-  }
-
-  // Longest prefix match for non-public sub-app paths
-  const prefixes = Object.keys(subApps).filter(k => k !== 'public').sort((a, b) => b.length - a.length);
-  for (const prefix of prefixes) {
-    if (stripped === prefix || stripped.startsWith(prefix + '/')) {
-      return prefix;
-    }
-  }
-
-  // Customer paths
-  const customerPaths = CUSTOMER_PATHS[vertical] || [];
-  for (const prefix of customerPaths) {
-    if (stripped === prefix || stripped.startsWith(prefix + '/')) {
-      return 'customer';
-    }
-  }
-
-  return 'public';
-}
-
-function pathStartsWith(pathname, prefix) {
-  return pathname === prefix || pathname.startsWith(`${prefix}/`);
-}
-
-function tenantScopedPathname(vertical, subKey, pathname, tenantSlug) {
-  if (!tenantSlug) return pathname;
-
-  // Static asset prefixes are already namespaced for a sub-app. They should
-  // stay at /staff-static, /customer-static, etc. rather than /:slug/...
-  const firstSegment = pathname.replace(/^\//, '').split('/')[0];
-  if (ASSET_PREFIX_SUBAPP[firstSegment] || pathname.startsWith('/_next/')) {
-    return pathname;
-  }
-
-  // These app-router pages live under /:slug/... internally, but tenants use
-  // clean public URLs such as /staff and /enquiries.
-  if ((vertical === 'booking' || vertical === 'web') && subKey === 'staff' && pathStartsWith(pathname, '/staff')) {
-    return `/${tenantSlug}${pathname}`;
-  }
-  if (vertical === 'shop' && subKey === 'staff/manager' && pathStartsWith(pathname, '/staff/manager')) {
-    return `/${tenantSlug}${pathname}`;
-  }
-  if (vertical === 'shop' && subKey === 'staff/delivery' && pathStartsWith(pathname, '/staff/delivery')) {
-    return `/${tenantSlug}${pathname}`;
-  }
-  if (vertical === 'web' && subKey === 'customer' && pathStartsWith(pathname, '/enquiries')) {
-    return `/${tenantSlug}${pathname}`;
-  }
-
-  return pathname;
-}
-
 function unifiedAdminRedirect(url, cfg) {
   const target = new URL(`${url.protocol}//${cfg.PLATFORM_DOMAIN}/dashboard`);
   target.search = url.search;
   return Response.redirect(target.toString(), 302);
 }
 
-async function lookupVertical(slug, backendApi, env) {
+// Existence check for a platform-subdomain tenant (<slug>.hr.com). HR has a
+// single vertical, so the Worker no longer asks WHICH vertical a slug is — only
+// WHETHER it maps to a routable tenant. Returns the slug if it exists, else null.
+// NOTE FOR LEAD: hits the legacy /api/internal/tenant-vertical?slug endpoint as
+// an existence probe (its `vertical` field is ignored). Rename it to a
+// vertical-agnostic existence endpoint when the backend is rewired.
+async function lookupTenantExists(slug, backendApi, env) {
   // Try KV cache first (namespaced per backend so staging/prod don't collide)
-  const cacheKey = `v:${backendApi}:${slug}`;
+  const cacheKey = `t:${backendApi}:${slug}`;
   if (env.ROUTER_CACHE) {
     const cached = await env.ROUTER_CACHE.get(cacheKey);
     if (cached) return cached;
@@ -294,17 +198,22 @@ async function lookupVertical(slug, backendApi, env) {
   });
 
   if (!res.ok) return null;
-  const data = await res.json();
-  const vertical = data?.vertical?.toLowerCase() || null;
+  const data = await res.json().catch(() => null);
+  const resolvedSlug = (data?.slug || slug) ? slug : null;
 
   // Store in KV
-  if (vertical && env.ROUTER_CACHE) {
-    await env.ROUTER_CACHE.put(cacheKey, vertical, { expirationTtl: 60 });
+  if (resolvedSlug && env.ROUTER_CACHE) {
+    await env.ROUTER_CACHE.put(cacheKey, resolvedSlug, { expirationTtl: 60 });
   }
 
-  return vertical;
+  return resolvedSlug;
 }
 
+// Resolve a bound custom domain (e.g. careers.acme.com) → the ESS app for its
+// tenant. The backend's /domain-route returns action:'serve' for a routable
+// mapping (gated by ROUTABLE_CUSTOM_DOMAIN_STATUSES) or action:'redirect' for a
+// non-primary alias. We keep the serve/redirect + slug shape; the `vertical`
+// field is no longer consulted (HR has one).
 async function lookupCustomTenant(host, env) {
   const cacheKey = `custom-host:${host}`;
   if (env.ROUTER_CACHE) {
@@ -312,7 +221,7 @@ async function lookupCustomTenant(host, env) {
     if (cached?.action === 'redirect' && cached?.targetHost && cached?.apex && ENVS[cached.apex]) {
       return { ...cached, cfg: ENVS[cached.apex] };
     }
-    if (cached?.vertical && cached?.slug && cached?.apex && ENVS[cached.apex]) {
+    if (cached?.action === 'serve' && cached?.slug && cached?.apex && ENVS[cached.apex]) {
       return { ...cached, cfg: ENVS[cached.apex] };
     }
   }
@@ -336,46 +245,36 @@ async function lookupCustomTenant(host, env) {
         return { ...tenant, cfg };
       }
 
-      const vertical = route?.vertical?.toLowerCase() || null;
       const slug = route?.slug || null;
-      if (vertical && slug && cfg.VERCEL_URLS[vertical]) {
-        const tenant = { apex, action: 'serve', vertical, slug };
+      if (route?.action === 'serve' && slug) {
+        const tenant = { apex, action: 'serve', slug };
         if (env.ROUTER_CACHE) {
           await env.ROUTER_CACHE.put(cacheKey, JSON.stringify(tenant), { expirationTtl: 60 });
         }
         return { ...tenant, cfg };
       }
     }
-
-    const res = await fetch(`${cfg.BACKEND_API}/api/internal/tenant-vertical?host=${encodeURIComponent(host)}`, {
-      headers: { 'x-internal-secret': env.INTERNAL_SECRET || '' },
-      cf: { cacheTtl: 60 },
-    }).catch(() => null);
-
-    if (!res?.ok) continue;
-    const data = await res.json().catch(() => null);
-    const vertical = data?.vertical?.toLowerCase() || null;
-    const slug = data?.slug || null;
-    if (!vertical || !slug || !cfg.VERCEL_URLS[vertical]) continue;
-
-    const tenant = { apex, action: 'serve', vertical, slug };
-    if (env.ROUTER_CACHE) {
-      await env.ROUTER_CACHE.put(cacheKey, JSON.stringify(tenant), { expirationTtl: 60 });
-    }
-    return { ...tenant, cfg };
   }
 
   return null;
 }
 
-function proxyToSubApp({ request, url, host, pathname, cfg, vertical, tenantSlug }) {
-  const subKey = resolveSubAppKey(vertical, pathname, cfg.VERCEL_URLS);
-  const targetBase = cfg.VERCEL_URLS[vertical][subKey] || cfg.VERCEL_URLS[vertical].public;
-  const targetPathname = tenantScopedPathname(vertical, subKey, pathname, tenantSlug);
+// Proxy a tenant host (subdomain slug or bound custom domain) → the ESS Vercel
+// project. The ESS app resolves the tenant (businessId) from x-tenant-host; the
+// path is passed through unchanged (no per-vertical slug rewrite — the tenant is
+// keyed by Host, not a path prefix). Asset-prefix routing: the ESS app's
+// /ess-static/* chunks are host-keyed static assets, so they pass straight
+// through to the same ESS project (the ASSET_PREFIX_SUBAPP contract collapses to
+// a single project here — kept explicit and in sync with the ESS next.config).
+function proxyToEss({ request, url, host, pathname, cfg, tenantSlug }) {
+  const targetBase = cfg.ESS_VERCEL;
+  const firstSegment = pathname.replace(/^\//, '').split('/')[0];
+  const isAssetPrefix = Boolean(ASSET_PREFIX_SUBAPP[firstSegment]) || pathname.startsWith('/_next/');
 
-  const target = new URL(`${targetBase}${targetPathname}${url.search}`);
+  const target = new URL(`${targetBase}${pathname}${url.search}`);
   target.searchParams.set('__tenantHost', host);
-  target.searchParams.set('__tenantSlug', tenantSlug);
+  // Asset chunks don't need the tenant-slug hint (they're host-keyed builds).
+  if (tenantSlug && !isAssetPrefix) target.searchParams.set('__tenantSlug', tenantSlug);
   return fetch(target.toString(), {
     method: request.method,
     headers: {
@@ -384,7 +283,7 @@ function proxyToSubApp({ request, url, host, pathname, cfg, vertical, tenantSlug
       'x-forwarded-host': host,
       'x-tenant-host': host,
       'x-sitepresso-host': host,
-      'x-tenant-slug': tenantSlug,
+      ...(tenantSlug ? { 'x-tenant-slug': tenantSlug } : {}),
     },
     body: ['GET', 'HEAD'].includes(request.method) ? null : request.body,
   });
@@ -396,7 +295,8 @@ export default {
     const host = url.hostname; // e.g. shreya.sitepresso.com
     const pathname = url.pathname;
 
-    // Resolve which environment (staging vs prod) this host belongs to
+    // Resolve which environment (staging vs prod) this host belongs to.
+    // A non-platform host is a bound custom domain → the white-label ESS app.
     const resolved = resolveEnvForHost(host);
     if (!resolved) {
       const customTenant = await lookupCustomTenant(host, env);
@@ -407,16 +307,16 @@ export default {
         url.hostname = customTenant.targetHost;
         return Response.redirect(url.toString(), 301);
       }
+      // /admin on a tenant host → the tenant HR console (app.<domain>/dashboard).
       if (TENANT_ADMIN_PATH_RE.test(pathname)) {
         return unifiedAdminRedirect(url, customTenant.cfg);
       }
-      return proxyToSubApp({
+      return proxyToEss({
         request,
         url,
         host,
         pathname,
         cfg: customTenant.cfg,
-        vertical: customTenant.vertical,
         tenantSlug: customTenant.slug,
       });
     }
@@ -425,27 +325,38 @@ export default {
     const suffix = `.${apex}`;
     const subdomain = host === apex ? '' : host.slice(0, -suffix.length);
 
-    // API subdomain passes through to EC2 via its own DNS record (never proxy
-    // through the Worker). `api` = sitepresso backend. Standalone app hosts are
-    // handled by their own domains/tunnel ingress; prod Rider still lives under
-    // the prod Sitepresso zone, so keep that explicit pass-through below.
-    const passthrough = new Set(['api']);
-    const prodRiderHost = apex === 'sitepresso.com' && /^rider(-api)?$/.test(subdomain);
-    if (passthrough.has(subdomain) || prodRiderHost) {
+    // api.<domain> passes through to the backend via its own DNS record (never
+    // proxy through the Worker).
+    if (subdomain === 'api') {
       return fetch(request);
     }
 
-    // app.<domain> is the APPLICATION host, never the marketing site. The
-    // landing page lives ONLY on the apex (aapkatech.com / sitepresso.com).
-    // Redirect the bare app root to the login entry. Done at the edge on
-    // purpose: the Worker knows the true hostname, whereas the platform app
-    // can't reliably tell apex from app (both are proxied with
-    // host=app.<apex>, and Vercel rewrites x-forwarded-host).
-    if (subdomain === 'app' && (pathname === '/' || pathname === '')) {
-      return Response.redirect(`${url.protocol}//${host}/login`, 302);
+    // app.<domain> is the tenant HR console (operator session), never the
+    // marketing site. Redirect the bare app root to the login entry, then proxy
+    // everything else to the HR_ADMIN project. Done at the edge on purpose: the
+    // Worker knows the true hostname, whereas the app can't reliably tell apex
+    // from app (Vercel rewrites x-forwarded-host).
+    if (subdomain === 'app') {
+      if (pathname === '/' || pathname === '') {
+        return Response.redirect(`${url.protocol}//${host}/login`, 302);
+      }
+      return fetch(`${cfg.HR_ADMIN_VERCEL}${pathname}${url.search}`, {
+        method: request.method,
+        headers: {
+          ...Object.fromEntries(request.headers),
+          host: `app.${apex}`,
+          'x-forwarded-host': host,
+          'x-tenant-host': host,
+          'x-sitepresso-host': host,
+        },
+        body: ['GET', 'HEAD'].includes(request.method) ? null : request.body,
+      });
     }
 
-    // No subdomain or reserved → platform admin (admin.<domain> handled separately)
+    // Apex / www / other reserved subdomains (admin, mail, platform, hr, …) →
+    // the platform project: marketing + signup + onboarding, and the super-admin
+    // console on admin.<domain>. The platform app's own middleware locks
+    // admin.<domain> down to the super-admin surface.
     if (!subdomain || RESERVED.has(subdomain)) {
       return fetch(`${cfg.PLATFORM_VERCEL}${pathname}${url.search}`, {
         method: request.method,
@@ -460,24 +371,25 @@ export default {
       });
     }
 
-    // Resolve tenant vertical
-    const vertical = await lookupVertical(subdomain, cfg.BACKEND_API, env);
-    if (!vertical || !cfg.VERCEL_URLS[vertical]) {
+    // <slug>.<domain> → the white-label ESS app for that tenant. HR is a single
+    // vertical, so we only confirm the slug maps to a routable tenant.
+    const tenantSlug = await lookupTenantExists(subdomain, cfg.BACKEND_API, env);
+    if (!tenantSlug) {
       return tenantNotFoundResponse(host, apex);
     }
 
+    // /admin on a tenant subdomain → the tenant HR console (app.<domain>/dashboard).
     if (TENANT_ADMIN_PATH_RE.test(pathname)) {
       return unifiedAdminRedirect(url, cfg);
     }
 
-    return proxyToSubApp({
+    return proxyToEss({
       request,
       url,
       host,
       pathname,
       cfg,
-      vertical,
-      tenantSlug: subdomain,
+      tenantSlug,
     });
   },
 };

@@ -18,67 +18,32 @@ redis.on('error', () => {});
 
 const BACKEND_PORT = parseInt(process.env.BACKEND_PORT || '5000', 10);
 
-// Public-facing ports (storefront)
-const PUBLIC_PORTS = {
-  booking: 3001,
-  shop:    3002,
-  web:     3003,
-};
-
-// Sub-app ports per vertical + path prefix
-// Tenant admin paths are intentionally not listed here. The operator console
-// is canonical on app.<platform-domain>/dashboard, so /admin bookmarks should
-// leave the tenant/custom host instead of selecting a per-vertical admin app.
-const SUB_APP_PORTS = {
-  booking: {
-    staff:    3012,
-    customer: 3013,
-  },
-  shop: {
-    'staff/manager': 3022,
-    'staff/delivery':3023,
-    customer:        3024,
-  },
-  web: {
-    staff:    3032,
-    customer: 3033,
-  },
-};
-
-// Customer-side path prefixes (not admin/staff)
-// Wishlist stays on the public storefront — guests can have a wishlist via
-// X-Cart-Session (same pattern as the cart). Routing /wishlist to the
-// customer sub-app forced a 307 to /login for guests, even though they
-// could add items just fine. Logged-in customers still get their items
-// because the public storefront WishlistContext fetches the same backend.
-const CUSTOMER_PATHS = {
-  booking: ['dashboard'],
-  shop:    ['account', 'orders'],
-  web:     ['enquiries'],
-};
-
-// Asset-prefix routing. A non-public sub-app (e.g. the customer portal at
-// /account) sets `assetPrefix` in its next.config so its /_next/* chunks load
-// under one of these prefixes; route the whole prefix back to that sub-app.
-// Without it /customer-static/* falls through to the public storefront → 404
-// → unstyled, un-hydrated page (the "Loading account…" hang that breaks
-// login). The first path segment maps to a SUB_APP_PORTS key; honoured only
-// when that key exists for the resolved vertical. Keep in sync with each
-// non-public sub-app's next.config assetPrefix (mirrors the CF worker).
-const ASSET_PREFIX_SUBAPP = {
-  'customer-static': 'customer',
-  'staff-static':    'staff',
-  'manager-static':  'staff/manager',
-  'delivery-static': 'staff/delivery',
-};
-
+// HR is a single vertical with three fixed host surfaces (reuse-map §3.2):
+//   PLATFORM_PORT — hr.com marketing + /signup + /onboarding, and the
+//                   admin.hr.com super-admin console (operator session).
+//   HR_ADMIN_PORT — app.hr.com tenant HR console, /dashboard (operator session).
+//   ESS_PORT      — <slug>.hr.com OR a bound custom domain: the white-label
+//                   Employee Self-Service app (customer session). The tenant is
+//                   resolved by Host (subdomain slug or custom-domain lookup).
 const PLATFORM_PORT = parseInt(process.env.PLATFORM_PORT || '3000', 10);
-const MOBILE_PORT = parseInt(process.env.MOBILE_PORT || '3025', 10);
+const HR_ADMIN_PORT = parseInt(process.env.HR_ADMIN_PORT || '3010', 10);
+const ESS_PORT = parseInt(process.env.ESS_PORT || '3020', 10);
+
+// Asset-prefix routing. The ESS sub-app sets `assetPrefix` in its next.config so
+// its /_next/* chunks load under this prefix; route the whole prefix back to the
+// ESS app. Without it /ess-static/* would fall through and 404 → unstyled,
+// un-hydrated page (the "Loading…" hang that breaks login). The first path
+// segment maps to an ESS asset namespace. Keep in sync with the ESS sub-app's
+// next.config assetPrefix (mirrors the CF worker).
+const ASSET_PREFIX_SUBAPP = {
+  'ess-static': 'ess',
+};
+
 const QA_PORTAL_PORT = parseInt(process.env.QA_PORTAL_PORT || '3801', 10);
 const PUBLIC_MICROCACHE_TTL_SECONDS = parseInt(process.env.PUBLIC_MICROCACHE_TTL_SECONDS || '300', 10);
 const PUBLIC_MICROCACHE_MAX_BYTES = parseInt(process.env.PUBLIC_MICROCACHE_MAX_BYTES || String(2 * 1024 * 1024), 10);
 const TENANT_ADMIN_PATH_RE = /^\/admin(?:\/|$)/;
-const RESERVED_SUBDOMAINS = new Set(['www', 'api', 'admin', 'app', 'mail', 'platform', 'm', 'test']);
+const RESERVED_SUBDOMAINS = new Set(['www', 'api', 'admin', 'app', 'mail', 'platform', 'm', 'test', 'hr']);
 // Standalone app hosts are handled by their own domains or tunnel ingress now;
 // only the QA portal (`test`) is still routed off the Sitepresso platform domain.
 const STANDALONE_PRODUCT_PORTS = {
@@ -154,16 +119,16 @@ function publicMicrocacheKey(host, url, cookieHeader, acceptLanguage) {
   return `public-microcache:v1:${cleanHost}:${locale}:${pathname}${search}`;
 }
 
-// Private/dynamic paths that must never be edge-cached even when they resolve to
-// the public storefront app: cart/checkout/order are per-session, /account &
-// /orders are customer-scoped, /api & /_next/data carry request state.
-const STOREFRONT_NO_CACHE_PREFIXES = [
-  '/api', '/_next/data', '/cart', '/checkout', '/wishlist',
-  '/shop/cart', '/shop/checkout', '/shop/order', '/account', '/orders', '/enquiries',
+// Private/dynamic ESS paths that must never be edge-cached even when they
+// resolve to the ESS app: the employee dashboard/account surfaces are
+// customer-scoped, and /api & /_next/data carry request state. Only the
+// anonymous login/splash shell is cacheable.
+const ESS_NO_CACHE_PREFIXES = [
+  '/api', '/_next/data', '/dashboard', '/account', '/profile',
 ];
 
-function isPublicStorefrontPath(pathname) {
-  return !STOREFRONT_NO_CACHE_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+function isPublicEssPath(pathname) {
+  return !ESS_NO_CACHE_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
 // True when the request carries no personalizing cookie — only the benign
@@ -177,18 +142,16 @@ function onlyLocaleCookie(cookieHeader) {
     .every((c) => /^NEXT_LOCALE=/i.test(c));
 }
 
-// Tenant storefront microcache key. Unlike publicMicrocacheKey (which only
-// allowlisted the apex marketing host), this caches the ANONYMOUS storefront SSR
-// shell for any tenant — but ONLY when the route resolved to the PUBLIC
-// storefront app for its vertical (never staff/customer sub-apps, standalone
-// products, or the backend — those use different ports / no vertical), the path
-// is public, and no personalizing cookie is present. Per-user data (cart,
-// account) is fetched client-side after hydration, so the SSR shell is identical
-// for all anonymous visitors and safe to share from the edge.
+// Tenant ESS microcache key. Unlike publicMicrocacheKey (which only allowlisted
+// the apex marketing host), this caches the ANONYMOUS ESS SSR shell for any
+// tenant — but ONLY when the route resolved to the ESS app (route.vertical is
+// set; never the platform/admin/backend hosts, which carry no vertical), the
+// path is public (login/splash), and no personalizing cookie is present.
+// Per-user data is fetched client-side after hydration, so the SSR shell is
+// identical for all anonymous visitors and safe to share from the edge.
 function storefrontMicrocacheKey(route, host, url, cookieHeader, acceptLanguage) {
   if (!route || !route.vertical) return null;
-  const publicPort = PUBLIC_PORTS[route.vertical];
-  if (!publicPort || route.target !== `http://localhost:${publicPort}`) return null;
+  if (route.target !== `http://localhost:${ESS_PORT}`) return null;
   if (hasPrivateCookie(cookieHeader) || !onlyLocaleCookie(cookieHeader)) return null;
 
   const cleanHost = (host || '').toLowerCase().split(':')[0];
@@ -199,7 +162,7 @@ function storefrontMicrocacheKey(route, host, url, cookieHeader, acceptLanguage)
     pathname = parsed.pathname || '/';
     search = parsed.search || '';
   } catch {}
-  if (!isPublicStorefrontPath(pathname)) return null;
+  if (!isPublicEssPath(pathname)) return null;
 
   const locale = microcacheLocaleKey(cookieHeader, acceptLanguage);
   return `public-microcache:v1:${cleanHost}:${locale}:${pathname}${search}`;
@@ -314,35 +277,22 @@ async function servePublicMicrocache(req, res, target, cacheKey) {
   return true;
 }
 
-function resolveSubAppPort(vertical, pathname) {
-  const stripped = pathname.replace(/^\//, '');                 // remove leading /
-  const subPorts = SUB_APP_PORTS[vertical] || {};
-
-  // Asset-prefix routing FIRST — keep a sub-app's /_next/* chunks with the
-  // sub-app that rendered the HTML (else customer/staff pages render unstyled
-  // and never hydrate). Can't be shadowed by a tenant path sharing a segment.
-  const assetKey = ASSET_PREFIX_SUBAPP[stripped.split('/')[0]];
-  if (assetKey && subPorts[assetKey]) {
-    return subPorts[assetKey];
+// The tenant-facing surface is a single ESS app on ESS_PORT — both the
+// <slug>.hr.com subdomain and bound custom domains resolve here. Asset-prefix
+// routing: the ESS sub-app sets `assetPrefix` (/ess-static) in its next.config
+// so its /_next/* chunks load under that prefix; that prefix maps to the 'ess'
+// sub-app, which is ESS_PORT. With a single tenant app every tenant-host path
+// already lands on ESS_PORT, so this always returns it — but the ESS_SUBAPPS
+// lookup keeps the asset-prefix contract explicit and ready if ESS is ever
+// split (mirrors the CF worker). Keep in sync with the ESS next.config.
+const ESS_SUBAPPS = { ess: ESS_PORT };
+function resolveEssPort(pathname) {
+  const firstSegment = String(pathname || '/').replace(/^\//, '').split('/')[0];
+  const assetKey = ASSET_PREFIX_SUBAPP[firstSegment];
+  if (assetKey && ESS_SUBAPPS[assetKey]) {
+    return ESS_SUBAPPS[assetKey];
   }
-
-  // Check staff/customer path prefixes (longest match first)
-  for (const [prefix, port] of Object.entries(subPorts).sort((a, b) => b[0].length - a[0].length)) {
-    if (stripped === prefix || stripped.startsWith(prefix + '/')) {
-      return port;
-    }
-  }
-
-  // Check customer paths
-  const customerPaths = CUSTOMER_PATHS[vertical] || [];
-  for (const prefix of customerPaths) {
-    if (stripped === prefix || stripped.startsWith(prefix + '/')) {
-      return subPorts.customer || PUBLIC_PORTS[vertical];
-    }
-  }
-
-  // Default → public storefront
-  return PUBLIC_PORTS[vertical] || PLATFORM_PORT;
+  return ESS_PORT;
 }
 
 function platformTenantSlug(host) {
@@ -364,68 +314,6 @@ function platformSubdomainForHost(cleanHost, platformDomain) {
   const suffix = `.${apex}`;
   if (!host.endsWith(suffix)) return null;
   return host.slice(0, -suffix.length);
-}
-
-function pathStartsWith(pathname, prefix) {
-  return pathname === prefix || pathname.startsWith(`${prefix}/`);
-}
-
-function pathNeedsTenantSlug(vertical, pathname, target) {
-  let port = null;
-  try {
-    port = Number(new URL(target).port || 80);
-  } catch {
-    return false;
-  }
-
-  // These sub-apps keep their app-router pages under /:slug/... internally
-  // while the public tenant URL remains clean, e.g. /staff.
-  if ((vertical === 'booking' || vertical === 'web') && port === SUB_APP_PORTS[vertical]?.staff) {
-    return pathStartsWith(pathname, '/staff');
-  }
-  if (vertical === 'shop' && port === SUB_APP_PORTS.shop['staff/manager']) {
-    return pathStartsWith(pathname, '/staff/manager');
-  }
-  if (vertical === 'shop' && port === SUB_APP_PORTS.shop['staff/delivery']) {
-    return pathStartsWith(pathname, '/staff/delivery');
-  }
-  if (vertical === 'web' && port === SUB_APP_PORTS.web.customer) {
-    return pathStartsWith(pathname, '/enquiries');
-  }
-
-  return false;
-}
-
-function tenantScopedUrl(host, url, vertical, target) {
-  const slug = platformTenantSlug(host);
-  if (!slug) return url;
-
-  const parsed = new URL(url || '/', `http://${host || 'localhost'}`);
-  if (!pathNeedsTenantSlug(vertical, parsed.pathname, target)) return url;
-
-  parsed.pathname = `/${slug}${parsed.pathname}`;
-  return `${parsed.pathname}${parsed.search}`;
-}
-
-async function lookupVerticalFromBackend(slug, { host = null } = {}) {
-  return new Promise((resolve) => {
-    const query = host
-      ? `host=${encodeURIComponent(host)}`
-      : `slug=${encodeURIComponent(slug)}`;
-    const req = http.request(
-      { hostname: 'localhost', port: BACKEND_PORT, path: `/api/internal/tenant-vertical?${query}`, method: 'GET', agent: localHttpAgent },
-      (res) => {
-        let data = '';
-        res.on('data', (chunk) => { data += chunk; });
-        res.on('end', () => {
-          try { resolve(JSON.parse(data).vertical || null); } catch { resolve(null); }
-        });
-      }
-    );
-    req.on('error', () => resolve(null));
-    req.setTimeout(2000, () => { req.destroy(); resolve(null); });
-    req.end();
-  });
 }
 
 async function lookupDomainRouteFromBackend(host) {
@@ -456,6 +344,33 @@ async function lookupDomainRouteFromBackend(host) {
     );
     req.on('error', () => resolve(null));
     req.setTimeout(2000, () => { req.destroy(); resolve(null); });
+    req.end();
+  });
+}
+
+// Existence check for a platform-subdomain tenant (<slug>.hr.com). HR has a
+// single vertical, so the router no longer asks the backend WHICH vertical a
+// slug is — only WHETHER the slug maps to a routable tenant. A 2xx (tenant
+// exists) → route the host to the ESS app; a 404 → "no site connected".
+// NOTE FOR LEAD: this hits the legacy /api/internal/tenant-vertical?slug
+// endpoint purely as an existence probe (its `vertical` field is ignored).
+// When you rewire the backend, rename it to a vertical-agnostic existence
+// endpoint (e.g. /api/internal/tenant-route?slug) and update the path below.
+async function lookupTenantExistsFromBackend(slug) {
+  return new Promise((resolve) => {
+    const req = http.request(
+      { hostname: 'localhost', port: BACKEND_PORT, path: `/api/internal/tenant-vertical?slug=${encodeURIComponent(slug)}`, method: 'GET', agent: localHttpAgent },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          if (res.statusCode < 200 || res.statusCode >= 300) return resolve(false);
+          try { resolve(Boolean(JSON.parse(data).slug || slug)); } catch { resolve(false); }
+        });
+      }
+    );
+    req.on('error', () => resolve(false));
+    req.setTimeout(2000, () => { req.destroy(); resolve(false); });
     req.end();
   });
 }
@@ -601,65 +516,60 @@ async function resolveRoute(host, url, referer) {
     return { target: `http://localhost:${BACKEND_PORT}` };
   }
 
+  // Bound custom domain (e.g. careers.acme.com) → the white-label ESS app.
+  // Resolve the tenant by Host: a routable custom-domain mapping
+  // (routableCustomDomainWhere, gated by ROUTABLE_CUSTOM_DOMAIN_STATUSES) makes
+  // the backend's /domain-route return action:'serve'. We don't care WHICH
+  // vertical (HR has one) — only that the host maps to a routable tenant.
+  // `vertical:'ess'` is set so the proxy forwards X-Tenant-Host and applies the
+  // customer-session microcache. Redirect actions are handled earlier in the
+  // request handler via domainRedirectUrl; here we only serve or 404.
   if (!isPlatformHost) {
-    const cacheKey = `vertical:custom:${cleanHost}`;
-    let customVertical = await redis.get(cacheKey).catch(() => null);
-    if (!customVertical || !PUBLIC_PORTS[customVertical]) {
+    const cacheKey = `ess-route:custom:${cleanHost}`;
+    let serve = await redis.get(cacheKey).catch(() => null);
+    if (serve !== 'serve') {
       const route = await lookupDomainRouteFromBackend(cleanHost);
-      customVertical = route?.action === 'serve' ? route.vertical : null;
-      if (!customVertical) {
-        customVertical = await lookupVerticalFromBackend(cleanHost, { host: cleanHost });
-      }
-      if (customVertical && PUBLIC_PORTS[customVertical]) {
-        redis.set(cacheKey, customVertical, 'EX', 60).catch(() => {});
+      serve = route?.action === 'serve' ? 'serve' : null;
+      if (serve === 'serve') {
+        redis.set(cacheKey, 'serve', 'EX', 60).catch(() => {});
       }
     }
-    if (customVertical && PUBLIC_PORTS[customVertical]) {
-      return { target: `http://localhost:${resolveSubAppPort(customVertical, pathname)}`, vertical: customVertical };
+    if (serve === 'serve') {
+      return { target: `http://localhost:${resolveEssPort(pathname)}`, vertical: 'ess' };
     }
     return tenantNotFoundRoute(cleanHost, platformDomain);
   }
 
-  // Mobile web app host. It resolves tenant + role from the path:
-  //   m.aapkatech.com/:tenant
-  //   m.ecom.aapkatech.com/:tenant/pos
-  if (subdomain === 'm') {
-    return { target: `http://localhost:${MOBILE_PORT}` };
+  // app.<platform-domain> → the tenant HR console (operator session, /dashboard).
+  if (subdomain === 'app') {
+    return { target: `http://localhost:${HR_ADMIN_PORT}` };
   }
 
+  // Apex / www / other reserved subdomains (admin, api, mail, platform, hr, …)
+  // → the platform app: marketing + /signup + /onboarding, and the super-admin
+  // console on admin.<platform-domain> (locked down by the admin-host guard).
   if (!subdomain || RESERVED_SUBDOMAINS.has(subdomain)) {
     return { target: `http://localhost:${PLATFORM_PORT}` };
   }
 
-  // 60 s TTL — vertical rarely changes, but when it does (tenant deleted
-  // and re-created on a different vertical, etc.) we don't want a 24 h
-  // stale value sending traffic to the wrong app. The backend lookup is a
-  // single indexed query, so 1× per minute per slug is cheap.
-  let vertical = await redis.get(`vertical:${subdomain}`).catch(() => null);
-  if (!vertical || !PUBLIC_PORTS[vertical]) {
-    vertical = await lookupVerticalFromBackend(subdomain);
-    if (vertical && PUBLIC_PORTS[vertical]) {
-      redis.set(`vertical:${subdomain}`, vertical, 'EX', 60).catch(() => {});
+  // <slug>.<platform-domain> → the white-label ESS app for that tenant.
+  // 60 s TTL — tenant existence rarely changes, but when it does (tenant
+  // deleted, suspended) we don't want a long-lived stale value routing traffic
+  // to a dead tenant. The backend lookup is a single indexed query, so 1× per
+  // minute per slug is cheap.
+  let tenantExists = await redis.get(`ess-route:${subdomain}`).catch(() => null);
+  if (tenantExists !== '1') {
+    tenantExists = (await lookupTenantExistsFromBackend(subdomain)) ? '1' : null;
+    if (tenantExists === '1') {
+      redis.set(`ess-route:${subdomain}`, '1', 'EX', 60).catch(() => {});
     }
   }
 
-  if (!vertical || !PUBLIC_PORTS[vertical]) {
+  if (tenantExists !== '1') {
     return tenantNotFoundRoute(cleanHost, platformDomain);
   }
 
-  // /_next/ static assets have no sub-app context in their own path.
-  // Use the Referer header (the page that loaded the asset) to route them
-  // to whichever sub-app owns that page — otherwise customer-sub-app assets
-  // fall through to the public storefront and return 404.
-  let routingPath = pathname;
-  if (pathname.startsWith('/_next/') && referer) {
-    try {
-      routingPath = new URL(referer).pathname;
-    } catch {}
-  }
-
-  const port = resolveSubAppPort(vertical, routingPath);
-  return { target: `http://localhost:${port}`, vertical };
+  return { target: `http://localhost:${resolveEssPort(pathname)}`, vertical: 'ess' };
 }
 
 async function resolveTarget(host, url, referer) {
@@ -793,10 +703,10 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     // Microcache key: the early host-based one (apex/auth/api allowlist) OR — now
-    // that the route is resolved — a tenant-storefront key when it landed on the
-    // PUBLIC storefront app. Storefronts were never edge-cached before, so every
-    // anonymous page view hit the SSR origin; this serves them from Redis and
-    // emits public cache-control so Cloudflare caches them at the edge too.
+    // that the route is resolved — a tenant ESS key when it landed on the ESS
+    // app. The anonymous ESS login/splash shell was never edge-cached before, so
+    // every anonymous page view hit the SSR origin; this serves them from Redis
+    // and emits public cache-control so Cloudflare caches them at the edge too.
     let effectiveCacheKey = microcacheKey;
     if (!effectiveCacheKey && (req.method === 'GET' || req.method === 'HEAD')) {
       effectiveCacheKey = storefrontMicrocacheKey(route, req.headers.host, req.url, req.headers.cookie, req.headers['accept-language']);
@@ -804,18 +714,15 @@ const server = http.createServer(async (req, res) => {
     if (effectiveCacheKey && await servePublicMicrocache(req, res, route.target, effectiveCacheKey)) {
       return;
     }
-    const { target, vertical } = route;
+    const { target } = route;
     // changeOrigin rewrites Host to the sub-app target, so the real tenant host
-    // must be forwarded explicitly. Sub-app SSR (web/booking/shop) resolves the
-    // tenant from x-tenant-host / x-sitepresso-host. In production this was the
+    // must be forwarded explicitly. The ESS app resolves the tenant (businessId)
+    // from x-tenant-host / x-sitepresso-host. In production this was the
     // Cloudflare Worker's job; on EC2-behind-tunnel this router owns it, so set
     // the tenant host on EVERY proxied request, not just /api.
     const tenantHost = req.headers.host || '';
     req.headers['x-tenant-host'] = tenantHost;
     req.headers['x-sitepresso-host'] = tenantHost;
-    if (vertical) {
-      req.url = tenantScopedUrl(req.headers.host, req.url, vertical, target);
-    }
     proxy.web(req, res, { target });
   } catch {
     res.writeHead(502, { 'Content-Type': 'text/plain' });
