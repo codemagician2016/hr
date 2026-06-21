@@ -17,7 +17,7 @@ This is the **definitive statutory specification for running compliant New Zeala
 
 | Source | Used for |
 |---|---|
-| IRD `ir-340` / `ir-335` (Apr 2026 editions) | PAYE deduction tables, employer's guide |
+| IRD `ir-340` / `ir-335` (Apr 2026 editions) | PAYE deduction tables, employer's guide, **ND no-notification rate (45% + ACC = 46.75%)** |
 | IRD payday filing guidance | EI return cadence, fields, file formats |
 | IRD KiwiSaver changes page | 3.5% from 1 Apr 2026, 16–17yo employer contributions |
 | IRD ESCT page + Calculate.co.nz ESCT 2026/27 | ESCT tier thresholds |
@@ -342,6 +342,8 @@ Payday filing line: employee KS deduction **$70.00**, employer gross KS **$70.00
 | **Maximum annual levy** | — | **$2,741.22** (= 156,641 × 1.75%) |
 
 The earners' levy funds ACC's cover for non-work injuries and is collected **through PAYE** on **primary tax codes (M/ME and SL variants)**. Secondary flat-rate codes have ACC embedded in the published secondary rate.
+
+> **Note on the published rate.** IRD/ACC publish the earners' levy as **$1.75 per $100 of liable earnings, GST-inclusive** — that GST-inclusive figure *is* the rate deducted through PAYE and the one we store. No separate GST handling is required in the calc path. (Verified: ACC earners' levy 2026/27, IRD.)
 
 ### 5.2 What's liable
 

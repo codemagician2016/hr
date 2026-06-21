@@ -255,10 +255,11 @@ A component is prorated by its `prorationPolicy` against a **payable-days fracti
 ### 6.3 Arrears & back-pay
 
 `Arrear` = money for prior period(s) surfacing now. Sources:
-1. **Backdated revision** (CTC increased effective a past date) → engine recomputes each affected past period at the *new* rates, diffs against what was *actually locked*, sums the deltas → arrear earning lines (per source period, itemized).
+1. **Backdated revision** (CTC increased effective a past date) → engine recomputes each affected past period and diffs against what was *actually locked*; the sum of deltas becomes itemized arrear earning lines (per source period).
+   - **Determinism rule (critical, easy to get wrong):** the recompute of source period *P* uses the **revised compensation** but the **rule version that was pinned for *P*** (resolved by *P*'s original `payDate`), **not** today's rule version. A Dec-2025 arrear recomputed in a Jun-2026 run applies **Dec-2025** PF/ESI/PT/TDS rates, not Jun-2026 rates. Each source period therefore carries its own `ruleVersionRef` in the trace. (The *current* run's TDS projection, by contrast, absorbs the resulting arrear into the *current* year's annual tax — see below — because tax is on receipt.)
 2. **Late joiner** paid for prior days.
 3. **LOP/attendance correction** (positive or negative).
-4. **Statutory rate change applied retrospectively** (rare; handled via rule-version effective dates).
+4. **Statutory rate change applied retrospectively** (rare) — handled purely via rule-version effective dates: Super Admin issues a backdated `effectiveFrom` version with a `correction` flag, and affected locked runs are surfaced for **compensating runs** (§10), never silently recomputed.
 
 **Statutory treatment of arrears (critical):**
 - **IN TDS:** arrears are taxable in the year of *receipt*; engine recomputes projected annual tax including the arrear and spreads/withholds accordingly. Optionally compute **Section 89(1) relief** worksheet (Form 10E) data for the employee (informational; relief is claimed by employee, but we surface the figures).
@@ -334,9 +335,10 @@ FnF gates: cannot LOCK FnF while the employee has an unsettled prior locked run 
 |---|---|---|
 | EPF employee (EE) | **12%** | of `PF_WAGES` |
 | EPF employer (ER) split | **3.67%** to EPF + **8.33%** to EPS | of `PF_WAGES` |
-| EPS (pension) cap | **8.33% of min(PF_WAGES, ₹15,000)** = max **₹1,250/mo** | excess ER share → EPF |
-| EDLI | **0.50%** of min(PF_WAGES, ₹15,000) | employer cost |
-| EPF admin charges | **0.50%**, **min ₹75/mo** (₹500 EDLI-admin nuance per EPFO) | employer cost |
+| EPS (pension) cap | **8.33% of min(PF_WAGES, ₹15,000)**, statutorily capped at **₹1,250/mo** | excess ER share → EPF. *Arithmetic note: 8.33% × ₹15,000 = ₹1,249.50; EPFO fixes the ceiling at the rounded **₹1,250**, so the rule-table stores an absolute `epsCapMinor = 125000` paise applied as `min(8.33% × wages, ₹1,250)` — the cap is a hard figure, not a by-product of rounding. Logged as a `CAP` trace node.* |
+| EDLI | **0.50%** of min(PF_WAGES, ₹15,000); max **₹75/mo** per employee | employer cost |
+| EPF admin charges (A/c 2) | **0.50%** of PF_WAGES, **min ₹75/mo per establishment** (not per employee) | employer cost |
+| EDLI admin charges (A/c 22) | **₹0 — administrative charge waived since 01 Apr 2017** (do not levy; older "0.01%/₹200" figures are obsolete) | — |
 | Mandatory threshold | establishments with **20+** employees | |
 | Ceiling note | wage ceiling **₹15,000** as of 2026 (proposals to raise to ₹21k/₹25k tracked but **not yet effective** — rule-table `effectiveTo` left open, alert on change) |
 
@@ -558,7 +560,7 @@ TraceNode {
   params,        // { percent, rate, slabRowId, capMinor, ruleVersion, roundMode, days }
   outputMinor,   // result of this node
   ruleVersionRef,
-  note           // localized human sentence, e.g. "EPF 12% of PF wages ₹50,000 = ₹6,000"
+  note           // localized human sentence, e.g. "EPF EE 12% of PF wages ₹50,000 (employer opted to contribute above the ₹15,000 ceiling) = ₹6,000" — or, if ceiling-restricted, "12% of ₹15,000 = ₹1,800"
 }
 ```
 

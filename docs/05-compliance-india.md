@@ -479,6 +479,7 @@ Last drawn Basic+DA = ₹60,000; service 8 years 7 months → **9 years**.
 
 ### 9.1 Rules
 
+- **Establishment applicability:** the Act applies to every factory and every establishment employing **≥ 20 persons** on any day in the accounting year (once applicable, it continues even if the headcount later drops below 20). Store an `bonusActApplicable` flag per LegalEntity/establishment; a sub-20 tenant has no statutory-bonus obligation (though it may pay ex-gratia).
 - **Eligible:** employee with Basic+DA ≤ **₹21,000/month** who worked **≥ 30 days** in the accounting year.
 - **Calculation wage:** if Basic+DA ≤ ₹7,000 → on actual; if > ₹7,000 → **capped at max(₹7,000, applicable minimum wage for the scheduled employment)**.
 - **Rate:** **min 8.33%** (mandatory even at a loss), **max 20%** (profit-linked via allocable surplus = 67% of available surplus, non-banking).
@@ -881,7 +882,10 @@ FINALIZED runs are append-only; corrections create an **adjustment run** (delta)
 | T9 | MH PT, Feb | ₹300 (not ₹200); FY total ₹2,500 |
 | T10 | KA PT, gross ₹24,000, May 2025 | **Nil** (post 01-Apr-2025 ₹25k threshold) |
 | T11 | KA PT, gross ₹24,000, Jan 2025 (old rule) | ₹200 (pre-revision version resolves) |
-| T12 | TN PT, half-year ₹62,000 | ₹1,025 for the half |
+| T12 | TN PT, half-year ₹62,000 | ₹1,025 for the half (60,001–75,000 band, unchanged by FY24-25 revision) |
+| T12a | TN PT, half-year ₹35,000, FY 2024-25+ | **₹425** (revised band, NOT the old ₹315) |
+| T12b | TN PT, half-year ₹35,000, FY 2023-24 | ₹315 (pre-revision version resolves) |
+| T3a | Taxable ₹12,70,588 vs ₹12,71,000 | marginal relief still binds at ₹12,70,588; stops binding just above (boundary of the relief band) |
 | T13 | Gratuity 8y7m, Basic+DA ₹60k | ₹3,11,538 (years→9) |
 | T14 | Bonus, Basic+DA ₹18k, 8.33% | ₹6,997/yr (capped ₹7,000) |
 | T15 | 50% breach: basic 35% | `WAGE_DEF_50PCT_BREACH` + deemed add-back to PF base |
@@ -934,13 +938,13 @@ Rule-edit endpoints are **super-admin only**, write `AuditLog`, and **never** al
 - Income tax slabs / §87A / std deduction / surcharge / cess (FY 2025-26 & 2026-27): cleartax.in/s/income-tax-slabs; incometax.gov.in (AY 2026-27); cleartax.in/s/marginal-relief-surcharge; bajajfinserv.in income-tax-slabs.
 - EPF/EPS/EDLI/admin split, ₹15,000 cap, interest 8.25%, damages 1%/mo (14-Jun-2024) & 12% §7Q: epfindia.gov.in (ContributionRate.pdf, 237th CBT press release); taxguru.in rates-contribution-epf; cleartax.in/s/edli; lexology.com (revised damages).
 - ESI 0.75%/3.25%, ₹21,000 ceiling, 10/20-employee threshold, contribution periods: tallysolutions.com; hrone.cloud; cleartax.in/s/esi-rate.
-- Professional Tax MH/KA/TN/GJ/WB + KA Act 33 of 2025 (01-Apr-2025): greythr.freshdesk.com (KA April-2025); cleartax.in/s/professional-tax-{karnataka,maharashtra,tamil-nadu,west-bengal}; mahagst.gov.in; tn.gov.in/dtp; wbcomtax.gov.in; saral.pro; factohr.com.
+- Professional Tax MH/KA/TN/GJ/WB + KA Act 33 of 2025 (01-Apr-2025): greythr.freshdesk.com (KA April-2025); cleartax.in/s/professional-tax-{karnataka,maharashtra,tamil-nadu,west-bengal}; mahagst.gov.in; tn.gov.in/dtp; wbcomtax.gov.in; saral.pro; factohr.com. **TN GCC half-yearly slabs revised FY 2024-25** (₹180/₹425/₹930 for the lower bands) re-verified 2026-06-22: cleartax.in/s/professional-tax-tamil-nadu; tnswp.com GCC profession-tax schedule. MH male slabs (₹175 @ 7,501–10,000; ₹200 @ >10,000; ₹300 Feb) and female ≤₹25,000 exemption re-verified: cleartax.in/s/professional-tax-maharashtra. WB statutory cap ₹2,500 (slabs 110/130/150/200) re-verified: cleartax.in/s/professional-tax-west-bengal.
 - Labour Codes live 21-Nov-2025 + 50% wage definition: ey.com (21-Nov-2025 alert PDF); kpmg.com (flash-alert-2025-267); bdo.in; pwc.in/tax-knowledge-hub/new-labour-codes; payroll.org (2025/12/17).
 - Gratuity 15/26, ₹20L cap, 30-day/10%: cleartax.in/s/gratuity-calculator; bankbazaar.com/tax/gratuity.
 - Bonus ₹21,000 / ₹7,000 cap / 8.33–20% / set-on-set-off / 8 months: greythr.com; omnivoo.com/blog/statutory-bonus-india; quikchex.in.
 - LWF state rates + KA 10-employee (07-Jan-2026): futurexsolutions.com; zoho.com/in/payroll (LWF); omconsultants.in.
 - TDS deposit 7th / March 30 Apr; Form 24Q due 31 Jul/Oct/Jan/May; §234E ₹200/day: cleartax.in/s/tds-payment-due-dates-and-penalties; onlinetds.com; kredily.com (Form 24Q).
-- Form 16 → Form 130, 24Q → 138, 26AS → 168 (Income-tax Act 2025; Form 16 valid FY2025-26 issued 15-Jun-2026; Form 130 from TY2026-27 issued 15-Jun-2027): caclubindia.com (form-130-income-tax-act-2025); cleartax.in/s/form-130-income-tax; taxguru.in; scconline.com (2026/06/15 comparison).
+- Form renumbering under Income-tax Act 2025 / Rules 2026 (16→130, 16A→131, 16B/C/D/E→132, 27D→133, 24Q→138, 26Q→140, 27Q→144, 26AS→168; Form 16 valid FY2025-26 issued 15-Jun-2026; Form 130 from TY2026-27 issued 15-Jun-2027): caclubindia.com (form-130-income-tax-act-2025); cleartax.in/s/{form-130-income-tax,new-income-tax-forms}; taxguru.in; scconline.com (2026/06/15 comparison). **The "24Q→137" claim seen in some summaries is incorrect — 24Q maps to 138; cross-verified against caclubindia + cleartax 2026-06-22.**
 - Sitepresso reuse paths: read-only inspection of `/Users/kp/sitepresso` on 2026-06-22 (paths cited inline in §14).
 
 > **Maintenance note:** every figure above is also a row in the §15 tables with `effectiveFrom`/`source`. When a Budget or notification lands, the super-admin edits a versioned row — **this doc and the running system stay in lockstep without a deploy.** That is the whole point.

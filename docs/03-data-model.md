@@ -39,7 +39,7 @@ Per the brief: website/page builder, verticals `apps/{web,shop,booking}` + `back
 | Writer | Tables it owns (creates/mutates) |
 |---|---|
 | Super Admin | `ComplianceRuleSet`, `ComplianceRuleVersion`, plan/feature gating (external doc) |
-| Tenant Admin (HR console) | `Entity`, `Location`, `Department`, `Designation`, `Grade`, `Employee`, `EmploymentRecord`, `SalaryStructure`, `CompensationRevision`, `LeavePolicy`, `ShiftPattern`, `PayRun` (create/lock/approve), policy config for expense/loan/asset/perf/recruitment/helpdesk |
+| Tenant Admin (HR console) | `Entity`, `Location`, `Department`, `Designation`, `Grade`, `Employee`, `EmploymentRecord`, `SalaryStructure`, `CompensationRevision`, `LeavePolicy`, `ShiftPattern`, `PayRun` (create/lock/approve), `SeparationCase` (FNF), `DocumentTemplate`, policy config for expense/loan/asset/perf/recruitment/helpdesk |
 | Employee (ESS) | `LeaveTransaction` (request), `AttendancePunch`, `Timesheet`, `ExpenseClaim`, `LoanApplication`, `DocumentRequest`, `HelpdeskTicket`, profile change requests (→ `ApprovalRequest`) |
 | System (engine/cron) | `PayRunLine`, `Payslip`, `LeaveBalance` accrual, `LoanInstallment` schedule, `StatutoryRemittance`, `AuditLog`, `Notification` |
 
@@ -88,7 +88,7 @@ Most HR rows are **also** scoped to an `Entity` (the legal payroll entity), beca
 
 ### 1.4 Timestamps, soft-delete, optimistic locking
 
-Every table:
+The full audit block — applied to every **mutable aggregate root** (Employee, Entity, PayRun, Loan, ExpenseClaim, LeavePolicy, etc.):
 
 ```prisma
 createdAt DateTime  @default(now())
@@ -96,6 +96,15 @@ updatedAt DateTime  @updatedAt
 deletedAt DateTime?              // soft delete; NULL = live
 version   Int       @default(0)  // optimistic concurrency (engine + ESS race control)
 ```
+
+**Not every table gets all four columns**, and that is deliberate — the earlier shorthand "every table" overstated it. The rules:
+
+| Column | Applies to | Deliberately omitted on |
+|---|---|---|
+| `createdAt` | **every** table without exception | — (any model lacking it is a bug; `PayRunLineComponent`/`ApprovalAction`/`NumberSequence` were corrected to include it) |
+| `updatedAt` | every table that is **mutated after insert** | pure append-only ledger/line rows that are never updated (`PayRunLineComponent`, `ApprovalAction`, `LeaveTransaction` rows, `AttendancePunch`, `StatutoryElectionHistory`) — these are written once. `NumberSequence` keeps `updatedAt` (counter bumps). |
+| `deletedAt` | rows that are **soft-deleted / legally retained** (Employee, Payslip, PayRun, Loan, ExpenseClaim, statutory rows, documents, catalog/config rows that must not break historical FKs) | child/line rows that die with their parent via cascade (`ExpenseLine`, `LoanInstallment`, `PayRunLineComponent`, `TimesheetEntry`, `HelpdeskMessage`), and immutable ledger rows. |
+| `version` | rows with **concurrent writers** (engine ⇄ ESS ⇄ HR-admin races: `PayRun`, `PayRunLine`, `Payslip`, `LeaveBalance`, `LeaveTransaction`, `Employee`, `CompensationRevision`, `ApprovalRequest`) | read-only-after-insert ledger/line rows and config rows with a single writer (`PayRunLineComponent`, `ApprovalAction`, `AttendancePunch`, `Holiday`, `AccrualRule`, `EmployeeSkill`, lookup catalogs). Adding `version` to a never-concurrently-updated row is harmless but noise. |
 
 - **Soft delete** (`deletedAt`) for anything legally retained (Employee, Payslip, PayRun, statutory rows, documents). Hard delete only for transient drafts. Aligns with Sitepresso's GDPR soft-delete on `User` (`pendingDeletionAt`/`anonymisedAt`, lines 44–45).
 - **Optimistic lock:** `version` is bumped on every update; the engine and ESS both pass the expected version, and a mismatch → `409 Conflict`. Critical for payslip locking and concurrent leave approvals.
@@ -136,11 +145,13 @@ Business (tenant root, reused)
  │   ├─ ExpenseClaim ─ ExpenseLine          Loan ─ LoanInstallment
  │   ├─ EmployeeDocument   AssetAssignment
  │   ├─ PerformanceReview   Goal             EmployeeSkill
+ │   ├─ SeparationCase (FNF) ─ fnf PayRun(type=FNF)
+ │   ├─ ProfileChangeRequest   DocumentRequest   AttendanceRegularizationRequest (ESS)
  │   └─ Payslip (N, via PayRunLine)
  ├─ LeaveType ─ LeavePolicy ─ LeavePolicyAssignment ─ AccrualRule
- ├─ ShiftPattern   Holiday(public)   WeekOffPattern
+ ├─ ShiftPattern (incl. weekly-off CSV)   Holiday(public)
  ├─ ExpenseCategory   ExpensePolicy
- ├─ LoanScheme
+ ├─ LoanScheme       DocumentTemplate
  ├─ Job (req) ─ JobStage ─ Candidate ─ Application ─ Interview ─ Offer
  ├─ HelpdeskCategory ─ HelpdeskTicket ─ HelpdeskMessage
  ├─ WorkflowDefinition ─ WorkflowStep ─ ApprovalRequest ─ ApprovalAction
@@ -413,6 +424,10 @@ model Employee {
   payslips          Payslip[]
   helpdeskTickets   HelpdeskTicket[]
   approvalRequests  ApprovalRequest[]     @relation("RequesterApprovals")
+  separations       SeparationCase[]
+  profileChangeRequests ProfileChangeRequest[]
+  documentRequests  DocumentRequest[]
+  regularizationRequests AttendanceRegularizationRequest[]
 
   @@unique([businessId, code])
   @@index([businessId, status])
@@ -935,7 +950,17 @@ model PayRun {
   payslips      Payslip[]
   remittances   StatutoryRemittance[]
 
-  @@unique([businessId, entityId, payCalendarId, periodStart, type])
+  // Exactly ONE regular run per (entity, calendar, period); but MANY off-cycle/correction/
+  // bonus runs may share a period — so the unique key must NOT span all types. We enforce the
+  // single-regular-run rule with a partial unique index instead of a plain @@unique.
+  // Prisma: @@unique([businessId, entityId, payCalendarId, periodStart], where type=REGULAR)
+  // is not yet expressible in schema; emit it as a raw partial index in the migration:
+  //   CREATE UNIQUE INDEX payrun_one_regular
+  //     ON "PayRun"(business_id, entity_id, pay_calendar_id, period_start)
+  //     WHERE type = 'REGULAR' AND deleted_at IS NULL;
+  // Off-cycle/correction runs are disambiguated by their own `code` (unique) and `parentPayRunId`.
+  @@unique([businessId, code])
+  @@index([businessId, entityId, payCalendarId, periodStart, type])
   @@index([businessId, entityId, status])
   @@index([businessId, taxYear])
 }
@@ -970,7 +995,7 @@ LOCKED+ ─correct──► spawn child PayRun(type=CORRECTION) (never mutate th
 **Invariants:**
 - Once `LOCKED`, `PayRunLine` and `Payslip` rows are read-only; corrections create a `CORRECTION` child run with delta lines. Mirrors how Sitepresso freezes invoices (`InvoiceCounter` line 1877, `AdjustmentLedger` line 1883 for post-facto deltas).
 - `complianceVersionId` is stamped at `COMPUTING` start so re-runs and audits reproduce the exact rates used, even if Super Admin later publishes a new `ComplianceRuleVersion`.
-- A regular run cannot be `LOCKED` if the entity has an earlier regular run in the same tax year still in `DRAFT`/`COMPUTED` (no period gaps/overlaps); enforced by the `@@unique` + a service-layer sequence check.
+- A regular run cannot be `LOCKED` if the entity has an earlier regular run in the same tax year still in `DRAFT`/`COMPUTED` (no period gaps/overlaps); enforced by the **partial unique index** `payrun_one_regular` (one `REGULAR` run per entity/calendar/period) + a service-layer sequence check. Off-cycle/correction/bonus runs are intentionally *not* covered by that uniqueness so several may coexist in one period.
 
 ### 7.3 `PayRunLine` — per-employee computation
 
@@ -1373,7 +1398,9 @@ APPROVED ─cancel(after start)──► requires ADJUSTMENT txn (partial revers
 
 ## 9. Attendance, shifts, timesheets
 
-### 9.1 `ShiftPattern`, `ShiftAssignment`, `WeekOffPattern`, `Holiday`
+### 9.1 `ShiftPattern`, `ShiftAssignment`, `Holiday`
+
+> Week-off configuration is **not** a separate `WeekOffPattern` table — it is the `ShiftPattern.weeklyOffDays` CSV column (e.g. `"0,6"` = Sun+Sat off). The §2 ER overview's `WeekOffPattern` node refers to this column, not a distinct model. Rotating/alternating week-offs (e.g. alternate Saturdays) are expressed by assigning different `ShiftPattern`s across `ShiftAssignment` effective-dated rows.
 
 ```prisma
 model ShiftPattern {
@@ -1428,15 +1455,21 @@ model Holiday {                                       // public/company holiday 
   countryCode String   @db.Char(2)
   isPaid      Boolean  @default(true)
   isRestricted Boolean @default(false)               // IN optional/restricted holiday
+  // Scope-key collapses the two nullable scope columns into one NOT NULL key so the
+  // unique constraint actually fires for global holidays (see note below).
+  scopeKey    String                                 // = coalesce(entityId,'*') || ':' || coalesce(locationId,'*')
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  @@unique([businessId, entityId, locationId, date, name])
+  @@unique([businessId, scopeKey, date, name])
   @@index([businessId, countryCode, date])
+  @@index([businessId, entityId, locationId, date])
 }
 
 enum HolidayType { PUBLIC NATIONAL REGIONAL COMPANY RESTRICTED_OPTIONAL }
 ```
 
+> **Nullable-unique gotcha (fixed):** the original `@@unique([businessId, entityId, locationId, date, name])` does **not** prevent duplicate *global* holidays, because Postgres treats `NULL` as distinct in a unique index — two rows with `entityId=NULL, locationId=NULL, date='2026-10-20', name='Diwali'` both pass. We collapse the two nullable scope columns into a computed NOT-NULL `scopeKey` (`coalesce(entityId,'*') || ':' || coalesce(locationId,'*')`) and make *that* part of the unique key. (Postgres 15+ alternatively supports `UNIQUE NULLS NOT DISTINCT`, but Prisma does not yet emit it, so the derived-key approach is the portable fix.)
+>
 > NZ public holidays are **Mondayised** (if they fall on a weekend, observed Monday) and provincial anniversary days vary by region — hence `locationId` on `Holiday` and `countryCode`-aware seeding. The mover that knows the 2026 NZ public-holiday set lives in `06-compliance-NZ.md`.
 
 ### 9.2 `AttendancePunch` & daily `Attendance`
@@ -1722,6 +1755,83 @@ enum InstallmentStatus { SCHEDULED DUE RECOVERED SKIPPED WAIVED BOUNCED }
 
 ---
 
+## 11A. Separation & Full-and-Final settlement
+
+> **Why this exists (was a gap):** earlier drafts referenced `PayRunType.FNF`, the `SEPARATION` workflow module, the offboarding asset-return checklist, and invariant #11 ("cannot finalize `TERMINATED` with open loans/leave-encashment/asset recovery") — but never modeled the row that *holds* a separation. For an IN/NZ payroll product this is a **core statutory entity**, not optional: IN requires gratuity (≥5 yrs, 15/26 formula) + leave encashment + notice adjustment at exit, and **NZ requires holiday pay paid out on termination (8% of gross earned since last anniversary not yet taken) computed at the greater of OWP/AWE** — a calculation that must be persisted and provable. `SeparationCase` is the offboarding aggregate that the FNF `PayRun` reads.
+
+```prisma
+model SeparationCase {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId    String
+  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  entityId      String                                  // entity for statutory exit obligations
+  code          String                                  // SEP-000017
+  type          SeparationType
+  reason        String?
+  // Key dates
+  initiatedAt   DateTime @db.Date
+  resignationDate DateTime? @db.Date                     // employee notice date
+  noticePeriodDays Int?
+  noticeShortfallDays Int @default(0)                    // → NOTICE_RECOVERY component
+  lastWorkingDay DateTime? @db.Date                      // payroll cutoff for FNF
+  relievingDate  DateTime? @db.Date
+  // Settlement components (snapshot of computed FNF inputs; engine fills)
+  gratuityAmount        Decimal? @db.Decimal(15,2)       // IN: 15/26 × last-drawn × completed yrs
+  leaveEncashmentDays   Decimal? @db.Decimal(8,4)
+  leaveEncashmentAmount Decimal? @db.Decimal(15,2)
+  nzHolidayPayoutAmount Decimal? @db.Decimal(15,2)       // NZ: 8% accrued + untaken annual @ OWP/AWE
+  noticeRecoveryAmount  Decimal? @db.Decimal(15,2)
+  loanForeclosureAmount Decimal? @db.Decimal(15,2)
+  assetRecoveryAmount   Decimal? @db.Decimal(15,2)
+  netSettlement         Decimal? @db.Decimal(15,2)
+  currencyCode  String   @db.Char(3)
+  fnfPayRunId   String?                                  // FNF PayRun (type=FNF) that paid it
+  // Offboarding checklist state (rendered from fixed task catalog, not tenant-built)
+  clearanceJson Json?                                    // {assets:bool, it:bool, finance:bool, knowledge_transfer:bool}
+  status        SeparationStatus @default(INITIATED)
+  approvalRequestId String?
+  exitInterviewJson Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+  version       Int      @default(0)
+
+  @@unique([businessId, code])
+  @@unique([businessId, employeeId, initiatedAt])        // one active case per separation event
+  @@index([businessId, status])
+  @@index([businessId, entityId, lastWorkingDay])
+}
+
+enum SeparationType {
+  RESIGNATION TERMINATION_FOR_CAUSE RETRENCHMENT REDUNDANCY
+  END_OF_CONTRACT RETIREMENT DEATH ABSCONDING PROBATION_FAILURE MUTUAL_SEPARATION
+}
+enum SeparationStatus {
+  INITIATED              // resignation/termination logged
+  NOTICE_SERVING         // serving notice period
+  CLEARANCE_PENDING      // asset/IT/finance clearances open
+  FNF_PENDING            // clearances done, FNF computation queued
+  FNF_COMPUTED           // settlement figures produced
+  FNF_APPROVED           // signed off
+  SETTLED               // paid; relieving letter issued
+  CANCELLED              // resignation withdrawn before LWD
+}
+```
+
+**Separation state machine & gating:**
+```
+INITIATED ─serveNotice──► NOTICE_SERVING ─lastWorkingDay──► CLEARANCE_PENDING
+NOTICE_SERVING ─withdraw(before LWD, approved)──► CANCELLED  (Employee stays ACTIVE)
+CLEARANCE_PENDING ─allClear──► FNF_PENDING ─compute──► FNF_COMPUTED ─approve──► FNF_APPROVED ─pay──► SETTLED
+```
+- Moving `Employee → TERMINATED` (§4.1 guard) **requires** a `SeparationCase` in `FNF_APPROVED`/`SETTLED` **or** an explicit waiver flag — this is the row that invariant #11 (§21) actually checks.
+- `nzHolidayPayoutAmount` is computed by the NZ Holidays Act module (`06-compliance-NZ.md`) and is non-waivable; IN gratuity/leave-encashment are statutory minima.
+- `SeparationType.DEATH`/`RETRENCHMENT` change IN gratuity eligibility (waives the 5-year minimum) — the compliance module branches on `type`.
+
+---
+
 ## 12. Documents
 
 ```prisma
@@ -1762,7 +1872,98 @@ enum DocumentVisibility { HR_ONLY MANAGER_AND_HR EMPLOYEE_VISIBLE }
 enum SignatureStatus    { NOT_REQUIRED PENDING SIGNED DECLINED EXPIRED }
 ```
 
-Document templates (offer letters, contracts) are **system templates with merge fields**, not tenant-built layouts — honoring "configure, not build." A `DocumentTemplate` table (entity-scoped, picks one of N fixed layouts, fills logo/brand color/merge fields) backs generated PDFs; storage and signing reuse Sitepresso's signature plumbing (`User.signatureUrl`/`stampUrl`, lines 37–38).
+Document templates (offer letters, contracts) are **system templates with merge fields**, not tenant-built layouts — honoring "configure, not build." The `DocumentTemplate` table (entity-scoped, picks one of N fixed layouts, fills logo/brand color/merge fields) backs generated PDFs; storage and signing reuse Sitepresso's signature plumbing (`User.signatureUrl`/`stampUrl`, lines 37–38).
+
+```prisma
+model DocumentTemplate {                            // fixed-layout, merge-field templates (NOT a layout builder)
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId    String?
+  code        String
+  name        String
+  kind        TemplateKind                            // OFFER_LETTER, RELIEVING_LETTER, PAYSLIP, etc.
+  layoutKey   String                                  // one of N fixed system layouts (enum-like)
+  countryCode String?  @db.Char(2)
+  bodyMarkdown String  @db.Text                       // merge fields {{employee.name}}, {{ctc}} — no HTML/script
+  mergeFieldsJson Json?                               // declared allowed merge fields (validation)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(0)
+  @@unique([businessId, code])
+  @@index([businessId, kind, isActive])
+}
+
+enum TemplateKind {
+  OFFER_LETTER APPOINTMENT_LETTER CONFIRMATION_LETTER PROMOTION_LETTER
+  RELIEVING_LETTER EXPERIENCE_LETTER SALARY_CERTIFICATE WARNING_LETTER
+  PAYSLIP FORM16 FNF_STATEMENT POLICY_ACK OTHER
+}
+```
+
+### 12.1 ESS request entities (promised in §0.3, now modeled)
+
+§0.3 lists `DocumentRequest`, `RegularizationRequest`, and "profile change requests" as employee-owned writes. These route through `ApprovalRequest` (§18) but each needs its own row to carry the requested payload and link the artifact:
+
+```prisma
+model ProfileChangeRequest {                          // ESS self-service edit to gated fields
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  field       String                                  // "phone","addressLine1","bankAccount"...
+  oldValue    String?
+  newValue    String
+  status      RequestStatus @default(PENDING)
+  approvalRequestId String?
+  decidedBy   String?
+  decidedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  version     Int      @default(0)
+  @@index([businessId, employeeId, status])
+}
+
+model DocumentRequest {                               // employee asks HR for a letter/certificate
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  templateKind TemplateKind                            // what they want (SALARY_CERTIFICATE, etc.)
+  purpose     String?
+  status      RequestStatus @default(PENDING)
+  generatedDocumentId String?                          // resulting EmployeeDocument
+  approvalRequestId String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([businessId, employeeId, status])
+}
+
+model AttendanceRegularizationRequest {               // backs AttendancePunch.regularizationRequestId / Attendance fixes
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  date        DateTime @db.Date
+  requestedInAt  DateTime?
+  requestedOutAt DateTime?
+  reason      String
+  status      RequestStatus @default(PENDING)
+  approvalRequestId String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([businessId, employeeId, date])
+}
+
+enum RequestStatus { PENDING APPROVED REJECTED CANCELLED }
+```
+
+> These also need `employee` back-relations: add `profileChangeRequests`, `documentRequests`, `regularizationRequests` to the `Employee` relation block (§4.1).
 
 ---
 
@@ -2454,7 +2655,7 @@ model NumberSequence {
 8. **NZ minimum wage:** structure save warns if implied hourly < $23.95 (adult) / $19.16 (starting-out/training) from 1 Apr 2026.
 9. **KiwiSaver age gate:** employer contribution requires age ∈ [16, 65] from 1 Apr 2026 (engine reads `dateOfBirth`).
 10. **Statutory retention:** Employee/Payslip/statutory rows are soft-delete only; anonymise PII, keep `@retain:statutory` (IN wage registers; NZ 7-year IRD/Holidays Act records).
-11. **Separation gating:** cannot finalize `TERMINATED` with open loans/leave-encashment/asset recovery unresolved without an FNF run or explicit waiver.
+11. **Separation gating:** `Employee → TERMINATED` requires a `SeparationCase` (§11A) in `FNF_APPROVED`/`SETTLED` (or an explicit waiver flag); the FNF `PayRun` must have resolved open loans, leave encashment, IN gratuity, NZ holiday-pay payout, and asset recovery.
 12. **Audit completeness:** salary views, exports, payslip reissues, rule publishes, and impersonation all emit `AuditLog` rows.
 
 ---
