@@ -1,0 +1,8 @@
+{
+  "name": "@sitepresso/admin-core",
+  "version": "0.0.1",
+  "private": true,
+  "main": "index.js",
+  "types": "index.d.ts",
+  "description": "Shared admin panel/controller package. Starts with contracts and guard helpers; panel extraction lands incrementally."
+}

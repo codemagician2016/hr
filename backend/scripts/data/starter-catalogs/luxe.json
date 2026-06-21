@@ -1,0 +1,430 @@
+{
+  "theme": "luxe",
+  "categories": [
+    {
+      "slug": "women",
+      "name": "Women",
+      "children": [
+        {
+          "slug": "women-ready-to-wear",
+          "name": "Ready-to-Wear",
+          "children": [
+            {
+              "slug": "women-rtw-coats",
+              "name": "Coats & Outerwear"
+            },
+            {
+              "slug": "women-rtw-dresses",
+              "name": "Dresses & Gowns"
+            },
+            {
+              "slug": "women-rtw-knitwear",
+              "name": "Cashmere & Knitwear"
+            },
+            {
+              "slug": "women-rtw-tailoring",
+              "name": "Tailoring"
+            }
+          ]
+        },
+        {
+          "slug": "women-handbags",
+          "name": "Handbags",
+          "children": [
+            {
+              "slug": "women-bags-top-handle",
+              "name": "Top-Handle Bags"
+            },
+            {
+              "slug": "women-bags-shoulder",
+              "name": "Shoulder Bags"
+            },
+            {
+              "slug": "women-bags-clutches",
+              "name": "Clutches & Minaudieres"
+            }
+          ]
+        },
+        {
+          "slug": "women-shoes",
+          "name": "Shoes",
+          "children": [
+            {
+              "slug": "women-shoes-heels",
+              "name": "Heels & Pumps"
+            },
+            {
+              "slug": "women-shoes-flats",
+              "name": "Flats & Loafers"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "men",
+      "name": "Men",
+      "children": [
+        {
+          "slug": "men-ready-to-wear",
+          "name": "Ready-to-Wear",
+          "children": [
+            {
+              "slug": "men-rtw-tailoring",
+              "name": "Suits & Tailoring"
+            },
+            {
+              "slug": "men-rtw-outerwear",
+              "name": "Outerwear"
+            },
+            {
+              "slug": "men-rtw-knitwear",
+              "name": "Knitwear"
+            }
+          ]
+        },
+        {
+          "slug": "men-leather-goods",
+          "name": "Leather Goods",
+          "children": [
+            {
+              "slug": "men-leather-wallets",
+              "name": "Wallets & Card Holders"
+            },
+            {
+              "slug": "men-leather-briefcases",
+              "name": "Briefcases & Document Cases"
+            },
+            {
+              "slug": "men-leather-belts",
+              "name": "Belts"
+            }
+          ]
+        },
+        {
+          "slug": "men-footwear",
+          "name": "Footwear",
+          "children": [
+            {
+              "slug": "men-footwear-oxfords",
+              "name": "Oxfords & Derbies"
+            },
+            {
+              "slug": "men-footwear-loafers",
+              "name": "Loafers"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "watches-jewellery",
+      "name": "Watches & Fine Jewellery",
+      "children": [
+        {
+          "slug": "wj-timepieces",
+          "name": "Timepieces",
+          "children": [
+            {
+              "slug": "wj-watches-automatic",
+              "name": "Automatic Watches"
+            },
+            {
+              "slug": "wj-watches-dress",
+              "name": "Dress Watches"
+            },
+            {
+              "slug": "wj-watches-straps",
+              "name": "Straps & Accessories"
+            }
+          ]
+        },
+        {
+          "slug": "wj-fine-jewellery",
+          "name": "Fine Jewellery",
+          "children": [
+            {
+              "slug": "wj-jewellery-rings",
+              "name": "Rings"
+            },
+            {
+              "slug": "wj-jewellery-necklaces",
+              "name": "Necklaces & Pendants"
+            },
+            {
+              "slug": "wj-jewellery-earrings",
+              "name": "Earrings"
+            },
+            {
+              "slug": "wj-jewellery-bracelets",
+              "name": "Bracelets"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "fragrance-beauty",
+      "name": "Fragrance & Beauty",
+      "children": [
+        {
+          "slug": "fb-fragrance",
+          "name": "Fragrance",
+          "children": [
+            {
+              "slug": "fb-fragrance-edp",
+              "name": "Eau de Parfum"
+            },
+            {
+              "slug": "fb-fragrance-niche",
+              "name": "Niche & Exclusive"
+            },
+            {
+              "slug": "fb-fragrance-home",
+              "name": "Home Fragrance"
+            }
+          ]
+        },
+        {
+          "slug": "fb-skincare",
+          "name": "Skincare",
+          "children": [
+            {
+              "slug": "fb-skincare-serums",
+              "name": "Serums & Treatments"
+            },
+            {
+              "slug": "fb-skincare-creams",
+              "name": "Creams & Moisturisers"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "accessories",
+      "name": "Accessories",
+      "children": [
+        {
+          "slug": "accessories-silk-scarves",
+          "name": "Silk & Scarves",
+          "children": [
+            {
+              "slug": "acc-scarves-silk",
+              "name": "Silk Scarves"
+            },
+            {
+              "slug": "acc-scarves-cashmere",
+              "name": "Cashmere Stoles"
+            }
+          ]
+        },
+        {
+          "slug": "accessories-eyewear",
+          "name": "Eyewear",
+          "children": [
+            {
+              "slug": "acc-eyewear-sunglasses",
+              "name": "Sunglasses"
+            },
+            {
+              "slug": "acc-eyewear-optical",
+              "name": "Optical Frames"
+            }
+          ]
+        },
+        {
+          "slug": "accessories-small-leather",
+          "name": "Small Leather Goods",
+          "children": [
+            {
+              "slug": "acc-sl-cardholders",
+              "name": "Card Holders"
+            },
+            {
+              "slug": "acc-sl-keyrings",
+              "name": "Key Rings & Charms"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "brandsByCountry": {
+    "IN": [
+      "Sabyasachi",
+      "Hidesign",
+      "Titan Edge",
+      "Forest Essentials",
+      "Tarun Tahiliani",
+      "Anita Dongre",
+      "Bombay Shaving Company",
+      "Raghavendra Rathore"
+    ],
+    "default": [
+      "Maison Aurélian",
+      "Atelier Noir",
+      "Valmont & Cie",
+      "Horloger Genève",
+      "Cuir de Saison",
+      "Lumière Privée",
+      "Casa Velluto"
+    ]
+  },
+  "products": [
+    {
+      "slug": "double-breasted-cashmere-overcoat",
+      "name": "Double-Breasted Cashmere Overcoat",
+      "categorySlug": "women-rtw-coats",
+      "brand": "Maison Aurélian",
+      "priceUsd": 2890,
+      "compareUsd": 3450,
+      "stock": 18,
+      "shortDescription": "Tailored from pure Mongolian cashmere with hand-finished horn buttons and a half-canvas construction."
+    },
+    {
+      "slug": "silk-charmeuse-bias-cut-gown",
+      "name": "Silk Charmeuse Bias-Cut Gown",
+      "categorySlug": "women-rtw-dresses",
+      "brand": "Tarun Tahiliani",
+      "priceUsd": 1980,
+      "stock": 22,
+      "shortDescription": "A floor-length mulberry silk gown cut on the bias with hand-rolled hems for fluid, draped movement."
+    },
+    {
+      "slug": "ribbed-cashmere-roll-neck",
+      "name": "Ribbed Cashmere Roll-Neck",
+      "categorySlug": "women-rtw-knitwear",
+      "brand": "Casa Velluto",
+      "priceUsd": 620,
+      "compareUsd": 780,
+      "stock": 46,
+      "shortDescription": "An everyday luxury roll-neck knitted from twelve-gauge Italian cashmere for lightweight warmth."
+    },
+    {
+      "slug": "structured-top-handle-calf-bag",
+      "name": "Structured Top-Handle Calf Bag",
+      "categorySlug": "women-bags-top-handle",
+      "brand": "Hidesign",
+      "priceUsd": 1450,
+      "compareUsd": 1690,
+      "stock": 27,
+      "shortDescription": "A sculptural top-handle bag in full-grain calf leather with hand-painted edges and a suede-lined interior."
+    },
+    {
+      "slug": "quilted-lambskin-shoulder-bag",
+      "name": "Quilted Lambskin Shoulder Bag",
+      "categorySlug": "women-bags-shoulder",
+      "brand": "Cuir de Saison",
+      "priceUsd": 2180,
+      "stock": 15,
+      "shortDescription": "Diamond-quilted lambskin with antique-gold hardware and a convertible chain-and-leather strap."
+    },
+    {
+      "slug": "crystal-embellished-satin-clutch",
+      "name": "Crystal-Embellished Satin Clutch",
+      "categorySlug": "women-bags-clutches",
+      "brand": "Sabyasachi",
+      "priceUsd": 890,
+      "compareUsd": 1150,
+      "stock": 30,
+      "shortDescription": "An evening minaudiere in duchess satin, hand-set with faceted crystals and a concealed magnetic closure."
+    },
+    {
+      "slug": "patent-leather-stiletto-pump",
+      "name": "Patent Leather Stiletto Pump",
+      "categorySlug": "women-shoes-heels",
+      "brand": "Atelier Noir",
+      "priceUsd": 740,
+      "stock": 38,
+      "shortDescription": "A pointed 90mm pump in glossy Italian patent leather with a leather sole and signature red lining."
+    },
+    {
+      "slug": "super-150s-wool-peak-lapel-suit",
+      "name": "Super 150s Wool Peak-Lapel Suit",
+      "categorySlug": "men-rtw-tailoring",
+      "brand": "Raghavendra Rathore",
+      "priceUsd": 2350,
+      "compareUsd": 2790,
+      "stock": 16,
+      "shortDescription": "A two-piece suit in Super 150s wool with hand-padded peak lapels and functional buttonholes."
+    },
+    {
+      "slug": "hand-stitched-leather-bifold-wallet",
+      "name": "Hand-Stitched Leather Bifold Wallet",
+      "categorySlug": "men-leather-wallets",
+      "brand": "Hidesign",
+      "priceUsd": 240,
+      "compareUsd": 320,
+      "stock": 64,
+      "shortDescription": "A slim bifold in vegetable-tanned full-grain leather, saddle-stitched by hand with eight card slots."
+    },
+    {
+      "slug": "full-grain-leather-briefcase",
+      "name": "Full-Grain Leather Briefcase",
+      "categorySlug": "men-leather-briefcases",
+      "brand": "Cuir de Saison",
+      "priceUsd": 1680,
+      "stock": 19,
+      "shortDescription": "A structured document briefcase in full-grain bridle leather with brass fittings and a suede laptop sleeve."
+    },
+    {
+      "slug": "hand-welted-leather-oxford",
+      "name": "Hand-Welted Leather Oxford",
+      "categorySlug": "men-footwear-oxfords",
+      "brand": "Atelier Noir",
+      "priceUsd": 690,
+      "compareUsd": 850,
+      "stock": 33,
+      "shortDescription": "A wholecut Oxford in burnished calf leather, Goodyear-welted and finished with a hand-patinated toe."
+    },
+    {
+      "slug": "swiss-automatic-skeleton-watch",
+      "name": "Swiss Automatic Skeleton Watch",
+      "categorySlug": "wj-watches-automatic",
+      "brand": "Horloger Genève",
+      "priceUsd": 4250,
+      "stock": 12,
+      "shortDescription": "An openworked automatic with a 42-hour power reserve, sapphire crystal and a hand-stitched alligator strap."
+    },
+    {
+      "slug": "ultra-thin-rose-gold-dress-watch",
+      "name": "Ultra-Thin Rose-Gold Dress Watch",
+      "categorySlug": "wj-watches-dress",
+      "brand": "Titan Edge",
+      "priceUsd": 980,
+      "compareUsd": 1250,
+      "stock": 24,
+      "shortDescription": "A 6mm-slim dress watch in 18k rose-gold-plated steel with a domed sapphire crystal and Milanese mesh band."
+    },
+    {
+      "slug": "platinum-solitaire-diamond-ring",
+      "name": "Platinum Solitaire Diamond Ring",
+      "categorySlug": "wj-jewellery-rings",
+      "brand": "Lumière Privée",
+      "priceUsd": 6800,
+      "stock": 10,
+      "shortDescription": "A GIA-certified brilliant-cut solitaire set in a hand-finished platinum band with a knife-edge profile."
+    },
+    {
+      "slug": "south-sea-pearl-drop-earrings",
+      "name": "South Sea Pearl Drop Earrings",
+      "categorySlug": "wj-jewellery-earrings",
+      "brand": "Anita Dongre",
+      "priceUsd": 1340,
+      "compareUsd": 1690,
+      "stock": 21,
+      "shortDescription": "Lustrous South Sea pearls suspended from 18k yellow-gold posts set with a pavé of brilliant diamonds."
+    },
+    {
+      "slug": "oud-noir-eau-de-parfum-100ml",
+      "name": "Oud Noir Eau de Parfum 100ml",
+      "categorySlug": "fb-fragrance-niche",
+      "brand": "Lumière Privée",
+      "priceUsd": 320,
+      "compareUsd": 380,
+      "stock": 52,
+      "shortDescription": "A smoky niche composition of oud, Turkish rose and amber, blended and matured in Grasse."
+    }
+  ]
+}

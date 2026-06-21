@@ -1,0 +1,543 @@
+{
+  "theme": "rental",
+  "categories": [
+    {
+      "slug": "events-parties",
+      "name": "Events & Parties",
+      "children": [
+        {
+          "slug": "events-tents-marquees",
+          "name": "Tents & Marquees",
+          "children": [
+            {
+              "slug": "events-tents-frame",
+              "name": "Frame Marquees"
+            },
+            {
+              "slug": "events-tents-pop-up",
+              "name": "Pop-Up Gazebos"
+            },
+            {
+              "slug": "events-tents-stretch",
+              "name": "Stretch Tents"
+            }
+          ]
+        },
+        {
+          "slug": "events-tables-seating",
+          "name": "Tables & Seating",
+          "children": [
+            {
+              "slug": "events-seating-chiavari",
+              "name": "Chiavari Chairs"
+            },
+            {
+              "slug": "events-tables-banquet",
+              "name": "Banquet Tables"
+            },
+            {
+              "slug": "events-seating-lounge",
+              "name": "Lounge Sofas"
+            }
+          ]
+        },
+        {
+          "slug": "events-decor-lighting",
+          "name": "Decor & Lighting",
+          "children": [
+            {
+              "slug": "events-lighting-uplighters",
+              "name": "LED Uplighters"
+            },
+            {
+              "slug": "events-decor-backdrops",
+              "name": "Backdrops & Drapes"
+            },
+            {
+              "slug": "events-decor-dancefloor",
+              "name": "Dance Floors"
+            }
+          ]
+        },
+        {
+          "slug": "events-catering-gear",
+          "name": "Catering Equipment",
+          "children": [
+            {
+              "slug": "events-catering-warmers",
+              "name": "Chafing & Warmers"
+            },
+            {
+              "slug": "events-catering-glassware",
+              "name": "Glassware & Crockery"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "photo-video",
+      "name": "Photo & Video",
+      "children": [
+        {
+          "slug": "photo-cameras",
+          "name": "Cameras",
+          "children": [
+            {
+              "slug": "photo-cameras-mirrorless",
+              "name": "Mirrorless Bodies"
+            },
+            {
+              "slug": "photo-cameras-cinema",
+              "name": "Cinema Cameras"
+            },
+            {
+              "slug": "photo-cameras-action",
+              "name": "Action Cameras"
+            }
+          ]
+        },
+        {
+          "slug": "photo-lenses",
+          "name": "Lenses",
+          "children": [
+            {
+              "slug": "photo-lenses-prime",
+              "name": "Prime Lenses"
+            },
+            {
+              "slug": "photo-lenses-zoom",
+              "name": "Zoom Lenses"
+            }
+          ]
+        },
+        {
+          "slug": "photo-lighting-grip",
+          "name": "Lighting & Grip",
+          "children": [
+            {
+              "slug": "photo-lighting-led",
+              "name": "LED Panels"
+            },
+            {
+              "slug": "photo-grip-tripods",
+              "name": "Tripods & Sliders"
+            },
+            {
+              "slug": "photo-grip-gimbals",
+              "name": "Gimbals & Stabilisers"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "tools-equipment",
+      "name": "Tools & Equipment",
+      "children": [
+        {
+          "slug": "tools-power",
+          "name": "Power Tools",
+          "children": [
+            {
+              "slug": "tools-power-drills",
+              "name": "Drills & Drivers"
+            },
+            {
+              "slug": "tools-power-saws",
+              "name": "Saws & Cutters"
+            },
+            {
+              "slug": "tools-power-sanders",
+              "name": "Sanders & Grinders"
+            }
+          ]
+        },
+        {
+          "slug": "tools-cleaning",
+          "name": "Cleaning Machines",
+          "children": [
+            {
+              "slug": "tools-cleaning-pressure",
+              "name": "Pressure Washers"
+            },
+            {
+              "slug": "tools-cleaning-carpet",
+              "name": "Carpet & Floor Cleaners"
+            }
+          ]
+        },
+        {
+          "slug": "tools-access-lift",
+          "name": "Access & Lifting",
+          "children": [
+            {
+              "slug": "tools-access-scaffold",
+              "name": "Scaffold Towers"
+            },
+            {
+              "slug": "tools-access-ladders",
+              "name": "Ladders & Platforms"
+            }
+          ]
+        },
+        {
+          "slug": "tools-garden",
+          "name": "Garden & Landscaping",
+          "children": [
+            {
+              "slug": "tools-garden-mowers",
+              "name": "Mowers & Trimmers"
+            },
+            {
+              "slug": "tools-garden-chippers",
+              "name": "Chippers & Shredders"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "furniture-staging",
+      "name": "Furniture & Staging",
+      "children": [
+        {
+          "slug": "furniture-home",
+          "name": "Home Furniture",
+          "children": [
+            {
+              "slug": "furniture-home-sofas",
+              "name": "Sofas & Seating"
+            },
+            {
+              "slug": "furniture-home-beds",
+              "name": "Beds & Mattresses"
+            },
+            {
+              "slug": "furniture-home-dining",
+              "name": "Dining Sets"
+            }
+          ]
+        },
+        {
+          "slug": "furniture-office",
+          "name": "Office Furniture",
+          "children": [
+            {
+              "slug": "furniture-office-desks",
+              "name": "Desks & Workstations"
+            },
+            {
+              "slug": "furniture-office-chairs",
+              "name": "Ergonomic Chairs"
+            }
+          ]
+        },
+        {
+          "slug": "furniture-appliances",
+          "name": "Appliances",
+          "children": [
+            {
+              "slug": "furniture-appliances-fridges",
+              "name": "Refrigerators"
+            },
+            {
+              "slug": "furniture-appliances-washers",
+              "name": "Washing Machines"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "outdoor-travel",
+      "name": "Outdoor & Travel",
+      "children": [
+        {
+          "slug": "outdoor-camping",
+          "name": "Camping Gear",
+          "children": [
+            {
+              "slug": "outdoor-camping-tents",
+              "name": "Camping Tents"
+            },
+            {
+              "slug": "outdoor-camping-sleep",
+              "name": "Sleeping Systems"
+            }
+          ]
+        },
+        {
+          "slug": "outdoor-watersports",
+          "name": "Watersports",
+          "children": [
+            {
+              "slug": "outdoor-watersports-kayaks",
+              "name": "Kayaks & SUPs"
+            },
+            {
+              "slug": "outdoor-watersports-gear",
+              "name": "Wetsuits & Safety"
+            }
+          ]
+        },
+        {
+          "slug": "outdoor-baby-travel",
+          "name": "Baby & Travel Gear",
+          "children": [
+            {
+              "slug": "outdoor-baby-strollers",
+              "name": "Strollers & Prams"
+            },
+            {
+              "slug": "outdoor-baby-carseats",
+              "name": "Car Seats"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "brandsByCountry": {
+    "IN": [
+      "RentoMojo",
+      "Furlenco",
+      "Rentickle",
+      "GrabOnRent",
+      "Cityfurnish",
+      "CameraKart Rentals",
+      "WeRent",
+      "Fabrento"
+    ],
+    "default": [
+      "HireHub",
+      "EventHire Co.",
+      "LensLoop",
+      "ToolShed Rentals",
+      "StagePad",
+      "TrailGear Hire",
+      "GlowEvents",
+      "RentEase"
+    ]
+  },
+  "products": [
+    {
+      "slug": "frame-marquee-6x12m",
+      "name": "Frame Marquee 6×12m",
+      "categorySlug": "events-tents-frame",
+      "brand": "EventHire Co.",
+      "priceUsd": 149,
+      "compareUsd": 199,
+      "stock": 14,
+      "shortDescription": "Heavy-duty 6×12m frame marquee with clear-span sides, ideal for weddings and corporate marquees up to 70 guests."
+    },
+    {
+      "slug": "pop-up-gazebo-3x3m",
+      "name": "Pop-Up Gazebo 3×3m",
+      "categorySlug": "events-tents-pop-up",
+      "brand": "HireHub",
+      "priceUsd": 28,
+      "stock": 40,
+      "shortDescription": "Waterproof 3×3m pop-up gazebo that assembles in minutes, perfect for market stalls and garden parties."
+    },
+    {
+      "slug": "chiavari-chair-set-10",
+      "name": "Gold Chiavari Chairs (Set of 10)",
+      "categorySlug": "events-seating-chiavari",
+      "brand": "EventHire Co.",
+      "priceUsd": 35,
+      "compareUsd": 50,
+      "stock": 60,
+      "shortDescription": "Set of ten classic gold Chiavari banquet chairs with cushioned seat pads for elegant reception seating."
+    },
+    {
+      "slug": "round-banquet-table-5ft",
+      "name": "Round Banquet Table 5ft",
+      "categorySlug": "events-tables-banquet",
+      "brand": "StagePad",
+      "priceUsd": 12,
+      "stock": 55,
+      "shortDescription": "Sturdy 5ft round folding banquet table that seats eight to ten guests, supplied event-ready and wipe-clean."
+    },
+    {
+      "slug": "led-uplighter-set-8",
+      "name": "Wireless LED Uplighters (Set of 8)",
+      "categorySlug": "events-lighting-uplighters",
+      "brand": "GlowEvents",
+      "priceUsd": 65,
+      "compareUsd": 90,
+      "stock": 22,
+      "shortDescription": "Eight battery-powered RGB LED uplighters with remote control to wash venue walls in any colour, cable-free."
+    },
+    {
+      "slug": "starlit-led-dance-floor-4x4m",
+      "name": "Starlit LED Dance Floor 4×4m",
+      "categorySlug": "events-decor-dancefloor",
+      "brand": "GlowEvents",
+      "priceUsd": 220,
+      "stock": 10,
+      "shortDescription": "Twinkling black starlit dance floor in a 4×4m interlocking layout, delivered, installed and collected by our crew."
+    },
+    {
+      "slug": "sony-a7-iv-mirrorless-body",
+      "name": "Sony A7 IV Mirrorless Body",
+      "categorySlug": "photo-cameras-mirrorless",
+      "brand": "CameraKart Rentals",
+      "priceUsd": 45,
+      "compareUsd": 60,
+      "stock": 18,
+      "shortDescription": "Full-frame 33MP Sony A7 IV body rented with two batteries, charger and a 128GB card for shoots and events."
+    },
+    {
+      "slug": "blackmagic-pocket-6k-cinema",
+      "name": "Blackmagic Pocket Cinema 6K",
+      "categorySlug": "photo-cameras-cinema",
+      "brand": "LensLoop",
+      "priceUsd": 75,
+      "stock": 12,
+      "shortDescription": "Super-35 6K cinema camera with EF mount, supplied with a V-mount battery plate and CFexpress media for film work."
+    },
+    {
+      "slug": "gopro-hero-12-action-kit",
+      "name": "GoPro HERO12 Action Kit",
+      "categorySlug": "photo-cameras-action",
+      "brand": "WeRent",
+      "priceUsd": 18,
+      "compareUsd": 25,
+      "stock": 30,
+      "shortDescription": "Waterproof GoPro HERO12 with chest mount, floating grip and spare batteries for adventure and travel filming."
+    },
+    {
+      "slug": "sigma-24-70-art-zoom",
+      "name": "Sigma 24-70mm f/2.8 Art Zoom",
+      "categorySlug": "photo-lenses-zoom",
+      "brand": "CameraKart Rentals",
+      "priceUsd": 28,
+      "stock": 20,
+      "shortDescription": "Versatile 24-70mm f/2.8 Art zoom for weddings and events, available in Sony E, Canon RF and Nikon Z mounts."
+    },
+    {
+      "slug": "dji-rs-3-pro-gimbal",
+      "name": "DJI RS 3 Pro Gimbal",
+      "categorySlug": "photo-grip-gimbals",
+      "brand": "LensLoop",
+      "priceUsd": 32,
+      "compareUsd": 45,
+      "stock": 16,
+      "shortDescription": "Three-axis DJI RS 3 Pro gimbal with focus motor and extended battery for smooth handheld cinema movement."
+    },
+    {
+      "slug": "aputure-300x-led-light",
+      "name": "Aputure 300X Bi-Colour LED",
+      "categorySlug": "photo-lighting-led",
+      "brand": "WeRent",
+      "priceUsd": 38,
+      "stock": 14,
+      "shortDescription": "Powerful 300W bi-colour LED light with softbox and stand for studio portraits and interview lighting setups."
+    },
+    {
+      "slug": "dewalt-18v-drill-driver-kit",
+      "name": "DeWalt 18V Drill & Driver Kit",
+      "categorySlug": "tools-power-drills",
+      "brand": "ToolShed Rentals",
+      "priceUsd": 16,
+      "compareUsd": 22,
+      "stock": 35,
+      "shortDescription": "Cordless DeWalt 18V combi drill and impact driver in a case with two batteries, charger and a bit set."
+    },
+    {
+      "slug": "karcher-hd-pressure-washer",
+      "name": "Kärcher HD Pressure Washer",
+      "categorySlug": "tools-cleaning-pressure",
+      "brand": "ToolShed Rentals",
+      "priceUsd": 24,
+      "stock": 26,
+      "shortDescription": "Professional Kärcher cold-water pressure washer with patio lance and turbo nozzle for driveways and decking."
+    },
+    {
+      "slug": "aluminium-scaffold-tower-4m",
+      "name": "Aluminium Scaffold Tower 4m",
+      "categorySlug": "tools-access-scaffold",
+      "brand": "ToolShed Rentals",
+      "priceUsd": 42,
+      "compareUsd": 55,
+      "stock": 12,
+      "shortDescription": "Lightweight 4m working-height aluminium scaffold tower with stabilisers and guard rails for safe indoor access."
+    },
+    {
+      "slug": "rentomojo-queen-bed-mattress",
+      "name": "Queen Bed with Mattress",
+      "categorySlug": "furniture-home-beds",
+      "brand": "RentoMojo",
+      "priceUsd": 9,
+      "stock": 48,
+      "shortDescription": "Solid-wood queen bed frame with an orthopaedic mattress, delivered and assembled for hassle-free home setups."
+    },
+    {
+      "slug": "furlenco-3-seater-sofa",
+      "name": "Wakefit 3-Seater Fabric Sofa",
+      "categorySlug": "furniture-home-sofas",
+      "brand": "Furlenco",
+      "priceUsd": 11,
+      "compareUsd": 16,
+      "stock": 30,
+      "shortDescription": "Plush three-seater fabric sofa on a monthly subscription, with free relocation and quarterly deep-clean included."
+    },
+    {
+      "slug": "ergonomic-mesh-office-chair",
+      "name": "Ergonomic Mesh Office Chair",
+      "categorySlug": "furniture-office-chairs",
+      "brand": "Cityfurnish",
+      "priceUsd": 6,
+      "stock": 70,
+      "shortDescription": "High-back mesh office chair with lumbar support and adjustable armrests for comfortable work-from-home setups."
+    },
+    {
+      "slug": "double-door-refrigerator-340l",
+      "name": "Double-Door Refrigerator 340L",
+      "categorySlug": "furniture-appliances-fridges",
+      "brand": "Rentickle",
+      "priceUsd": 14,
+      "stock": 25,
+      "shortDescription": "Energy-efficient 340L frost-free double-door fridge on flexible monthly hire, with free install and servicing."
+    },
+    {
+      "slug": "4-person-dome-tent",
+      "name": "4-Person Dome Tent",
+      "categorySlug": "outdoor-camping-tents",
+      "brand": "TrailGear Hire",
+      "priceUsd": 15,
+      "compareUsd": 20,
+      "stock": 28,
+      "shortDescription": "Waterproof four-person dome tent with sewn-in groundsheet and quick-pitch poles for weekend camping trips."
+    },
+    {
+      "slug": "single-sit-on-kayak",
+      "name": "Single Sit-On-Top Kayak",
+      "categorySlug": "outdoor-watersports-kayaks",
+      "brand": "TrailGear Hire",
+      "priceUsd": 30,
+      "stock": 18,
+      "shortDescription": "Stable single sit-on-top kayak supplied with paddle and buoyancy aid for lakes, calm rivers and coastal paddling."
+    },
+    {
+      "slug": "travel-stroller-pram",
+      "name": "Lightweight Travel Stroller",
+      "categorySlug": "outdoor-baby-strollers",
+      "brand": "GrabOnRent",
+      "priceUsd": 7,
+      "stock": 32,
+      "shortDescription": "Compact one-hand-fold travel stroller, sanitised before every hire, ideal for holidays and visiting families."
+    },
+    {
+      "slug": "convertible-baby-car-seat",
+      "name": "Convertible Baby Car Seat",
+      "categorySlug": "outdoor-baby-carseats",
+      "brand": "GrabOnRent",
+      "priceUsd": 8,
+      "compareUsd": 12,
+      "stock": 24,
+      "shortDescription": "Group 0+/1 rear- and forward-facing convertible car seat, deep-cleaned and safety-checked before each rental."
+    }
+  ]
+}

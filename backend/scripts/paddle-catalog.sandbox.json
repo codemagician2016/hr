@@ -1,0 +1,65 @@
+{
+  "environment": "sandbox",
+  "tiers": {
+    "free": {
+      "productId": "pro_01kt47pcxa1kmz2pmxdtqycmqb",
+      "monthly": "pri_01kt47pd9bry507ss2hxm1vcfx",
+      "annual": "pri_01kt47pdhh02kebfqce7bvytmc"
+    },
+    "starter": {
+      "productId": "pro_01kt47pdtybfyyt1gggkjt43by",
+      "monthly": "pri_01kt47pe56az3yat0j4qhv2e36",
+      "annual": "pri_01kt47ped5qdzmcrgx23ndngde"
+    },
+    "professional": {
+      "productId": "pro_01kt47pesvkp4phgq59brgnbb1",
+      "monthly": "pri_01kt47pf1g4hd33g68004rsnsc",
+      "annual": "pri_01kt47pf9jxx6dkeccjf623104"
+    },
+    "business": {
+      "productId": "pro_01kt47pfjqtspdz0g152sdwkp9",
+      "monthly": "pri_01kt47pft7qx757wwg9q3w27fq",
+      "annual": "pri_01kt47pg6512ze1zdyj8c1x7qb"
+    },
+    "ecom-free": {
+      "productId": "pro_01kt47pghkqahp418m8dkqtd58",
+      "monthly": "pri_01kt47pgsh16hz44ec2bybx69w",
+      "annual": "pri_01kt47ph1rm1db3hn19h7rhvjc"
+    },
+    "ecom-starter": {
+      "productId": "pro_01kt47phbcd8ff8npxpsmzt7n6",
+      "monthly": "pri_01kt47phn6weev7gybvvwws8n8",
+      "annual": "pri_01kt47phx2dwja59bawhk4ev3t"
+    },
+    "ecom-professional": {
+      "productId": "pro_01kt47pja1namms3cg2a8x43sb",
+      "monthly": "pri_01kt47pjn68xv2dxemgjkaaaq5",
+      "annual": "pri_01kt47pjyq6akyfftht7hm3qj5"
+    },
+    "ecom-business": {
+      "productId": "pro_01kt47pk9pkygh5mw6580a4vwx",
+      "monthly": "pri_01kt47pkh26s87j1r86zvgera5",
+      "annual": "pri_01kt47pksmjmhr5agj5jj1jxzn"
+    },
+    "static-free": {
+      "productId": "pro_01kt47pm6mkyas8nd242z7pz9w",
+      "monthly": "pri_01kt47pmeqtn6vk8wm8kxfpz11",
+      "annual": "pri_01kt47pmrmtazqtm2ntmzhzr5n"
+    },
+    "static-starter": {
+      "productId": "pro_01kt47pn38v6f2kfv069ggt6em",
+      "monthly": "pri_01kt47pnbmh611da9xew0m27w3",
+      "annual": "pri_01kt47pnmv9mks02pm16pr7em6"
+    },
+    "static-professional": {
+      "productId": "pro_01kt47pp011hphxmtkcpe8kctw",
+      "monthly": "pri_01kt47pp889pf488s7q9sjdfar",
+      "annual": "pri_01kt47pphtdkyhxtxv4jkpnf4y"
+    },
+    "static-business": {
+      "productId": "pro_01kt47ppwraxw7wgap59hne26v",
+      "monthly": "pri_01kt47pq4agjsqmf15trp79fe4",
+      "annual": "pri_01kt47pqejb9vx759awvfkx5r2"
+    }
+  }
+}

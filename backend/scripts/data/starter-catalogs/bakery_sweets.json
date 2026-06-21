@@ -1,0 +1,445 @@
+{
+  "theme": "bakery_sweets",
+  "categories": [
+    {
+      "slug": "cakes",
+      "name": "Cakes",
+      "children": [
+        {
+          "slug": "cakes-celebration",
+          "name": "Celebration Cakes",
+          "children": [
+            {
+              "slug": "cakes-celebration-birthday",
+              "name": "Birthday Cakes"
+            },
+            {
+              "slug": "cakes-celebration-photo",
+              "name": "Photo Cakes"
+            },
+            {
+              "slug": "cakes-celebration-tiered",
+              "name": "Tiered & Wedding Cakes"
+            }
+          ]
+        },
+        {
+          "slug": "cakes-everyday",
+          "name": "Everyday & Tea Cakes",
+          "children": [
+            {
+              "slug": "cakes-everyday-chocolate",
+              "name": "Chocolate Cakes"
+            },
+            {
+              "slug": "cakes-everyday-fruit",
+              "name": "Fresh Fruit Cakes"
+            },
+            {
+              "slug": "cakes-everyday-classic",
+              "name": "Classic Sponge Cakes"
+            }
+          ]
+        },
+        {
+          "slug": "cakes-dietary",
+          "name": "Eggless & Dietary",
+          "children": [
+            {
+              "slug": "cakes-dietary-eggless",
+              "name": "Eggless Cakes"
+            },
+            {
+              "slug": "cakes-dietary-vegan",
+              "name": "Vegan Cakes"
+            },
+            {
+              "slug": "cakes-dietary-sugarfree",
+              "name": "Sugar-Free Cakes"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "pastries-desserts",
+      "name": "Pastries & Desserts",
+      "children": [
+        {
+          "slug": "pastries-desserts-pastries",
+          "name": "Pastries",
+          "children": [
+            {
+              "slug": "pastries-desserts-pastries-croissants",
+              "name": "Croissants"
+            },
+            {
+              "slug": "pastries-desserts-pastries-eclairs",
+              "name": "Eclairs"
+            },
+            {
+              "slug": "pastries-desserts-pastries-danishes",
+              "name": "Danishes & Puffs"
+            }
+          ]
+        },
+        {
+          "slug": "pastries-desserts-plated",
+          "name": "Plated Desserts",
+          "children": [
+            {
+              "slug": "pastries-desserts-plated-cheesecake",
+              "name": "Cheesecakes"
+            },
+            {
+              "slug": "pastries-desserts-plated-tiramisu",
+              "name": "Tiramisu & Trifles"
+            },
+            {
+              "slug": "pastries-desserts-plated-brownies",
+              "name": "Brownies & Blondies"
+            }
+          ]
+        },
+        {
+          "slug": "pastries-desserts-cupcakes",
+          "name": "Cupcakes & Macarons",
+          "children": [
+            {
+              "slug": "pastries-desserts-cupcakes-cupcakes",
+              "name": "Cupcakes"
+            },
+            {
+              "slug": "pastries-desserts-cupcakes-macarons",
+              "name": "Macarons"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "indian-sweets",
+      "name": "Indian Sweets (Mithai)",
+      "children": [
+        {
+          "slug": "indian-sweets-milk",
+          "name": "Milk-Based Sweets",
+          "children": [
+            {
+              "slug": "indian-sweets-milk-bengali",
+              "name": "Bengali Sweets"
+            },
+            {
+              "slug": "indian-sweets-milk-pedaburfi",
+              "name": "Peda & Burfi"
+            },
+            {
+              "slug": "indian-sweets-milk-gulabjamun",
+              "name": "Gulab Jamun & Rasgulla"
+            }
+          ]
+        },
+        {
+          "slug": "indian-sweets-dryfruit",
+          "name": "Dry Fruit Sweets",
+          "children": [
+            {
+              "slug": "indian-sweets-dryfruit-kajukatli",
+              "name": "Kaju Katli"
+            },
+            {
+              "slug": "indian-sweets-dryfruit-anjeer",
+              "name": "Anjeer & Date Rolls"
+            }
+          ]
+        },
+        {
+          "slug": "indian-sweets-festive",
+          "name": "Ladoo & Festive",
+          "children": [
+            {
+              "slug": "indian-sweets-festive-ladoo",
+              "name": "Ladoo"
+            },
+            {
+              "slug": "indian-sweets-festive-soanpapdi",
+              "name": "Soan Papdi & Halwa"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "breads-bakes",
+      "name": "Breads & Bakes",
+      "children": [
+        {
+          "slug": "breads-bakes-artisan",
+          "name": "Artisan Loaves",
+          "children": [
+            {
+              "slug": "breads-bakes-artisan-sourdough",
+              "name": "Sourdough"
+            },
+            {
+              "slug": "breads-bakes-artisan-multigrain",
+              "name": "Multigrain & Whole Wheat"
+            },
+            {
+              "slug": "breads-bakes-artisan-focaccia",
+              "name": "Focaccia & Ciabatta"
+            }
+          ]
+        },
+        {
+          "slug": "breads-bakes-savoury",
+          "name": "Savoury Bakes",
+          "children": [
+            {
+              "slug": "breads-bakes-savoury-quiche",
+              "name": "Quiches & Tarts"
+            },
+            {
+              "slug": "breads-bakes-savoury-puffs",
+              "name": "Veg & Paneer Puffs"
+            }
+          ]
+        },
+        {
+          "slug": "breads-bakes-cookies",
+          "name": "Cookies & Rusks",
+          "children": [
+            {
+              "slug": "breads-bakes-cookies-chocchip",
+              "name": "Choc-Chip Cookies"
+            },
+            {
+              "slug": "breads-bakes-cookies-shortbread",
+              "name": "Shortbread & Biscotti"
+            },
+            {
+              "slug": "breads-bakes-cookies-rusk",
+              "name": "Rusks & Khari"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "chocolates-gifting",
+      "name": "Chocolates & Gifting",
+      "children": [
+        {
+          "slug": "chocolates-gifting-chocolates",
+          "name": "Chocolates",
+          "children": [
+            {
+              "slug": "chocolates-gifting-chocolates-truffles",
+              "name": "Truffles & Pralines"
+            },
+            {
+              "slug": "chocolates-gifting-chocolates-bars",
+              "name": "Bean-to-Bar"
+            },
+            {
+              "slug": "chocolates-gifting-chocolates-dragees",
+              "name": "Dragees & Bonbons"
+            }
+          ]
+        },
+        {
+          "slug": "chocolates-gifting-hampers",
+          "name": "Gift Hampers",
+          "children": [
+            {
+              "slug": "chocolates-gifting-hampers-festive",
+              "name": "Festive Hampers"
+            },
+            {
+              "slug": "chocolates-gifting-hampers-corporate",
+              "name": "Corporate Gifting"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "brandsByCountry": {
+    "IN": [
+      "Theobroma",
+      "Monginis",
+      "Mio Amore",
+      "Karachi Bakery",
+      "Haldiram's",
+      "Bikanervala",
+      "K. C. Das",
+      "The Bombay Sweet Shop",
+      "Smoor",
+      "Mishti"
+    ],
+    "default": [
+      "Sugar & Crumb",
+      "Maison Doré",
+      "The Flour Mill",
+      "Cocoa & Co.",
+      "Hearth & Honey",
+      "Patisserie Lune",
+      "Wildleaven Bakehouse"
+    ]
+  },
+  "products": [
+    {
+      "slug": "classic-chocolate-truffle-cake",
+      "name": "Classic Chocolate Truffle Cake",
+      "categorySlug": "cakes-everyday-chocolate",
+      "brand": "Theobroma",
+      "priceUsd": 18.5,
+      "compareUsd": 22,
+      "stock": 40,
+      "shortDescription": "Layers of moist chocolate sponge wrapped in silky dark-chocolate truffle ganache."
+    },
+    {
+      "slug": "fresh-fruit-gateau",
+      "name": "Fresh Fruit Gateau",
+      "categorySlug": "cakes-everyday-fruit",
+      "brand": "Monginis",
+      "priceUsd": 16,
+      "stock": 35,
+      "shortDescription": "Light vanilla sponge layered with whipped cream and seasonal glazed fresh fruit."
+    },
+    {
+      "slug": "red-velvet-photo-cake",
+      "name": "Red Velvet Photo Cake",
+      "categorySlug": "cakes-celebration-photo",
+      "brand": "Monginis",
+      "priceUsd": 24,
+      "compareUsd": 28,
+      "stock": 22,
+      "shortDescription": "Edible-print photo topper over a classic red velvet cake with cream-cheese frosting."
+    },
+    {
+      "slug": "two-tier-fondant-birthday-cake",
+      "name": "Two-Tier Fondant Birthday Cake",
+      "categorySlug": "cakes-celebration-birthday",
+      "brand": "Sugar & Crumb",
+      "priceUsd": 45,
+      "stock": 12,
+      "shortDescription": "Custom hand-finished fondant cake in two tiers, made to order for any celebration."
+    },
+    {
+      "slug": "eggless-blueberry-cake",
+      "name": "Eggless Blueberry Cream Cake",
+      "categorySlug": "cakes-dietary-eggless",
+      "brand": "Mio Amore",
+      "priceUsd": 17.5,
+      "compareUsd": 20,
+      "stock": 28,
+      "shortDescription": "Soft eggless sponge folded with blueberry compote and lightly sweetened cream."
+    },
+    {
+      "slug": "butter-croissant-4-pack",
+      "name": "All-Butter Croissant (4 Pack)",
+      "categorySlug": "pastries-desserts-pastries-croissants",
+      "brand": "Maison Doré",
+      "priceUsd": 7.5,
+      "stock": 60,
+      "shortDescription": "Flaky, golden laminated croissants baked fresh each morning with French butter."
+    },
+    {
+      "slug": "chocolate-eclair-6-pack",
+      "name": "Chocolate Eclair (6 Pack)",
+      "categorySlug": "pastries-desserts-pastries-eclairs",
+      "brand": "Patisserie Lune",
+      "priceUsd": 9,
+      "compareUsd": 11,
+      "stock": 45,
+      "shortDescription": "Choux pastry filled with vanilla crème pâtissière and finished in dark chocolate."
+    },
+    {
+      "slug": "new-york-cheesecake-slice",
+      "name": "New York Baked Cheesecake Slice",
+      "categorySlug": "pastries-desserts-plated-cheesecake",
+      "brand": "Theobroma",
+      "priceUsd": 6.5,
+      "stock": 50,
+      "shortDescription": "Dense, creamy baked cheesecake on a buttery digestive base, served by the slice."
+    },
+    {
+      "slug": "fudgy-brownie-box-6pc",
+      "name": "Fudgy Walnut Brownie Box (6 Pc)",
+      "categorySlug": "pastries-desserts-plated-brownies",
+      "brand": "Smoor",
+      "priceUsd": 12,
+      "compareUsd": 15,
+      "stock": 38,
+      "shortDescription": "Rich gooey-centred brownies studded with toasted walnuts and dark chocolate chunks."
+    },
+    {
+      "slug": "assorted-french-macarons-12",
+      "name": "Assorted French Macarons (Box of 12)",
+      "categorySlug": "pastries-desserts-cupcakes-macarons",
+      "brand": "Patisserie Lune",
+      "priceUsd": 16,
+      "stock": 30,
+      "shortDescription": "Delicate almond-meringue shells in six flavours with smooth ganache fillings."
+    },
+    {
+      "slug": "kaju-katli-500g",
+      "name": "Kaju Katli (500 g)",
+      "categorySlug": "indian-sweets-dryfruit-kajukatli",
+      "brand": "Haldiram's",
+      "priceUsd": 13,
+      "compareUsd": 15,
+      "stock": 55,
+      "shortDescription": "Thin diamond-cut cashew fudge finished with edible silver leaf, an evergreen favourite."
+    },
+    {
+      "slug": "assorted-bengali-sweets-box",
+      "name": "Assorted Bengali Sweets Box",
+      "categorySlug": "indian-sweets-milk-bengali",
+      "brand": "K. C. Das",
+      "priceUsd": 11,
+      "stock": 42,
+      "shortDescription": "A classic selection of rasgulla, sandesh and cham cham in soft chhena."
+    },
+    {
+      "slug": "motichoor-ladoo-1kg",
+      "name": "Motichoor Ladoo (1 kg)",
+      "categorySlug": "indian-sweets-festive-ladoo",
+      "brand": "Bikanervala",
+      "priceUsd": 9.5,
+      "compareUsd": 12,
+      "stock": 48,
+      "shortDescription": "Tiny gram-flour pearls bound with ghee and cardamom into melt-in-the-mouth ladoos."
+    },
+    {
+      "slug": "artisan-sourdough-loaf",
+      "name": "Artisan Sourdough Loaf",
+      "categorySlug": "breads-bakes-artisan-sourdough",
+      "brand": "Wildleaven Bakehouse",
+      "priceUsd": 6,
+      "stock": 30,
+      "shortDescription": "Naturally leavened over 24 hours for a crackling crust and open, tangy crumb."
+    },
+    {
+      "slug": "belgian-chocchip-cookies-250g",
+      "name": "Belgian Choc-Chip Cookies (250 g)",
+      "categorySlug": "breads-bakes-cookies-chocchip",
+      "brand": "The Flour Mill",
+      "priceUsd": 7,
+      "compareUsd": 8.5,
+      "stock": 65,
+      "shortDescription": "Chewy-edged cookies loaded with melting Belgian dark chocolate chunks."
+    },
+    {
+      "slug": "festive-chocolate-gift-hamper",
+      "name": "Festive Chocolate Gift Hamper",
+      "categorySlug": "chocolates-gifting-hampers-festive",
+      "brand": "Cocoa & Co.",
+      "priceUsd": 34,
+      "compareUsd": 42,
+      "stock": 18,
+      "shortDescription": "A curated box of artisan truffles, pralines and bonbons in a keepsake gift case."
+    }
+  ]
+}

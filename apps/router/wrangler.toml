@@ -1,0 +1,44 @@
+# Cloudflare Worker — SitePresso subdomain router
+name = "sitepresso-router"
+main = "cloudflare-worker.js"
+compatibility_date = "2024-01-01"
+account_id = "a1a83e9621188bda80ef2203a0368f6a"
+
+# `*.domain/*` matches subdomains (app., ecom., api., <tenant>.) but NOT the
+# bare apex. Without the apex route the Worker never runs for aapkatech.com /
+# sitepresso.com, so Cloudflare falls back to the (dead) apex origin → 522 and
+# the marketing landing page is unreachable on the root domain. The apex route
+# below binds the Worker to the bare apex too; the Worker already serves the
+# platform landing for a no-subdomain host (see cloudflare-worker.js).
+[[routes]]
+pattern = "aapkatech.com/*"
+zone_name = "aapkatech.com"
+
+[[routes]]
+pattern = "*.aapkatech.com/*"
+zone_name = "aapkatech.com"
+
+# Cloudflare for SaaS custom hostnames keep the customer's Host header
+# (for example www.customer.com). `*/*` lets those verified custom hosts
+# enter the same router, where the Worker resolves them through the backend.
+[[routes]]
+pattern = "*/*"
+zone_name = "aapkatech.com"
+
+# Production zone. The Worker is host-aware (see cloudflare-worker.js):
+# *.sitepresso.com → api.sitepresso.com + sitepresso-prod-* Vercel projects.
+[[routes]]
+pattern = "sitepresso.com/*"
+zone_name = "sitepresso.com"
+
+[[routes]]
+pattern = "*.sitepresso.com/*"
+zone_name = "sitepresso.com"
+
+[[routes]]
+pattern = "*/*"
+zone_name = "sitepresso.com"
+
+[[kv_namespaces]]
+binding = "ROUTER_CACHE"
+id = "c02197b9011d485e8569986ce91f7bf9"

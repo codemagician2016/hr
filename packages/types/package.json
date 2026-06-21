@@ -1,0 +1,8 @@
+{
+  "name": "@sitepresso/types",
+  "version": "0.0.1",
+  "private": true,
+  "main": "index.js",
+  "types": "index.d.ts",
+  "description": "Shared constants and theme/admin contract types across Sitepresso apps."
+}

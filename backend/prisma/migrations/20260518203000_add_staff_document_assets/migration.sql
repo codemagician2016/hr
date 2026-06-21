@@ -1,0 +1,2 @@
+ALTER TABLE "User" ADD COLUMN "signatureUrl" TEXT;
+ALTER TABLE "User" ADD COLUMN "stampUrl" TEXT;

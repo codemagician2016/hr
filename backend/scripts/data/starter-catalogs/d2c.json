@@ -1,0 +1,409 @@
+{
+  "theme": "d2c",
+  "categories": [
+    {
+      "slug": "daily-wellness",
+      "name": "Daily Wellness",
+      "children": [
+        {
+          "slug": "wellness-greens-superfoods",
+          "name": "Greens & Superfoods",
+          "children": [
+            {
+              "slug": "wellness-greens-powders",
+              "name": "Greens Powders"
+            },
+            {
+              "slug": "wellness-greens-reds-berries",
+              "name": "Reds & Berry Blends"
+            },
+            {
+              "slug": "wellness-greens-sachets",
+              "name": "On-the-Go Sachets"
+            }
+          ]
+        },
+        {
+          "slug": "wellness-gut-health",
+          "name": "Gut Health",
+          "children": [
+            {
+              "slug": "wellness-gut-probiotics",
+              "name": "Probiotics"
+            },
+            {
+              "slug": "wellness-gut-prebiotic-fibre",
+              "name": "Prebiotic Fibre"
+            },
+            {
+              "slug": "wellness-gut-digestive-enzymes",
+              "name": "Digestive Enzymes"
+            }
+          ]
+        },
+        {
+          "slug": "wellness-vitamins-minerals",
+          "name": "Vitamins & Minerals",
+          "children": [
+            {
+              "slug": "wellness-vitamins-multivitamin",
+              "name": "Daily Multivitamin"
+            },
+            {
+              "slug": "wellness-vitamins-vitamin-d3-k2",
+              "name": "Vitamin D3 + K2"
+            },
+            {
+              "slug": "wellness-vitamins-magnesium",
+              "name": "Magnesium"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "performance",
+      "name": "Performance",
+      "children": [
+        {
+          "slug": "performance-protein",
+          "name": "Protein",
+          "children": [
+            {
+              "slug": "performance-protein-plant",
+              "name": "Plant Protein"
+            },
+            {
+              "slug": "performance-protein-whey",
+              "name": "Whey Protein"
+            },
+            {
+              "slug": "performance-protein-bars",
+              "name": "Protein Bars"
+            }
+          ]
+        },
+        {
+          "slug": "performance-energy-focus",
+          "name": "Energy & Focus",
+          "children": [
+            {
+              "slug": "performance-energy-pre-workout",
+              "name": "Pre-Workout"
+            },
+            {
+              "slug": "performance-energy-nootropics",
+              "name": "Nootropics"
+            },
+            {
+              "slug": "performance-energy-electrolytes",
+              "name": "Electrolytes"
+            }
+          ]
+        },
+        {
+          "slug": "performance-recovery",
+          "name": "Recovery",
+          "children": [
+            {
+              "slug": "performance-recovery-creatine",
+              "name": "Creatine"
+            },
+            {
+              "slug": "performance-recovery-collagen",
+              "name": "Collagen"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "calm-sleep",
+      "name": "Calm & Sleep",
+      "children": [
+        {
+          "slug": "calm-sleep-support",
+          "name": "Sleep Support",
+          "children": [
+            {
+              "slug": "calm-sleep-melatonin",
+              "name": "Melatonin"
+            },
+            {
+              "slug": "calm-sleep-magnesium-glycinate",
+              "name": "Magnesium Glycinate"
+            },
+            {
+              "slug": "calm-sleep-herbal-tea",
+              "name": "Bedtime Herbal Tea"
+            }
+          ]
+        },
+        {
+          "slug": "calm-stress-mood",
+          "name": "Stress & Mood",
+          "children": [
+            {
+              "slug": "calm-stress-ashwagandha",
+              "name": "Ashwagandha"
+            },
+            {
+              "slug": "calm-stress-adaptogen-blends",
+              "name": "Adaptogen Blends"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "beauty-from-within",
+      "name": "Beauty From Within",
+      "children": [
+        {
+          "slug": "beauty-skin",
+          "name": "Skin",
+          "children": [
+            {
+              "slug": "beauty-skin-marine-collagen",
+              "name": "Marine Collagen"
+            },
+            {
+              "slug": "beauty-skin-hyaluronic-acid",
+              "name": "Hyaluronic Acid"
+            },
+            {
+              "slug": "beauty-skin-biotin",
+              "name": "Biotin"
+            }
+          ]
+        },
+        {
+          "slug": "beauty-hair-nails",
+          "name": "Hair & Nails",
+          "children": [
+            {
+              "slug": "beauty-hair-gummies",
+              "name": "Hair Gummies"
+            },
+            {
+              "slug": "beauty-hair-keratin",
+              "name": "Keratin Support"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "rituals-accessories",
+      "name": "Rituals & Accessories",
+      "children": [
+        {
+          "slug": "rituals-tools",
+          "name": "Mixing & Tools",
+          "children": [
+            {
+              "slug": "rituals-tools-shaker-bottles",
+              "name": "Shaker Bottles"
+            },
+            {
+              "slug": "rituals-tools-scoops-funnels",
+              "name": "Scoops & Funnels"
+            }
+          ]
+        },
+        {
+          "slug": "rituals-bundles-gifting",
+          "name": "Bundles & Gifting",
+          "children": [
+            {
+              "slug": "rituals-bundles-starter-kits",
+              "name": "Starter Kits"
+            },
+            {
+              "slug": "rituals-bundles-gift-sets",
+              "name": "Gift Sets"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "brandsByCountry": {
+    "IN": [
+      "Lumo",
+      "Kapiva",
+      "OZiva",
+      "The Whole Truth",
+      "Wellbeing Nutrition",
+      "MyProtein",
+      "HealthKart",
+      "Plix",
+      "Setu",
+      "Man Matters"
+    ],
+    "default": [
+      "Lumo",
+      "Northwild",
+      "Daylit",
+      "Rootform",
+      "Pure & Sound",
+      "Verdé Labs",
+      "Stillwater Nutrition"
+    ]
+  },
+  "products": [
+    {
+      "slug": "daily-greens-superfood-blend",
+      "name": "Daily Greens Superfood Blend",
+      "categorySlug": "wellness-greens-powders",
+      "brand": "Lumo",
+      "priceUsd": 39,
+      "compareUsd": 49,
+      "stock": 84,
+      "shortDescription": "55 greens, adaptogens and probiotics in one daily scoop that mixes clean in cold water for gut, energy and immunity support."
+    },
+    {
+      "slug": "daily-greens-travel-sachets-14-pack",
+      "name": "Daily Greens Travel Sachets (14-Pack)",
+      "categorySlug": "wellness-greens-sachets",
+      "brand": "Lumo",
+      "priceUsd": 22,
+      "stock": 110,
+      "shortDescription": "Single-serve sachets of our hero greens blend, so your daily ritual travels with you anywhere."
+    },
+    {
+      "slug": "reds-berry-antioxidant-blend",
+      "name": "Reds & Berry Antioxidant Blend",
+      "categorySlug": "wellness-greens-reds-berries",
+      "brand": "Northwild",
+      "priceUsd": 36,
+      "compareUsd": 44,
+      "stock": 57,
+      "shortDescription": "A tart pomegranate-berry powder packed with polyphenols and beetroot to support circulation and everyday recovery."
+    },
+    {
+      "slug": "everyday-probiotic-30-billion-cfu",
+      "name": "Everyday Probiotic 30 Billion CFU",
+      "categorySlug": "wellness-gut-probiotics",
+      "brand": "Setu",
+      "priceUsd": 29,
+      "stock": 72,
+      "shortDescription": "A shelf-stable 12-strain probiotic with delayed-release capsules to help keep digestion calm and balanced."
+    },
+    {
+      "slug": "prebiotic-fibre-daily-scoop",
+      "name": "Prebiotic Fibre Daily Scoop",
+      "categorySlug": "wellness-gut-prebiotic-fibre",
+      "brand": "Daylit",
+      "priceUsd": 27,
+      "compareUsd": 34,
+      "stock": 63,
+      "shortDescription": "Unflavoured organic acacia and inulin fibre that dissolves invisibly into any drink to feed your gut bacteria."
+    },
+    {
+      "slug": "core-daily-multivitamin",
+      "name": "Core Daily Multivitamin",
+      "categorySlug": "wellness-vitamins-multivitamin",
+      "brand": "Wellbeing Nutrition",
+      "priceUsd": 32,
+      "stock": 95,
+      "shortDescription": "A whole-food multivitamin with 22 essential nutrients in slow-release tablets for everyday foundational health."
+    },
+    {
+      "slug": "sunhold-vitamin-d3-k2-drops",
+      "name": "Sunhold Vitamin D3 + K2 Drops",
+      "categorySlug": "wellness-vitamins-vitamin-d3-k2",
+      "brand": "Rootform",
+      "priceUsd": 19,
+      "compareUsd": 25,
+      "stock": 88,
+      "shortDescription": "Five drops a day deliver 2000 IU of D3 with K2 in MCT oil to support bones, mood and immune resilience."
+    },
+    {
+      "slug": "the-everyday-plant-protein-vanilla",
+      "name": "The Everyday Plant Protein — Vanilla",
+      "categorySlug": "performance-protein-plant",
+      "brand": "The Whole Truth",
+      "priceUsd": 42,
+      "compareUsd": 52,
+      "stock": 49,
+      "shortDescription": "Smooth pea-and-brown-rice protein with 24g per serving and no added sugar, blended to actually taste like vanilla."
+    },
+    {
+      "slug": "grass-fed-whey-isolate-chocolate",
+      "name": "Grass-Fed Whey Isolate — Chocolate",
+      "categorySlug": "performance-protein-whey",
+      "brand": "MyProtein",
+      "priceUsd": 46,
+      "stock": 38,
+      "shortDescription": "A clean 25g grass-fed whey isolate that stays light and mixes effortlessly for post-workout recovery."
+    },
+    {
+      "slug": "charge-clean-pre-workout-citrus",
+      "name": "Charge Clean Pre-Workout — Citrus",
+      "categorySlug": "performance-energy-pre-workout",
+      "brand": "HealthKart",
+      "priceUsd": 34,
+      "compareUsd": 39,
+      "stock": 41,
+      "shortDescription": "Naturally flavoured pre-workout with 150mg caffeine, L-citrulline and beta-alanine for focus without the crash."
+    },
+    {
+      "slug": "rapid-hydration-electrolyte-mix",
+      "name": "Rapid Hydration Electrolyte Mix",
+      "categorySlug": "performance-energy-electrolytes",
+      "brand": "Stillwater Nutrition",
+      "priceUsd": 24,
+      "stock": 102,
+      "shortDescription": "A sugar-free 4:1 sodium-to-potassium electrolyte stick that keeps you hydrated through training and long days."
+    },
+    {
+      "slug": "pure-creatine-monohydrate-micronized",
+      "name": "Pure Creatine Monohydrate (Micronized)",
+      "categorySlug": "performance-recovery-creatine",
+      "brand": "MyProtein",
+      "priceUsd": 28,
+      "compareUsd": 35,
+      "stock": 67,
+      "shortDescription": "Unflavoured micronized creatine, third-party tested at 5g per scoop to support strength and recovery."
+    },
+    {
+      "slug": "deep-sleep-magnesium-glycinate",
+      "name": "Deep Sleep Magnesium Glycinate",
+      "categorySlug": "calm-sleep-magnesium-glycinate",
+      "brand": "Plix",
+      "priceUsd": 26,
+      "stock": 79,
+      "shortDescription": "Highly absorbable magnesium glycinate that helps your body unwind for deeper, less restless sleep."
+    },
+    {
+      "slug": "calm-ksm-66-ashwagandha",
+      "name": "Calm KSM-66 Ashwagandha",
+      "categorySlug": "calm-stress-ashwagandha",
+      "brand": "Kapiva",
+      "priceUsd": 23,
+      "compareUsd": 29,
+      "stock": 86,
+      "shortDescription": "Clinically studied KSM-66 ashwagandha root extract to help manage daily stress and support steady mood."
+    },
+    {
+      "slug": "glow-marine-collagen-peptides",
+      "name": "Glow Marine Collagen Peptides",
+      "categorySlug": "beauty-skin-marine-collagen",
+      "brand": "OZiva",
+      "priceUsd": 38,
+      "compareUsd": 45,
+      "stock": 54,
+      "shortDescription": "Unflavoured hydrolysed marine collagen with vitamin C and hyaluronic acid to support skin elasticity and hydration."
+    },
+    {
+      "slug": "lumo-stainless-shaker-bottle-600ml",
+      "name": "Lumo Stainless Shaker Bottle 600ml",
+      "categorySlug": "rituals-tools-shaker-bottles",
+      "brand": "Lumo",
+      "priceUsd": 18,
+      "stock": 120,
+      "shortDescription": "A leak-proof insulated stainless shaker with a stainless mixing ball that keeps your blend cold and clump-free."
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "@sitepresso/router",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js"
+  },
+  "dependencies": {
+    "http-proxy": "^1.18.1",
+    "ioredis": "^5.3.2"
+  }
+}

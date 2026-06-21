@@ -1,0 +1,420 @@
+{
+  "theme": "footwear",
+  "categories": [
+    {
+      "slug": "mens",
+      "name": "Men",
+      "children": [
+        {
+          "slug": "mens-sneakers",
+          "name": "Sneakers",
+          "children": [
+            {
+              "slug": "mens-sneakers-casual",
+              "name": "Casual Sneakers"
+            },
+            {
+              "slug": "mens-sneakers-high-top",
+              "name": "High-Tops"
+            },
+            {
+              "slug": "mens-sneakers-canvas",
+              "name": "Canvas Sneakers"
+            }
+          ]
+        },
+        {
+          "slug": "mens-formal",
+          "name": "Formal Shoes",
+          "children": [
+            {
+              "slug": "mens-formal-oxford",
+              "name": "Oxfords"
+            },
+            {
+              "slug": "mens-formal-derby",
+              "name": "Derbies"
+            },
+            {
+              "slug": "mens-formal-loafers",
+              "name": "Loafers"
+            }
+          ]
+        },
+        {
+          "slug": "mens-sandals",
+          "name": "Sandals & Floaters",
+          "children": [
+            {
+              "slug": "mens-sandals-floaters",
+              "name": "Floaters"
+            },
+            {
+              "slug": "mens-sandals-slides",
+              "name": "Slides"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "womens",
+      "name": "Women",
+      "children": [
+        {
+          "slug": "womens-heels",
+          "name": "Heels",
+          "children": [
+            {
+              "slug": "womens-heels-block",
+              "name": "Block Heels"
+            },
+            {
+              "slug": "womens-heels-stiletto",
+              "name": "Stilettos"
+            },
+            {
+              "slug": "womens-heels-wedges",
+              "name": "Wedges"
+            }
+          ]
+        },
+        {
+          "slug": "womens-flats",
+          "name": "Flats & Ballerinas",
+          "children": [
+            {
+              "slug": "womens-flats-ballerina",
+              "name": "Ballerinas"
+            },
+            {
+              "slug": "womens-flats-juttis",
+              "name": "Juttis & Mojaris"
+            },
+            {
+              "slug": "womens-flats-mules",
+              "name": "Mules"
+            }
+          ]
+        },
+        {
+          "slug": "womens-sneakers",
+          "name": "Sneakers",
+          "children": [
+            {
+              "slug": "womens-sneakers-chunky",
+              "name": "Chunky Sneakers"
+            },
+            {
+              "slug": "womens-sneakers-slip-on",
+              "name": "Slip-Ons"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "sports",
+      "name": "Sports & Active",
+      "children": [
+        {
+          "slug": "sports-running",
+          "name": "Running",
+          "children": [
+            {
+              "slug": "sports-running-road",
+              "name": "Road Running"
+            },
+            {
+              "slug": "sports-running-trail",
+              "name": "Trail Running"
+            }
+          ]
+        },
+        {
+          "slug": "sports-training",
+          "name": "Training & Gym",
+          "children": [
+            {
+              "slug": "sports-training-gym",
+              "name": "Gym Trainers"
+            },
+            {
+              "slug": "sports-training-walking",
+              "name": "Walking Shoes"
+            }
+          ]
+        },
+        {
+          "slug": "sports-field",
+          "name": "Field Sports",
+          "children": [
+            {
+              "slug": "sports-field-football",
+              "name": "Football Studs"
+            },
+            {
+              "slug": "sports-field-cricket",
+              "name": "Cricket Spikes"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "kids",
+      "name": "Kids",
+      "children": [
+        {
+          "slug": "kids-boys",
+          "name": "Boys",
+          "children": [
+            {
+              "slug": "kids-boys-sneakers",
+              "name": "Boys Sneakers"
+            },
+            {
+              "slug": "kids-boys-school",
+              "name": "School Shoes"
+            }
+          ]
+        },
+        {
+          "slug": "kids-girls",
+          "name": "Girls",
+          "children": [
+            {
+              "slug": "kids-girls-ballerinas",
+              "name": "Girls Ballerinas"
+            },
+            {
+              "slug": "kids-girls-light-up",
+              "name": "Light-Up Shoes"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "boots",
+      "name": "Boots",
+      "children": [
+        {
+          "slug": "boots-casual",
+          "name": "Casual Boots",
+          "children": [
+            {
+              "slug": "boots-casual-chelsea",
+              "name": "Chelsea Boots"
+            },
+            {
+              "slug": "boots-casual-chukka",
+              "name": "Chukka Boots"
+            }
+          ]
+        },
+        {
+          "slug": "boots-outdoor",
+          "name": "Outdoor & Work",
+          "children": [
+            {
+              "slug": "boots-outdoor-hiking",
+              "name": "Hiking Boots"
+            },
+            {
+              "slug": "boots-outdoor-work",
+              "name": "Work Boots"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "brandsByCountry": {
+    "IN": [
+      "Bata",
+      "Woodland",
+      "Red Tape",
+      "Campus",
+      "Liberty",
+      "Sparx",
+      "Metro",
+      "Mochi",
+      "Relaxo",
+      "Khadim's"
+    ],
+    "default": [
+      "Stride & Co",
+      "Pace Athletics",
+      "Cobble Lane",
+      "Vellum Leather",
+      "Sole Theory",
+      "Trailhead",
+      "Marlowe"
+    ]
+  },
+  "products": [
+    {
+      "slug": "court-leather-casual-sneaker",
+      "name": "Court Leather Casual Sneaker",
+      "categorySlug": "mens-sneakers-casual",
+      "brand": "Red Tape",
+      "priceUsd": 54.99,
+      "compareUsd": 79.99,
+      "stock": 64,
+      "shortDescription": "A clean white leather court sneaker with cushioned insole for all-day everyday wear."
+    },
+    {
+      "slug": "city-canvas-low-top",
+      "name": "City Canvas Low-Top",
+      "categorySlug": "mens-sneakers-canvas",
+      "brand": "Campus",
+      "priceUsd": 27.99,
+      "stock": 90,
+      "shortDescription": "Breathable washed-canvas low-tops with a vulcanised rubber sole for laid-back days."
+    },
+    {
+      "slug": "heritage-cap-toe-oxford",
+      "name": "Heritage Cap-Toe Oxford",
+      "categorySlug": "mens-formal-oxford",
+      "brand": "Vellum Leather",
+      "priceUsd": 89.99,
+      "compareUsd": 129.99,
+      "stock": 38,
+      "shortDescription": "Polished full-grain leather oxfords with a sleek cap toe for office and occasions."
+    },
+    {
+      "slug": "weekend-penny-loafer",
+      "name": "Weekend Penny Loafer",
+      "categorySlug": "mens-formal-loafers",
+      "brand": "Metro",
+      "priceUsd": 64.99,
+      "stock": 47,
+      "shortDescription": "Slip-on milled-leather penny loafers that pair easily with chinos or trousers."
+    },
+    {
+      "slug": "riverbank-adjustable-floater",
+      "name": "Riverbank Adjustable Floater",
+      "categorySlug": "mens-sandals-floaters",
+      "brand": "Woodland",
+      "priceUsd": 44.99,
+      "compareUsd": 59.99,
+      "stock": 72,
+      "shortDescription": "Rugged adjustable-strap floaters with a grippy outsole for travel and trails."
+    },
+    {
+      "slug": "lola-block-heel-sandal",
+      "name": "Lola Block-Heel Sandal",
+      "categorySlug": "womens-heels-block",
+      "brand": "Mochi",
+      "priceUsd": 49.99,
+      "compareUsd": 74.99,
+      "stock": 55,
+      "shortDescription": "Comfortable 2.5-inch block heels with a padded footbed for evenings out."
+    },
+    {
+      "slug": "aria-pointed-ballerina",
+      "name": "Aria Pointed Ballerina",
+      "categorySlug": "womens-flats-ballerina",
+      "brand": "Bata",
+      "priceUsd": 32.99,
+      "stock": 83,
+      "shortDescription": "Soft pointed-toe ballerinas with a flexible sole for effortless daily comfort."
+    },
+    {
+      "slug": "phulkari-embroidered-jutti",
+      "name": "Phulkari Embroidered Jutti",
+      "categorySlug": "womens-flats-juttis",
+      "brand": "Cobble Lane",
+      "priceUsd": 39.99,
+      "compareUsd": 54.99,
+      "stock": 41,
+      "shortDescription": "Hand-embroidered juttis with a cushioned insole that dress up ethnic and fusion looks."
+    },
+    {
+      "slug": "luna-chunky-sneaker",
+      "name": "Luna Chunky Sneaker",
+      "categorySlug": "womens-sneakers-chunky",
+      "brand": "Sole Theory",
+      "priceUsd": 58.99,
+      "stock": 60,
+      "shortDescription": "Statement chunky-soled sneakers with a knit upper that add height and street-style edge."
+    },
+    {
+      "slug": "tempo-road-runner",
+      "name": "Tempo Road Runner",
+      "categorySlug": "sports-running-road",
+      "brand": "Pace Athletics",
+      "priceUsd": 74.99,
+      "compareUsd": 99.99,
+      "stock": 52,
+      "shortDescription": "Lightweight road runners with responsive foam cushioning for daily miles and race day."
+    },
+    {
+      "slug": "ridgeline-trail-shoe",
+      "name": "Ridgeline Trail Shoe",
+      "categorySlug": "sports-running-trail",
+      "brand": "Trailhead",
+      "priceUsd": 84.99,
+      "stock": 36,
+      "shortDescription": "Aggressive-lug trail runners with a rock plate and secure heel lock for technical terrain."
+    },
+    {
+      "slug": "core-gym-trainer",
+      "name": "Core Gym Trainer",
+      "categorySlug": "sports-training-gym",
+      "brand": "Sparx",
+      "priceUsd": 36.99,
+      "compareUsd": 49.99,
+      "stock": 88,
+      "shortDescription": "Stable, flat-soled gym trainers built for lifting, HIIT and studio sessions."
+    },
+    {
+      "slug": "striker-firm-ground-studs",
+      "name": "Striker Firm-Ground Studs",
+      "categorySlug": "sports-field-football",
+      "brand": "Campus",
+      "priceUsd": 42.99,
+      "stock": 44,
+      "shortDescription": "Firm-ground football studs with a textured strike zone for grip and ball control."
+    },
+    {
+      "slug": "dash-boys-velcro-sneaker",
+      "name": "Dash Boys Velcro Sneaker",
+      "categorySlug": "kids-boys-sneakers",
+      "brand": "Liberty",
+      "priceUsd": 24.99,
+      "compareUsd": 34.99,
+      "stock": 95,
+      "shortDescription": "Easy-on velcro sneakers with a flexible non-marking sole for school runs and play."
+    },
+    {
+      "slug": "twinkle-girls-light-up-shoe",
+      "name": "Twinkle Girls Light-Up Shoe",
+      "categorySlug": "kids-girls-light-up",
+      "brand": "Relaxo",
+      "priceUsd": 21.99,
+      "stock": 110,
+      "shortDescription": "Fun LED light-up shoes with cushioned soles that kids love for everyday wear."
+    },
+    {
+      "slug": "camden-suede-chelsea-boot",
+      "name": "Camden Suede Chelsea Boot",
+      "categorySlug": "boots-casual-chelsea",
+      "brand": "Marlowe",
+      "priceUsd": 94.99,
+      "compareUsd": 139.99,
+      "stock": 29,
+      "shortDescription": "Elastic-gusset suede Chelsea boots with a stacked heel for sharp smart-casual outfits."
+    },
+    {
+      "slug": "summit-waterproof-hiking-boot",
+      "name": "Summit Waterproof Hiking Boot",
+      "categorySlug": "boots-outdoor-hiking",
+      "brand": "Woodland",
+      "priceUsd": 109.99,
+      "stock": 33,
+      "shortDescription": "Waterproof leather hiking boots with ankle support and a deep-lug outsole for the outdoors."
+    }
+  ]
+}

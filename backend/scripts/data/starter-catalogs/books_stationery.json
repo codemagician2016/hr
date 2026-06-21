@@ -1,0 +1,383 @@
+{
+  "theme": "books_stationery",
+  "categories": [
+    {
+      "slug": "books",
+      "name": "Books",
+      "children": [
+        {
+          "slug": "books-fiction",
+          "name": "Fiction",
+          "children": [
+            {
+              "slug": "books-fiction-literary",
+              "name": "Literary Fiction"
+            },
+            {
+              "slug": "books-fiction-mystery-thriller",
+              "name": "Mystery & Thriller"
+            },
+            {
+              "slug": "books-fiction-sci-fi-fantasy",
+              "name": "Sci-Fi & Fantasy"
+            },
+            {
+              "slug": "books-fiction-romance",
+              "name": "Romance"
+            }
+          ]
+        },
+        {
+          "slug": "books-non-fiction",
+          "name": "Non-Fiction",
+          "children": [
+            {
+              "slug": "books-non-fiction-biography",
+              "name": "Biography & Memoir"
+            },
+            {
+              "slug": "books-non-fiction-self-help",
+              "name": "Self-Help & Wellness"
+            },
+            {
+              "slug": "books-non-fiction-business",
+              "name": "Business & Economics"
+            },
+            {
+              "slug": "books-non-fiction-history",
+              "name": "History & Politics"
+            }
+          ]
+        },
+        {
+          "slug": "books-children",
+          "name": "Children's Books",
+          "children": [
+            {
+              "slug": "books-children-picture",
+              "name": "Picture Books"
+            },
+            {
+              "slug": "books-children-early-readers",
+              "name": "Early Readers"
+            },
+            {
+              "slug": "books-children-young-adult",
+              "name": "Young Adult"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "notebooks-journals",
+      "name": "Notebooks & Journals",
+      "children": [
+        {
+          "slug": "notebooks-ruled",
+          "name": "Ruled & Lined",
+          "children": [
+            {
+              "slug": "notebooks-ruled-a5",
+              "name": "A5 Ruled Notebooks"
+            },
+            {
+              "slug": "notebooks-ruled-a4",
+              "name": "A4 Ruled Notebooks"
+            }
+          ]
+        },
+        {
+          "slug": "notebooks-special",
+          "name": "Dotted & Blank",
+          "children": [
+            {
+              "slug": "notebooks-special-dotted",
+              "name": "Dotted Bullet Journals"
+            },
+            {
+              "slug": "notebooks-special-sketch",
+              "name": "Sketchbooks"
+            }
+          ]
+        },
+        {
+          "slug": "notebooks-planners",
+          "name": "Planners & Diaries",
+          "children": [
+            {
+              "slug": "notebooks-planners-daily",
+              "name": "Daily Planners"
+            },
+            {
+              "slug": "notebooks-planners-academic",
+              "name": "Academic Diaries"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "writing",
+      "name": "Writing Instruments",
+      "children": [
+        {
+          "slug": "writing-pens",
+          "name": "Pens",
+          "children": [
+            {
+              "slug": "writing-pens-ballpoint",
+              "name": "Ballpoint Pens"
+            },
+            {
+              "slug": "writing-pens-gel",
+              "name": "Gel Pens"
+            },
+            {
+              "slug": "writing-pens-fountain",
+              "name": "Fountain Pens"
+            }
+          ]
+        },
+        {
+          "slug": "writing-pencils",
+          "name": "Pencils",
+          "children": [
+            {
+              "slug": "writing-pencils-graphite",
+              "name": "Graphite Pencils"
+            },
+            {
+              "slug": "writing-pencils-mechanical",
+              "name": "Mechanical Pencils"
+            }
+          ]
+        },
+        {
+          "slug": "writing-markers",
+          "name": "Markers & Highlighters",
+          "children": [
+            {
+              "slug": "writing-markers-highlighters",
+              "name": "Highlighters"
+            },
+            {
+              "slug": "writing-markers-fineliners",
+              "name": "Fineliners"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "art-supplies",
+      "name": "Art Supplies",
+      "children": [
+        {
+          "slug": "art-painting",
+          "name": "Painting",
+          "children": [
+            {
+              "slug": "art-painting-watercolour",
+              "name": "Watercolour Sets"
+            },
+            {
+              "slug": "art-painting-acrylic",
+              "name": "Acrylic Paints"
+            }
+          ]
+        },
+        {
+          "slug": "art-drawing",
+          "name": "Drawing & Colouring",
+          "children": [
+            {
+              "slug": "art-drawing-coloured-pencils",
+              "name": "Coloured Pencils"
+            },
+            {
+              "slug": "art-drawing-sketch-markers",
+              "name": "Sketch Markers"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "brandsByCountry": {
+    "IN": [
+      "Classmate",
+      "Camlin",
+      "Cello",
+      "Luxor",
+      "Faber-Castell",
+      "Sundaram",
+      "Doms",
+      "Nataraj"
+    ],
+    "default": [
+      "Penbrook",
+      "Lumio",
+      "Verso & Quill",
+      "Inkhouse",
+      "Maple & Fern",
+      "Atelier Mark"
+    ]
+  },
+  "products": [
+    {
+      "slug": "midnight-harbour-novel",
+      "name": "Midnight Harbour",
+      "categorySlug": "books-fiction-literary",
+      "brand": "Verso & Quill",
+      "priceUsd": 16,
+      "compareUsd": 22,
+      "stock": 40,
+      "shortDescription": "A quietly devastating literary novel about a family reunited by a coastal storm."
+    },
+    {
+      "slug": "the-silent-ledger-thriller",
+      "name": "The Silent Ledger",
+      "categorySlug": "books-fiction-mystery-thriller",
+      "brand": "Verso & Quill",
+      "priceUsd": 14,
+      "compareUsd": 19,
+      "stock": 55,
+      "shortDescription": "A forensic accountant turns sleuth in this twist-laden financial thriller."
+    },
+    {
+      "slug": "ashes-of-the-ninth-realm",
+      "name": "Ashes of the Ninth Realm",
+      "categorySlug": "books-fiction-sci-fi-fantasy",
+      "brand": "Inkhouse",
+      "priceUsd": 18,
+      "stock": 38,
+      "shortDescription": "Epic fantasy opener following an exiled cartographer mapping a dying world."
+    },
+    {
+      "slug": "letters-we-never-sent",
+      "name": "Letters We Never Sent",
+      "categorySlug": "books-fiction-romance",
+      "brand": "Inkhouse",
+      "priceUsd": 13,
+      "compareUsd": 17,
+      "stock": 60,
+      "shortDescription": "A slow-burn romance told entirely through unsent love letters."
+    },
+    {
+      "slug": "against-the-current-memoir",
+      "name": "Against the Current: A Memoir",
+      "categorySlug": "books-non-fiction-biography",
+      "brand": "Maple & Fern",
+      "priceUsd": 21,
+      "stock": 30,
+      "shortDescription": "A long-distance swimmer's candid memoir of grief, training, and open water."
+    },
+    {
+      "slug": "the-quiet-mind-handbook",
+      "name": "The Quiet Mind Handbook",
+      "categorySlug": "books-non-fiction-self-help",
+      "brand": "Maple & Fern",
+      "priceUsd": 17,
+      "compareUsd": 24,
+      "stock": 48,
+      "shortDescription": "A practical, jargon-free guide to building a daily calm-and-focus routine."
+    },
+    {
+      "slug": "small-bets-big-business",
+      "name": "Small Bets, Big Business",
+      "categorySlug": "books-non-fiction-business",
+      "brand": "Maple & Fern",
+      "priceUsd": 19,
+      "stock": 35,
+      "shortDescription": "How founders compound tiny experiments into durable companies."
+    },
+    {
+      "slug": "the-wandering-fox-picture-book",
+      "name": "The Wandering Fox",
+      "categorySlug": "books-children-picture",
+      "brand": "Inkhouse",
+      "priceUsd": 12,
+      "compareUsd": 15,
+      "stock": 70,
+      "shortDescription": "A gently illustrated bedtime picture book about a fox who collects lost things."
+    },
+    {
+      "slug": "max-and-the-moon-train",
+      "name": "Max and the Moon Train",
+      "categorySlug": "books-children-early-readers",
+      "brand": "Inkhouse",
+      "priceUsd": 9,
+      "stock": 80,
+      "shortDescription": "An early-reader adventure with big type and simple, repeating words."
+    },
+    {
+      "slug": "classmate-a5-ruled-notebook-200pg",
+      "name": "Classmate A5 Ruled Notebook (200 Pages)",
+      "categorySlug": "notebooks-ruled-a5",
+      "brand": "Classmate",
+      "priceUsd": 4,
+      "stock": 120,
+      "shortDescription": "Everyday single-line A5 notebook with smooth, bleed-resistant pages."
+    },
+    {
+      "slug": "lumio-dotted-bullet-journal",
+      "name": "Lumio Dotted Bullet Journal",
+      "categorySlug": "notebooks-special-dotted",
+      "brand": "Lumio",
+      "priceUsd": 18,
+      "compareUsd": 26,
+      "stock": 45,
+      "shortDescription": "A5 hardcover dot-grid journal with 160gsm paper and two ribbon markers."
+    },
+    {
+      "slug": "penbrook-2026-daily-planner",
+      "name": "Penbrook 2026 Daily Planner",
+      "categorySlug": "notebooks-planners-daily",
+      "brand": "Penbrook",
+      "priceUsd": 22,
+      "compareUsd": 30,
+      "stock": 36,
+      "shortDescription": "Undated one-page-per-day planner with habit trackers and monthly spreads."
+    },
+    {
+      "slug": "cello-butterflow-ballpoint-10pk",
+      "name": "Cello Butterflow Ballpoint Pens (Pack of 10)",
+      "categorySlug": "writing-pens-ballpoint",
+      "brand": "Cello",
+      "priceUsd": 5,
+      "stock": 110,
+      "shortDescription": "Smooth low-viscosity blue ballpoints that glide without skipping."
+    },
+    {
+      "slug": "luxor-gel-pens-pack-of-5",
+      "name": "Luxor Gel Pens (Pack of 5)",
+      "categorySlug": "writing-pens-gel",
+      "brand": "Luxor",
+      "priceUsd": 7,
+      "compareUsd": 10,
+      "stock": 90,
+      "shortDescription": "0.7mm quick-dry gel pens in assorted vivid colours."
+    },
+    {
+      "slug": "penbrook-heritage-fountain-pen",
+      "name": "Penbrook Heritage Fountain Pen",
+      "categorySlug": "writing-pens-fountain",
+      "brand": "Penbrook",
+      "priceUsd": 34,
+      "compareUsd": 45,
+      "stock": 25,
+      "shortDescription": "Brass-bodied medium-nib fountain pen with a converter and ink cartridges."
+    },
+    {
+      "slug": "faber-castell-watercolour-set-24",
+      "name": "Faber-Castell Watercolour Set (24 Cakes)",
+      "categorySlug": "art-painting-watercolour",
+      "brand": "Faber-Castell",
+      "priceUsd": 16,
+      "compareUsd": 21,
+      "stock": 50,
+      "shortDescription": "Portable 24-colour watercolour pan set with a built-in mixing palette and brush."
+    }
+  ]
+}

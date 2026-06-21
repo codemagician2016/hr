@@ -1,0 +1,423 @@
+{
+  "theme": "grocery",
+  "categories": [
+    {
+      "slug": "fresh-food",
+      "name": "Fresh Food",
+      "children": [
+        {
+          "slug": "fresh-produce",
+          "name": "Fresh Produce",
+          "children": [
+            {
+              "slug": "produce-fruits",
+              "name": "Fruits"
+            },
+            {
+              "slug": "produce-vegetables",
+              "name": "Vegetables"
+            },
+            {
+              "slug": "produce-herbs-leafy",
+              "name": "Herbs & Leafy Greens"
+            }
+          ]
+        },
+        {
+          "slug": "dairy-eggs",
+          "name": "Dairy & Eggs",
+          "children": [
+            {
+              "slug": "dairy-milk-curd",
+              "name": "Milk & Curd"
+            },
+            {
+              "slug": "dairy-cheese-butter",
+              "name": "Cheese & Butter"
+            },
+            {
+              "slug": "dairy-eggs-eggs",
+              "name": "Eggs"
+            }
+          ]
+        },
+        {
+          "slug": "meat-seafood",
+          "name": "Meat & Seafood",
+          "children": [
+            {
+              "slug": "meat-chicken",
+              "name": "Chicken"
+            },
+            {
+              "slug": "meat-mutton",
+              "name": "Mutton & Lamb"
+            },
+            {
+              "slug": "meat-fish-seafood",
+              "name": "Fish & Seafood"
+            }
+          ]
+        },
+        {
+          "slug": "bakery",
+          "name": "Bakery",
+          "children": [
+            {
+              "slug": "bakery-bread",
+              "name": "Bread & Loaves"
+            },
+            {
+              "slug": "bakery-buns-pav",
+              "name": "Buns & Pav"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "pantry-staples",
+      "name": "Pantry & Staples",
+      "children": [
+        {
+          "slug": "pantry-grains-rice",
+          "name": "Atta, Rice & Dal",
+          "children": [
+            {
+              "slug": "pantry-rice",
+              "name": "Rice"
+            },
+            {
+              "slug": "pantry-atta-flour",
+              "name": "Atta & Flours"
+            },
+            {
+              "slug": "pantry-dal-pulses",
+              "name": "Dal & Pulses"
+            }
+          ]
+        },
+        {
+          "slug": "pantry-oils-ghee",
+          "name": "Oil, Ghee & Masala",
+          "children": [
+            {
+              "slug": "pantry-cooking-oil",
+              "name": "Cooking Oil"
+            },
+            {
+              "slug": "pantry-ghee",
+              "name": "Ghee & Vanaspati"
+            },
+            {
+              "slug": "pantry-spices-masala",
+              "name": "Spices & Masala"
+            }
+          ]
+        },
+        {
+          "slug": "pantry-breakfast-spreads",
+          "name": "Breakfast & Spreads",
+          "children": [
+            {
+              "slug": "pantry-cereal-oats",
+              "name": "Cereal & Oats"
+            },
+            {
+              "slug": "pantry-jam-honey",
+              "name": "Jam & Honey"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "snacks-beverages",
+      "name": "Snacks & Beverages",
+      "children": [
+        {
+          "slug": "snacks",
+          "name": "Snacks & Confectionery",
+          "children": [
+            {
+              "slug": "snacks-chips-namkeen",
+              "name": "Chips & Namkeen"
+            },
+            {
+              "slug": "snacks-biscuits-cookies",
+              "name": "Biscuits & Cookies"
+            },
+            {
+              "slug": "snacks-chocolate-candy",
+              "name": "Chocolate & Candy"
+            }
+          ]
+        },
+        {
+          "slug": "beverages",
+          "name": "Beverages",
+          "children": [
+            {
+              "slug": "bev-tea-coffee",
+              "name": "Tea & Coffee"
+            },
+            {
+              "slug": "bev-juices",
+              "name": "Juices & Drinks"
+            },
+            {
+              "slug": "bev-soft-drinks",
+              "name": "Soft Drinks & Soda"
+            }
+          ]
+        },
+        {
+          "slug": "frozen-instant",
+          "name": "Frozen & Instant",
+          "children": [
+            {
+              "slug": "frozen-snacks-meals",
+              "name": "Frozen Snacks & Meals"
+            },
+            {
+              "slug": "instant-noodles-soup",
+              "name": "Noodles & Instant Meals"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "home-personal-care",
+      "name": "Home & Personal Care",
+      "children": [
+        {
+          "slug": "household",
+          "name": "Household Essentials",
+          "children": [
+            {
+              "slug": "house-cleaning",
+              "name": "Cleaning Supplies"
+            },
+            {
+              "slug": "house-laundry",
+              "name": "Laundry"
+            },
+            {
+              "slug": "house-paper-disposables",
+              "name": "Tissue & Disposables"
+            }
+          ]
+        },
+        {
+          "slug": "personal-care",
+          "name": "Personal Care",
+          "children": [
+            {
+              "slug": "pc-bath-body",
+              "name": "Bath & Body"
+            },
+            {
+              "slug": "pc-hair-care",
+              "name": "Hair Care"
+            },
+            {
+              "slug": "pc-oral-care",
+              "name": "Oral Care"
+            }
+          ]
+        },
+        {
+          "slug": "baby-care",
+          "name": "Baby Care",
+          "children": [
+            {
+              "slug": "baby-diapers-wipes",
+              "name": "Diapers & Wipes"
+            },
+            {
+              "slug": "baby-food-formula",
+              "name": "Baby Food & Formula"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "brandsByCountry": {
+    "IN": [
+      "Amul",
+      "Tata Sampann",
+      "Aashirvaad",
+      "India Gate",
+      "Fortune",
+      "Mother Dairy",
+      "Britannia",
+      "Parle",
+      "MDH",
+      "Saffola"
+    ],
+    "default": [
+      "Farmstead Selects",
+      "Daily Harvest Co.",
+      "Greenfield Pantry",
+      "Orchard Lane",
+      "PureLeaf Naturals",
+      "HomeBasket",
+      "Meadowfresh"
+    ]
+  },
+  "products": [
+    {
+      "slug": "alphonso-mangoes-1kg",
+      "name": "Alphonso Mangoes 1 kg",
+      "categorySlug": "produce-fruits",
+      "brand": "Daily Harvest Co.",
+      "priceUsd": 6.49,
+      "compareUsd": 7.99,
+      "stock": 40,
+      "shortDescription": "Hand-picked Ratnagiri Alphonso mangoes, ripe and bursting with sweetness."
+    },
+    {
+      "slug": "fresh-tomatoes-1kg",
+      "name": "Fresh Tomatoes 1 kg",
+      "categorySlug": "produce-vegetables",
+      "brand": "Farmstead Selects",
+      "priceUsd": 1.29,
+      "stock": 90,
+      "shortDescription": "Firm, vine-ripened tomatoes perfect for everyday cooking and salads."
+    },
+    {
+      "slug": "baby-spinach-200g",
+      "name": "Baby Spinach 200 g",
+      "categorySlug": "produce-herbs-leafy",
+      "brand": "Greenfield Pantry",
+      "priceUsd": 1.99,
+      "compareUsd": 2.49,
+      "stock": 55,
+      "shortDescription": "Tender, triple-washed baby spinach leaves ready to toss into any dish."
+    },
+    {
+      "slug": "amul-toned-milk-1l",
+      "name": "Amul Toned Milk 1 L",
+      "categorySlug": "dairy-milk-curd",
+      "brand": "Amul",
+      "priceUsd": 0.79,
+      "stock": 120,
+      "shortDescription": "Homogenised, pasteurised toned milk in a convenient 1-litre pack."
+    },
+    {
+      "slug": "amul-butter-500g",
+      "name": "Amul Butter 500 g",
+      "categorySlug": "dairy-cheese-butter",
+      "brand": "Amul",
+      "priceUsd": 3.49,
+      "compareUsd": 3.99,
+      "stock": 70,
+      "shortDescription": "The classic creamy salted table butter loved across Indian kitchens."
+    },
+    {
+      "slug": "farm-eggs-12pack",
+      "name": "Farm Fresh Eggs (Pack of 12)",
+      "categorySlug": "dairy-eggs-eggs",
+      "brand": "Meadowfresh",
+      "priceUsd": 2.29,
+      "stock": 85,
+      "shortDescription": "Grade-A farm eggs with rich golden yolks, carefully graded and packed."
+    },
+    {
+      "slug": "chicken-breast-boneless-500g",
+      "name": "Boneless Chicken Breast 500 g",
+      "categorySlug": "meat-chicken",
+      "brand": "Farmstead Selects",
+      "priceUsd": 4.99,
+      "compareUsd": 5.99,
+      "stock": 35,
+      "shortDescription": "Antibiotic-free boneless chicken breast, cleaned and freshly cut."
+    },
+    {
+      "slug": "atlantic-salmon-fillet-300g",
+      "name": "Atlantic Salmon Fillet 300 g",
+      "categorySlug": "meat-fish-seafood",
+      "brand": "Orchard Lane",
+      "priceUsd": 8.99,
+      "stock": 22,
+      "shortDescription": "Skin-on Atlantic salmon fillet, flash-frozen at peak freshness."
+    },
+    {
+      "slug": "britannia-whole-wheat-bread",
+      "name": "Britannia Whole Wheat Bread 400 g",
+      "categorySlug": "bakery-bread",
+      "brand": "Britannia",
+      "priceUsd": 1.19,
+      "stock": 60,
+      "shortDescription": "Soft 100% whole wheat sandwich loaf, baked fresh daily."
+    },
+    {
+      "slug": "india-gate-basmati-rice-5kg",
+      "name": "India Gate Basmati Rice 5 kg",
+      "categorySlug": "pantry-rice",
+      "brand": "India Gate",
+      "priceUsd": 12.99,
+      "compareUsd": 15.49,
+      "stock": 45,
+      "shortDescription": "Aged long-grain basmati rice that cooks up fluffy and fragrant."
+    },
+    {
+      "slug": "aashirvaad-atta-5kg",
+      "name": "Aashirvaad Whole Wheat Atta 5 kg",
+      "categorySlug": "pantry-atta-flour",
+      "brand": "Aashirvaad",
+      "priceUsd": 6.99,
+      "stock": 50,
+      "shortDescription": "Stone-ground whole wheat atta for soft, fluffy everyday rotis."
+    },
+    {
+      "slug": "tata-sampann-toor-dal-1kg",
+      "name": "Tata Sampann Toor Dal 1 kg",
+      "categorySlug": "pantry-dal-pulses",
+      "brand": "Tata Sampann",
+      "priceUsd": 2.49,
+      "compareUsd": 2.89,
+      "stock": 65,
+      "shortDescription": "Unpolished toor dal with higher protein, cleaned and ready to cook."
+    },
+    {
+      "slug": "fortune-sunflower-oil-1l",
+      "name": "Fortune Sunflower Oil 1 L",
+      "categorySlug": "pantry-cooking-oil",
+      "brand": "Fortune",
+      "priceUsd": 2.19,
+      "stock": 80,
+      "shortDescription": "Light, refined sunflower oil rich in Vitamin E for healthy cooking."
+    },
+    {
+      "slug": "mdh-garam-masala-100g",
+      "name": "MDH Garam Masala 100 g",
+      "categorySlug": "pantry-spices-masala",
+      "brand": "MDH",
+      "priceUsd": 1.89,
+      "stock": 75,
+      "shortDescription": "Aromatic blend of hand-ground whole spices for authentic Indian flavour."
+    },
+    {
+      "slug": "saffola-oats-honey-500g",
+      "name": "Saffola Honey Oats 500 g",
+      "categorySlug": "pantry-cereal-oats",
+      "brand": "Saffola",
+      "priceUsd": 2.79,
+      "compareUsd": 3.29,
+      "stock": 58,
+      "shortDescription": "Wholegrain rolled oats with a touch of honey for a wholesome breakfast."
+    },
+    {
+      "slug": "parle-g-biscuits-800g",
+      "name": "Parle-G Glucose Biscuits 800 g",
+      "categorySlug": "snacks-biscuits-cookies",
+      "brand": "Parle",
+      "priceUsd": 1.49,
+      "stock": 110,
+      "shortDescription": "India's beloved glucose biscuits, perfect with a cup of chai."
+    }
+  ]
+}

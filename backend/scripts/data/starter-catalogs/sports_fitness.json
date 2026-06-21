@@ -1,0 +1,428 @@
+{
+  "theme": "sports_fitness",
+  "categories": [
+    {
+      "slug": "gym-equipment",
+      "name": "Gym Equipment",
+      "children": [
+        {
+          "slug": "gym-strength-training",
+          "name": "Strength Training",
+          "children": [
+            {
+              "slug": "gym-dumbbells",
+              "name": "Dumbbells"
+            },
+            {
+              "slug": "gym-kettlebells",
+              "name": "Kettlebells"
+            },
+            {
+              "slug": "gym-barbells-plates",
+              "name": "Barbells & Plates"
+            },
+            {
+              "slug": "gym-benches-racks",
+              "name": "Benches & Racks"
+            }
+          ]
+        },
+        {
+          "slug": "gym-cardio-machines",
+          "name": "Cardio Machines",
+          "children": [
+            {
+              "slug": "gym-treadmills",
+              "name": "Treadmills"
+            },
+            {
+              "slug": "gym-exercise-bikes",
+              "name": "Exercise Bikes"
+            },
+            {
+              "slug": "gym-jump-ropes",
+              "name": "Jump Ropes"
+            }
+          ]
+        },
+        {
+          "slug": "gym-functional-training",
+          "name": "Functional Training",
+          "children": [
+            {
+              "slug": "gym-resistance-bands",
+              "name": "Resistance Bands"
+            },
+            {
+              "slug": "gym-foam-rollers",
+              "name": "Foam Rollers"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "apparel",
+      "name": "Apparel",
+      "children": [
+        {
+          "slug": "apparel-mens",
+          "name": "Men's",
+          "children": [
+            {
+              "slug": "apparel-mens-tshirts",
+              "name": "T-Shirts"
+            },
+            {
+              "slug": "apparel-mens-shorts",
+              "name": "Shorts"
+            },
+            {
+              "slug": "apparel-mens-track-jackets",
+              "name": "Track Jackets"
+            }
+          ]
+        },
+        {
+          "slug": "apparel-womens",
+          "name": "Women's",
+          "children": [
+            {
+              "slug": "apparel-womens-leggings",
+              "name": "Leggings"
+            },
+            {
+              "slug": "apparel-womens-sports-bras",
+              "name": "Sports Bras"
+            },
+            {
+              "slug": "apparel-womens-tank-tops",
+              "name": "Tank Tops"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "footwear",
+      "name": "Footwear",
+      "children": [
+        {
+          "slug": "footwear-running",
+          "name": "Running Shoes",
+          "children": [
+            {
+              "slug": "footwear-running-road",
+              "name": "Road Running"
+            },
+            {
+              "slug": "footwear-running-trail",
+              "name": "Trail Running"
+            }
+          ]
+        },
+        {
+          "slug": "footwear-training",
+          "name": "Training Shoes",
+          "children": [
+            {
+              "slug": "footwear-training-cross",
+              "name": "Cross-Training"
+            },
+            {
+              "slug": "footwear-training-weightlifting",
+              "name": "Weightlifting"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "yoga-cycling",
+      "name": "Yoga & Cycling",
+      "children": [
+        {
+          "slug": "yoga",
+          "name": "Yoga",
+          "children": [
+            {
+              "slug": "yoga-mats",
+              "name": "Yoga Mats"
+            },
+            {
+              "slug": "yoga-blocks-straps",
+              "name": "Blocks & Straps"
+            }
+          ]
+        },
+        {
+          "slug": "cycling",
+          "name": "Cycling",
+          "children": [
+            {
+              "slug": "cycling-helmets",
+              "name": "Helmets"
+            },
+            {
+              "slug": "cycling-bottles-cages",
+              "name": "Bottles & Cages"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "supplements",
+      "name": "Supplements",
+      "children": [
+        {
+          "slug": "supplements-protein",
+          "name": "Protein",
+          "children": [
+            {
+              "slug": "supplements-whey-protein",
+              "name": "Whey Protein"
+            },
+            {
+              "slug": "supplements-plant-protein",
+              "name": "Plant Protein"
+            }
+          ]
+        },
+        {
+          "slug": "supplements-performance",
+          "name": "Performance",
+          "children": [
+            {
+              "slug": "supplements-pre-workout",
+              "name": "Pre-Workout"
+            },
+            {
+              "slug": "supplements-bcaa-recovery",
+              "name": "BCAA & Recovery"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "brandsByCountry": {
+    "IN": [
+      "Decathlon",
+      "HRX",
+      "Cosco",
+      "Boldfit",
+      "MuscleBlaze",
+      "Nivia",
+      "Cult.fit",
+      "Vector X",
+      "Wildcraft"
+    ],
+    "default": [
+      "Apex Athletics",
+      "Ironclad",
+      "PaceForge",
+      "Zenflow",
+      "Summit Cycle",
+      "PureFuel",
+      "CoreVault"
+    ]
+  },
+  "products": [
+    {
+      "slug": "rubber-hex-dumbbell-pair-10kg",
+      "name": "Rubber Hex Dumbbell Pair (10 kg)",
+      "categorySlug": "gym-dumbbells",
+      "brand": "MuscleBlaze",
+      "priceUsd": 45,
+      "compareUsd": 59,
+      "stock": 40,
+      "shortDescription": "Anti-roll rubber-coated hex dumbbells with a knurled chrome handle for a secure grip."
+    },
+    {
+      "slug": "cast-iron-kettlebell-16kg",
+      "name": "Cast Iron Kettlebell (16 kg)",
+      "categorySlug": "gym-kettlebells",
+      "brand": "Boldfit",
+      "priceUsd": 38,
+      "compareUsd": 49,
+      "stock": 35,
+      "shortDescription": "Single-cast iron kettlebell with a smooth wide handle for swings, cleans and Turkish get-ups."
+    },
+    {
+      "slug": "olympic-barbell-20kg",
+      "name": "Olympic Barbell (20 kg)",
+      "categorySlug": "gym-barbells-plates",
+      "brand": "Ironclad",
+      "priceUsd": 159,
+      "compareUsd": 199,
+      "stock": 18,
+      "shortDescription": "7-foot Olympic barbell with dual knurl marks and needle-bearing rotating sleeves."
+    },
+    {
+      "slug": "adjustable-flat-incline-bench",
+      "name": "Adjustable Flat-Incline Bench",
+      "categorySlug": "gym-benches-racks",
+      "brand": "Apex Athletics",
+      "priceUsd": 129,
+      "stock": 22,
+      "shortDescription": "Seven-position adjustable bench with heavy-gauge steel frame and high-density padding."
+    },
+    {
+      "slug": "motorized-folding-treadmill",
+      "name": "Motorized Folding Treadmill",
+      "categorySlug": "gym-treadmills",
+      "brand": "Cult.fit",
+      "priceUsd": 549,
+      "compareUsd": 699,
+      "stock": 12,
+      "shortDescription": "2.5 HP folding treadmill with auto-incline, cushioned deck and a 12-program console."
+    },
+    {
+      "slug": "magnetic-upright-exercise-bike",
+      "name": "Magnetic Upright Exercise Bike",
+      "categorySlug": "gym-exercise-bikes",
+      "brand": "PaceForge",
+      "priceUsd": 219,
+      "compareUsd": 279,
+      "stock": 20,
+      "shortDescription": "Quiet magnetic-resistance bike with 8 tension levels and an adjustable padded saddle."
+    },
+    {
+      "slug": "speed-jump-rope-steel",
+      "name": "Speed Jump Rope (Steel Cable)",
+      "categorySlug": "gym-jump-ropes",
+      "brand": "Cosco",
+      "priceUsd": 12,
+      "compareUsd": 18,
+      "stock": 110,
+      "shortDescription": "Ball-bearing speed rope with an adjustable steel cable for fast double-unders."
+    },
+    {
+      "slug": "resistance-bands-set-5pc",
+      "name": "Resistance Bands Set (5-Piece)",
+      "categorySlug": "gym-resistance-bands",
+      "brand": "Boldfit",
+      "priceUsd": 22,
+      "compareUsd": 30,
+      "stock": 90,
+      "shortDescription": "Five colour-coded latex loop bands from light to extra-heavy with a carry pouch."
+    },
+    {
+      "slug": "high-density-foam-roller",
+      "name": "High-Density Foam Roller (33 cm)",
+      "categorySlug": "gym-foam-rollers",
+      "brand": "Zenflow",
+      "priceUsd": 24,
+      "stock": 60,
+      "shortDescription": "Textured EVA foam roller for deep-tissue release and post-workout muscle recovery."
+    },
+    {
+      "slug": "mens-dri-fit-training-tee",
+      "name": "Men's Dri-Fit Training Tee",
+      "categorySlug": "apparel-mens-tshirts",
+      "brand": "HRX",
+      "priceUsd": 19,
+      "compareUsd": 26,
+      "stock": 75,
+      "shortDescription": "Lightweight moisture-wicking tee with mesh side panels to keep you cool through any set."
+    },
+    {
+      "slug": "mens-7inch-running-shorts",
+      "name": "Men's 7-Inch Running Shorts",
+      "categorySlug": "apparel-mens-shorts",
+      "brand": "Decathlon",
+      "priceUsd": 21,
+      "stock": 64,
+      "shortDescription": "Quick-dry running shorts with a built-in liner and a zip pocket for your keys."
+    },
+    {
+      "slug": "womens-high-waist-leggings",
+      "name": "Women's High-Waist Leggings",
+      "categorySlug": "apparel-womens-leggings",
+      "brand": "CoreVault",
+      "priceUsd": 34,
+      "compareUsd": 45,
+      "stock": 58,
+      "shortDescription": "Squat-proof high-waist leggings in buttery four-way stretch with a hidden waistband pocket."
+    },
+    {
+      "slug": "womens-medium-impact-sports-bra",
+      "name": "Women's Medium-Impact Sports Bra",
+      "categorySlug": "apparel-womens-sports-bras",
+      "brand": "HRX",
+      "priceUsd": 24,
+      "compareUsd": 32,
+      "stock": 52,
+      "shortDescription": "Seamless medium-support sports bra with removable pads and a racerback for free movement."
+    },
+    {
+      "slug": "road-running-shoes-cushioned",
+      "name": "Cushioned Road Running Shoes",
+      "categorySlug": "footwear-running-road",
+      "brand": "PaceForge",
+      "priceUsd": 89,
+      "compareUsd": 120,
+      "stock": 30,
+      "shortDescription": "Responsive foam midsole and breathable engineered mesh built for long road miles."
+    },
+    {
+      "slug": "trail-running-shoes-gripx",
+      "name": "Trail Running Shoes Grip-X",
+      "categorySlug": "footwear-running-trail",
+      "brand": "Decathlon",
+      "priceUsd": 79,
+      "stock": 28,
+      "shortDescription": "Aggressive lugged outsole and a protective toe cap for confident grip on rugged trails."
+    },
+    {
+      "slug": "non-slip-tpe-yoga-mat-6mm",
+      "name": "Non-Slip TPE Yoga Mat (6 mm)",
+      "categorySlug": "yoga-mats",
+      "brand": "Zenflow",
+      "priceUsd": 29,
+      "compareUsd": 39,
+      "stock": 70,
+      "shortDescription": "Cushioned 6 mm TPE mat with a dual-sided non-slip texture and alignment guide lines."
+    },
+    {
+      "slug": "aero-road-cycling-helmet",
+      "name": "Aero Road Cycling Helmet",
+      "categorySlug": "cycling-helmets",
+      "brand": "Summit Cycle",
+      "priceUsd": 69,
+      "compareUsd": 89,
+      "stock": 26,
+      "shortDescription": "Lightweight in-mould helmet with 18 vents and a dial-fit system for an all-day secure fit."
+    },
+    {
+      "slug": "whey-protein-concentrate-1kg",
+      "name": "Whey Protein Concentrate (1 kg)",
+      "categorySlug": "supplements-whey-protein",
+      "brand": "PureFuel",
+      "priceUsd": 39,
+      "compareUsd": 52,
+      "stock": 80,
+      "shortDescription": "24 g of protein per scoop in a smooth chocolate blend that mixes clean with no clumps."
+    },
+    {
+      "slug": "plant-protein-vanilla-1kg",
+      "name": "Plant Protein Blend Vanilla (1 kg)",
+      "categorySlug": "supplements-plant-protein",
+      "brand": "PureFuel",
+      "priceUsd": 42,
+      "stock": 50,
+      "shortDescription": "Pea-and-rice vegan protein with a full amino profile and a naturally sweet vanilla taste."
+    },
+    {
+      "slug": "pre-workout-fruit-punch-300g",
+      "name": "Pre-Workout Fruit Punch (300 g)",
+      "categorySlug": "supplements-pre-workout",
+      "brand": "MuscleBlaze",
+      "priceUsd": 28,
+      "compareUsd": 36,
+      "stock": 60,
+      "shortDescription": "Energising pre-workout with caffeine, beta-alanine and citrulline for sharper focus and pumps."
+    }
+  ]
+}

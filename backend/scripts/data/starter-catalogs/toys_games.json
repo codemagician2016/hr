@@ -1,0 +1,472 @@
+{
+  "theme": "toys_games",
+  "categories": [
+    {
+      "slug": "building-construction",
+      "name": "Building & Construction",
+      "children": [
+        {
+          "slug": "building-brick-sets",
+          "name": "Brick Sets",
+          "children": [
+            {
+              "slug": "building-brick-sets-themed-kits",
+              "name": "Themed Kits"
+            },
+            {
+              "slug": "building-brick-sets-classic-bricks",
+              "name": "Classic Bricks"
+            },
+            {
+              "slug": "building-brick-sets-baseplates",
+              "name": "Baseplates & Accessories"
+            }
+          ]
+        },
+        {
+          "slug": "building-magnetic-tiles",
+          "name": "Magnetic Tiles",
+          "children": [
+            {
+              "slug": "building-magnetic-tiles-starter",
+              "name": "Starter Sets"
+            },
+            {
+              "slug": "building-magnetic-tiles-deluxe",
+              "name": "Deluxe Sets"
+            }
+          ]
+        },
+        {
+          "slug": "building-marble-runs",
+          "name": "Marble Runs",
+          "children": [
+            {
+              "slug": "building-marble-runs-gravity",
+              "name": "Gravity Tracks"
+            },
+            {
+              "slug": "building-marble-runs-powered",
+              "name": "Powered Sets"
+            }
+          ]
+        },
+        {
+          "slug": "building-stem-robotics",
+          "name": "STEM Robotics",
+          "children": [
+            {
+              "slug": "building-stem-robotics-coding",
+              "name": "Coding Robots"
+            },
+            {
+              "slug": "building-stem-robotics-mechanical",
+              "name": "Mechanical Kits"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "games-puzzles",
+      "name": "Games & Puzzles",
+      "children": [
+        {
+          "slug": "games-board-games",
+          "name": "Board Games",
+          "children": [
+            {
+              "slug": "games-board-games-strategy",
+              "name": "Strategy"
+            },
+            {
+              "slug": "games-board-games-family",
+              "name": "Family Night"
+            },
+            {
+              "slug": "games-board-games-classics",
+              "name": "Classics"
+            }
+          ]
+        },
+        {
+          "slug": "games-card-games",
+          "name": "Card Games",
+          "children": [
+            {
+              "slug": "games-card-games-party",
+              "name": "Party Packs"
+            },
+            {
+              "slug": "games-card-games-collectible",
+              "name": "Collectible"
+            }
+          ]
+        },
+        {
+          "slug": "games-jigsaw-puzzles",
+          "name": "Jigsaw Puzzles",
+          "children": [
+            {
+              "slug": "games-jigsaw-puzzles-kids",
+              "name": "Kids Puzzles"
+            },
+            {
+              "slug": "games-jigsaw-puzzles-1000",
+              "name": "1000+ Piece"
+            },
+            {
+              "slug": "games-jigsaw-puzzles-3d",
+              "name": "3D Puzzles"
+            }
+          ]
+        },
+        {
+          "slug": "games-brain-teasers",
+          "name": "Brain Teasers",
+          "children": [
+            {
+              "slug": "games-brain-teasers-cubes",
+              "name": "Speed Cubes"
+            },
+            {
+              "slug": "games-brain-teasers-logic",
+              "name": "Logic Puzzles"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "action-collectibles",
+      "name": "Action Figures & Collectibles",
+      "children": [
+        {
+          "slug": "action-figures",
+          "name": "Action Figures",
+          "children": [
+            {
+              "slug": "action-figures-superheroes",
+              "name": "Superheroes"
+            },
+            {
+              "slug": "action-figures-anime",
+              "name": "Anime & Manga"
+            },
+            {
+              "slug": "action-figures-vehicles",
+              "name": "Vehicles & Playsets"
+            }
+          ]
+        },
+        {
+          "slug": "action-dolls-playsets",
+          "name": "Dolls & Playsets",
+          "children": [
+            {
+              "slug": "action-dolls-fashion",
+              "name": "Fashion Dolls"
+            },
+            {
+              "slug": "action-dolls-houses",
+              "name": "Doll Houses"
+            }
+          ]
+        },
+        {
+          "slug": "action-collectible-figures",
+          "name": "Collectible Figures",
+          "children": [
+            {
+              "slug": "action-collectible-figures-blind-box",
+              "name": "Blind Box"
+            },
+            {
+              "slug": "action-collectible-figures-vinyl",
+              "name": "Vinyl Figures"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "outdoor-active",
+      "name": "Outdoor & Active Play",
+      "children": [
+        {
+          "slug": "outdoor-ride-ons",
+          "name": "Ride-Ons",
+          "children": [
+            {
+              "slug": "outdoor-ride-ons-scooters",
+              "name": "Scooters"
+            },
+            {
+              "slug": "outdoor-ride-ons-balance-bikes",
+              "name": "Balance Bikes"
+            }
+          ]
+        },
+        {
+          "slug": "outdoor-blasters-water",
+          "name": "Blasters & Water Play",
+          "children": [
+            {
+              "slug": "outdoor-blasters-water-foam",
+              "name": "Foam Blasters"
+            },
+            {
+              "slug": "outdoor-blasters-water-soakers",
+              "name": "Water Soakers"
+            }
+          ]
+        },
+        {
+          "slug": "outdoor-sports-garden",
+          "name": "Sports & Garden",
+          "children": [
+            {
+              "slug": "outdoor-sports-garden-trampolines",
+              "name": "Trampolines"
+            },
+            {
+              "slug": "outdoor-sports-garden-flying-discs",
+              "name": "Flying & Bubbles"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "early-learning",
+      "name": "Early Learning & Baby",
+      "children": [
+        {
+          "slug": "early-learning-educational",
+          "name": "Educational Toys",
+          "children": [
+            {
+              "slug": "early-learning-educational-counting",
+              "name": "Counting & Numbers"
+            },
+            {
+              "slug": "early-learning-educational-language",
+              "name": "Letters & Language"
+            },
+            {
+              "slug": "early-learning-educational-science",
+              "name": "Science Kits"
+            }
+          ]
+        },
+        {
+          "slug": "early-learning-baby-toddler",
+          "name": "Baby & Toddler",
+          "children": [
+            {
+              "slug": "early-learning-baby-toddler-first-toys",
+              "name": "First Toys"
+            },
+            {
+              "slug": "early-learning-baby-toddler-activity",
+              "name": "Activity Centres"
+            }
+          ]
+        },
+        {
+          "slug": "early-learning-arts-crafts",
+          "name": "Arts & Crafts",
+          "children": [
+            {
+              "slug": "early-learning-arts-crafts-art-sets",
+              "name": "Art Sets"
+            },
+            {
+              "slug": "early-learning-arts-crafts-clay-dough",
+              "name": "Clay & Dough"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "brandsByCountry": {
+    "IN": [
+      "Funskool",
+      "Hamleys",
+      "Hot Wheels",
+      "Nerf",
+      "LEGO",
+      "Lego Education",
+      "Skillmatics",
+      "Smartivity",
+      "Chicco",
+      "Frank Puzzles"
+    ],
+    "default": [
+      "BrickWorks",
+      "MagPlay",
+      "TableTop Co.",
+      "BrightMinds",
+      "PlayMax",
+      "CuddleCo",
+      "CraftLab",
+      "TinyTots"
+    ]
+  },
+  "products": [
+    {
+      "slug": "city-fire-station-themed-kit",
+      "name": "City Fire Station Building Kit (640 pc)",
+      "categorySlug": "building-brick-sets-themed-kits",
+      "brand": "LEGO",
+      "priceUsd": 89.99,
+      "compareUsd": 109.99,
+      "stock": 42,
+      "shortDescription": "A detailed fire station playset with a working ladder truck, minifigures, and 640 interlocking pieces for ages 6 and up."
+    },
+    {
+      "slug": "magnetic-tiles-starter-60pc",
+      "name": "Magnetic Tiles Starter Set (60 pc)",
+      "categorySlug": "building-magnetic-tiles-starter",
+      "brand": "MagPlay",
+      "priceUsd": 29.99,
+      "compareUsd": 39.99,
+      "stock": 78,
+      "shortDescription": "Translucent rainbow magnetic tiles that snap together for endless 2D and 3D builds, perfect for first-time builders."
+    },
+    {
+      "slug": "gravity-marble-run-deluxe",
+      "name": "Gravity Marble Run Deluxe (120 pc)",
+      "categorySlug": "building-marble-runs-gravity",
+      "brand": "BrickWorks",
+      "priceUsd": 44.99,
+      "stock": 35,
+      "shortDescription": "A 120-piece marble run with chutes, funnels, and spinners that teaches cause-and-effect through hours of open-ended play."
+    },
+    {
+      "slug": "coding-robot-stem-kit",
+      "name": "Screen-Free Coding Robot",
+      "categorySlug": "building-stem-robotics-coding",
+      "brand": "Smartivity",
+      "priceUsd": 59.99,
+      "compareUsd": 74.99,
+      "stock": 28,
+      "shortDescription": "An introductory coding robot kids program with tactile command cards, building early logic skills without a screen."
+    },
+    {
+      "slug": "settlers-strategy-board-game",
+      "name": "Island Settlers Strategy Board Game",
+      "categorySlug": "games-board-games-strategy",
+      "brand": "TableTop Co.",
+      "priceUsd": 39.99,
+      "compareUsd": 49.99,
+      "stock": 53,
+      "shortDescription": "A modular-board trading and settlement game for 3-4 players, blending strategy and negotiation across 60-minute sessions."
+    },
+    {
+      "slug": "family-trivia-night-game",
+      "name": "Family Trivia Night Party Game",
+      "categorySlug": "games-board-games-family",
+      "brand": "TableTop Co.",
+      "priceUsd": 24.99,
+      "stock": 66,
+      "shortDescription": "Over 1,200 trivia questions across kid and adult tiers so the whole family competes fairly on game night."
+    },
+    {
+      "slug": "wooden-chess-set-classic",
+      "name": "Tournament Wooden Chess Set",
+      "categorySlug": "games-board-games-classics",
+      "brand": "Frank Puzzles",
+      "priceUsd": 34.99,
+      "compareUsd": 44.99,
+      "stock": 40,
+      "shortDescription": "A hand-finished wooden chess set with weighted Staunton pieces and a folding board that doubles as storage."
+    },
+    {
+      "slug": "uno-style-party-card-game",
+      "name": "Color Clash Party Card Game",
+      "categorySlug": "games-card-games-party",
+      "brand": "Funskool",
+      "priceUsd": 9.99,
+      "stock": 110,
+      "shortDescription": "A fast-paced matching card game for 2-10 players with wild action cards that keep every round unpredictable."
+    },
+    {
+      "slug": "rainforest-1000-piece-puzzle",
+      "name": "Rainforest Canopy 1000-Piece Puzzle",
+      "categorySlug": "games-jigsaw-puzzles-1000",
+      "brand": "Frank Puzzles",
+      "priceUsd": 16.99,
+      "compareUsd": 21.99,
+      "stock": 47,
+      "shortDescription": "A vivid 1000-piece jigsaw of a rainforest canopy printed on low-glare board for a relaxing weekend build."
+    },
+    {
+      "slug": "speed-cube-3x3-pro",
+      "name": "Pro Speed Cube 3x3",
+      "categorySlug": "games-brain-teasers-cubes",
+      "brand": "BrightMinds",
+      "priceUsd": 12.99,
+      "stock": 95,
+      "shortDescription": "A magnetic 3x3 speed cube with corner-cutting and adjustable tension for smooth, competition-ready solves."
+    },
+    {
+      "slug": "superhero-action-figure-12in",
+      "name": "Thunderbolt Superhero Figure (12 in)",
+      "categorySlug": "action-figures-superheroes",
+      "brand": "Hot Wheels",
+      "priceUsd": 27.99,
+      "compareUsd": 34.99,
+      "stock": 38,
+      "shortDescription": "A 12-inch articulated superhero figure with light-up chest emblem and swappable hands for dynamic poses."
+    },
+    {
+      "slug": "anime-collectible-figure-deku",
+      "name": "Anime Hero Collectible Figure",
+      "categorySlug": "action-figures-anime",
+      "brand": "Hamleys",
+      "priceUsd": 49.99,
+      "stock": 22,
+      "shortDescription": "A premium 1/8-scale anime collectible figure on a dynamic display base, faithfully sculpted for serious fans."
+    },
+    {
+      "slug": "blind-box-mini-figure-series3",
+      "name": "Mystery Mini Figure Blind Box (Series 3)",
+      "categorySlug": "action-collectible-figures-blind-box",
+      "brand": "CuddleCo",
+      "priceUsd": 6.99,
+      "stock": 120,
+      "shortDescription": "A surprise blind box with one of twelve collectible mini figures, including a rare chase variant to hunt for."
+    },
+    {
+      "slug": "kids-kick-scooter-3wheel",
+      "name": "3-Wheel Lean-to-Steer Kick Scooter",
+      "categorySlug": "outdoor-ride-ons-scooters",
+      "brand": "PlayMax",
+      "priceUsd": 54.99,
+      "compareUsd": 69.99,
+      "stock": 31,
+      "shortDescription": "A stable three-wheel scooter with lean-to-steer control and a height-adjustable handlebar that grows with your child."
+    },
+    {
+      "slug": "foam-dart-blaster-rapid",
+      "name": "Rapid-Fire Foam Dart Blaster",
+      "categorySlug": "outdoor-blasters-water-foam",
+      "brand": "Nerf",
+      "priceUsd": 29.99,
+      "compareUsd": 36.99,
+      "stock": 60,
+      "shortDescription": "A motorized foam dart blaster with a 10-dart clip and 25-meter range for fast-paced backyard battles."
+    },
+    {
+      "slug": "counting-bears-math-set",
+      "name": "Rainbow Counting Bears Math Set",
+      "categorySlug": "early-learning-educational-counting",
+      "brand": "Skillmatics",
+      "priceUsd": 18.99,
+      "stock": 84,
+      "shortDescription": "Sixty sorting bears in six colors with cups and dice that build counting, sorting, and early math skills through play."
+    }
+  ]
+}

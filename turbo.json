@@ -1,0 +1,59 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+
+  "globalDependencies": [
+    "**/.env",
+    "tsconfig.json",
+    "turbo.json",
+    "apps/shop/core/**",
+    "apps/shop/themes/**",
+    "apps/booking/core/**",
+    "apps/booking/themes/**",
+    "apps/web/core/**",
+    "apps/web/themes/**"
+  ],
+
+  "globalPassThroughEnv": [
+    "NODE_ENV",
+    "BUILD_COMMIT",
+    "BUILD_TIME",
+    "DATABASE_URL",
+    "NEXT_PUBLIC_API_URL",
+    "NEXT_PUBLIC_PLATFORM_DOMAIN",
+    "NEXT_PUBLIC_PLATFORM_URL",
+    "NEXT_PUBLIC_TURNSTILE_SITE_KEY"
+  ],
+
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [
+        ".next/**",
+        "!.next/cache/**",
+        "dist/**",
+        "build/**"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!.next/**",
+        "!dist/**",
+        "!build/**",
+        "!coverage/**"
+      ]
+    },
+
+    "lint": {
+      "outputs": []
+    },
+
+    "test": {
+      "dependsOn": ["^build"],
+      "outputs": ["coverage/**"]
+    },
+
+    "dev": {
+      "cache": false,
+      "persistent": true
+    }
+  }
+}

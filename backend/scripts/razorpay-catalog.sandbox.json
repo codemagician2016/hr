@@ -1,0 +1,137 @@
+{
+  "environment": "test",
+  "country": "IN",
+  "currency": "INR",
+  "tiers": {
+    "static-starter:STATIC": {
+      "tierSlug": "static-starter",
+      "vertical": "STATIC",
+      "tierName": "Starter",
+      "monthly": {
+        "planId": "plan_SxQvU06kyDlXo3",
+        "amountMinor": 35900
+      },
+      "annual": {
+        "planId": "plan_SxQvUxNhkSq6Ue",
+        "amountMinor": 344640
+      }
+    },
+    "free:APPOINTMENT": {
+      "tierSlug": "free",
+      "vertical": "APPOINTMENT",
+      "tierName": "Solo",
+      "monthly": {
+        "planId": "plan_SxQvVREaWp438F",
+        "amountMinor": 29900
+      },
+      "annual": {
+        "planId": "plan_SxQvW0eUPWynLF",
+        "amountMinor": 287040
+      }
+    },
+    "starter:APPOINTMENT": {
+      "tierSlug": "starter",
+      "vertical": "APPOINTMENT",
+      "tierName": "Starter",
+      "monthly": {
+        "planId": "plan_SxQvWSRk6DXqdm",
+        "amountMinor": 59900
+      },
+      "annual": {
+        "planId": "plan_SxQvWs7HyTgtSz",
+        "amountMinor": 575040
+      }
+    },
+    "ecom-starter:ECOMMERCE": {
+      "tierSlug": "ecom-starter",
+      "vertical": "ECOMMERCE",
+      "tierName": "Starter",
+      "monthly": {
+        "planId": "plan_SxQvXEryAkGjE8",
+        "amountMinor": 249900
+      },
+      "annual": {
+        "planId": "plan_SxQvXdTlKJeCol",
+        "amountMinor": 2399040
+      }
+    },
+    "static-professional:STATIC": {
+      "tierSlug": "static-professional",
+      "vertical": "STATIC",
+      "tierName": "Professional",
+      "monthly": {
+        "planId": "plan_SxQvXzBjLt9XKO",
+        "amountMinor": 89900
+      },
+      "annual": {
+        "planId": "plan_SxQvYOAMgCtjpg",
+        "amountMinor": 863040
+      }
+    },
+    "professional:APPOINTMENT": {
+      "tierSlug": "professional",
+      "vertical": "APPOINTMENT",
+      "tierName": "Professional",
+      "monthly": {
+        "planId": "plan_SxQvYpHBVzajeL",
+        "amountMinor": 149900
+      },
+      "annual": {
+        "planId": "plan_SxQvZEJW3u1v2i",
+        "amountMinor": 1439040
+      }
+    },
+    "ecom-professional:ECOMMERCE": {
+      "tierSlug": "ecom-professional",
+      "vertical": "ECOMMERCE",
+      "tierName": "Professional",
+      "monthly": {
+        "planId": "plan_SxQvZZqF2FZ1eG",
+        "amountMinor": 459900
+      },
+      "annual": {
+        "planId": "plan_SxQvZwV34fRJoV",
+        "amountMinor": 4415040
+      }
+    },
+    "business:APPOINTMENT": {
+      "tierSlug": "business",
+      "vertical": "APPOINTMENT",
+      "tierName": "Business",
+      "monthly": {
+        "planId": "plan_SxQvaLfKlA1viP",
+        "amountMinor": 399900
+      },
+      "annual": {
+        "planId": "plan_SxQvamwzEvme8H",
+        "amountMinor": 3839040
+      }
+    },
+    "ecom-business:ECOMMERCE": {
+      "tierSlug": "ecom-business",
+      "vertical": "ECOMMERCE",
+      "tierName": "Business",
+      "monthly": {
+        "planId": "plan_SxQvbEJ8t2z1I3",
+        "amountMinor": 929900
+      },
+      "annual": {
+        "planId": "plan_SxQvbgY16bC9Un",
+        "amountMinor": 8927040
+      }
+    },
+    "static-business:STATIC": {
+      "tierSlug": "static-business",
+      "vertical": "STATIC",
+      "tierName": "Business",
+      "monthly": {
+        "planId": "plan_SxQvc6eY5FYzxD",
+        "amountMinor": 239900
+      },
+      "annual": {
+        "planId": "plan_SxQvcTPkbveJcb",
+        "amountMinor": 2303040
+      }
+    }
+  }
+}

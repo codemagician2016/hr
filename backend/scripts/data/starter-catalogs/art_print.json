@@ -1,0 +1,442 @@
+{
+  "theme": "art_print",
+  "categories": [
+    {
+      "slug": "wall-art",
+      "name": "Wall Art",
+      "children": [
+        {
+          "slug": "wall-art-abstract",
+          "name": "Abstract",
+          "children": [
+            {
+              "slug": "wall-art-abstract-geometric",
+              "name": "Geometric"
+            },
+            {
+              "slug": "wall-art-abstract-colour-field",
+              "name": "Colour Field"
+            },
+            {
+              "slug": "wall-art-abstract-line",
+              "name": "Abstract Line Art"
+            }
+          ]
+        },
+        {
+          "slug": "wall-art-botanical",
+          "name": "Botanical & Floral",
+          "children": [
+            {
+              "slug": "wall-art-botanical-leaves",
+              "name": "Leaves & Foliage"
+            },
+            {
+              "slug": "wall-art-botanical-flowers",
+              "name": "Flowers"
+            },
+            {
+              "slug": "wall-art-botanical-vintage",
+              "name": "Vintage Botanical"
+            }
+          ]
+        },
+        {
+          "slug": "wall-art-landscape",
+          "name": "Landscape & Nature",
+          "children": [
+            {
+              "slug": "wall-art-landscape-mountains",
+              "name": "Mountains"
+            },
+            {
+              "slug": "wall-art-landscape-coastal",
+              "name": "Coastal & Ocean"
+            },
+            {
+              "slug": "wall-art-landscape-desert",
+              "name": "Desert"
+            }
+          ]
+        },
+        {
+          "slug": "wall-art-maps",
+          "name": "Maps & Cities",
+          "children": [
+            {
+              "slug": "wall-art-maps-city",
+              "name": "City Maps"
+            },
+            {
+              "slug": "wall-art-maps-world",
+              "name": "World Maps"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "photography",
+      "name": "Photography Prints",
+      "children": [
+        {
+          "slug": "photography-black-white",
+          "name": "Black & White",
+          "children": [
+            {
+              "slug": "photography-black-white-architecture",
+              "name": "Architecture"
+            },
+            {
+              "slug": "photography-black-white-street",
+              "name": "Street"
+            },
+            {
+              "slug": "photography-black-white-portrait",
+              "name": "Portrait"
+            }
+          ]
+        },
+        {
+          "slug": "photography-travel",
+          "name": "Travel & Places",
+          "children": [
+            {
+              "slug": "photography-travel-india",
+              "name": "India"
+            },
+            {
+              "slug": "photography-travel-europe",
+              "name": "Europe"
+            },
+            {
+              "slug": "photography-travel-aerial",
+              "name": "Aerial & Drone"
+            }
+          ]
+        },
+        {
+          "slug": "photography-fine-art",
+          "name": "Fine Art Photography",
+          "children": [
+            {
+              "slug": "photography-fine-art-still-life",
+              "name": "Still Life"
+            },
+            {
+              "slug": "photography-fine-art-long-exposure",
+              "name": "Long Exposure"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "typography",
+      "name": "Typography & Quotes",
+      "children": [
+        {
+          "slug": "typography-motivational",
+          "name": "Motivational",
+          "children": [
+            {
+              "slug": "typography-motivational-office",
+              "name": "Office & Desk"
+            },
+            {
+              "slug": "typography-motivational-affirmations",
+              "name": "Affirmations"
+            }
+          ]
+        },
+        {
+          "slug": "typography-minimalist",
+          "name": "Minimalist Type",
+          "children": [
+            {
+              "slug": "typography-minimalist-single-word",
+              "name": "Single Word"
+            },
+            {
+              "slug": "typography-minimalist-line-quotes",
+              "name": "Line Quotes"
+            }
+          ]
+        },
+        {
+          "slug": "typography-music-film",
+          "name": "Music & Film",
+          "children": [
+            {
+              "slug": "typography-music-film-lyrics",
+              "name": "Song Lyrics"
+            },
+            {
+              "slug": "typography-music-film-movie",
+              "name": "Movie Quotes"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "by-room",
+      "name": "Shop By Room",
+      "children": [
+        {
+          "slug": "by-room-living-room",
+          "name": "Living Room",
+          "children": [
+            {
+              "slug": "by-room-living-room-statement",
+              "name": "Statement Pieces"
+            },
+            {
+              "slug": "by-room-living-room-gallery-sets",
+              "name": "Gallery Wall Sets"
+            }
+          ]
+        },
+        {
+          "slug": "by-room-nursery",
+          "name": "Nursery & Kids",
+          "children": [
+            {
+              "slug": "by-room-nursery-animals",
+              "name": "Animal Friends"
+            },
+            {
+              "slug": "by-room-nursery-alphabet",
+              "name": "Alphabet & Numbers"
+            }
+          ]
+        },
+        {
+          "slug": "by-room-kitchen",
+          "name": "Kitchen & Dining",
+          "children": [
+            {
+              "slug": "by-room-kitchen-food-art",
+              "name": "Food Illustrations"
+            },
+            {
+              "slug": "by-room-kitchen-bar-cart",
+              "name": "Bar & Cocktails"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "framed-canvas",
+      "name": "Framed & Canvas",
+      "children": [
+        {
+          "slug": "framed-canvas-framed-prints",
+          "name": "Framed Prints",
+          "children": [
+            {
+              "slug": "framed-canvas-framed-prints-oak",
+              "name": "Oak Frame"
+            },
+            {
+              "slug": "framed-canvas-framed-prints-black",
+              "name": "Black Frame"
+            }
+          ]
+        },
+        {
+          "slug": "framed-canvas-canvas",
+          "name": "Canvas & Stretched",
+          "children": [
+            {
+              "slug": "framed-canvas-canvas-gallery-wrap",
+              "name": "Gallery Wrap"
+            },
+            {
+              "slug": "framed-canvas-canvas-multi-panel",
+              "name": "Multi-Panel"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "brandsByCountry": {
+    "IN": [
+      "India Circus",
+      "Chumbak",
+      "The Art Sutra",
+      "Tallenge Store",
+      "ArtzFolio",
+      "999Store",
+      "DailyObjects",
+      "Nappa Dori"
+    ],
+    "default": [
+      "Atelier Wall",
+      "Desenio",
+      "JUNIQE",
+      "Posterstore",
+      "King & McGaw",
+      "Inkfish Editions",
+      "North & Frame"
+    ]
+  },
+  "products": [
+    {
+      "slug": "umber-arch-geometric-print",
+      "name": "Umber Arch Geometric Print",
+      "categorySlug": "wall-art-abstract-geometric",
+      "brand": "Atelier Wall",
+      "priceUsd": 34,
+      "compareUsd": 45,
+      "stock": 64,
+      "shortDescription": "Warm terracotta arches and clean geometric blocks for a modern mid-century wall."
+    },
+    {
+      "slug": "dusk-colour-field-no-4",
+      "name": "Dusk Colour Field No. 4",
+      "categorySlug": "wall-art-abstract-colour-field",
+      "brand": "Inkfish Editions",
+      "priceUsd": 39,
+      "stock": 42,
+      "shortDescription": "Soft gradient bands of rose and slate that bring a calm, painterly mood to any room."
+    },
+    {
+      "slug": "eucalyptus-leaf-study-set",
+      "name": "Eucalyptus Leaf Study",
+      "categorySlug": "wall-art-botanical-leaves",
+      "brand": "Desenio",
+      "priceUsd": 24,
+      "compareUsd": 32,
+      "stock": 88,
+      "shortDescription": "Delicate hand-painted eucalyptus sprigs on a warm off-white ground."
+    },
+    {
+      "slug": "vintage-fern-botanical-plate",
+      "name": "Vintage Fern Botanical Plate",
+      "categorySlug": "wall-art-botanical-vintage",
+      "brand": "King & McGaw",
+      "priceUsd": 29,
+      "stock": 51,
+      "shortDescription": "A restored 19th-century botanical engraving of a curling fern, rich in antique detail."
+    },
+    {
+      "slug": "himalayan-peaks-at-dawn",
+      "name": "Himalayan Peaks at Dawn",
+      "categorySlug": "wall-art-landscape-mountains",
+      "brand": "Tallenge Store",
+      "priceUsd": 36,
+      "compareUsd": 49,
+      "stock": 37,
+      "shortDescription": "Snow-capped Himalayan ridges glowing under a soft first-light sky."
+    },
+    {
+      "slug": "konkan-coast-minimal-seascape",
+      "name": "Konkan Coast Minimal Seascape",
+      "categorySlug": "wall-art-landscape-coastal",
+      "brand": "The Art Sutra",
+      "priceUsd": 31,
+      "stock": 46,
+      "shortDescription": "A pared-back horizon of teal water and pale sand inspired by India's western coast."
+    },
+    {
+      "slug": "mumbai-street-map-charcoal",
+      "name": "Mumbai Street Map in Charcoal",
+      "categorySlug": "wall-art-maps-city",
+      "brand": "DailyObjects",
+      "priceUsd": 28,
+      "compareUsd": 38,
+      "stock": 59,
+      "shortDescription": "A finely detailed charcoal-on-cream street map of Mumbai for the city-lover's wall."
+    },
+    {
+      "slug": "monsoon-marine-drive-bw",
+      "name": "Monsoon at Marine Drive",
+      "categorySlug": "photography-black-white-architecture",
+      "brand": "Tallenge Store",
+      "priceUsd": 42,
+      "stock": 33,
+      "shortDescription": "A moody black-and-white capture of Marine Drive's curve under heavy monsoon cloud."
+    },
+    {
+      "slug": "varanasi-ghats-golden-hour",
+      "name": "Varanasi Ghats at Golden Hour",
+      "categorySlug": "photography-travel-india",
+      "brand": "ArtzFolio",
+      "priceUsd": 38,
+      "compareUsd": 52,
+      "stock": 41,
+      "shortDescription": "Warm sunrise light spilling over the steps and boats of the Varanasi riverfront."
+    },
+    {
+      "slug": "still-waters-long-exposure",
+      "name": "Still Waters — Long Exposure",
+      "categorySlug": "photography-fine-art-long-exposure",
+      "brand": "Inkfish Editions",
+      "priceUsd": 54,
+      "compareUsd": 69,
+      "stock": 22,
+      "shortDescription": "A silky, glass-smooth lake at twilight captured in a slow thirty-second exposure."
+    },
+    {
+      "slug": "stay-curious-desk-print",
+      "name": "Stay Curious Desk Print",
+      "categorySlug": "typography-motivational-office",
+      "brand": "Chumbak",
+      "priceUsd": 19,
+      "stock": 96,
+      "shortDescription": "A cheerful two-word reminder in bold retro type to keep the workday inspired."
+    },
+    {
+      "slug": "breathe-single-word-minimal",
+      "name": "Breathe — Minimalist Word Print",
+      "categorySlug": "typography-minimalist-single-word",
+      "brand": "Posterstore",
+      "priceUsd": 16,
+      "compareUsd": 22,
+      "stock": 110,
+      "shortDescription": "One quiet word in a clean serif, set in generous white space for a calming nook."
+    },
+    {
+      "slug": "gallery-wall-set-of-six-neutral",
+      "name": "Neutral Gallery Wall Set of 6",
+      "categorySlug": "by-room-living-room-gallery-sets",
+      "brand": "Desenio",
+      "priceUsd": 79,
+      "compareUsd": 108,
+      "stock": 28,
+      "shortDescription": "Six coordinated abstract and line-art prints curated to build an instant gallery wall."
+    },
+    {
+      "slug": "little-fox-nursery-print",
+      "name": "Little Fox Nursery Print",
+      "categorySlug": "by-room-nursery-animals",
+      "brand": "India Circus",
+      "priceUsd": 21,
+      "stock": 73,
+      "shortDescription": "A sweet sleepy fox in soft pastels, sized perfectly for a cot-side nursery wall."
+    },
+    {
+      "slug": "oak-framed-coastal-print-a2",
+      "name": "Oak-Framed Coastal Print (A2)",
+      "categorySlug": "framed-canvas-framed-prints-oak",
+      "brand": "North & Frame",
+      "priceUsd": 89,
+      "compareUsd": 119,
+      "stock": 18,
+      "shortDescription": "A serene coastal scene hand-assembled in a solid light-oak frame, ready to hang."
+    },
+    {
+      "slug": "abstract-triptych-canvas-panels",
+      "name": "Abstract Triptych Canvas (3-Panel)",
+      "categorySlug": "framed-canvas-canvas-multi-panel",
+      "brand": "999Store",
+      "priceUsd": 124,
+      "compareUsd": 165,
+      "stock": 14,
+      "shortDescription": "A bold three-panel abstract on stretched gallery-wrap canvas for a statement living room."
+    }
+  ]
+}

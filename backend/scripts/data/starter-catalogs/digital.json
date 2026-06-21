@@ -1,0 +1,447 @@
+{
+  "theme": "digital",
+  "categories": [
+    {
+      "slug": "software-licenses",
+      "name": "Software & Licenses",
+      "children": [
+        {
+          "slug": "software-creative-apps",
+          "name": "Creative Apps",
+          "children": [
+            {
+              "slug": "software-creative-photo-editors",
+              "name": "Photo Editors"
+            },
+            {
+              "slug": "software-creative-video-editors",
+              "name": "Video Editors"
+            },
+            {
+              "slug": "software-creative-audio-tools",
+              "name": "Audio & Music Tools"
+            }
+          ]
+        },
+        {
+          "slug": "software-productivity",
+          "name": "Productivity",
+          "children": [
+            {
+              "slug": "software-productivity-office-suites",
+              "name": "Office Suites"
+            },
+            {
+              "slug": "software-productivity-pdf-tools",
+              "name": "PDF Tools"
+            },
+            {
+              "slug": "software-productivity-note-apps",
+              "name": "Note-Taking Apps"
+            }
+          ]
+        },
+        {
+          "slug": "software-developer-tools",
+          "name": "Developer Tools",
+          "children": [
+            {
+              "slug": "software-developer-ides",
+              "name": "IDEs & Editors"
+            },
+            {
+              "slug": "software-developer-database-tools",
+              "name": "Database Tools"
+            }
+          ]
+        },
+        {
+          "slug": "software-security",
+          "name": "Security & VPN",
+          "children": [
+            {
+              "slug": "software-security-antivirus",
+              "name": "Antivirus"
+            },
+            {
+              "slug": "software-security-vpn",
+              "name": "VPN Subscriptions"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "ebooks-audiobooks",
+      "name": "eBooks & Audiobooks",
+      "children": [
+        {
+          "slug": "ebooks-fiction",
+          "name": "Fiction",
+          "children": [
+            {
+              "slug": "ebooks-fiction-thriller",
+              "name": "Thriller & Mystery"
+            },
+            {
+              "slug": "ebooks-fiction-scifi-fantasy",
+              "name": "Sci-Fi & Fantasy"
+            }
+          ]
+        },
+        {
+          "slug": "ebooks-nonfiction",
+          "name": "Non-Fiction",
+          "children": [
+            {
+              "slug": "ebooks-nonfiction-business",
+              "name": "Business & Money"
+            },
+            {
+              "slug": "ebooks-nonfiction-self-help",
+              "name": "Self-Help"
+            },
+            {
+              "slug": "ebooks-nonfiction-tech",
+              "name": "Tech & Programming"
+            }
+          ]
+        },
+        {
+          "slug": "ebooks-audiobooks-category",
+          "name": "Audiobooks",
+          "children": [
+            {
+              "slug": "ebooks-audiobooks-narrated-fiction",
+              "name": "Narrated Fiction"
+            },
+            {
+              "slug": "ebooks-audiobooks-business-audio",
+              "name": "Business & Growth"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "templates-graphics",
+      "name": "Templates & Graphics",
+      "children": [
+        {
+          "slug": "templates-design",
+          "name": "Design Templates",
+          "children": [
+            {
+              "slug": "templates-design-presentations",
+              "name": "Presentations & Pitch Decks"
+            },
+            {
+              "slug": "templates-design-social-media",
+              "name": "Social Media Kits"
+            },
+            {
+              "slug": "templates-design-resumes",
+              "name": "Resumes & CVs"
+            }
+          ]
+        },
+        {
+          "slug": "templates-notion-docs",
+          "name": "Notion & Docs",
+          "children": [
+            {
+              "slug": "templates-notion-productivity",
+              "name": "Productivity Systems"
+            },
+            {
+              "slug": "templates-notion-finance",
+              "name": "Budget & Finance Trackers"
+            }
+          ]
+        },
+        {
+          "slug": "templates-stock-assets",
+          "name": "Stock Assets",
+          "children": [
+            {
+              "slug": "templates-stock-icons",
+              "name": "Icon Packs"
+            },
+            {
+              "slug": "templates-stock-mockups",
+              "name": "Mockups & Scenes"
+            },
+            {
+              "slug": "templates-stock-fonts",
+              "name": "Fonts & Typefaces"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "online-courses",
+      "name": "Online Courses",
+      "children": [
+        {
+          "slug": "courses-tech",
+          "name": "Tech & Coding",
+          "children": [
+            {
+              "slug": "courses-tech-web-development",
+              "name": "Web Development"
+            },
+            {
+              "slug": "courses-tech-data-ai",
+              "name": "Data & AI"
+            }
+          ]
+        },
+        {
+          "slug": "courses-creative",
+          "name": "Design & Creative",
+          "children": [
+            {
+              "slug": "courses-creative-ui-ux",
+              "name": "UI/UX Design"
+            },
+            {
+              "slug": "courses-creative-photography",
+              "name": "Photography & Video"
+            }
+          ]
+        },
+        {
+          "slug": "courses-business",
+          "name": "Business & Marketing",
+          "children": [
+            {
+              "slug": "courses-business-digital-marketing",
+              "name": "Digital Marketing"
+            },
+            {
+              "slug": "courses-business-finance",
+              "name": "Finance & Investing"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "music-media",
+      "name": "Music & Media",
+      "children": [
+        {
+          "slug": "music-production",
+          "name": "Music Production",
+          "children": [
+            {
+              "slug": "music-production-sample-packs",
+              "name": "Sample Packs"
+            },
+            {
+              "slug": "music-production-preset-banks",
+              "name": "Synth Preset Banks"
+            }
+          ]
+        },
+        {
+          "slug": "media-stock-footage",
+          "name": "Stock Footage & Audio",
+          "children": [
+            {
+              "slug": "media-stock-royalty-free-music",
+              "name": "Royalty-Free Music"
+            },
+            {
+              "slug": "media-stock-video-clips",
+              "name": "4K Video Clips"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "brandsByCountry": {
+    "IN": [
+      "Quick Heal",
+      "Tally Solutions",
+      "Zoho",
+      "Unacademy",
+      "upGrad",
+      "Westland Books",
+      "Pratilipi",
+      "Pocket FM",
+      "BharatVerse Studio",
+      "Razorpay Press"
+    ],
+    "default": [
+      "PixelForge Studio",
+      "Brightleaf Press",
+      "NoteNest",
+      "Lumen Labs",
+      "Soundwave Audio",
+      "DeckCraft",
+      "Vaultline Security",
+      "Glyphhouse"
+    ]
+  },
+  "products": [
+    {
+      "slug": "pixelforge-photo-studio-pro",
+      "name": "PixelForge Photo Studio Pro (Lifetime License)",
+      "categorySlug": "software-creative-photo-editors",
+      "brand": "PixelForge Studio",
+      "priceUsd": 79,
+      "compareUsd": 149,
+      "stock": 9999,
+      "shortDescription": "A pro-grade photo editor with AI masking, RAW support and non-destructive layers, unlocked for life with one instant license key."
+    },
+    {
+      "slug": "lumen-cut-4k-video-editor",
+      "name": "Lumen Cut 4K Video Editor (1-Year License)",
+      "categorySlug": "software-creative-video-editors",
+      "brand": "Lumen Labs",
+      "priceUsd": 59,
+      "stock": 9999,
+      "shortDescription": "Edit, colour-grade and export 4K video with GPU-accelerated timelines and 200+ transitions, delivered as an instant download."
+    },
+    {
+      "slug": "soundwave-daw-music-suite",
+      "name": "Soundwave DAW Music Production Suite",
+      "categorySlug": "software-creative-audio-tools",
+      "brand": "Soundwave Audio",
+      "priceUsd": 99,
+      "compareUsd": 179,
+      "stock": 9999,
+      "shortDescription": "A full digital audio workstation with unlimited tracks, 50 built-in instruments and VST support for producing tracks start to finish."
+    },
+    {
+      "slug": "zoho-workplace-business-suite",
+      "name": "Zoho Workplace Business Suite (Annual)",
+      "categorySlug": "software-productivity-office-suites",
+      "brand": "Zoho",
+      "priceUsd": 36,
+      "stock": 9999,
+      "shortDescription": "Cloud-based mail, docs, sheets and slides for your whole team, activated instantly to your account after checkout."
+    },
+    {
+      "slug": "notenest-pro-lifetime",
+      "name": "NoteNest Pro Note-Taking App (Lifetime)",
+      "categorySlug": "software-productivity-note-apps",
+      "brand": "NoteNest",
+      "priceUsd": 49,
+      "compareUsd": 89,
+      "stock": 9999,
+      "shortDescription": "Capture notes, web clips and to-dos across all your devices with end-to-end sync and offline access, unlocked forever."
+    },
+    {
+      "slug": "quick-heal-total-security-3device",
+      "name": "Quick Heal Total Security (3 Devices, 1 Year)",
+      "categorySlug": "software-security-antivirus",
+      "brand": "Quick Heal",
+      "priceUsd": 24,
+      "compareUsd": 39,
+      "stock": 9999,
+      "shortDescription": "Real-time antivirus, ransomware protection and a safe-banking shield for up to three devices, with the license key emailed instantly."
+    },
+    {
+      "slug": "vaultline-vpn-2year",
+      "name": "Vaultline VPN Premium (2-Year Subscription)",
+      "categorySlug": "software-security-vpn",
+      "brand": "Vaultline Security",
+      "priceUsd": 69,
+      "compareUsd": 215,
+      "stock": 9999,
+      "shortDescription": "Encrypt your connection across 90+ countries with a strict no-logs policy and instant account access on up to 10 devices."
+    },
+    {
+      "slug": "the-silent-ledger-thriller-ebook",
+      "name": "The Silent Ledger (eBook)",
+      "categorySlug": "ebooks-fiction-thriller",
+      "brand": "Westland Books",
+      "priceUsd": 4.99,
+      "stock": 9999,
+      "shortDescription": "A twisting financial-crime thriller you can download as EPUB and PDF and start reading the moment you check out."
+    },
+    {
+      "slug": "starfall-protocol-scifi-ebook",
+      "name": "Starfall Protocol (Sci-Fi eBook)",
+      "categorySlug": "ebooks-fiction-scifi-fantasy",
+      "brand": "Brightleaf Press",
+      "priceUsd": 5.99,
+      "compareUsd": 9.99,
+      "stock": 9999,
+      "shortDescription": "An epic space-opera adventure of rogue AIs and lost colonies, delivered instantly in EPUB, MOBI and PDF formats."
+    },
+    {
+      "slug": "the-bootstrapped-founder-ebook",
+      "name": "The Bootstrapped Founder (Business eBook)",
+      "categorySlug": "ebooks-nonfiction-business",
+      "brand": "Razorpay Press",
+      "priceUsd": 12.99,
+      "compareUsd": 19.99,
+      "stock": 9999,
+      "shortDescription": "A practical 240-page playbook for building a profitable company without raising a rupee of outside funding."
+    },
+    {
+      "slug": "deep-work-mindset-audiobook",
+      "name": "The Deep Work Mindset (Audiobook)",
+      "categorySlug": "ebooks-audiobooks-business-audio",
+      "brand": "Pocket FM",
+      "priceUsd": 14.99,
+      "stock": 9999,
+      "shortDescription": "Six hours of narrated, actionable strategies to beat distraction and do your best focused work, streamable right after purchase."
+    },
+    {
+      "slug": "investor-ready-pitch-deck-pack",
+      "name": "Investor-Ready Pitch Deck Pack",
+      "categorySlug": "templates-design-presentations",
+      "brand": "DeckCraft",
+      "priceUsd": 29,
+      "compareUsd": 59,
+      "stock": 9999,
+      "shortDescription": "Four fully editable pitch decks in Keynote, PowerPoint and Google Slides, used by funded startups to raise their seed rounds."
+    },
+    {
+      "slug": "modern-resume-cv-kit",
+      "name": "Modern Resume & CV Kit (8 Templates)",
+      "categorySlug": "templates-design-resumes",
+      "brand": "Glyphhouse",
+      "priceUsd": 15,
+      "compareUsd": 29,
+      "stock": 9999,
+      "shortDescription": "Eight ATS-friendly resume and cover-letter templates in Word, Pages and Figma that you can edit and download in minutes."
+    },
+    {
+      "slug": "notion-second-brain-os",
+      "name": "Notion Second Brain OS Template",
+      "categorySlug": "templates-notion-productivity",
+      "brand": "NoteNest",
+      "priceUsd": 19,
+      "compareUsd": 39,
+      "stock": 9999,
+      "shortDescription": "An all-in-one Notion workspace for notes, tasks, projects and goals that you duplicate into your account with a single click."
+    },
+    {
+      "slug": "glyphhouse-6000-icon-pack",
+      "name": "Glyphhouse 6,000 SVG Icon Pack",
+      "categorySlug": "templates-stock-icons",
+      "brand": "Glyphhouse",
+      "priceUsd": 39,
+      "compareUsd": 79,
+      "stock": 9999,
+      "shortDescription": "A consistent 6,000-icon library in SVG and icon-font formats with Figma and Sketch plugins and free monthly updates."
+    },
+    {
+      "slug": "midnight-lofi-sample-pack",
+      "name": "Midnight Lo-Fi Sample Pack (500 Loops)",
+      "categorySlug": "music-production-sample-packs",
+      "brand": "BharatVerse Studio",
+      "priceUsd": 24,
+      "compareUsd": 45,
+      "stock": 9999,
+      "shortDescription": "Five hundred royalty-free lo-fi drum, melody and texture loops in 24-bit WAV, ready to drop into any DAW the moment you download."
+    }
+  ]
+}

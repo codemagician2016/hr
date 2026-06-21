@@ -1,0 +1,429 @@
+{
+  "theme": "jewelry_shop",
+  "categories": [
+    {
+      "slug": "rings",
+      "name": "Rings",
+      "children": [
+        {
+          "slug": "rings-engagement",
+          "name": "Engagement Rings",
+          "children": [
+            {
+              "slug": "rings-engagement-solitaire",
+              "name": "Solitaire"
+            },
+            {
+              "slug": "rings-engagement-halo",
+              "name": "Halo"
+            },
+            {
+              "slug": "rings-engagement-three-stone",
+              "name": "Three Stone"
+            }
+          ]
+        },
+        {
+          "slug": "rings-wedding-bands",
+          "name": "Wedding Bands",
+          "children": [
+            {
+              "slug": "rings-wedding-bands-classic",
+              "name": "Classic Bands"
+            },
+            {
+              "slug": "rings-wedding-bands-eternity",
+              "name": "Eternity Bands"
+            },
+            {
+              "slug": "rings-wedding-bands-mens",
+              "name": "Men's Bands"
+            }
+          ]
+        },
+        {
+          "slug": "rings-fashion",
+          "name": "Fashion Rings",
+          "children": [
+            {
+              "slug": "rings-fashion-stackable",
+              "name": "Stackable Rings"
+            },
+            {
+              "slug": "rings-fashion-cocktail",
+              "name": "Cocktail Rings"
+            },
+            {
+              "slug": "rings-fashion-signet",
+              "name": "Signet Rings"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "earrings",
+      "name": "Earrings",
+      "children": [
+        {
+          "slug": "earrings-studs",
+          "name": "Stud Earrings",
+          "children": [
+            {
+              "slug": "earrings-studs-diamond",
+              "name": "Diamond Studs"
+            },
+            {
+              "slug": "earrings-studs-pearl",
+              "name": "Pearl Studs"
+            },
+            {
+              "slug": "earrings-studs-gemstone",
+              "name": "Gemstone Studs"
+            }
+          ]
+        },
+        {
+          "slug": "earrings-hoops",
+          "name": "Hoop Earrings",
+          "children": [
+            {
+              "slug": "earrings-hoops-huggie",
+              "name": "Huggie Hoops"
+            },
+            {
+              "slug": "earrings-hoops-classic",
+              "name": "Classic Hoops"
+            }
+          ]
+        },
+        {
+          "slug": "earrings-drops",
+          "name": "Drop & Dangle Earrings",
+          "children": [
+            {
+              "slug": "earrings-drops-chandelier",
+              "name": "Chandelier"
+            },
+            {
+              "slug": "earrings-drops-threader",
+              "name": "Threaders"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "necklaces",
+      "name": "Necklaces & Pendants",
+      "children": [
+        {
+          "slug": "necklaces-pendants",
+          "name": "Pendants",
+          "children": [
+            {
+              "slug": "necklaces-pendants-diamond",
+              "name": "Diamond Pendants"
+            },
+            {
+              "slug": "necklaces-pendants-solitaire",
+              "name": "Solitaire Pendants"
+            },
+            {
+              "slug": "necklaces-pendants-birthstone",
+              "name": "Birthstone Pendants"
+            }
+          ]
+        },
+        {
+          "slug": "necklaces-chains",
+          "name": "Chains",
+          "children": [
+            {
+              "slug": "necklaces-chains-gold",
+              "name": "Gold Chains"
+            },
+            {
+              "slug": "necklaces-chains-rope",
+              "name": "Rope Chains"
+            }
+          ]
+        },
+        {
+          "slug": "necklaces-statement",
+          "name": "Statement Necklaces",
+          "children": [
+            {
+              "slug": "necklaces-statement-tennis",
+              "name": "Tennis Necklaces"
+            },
+            {
+              "slug": "necklaces-statement-choker",
+              "name": "Chokers"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "bracelets",
+      "name": "Bracelets & Bangles",
+      "children": [
+        {
+          "slug": "bracelets-tennis",
+          "name": "Tennis Bracelets",
+          "children": [
+            {
+              "slug": "bracelets-tennis-diamond",
+              "name": "Diamond Tennis"
+            },
+            {
+              "slug": "bracelets-tennis-gemstone",
+              "name": "Gemstone Tennis"
+            }
+          ]
+        },
+        {
+          "slug": "bracelets-bangles",
+          "name": "Bangles & Cuffs",
+          "children": [
+            {
+              "slug": "bracelets-bangles-gold",
+              "name": "Gold Bangles"
+            },
+            {
+              "slug": "bracelets-bangles-cuff",
+              "name": "Cuffs"
+            }
+          ]
+        },
+        {
+          "slug": "bracelets-charm",
+          "name": "Charm Bracelets",
+          "children": [
+            {
+              "slug": "bracelets-charm-classic",
+              "name": "Charm Bracelets"
+            },
+            {
+              "slug": "bracelets-charm-tennis-link",
+              "name": "Link Bracelets"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "watches",
+      "name": "Watches",
+      "children": [
+        {
+          "slug": "watches-womens",
+          "name": "Women's Watches",
+          "children": [
+            {
+              "slug": "watches-womens-dress",
+              "name": "Dress Watches"
+            },
+            {
+              "slug": "watches-womens-bracelet",
+              "name": "Bracelet Watches"
+            }
+          ]
+        },
+        {
+          "slug": "watches-mens",
+          "name": "Men's Watches",
+          "children": [
+            {
+              "slug": "watches-mens-dress",
+              "name": "Dress Watches"
+            },
+            {
+              "slug": "watches-mens-chronograph",
+              "name": "Chronographs"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "brandsByCountry": {
+    "IN": [
+      "Tanishq",
+      "Kalyan Jewellers",
+      "Malabar Gold & Diamonds",
+      "CaratLane",
+      "PC Jeweller",
+      "Senco Gold & Diamonds",
+      "Mia by Tanishq",
+      "BlueStone",
+      "Titan"
+    ],
+    "default": [
+      "Aurelia",
+      "Lustre & Co.",
+      "Maison Or",
+      "Étoile Fine Jewellery",
+      "Verena",
+      "Solène",
+      "Goldhaus"
+    ]
+  },
+  "products": [
+    {
+      "slug": "celeste-solitaire-diamond-engagement-ring",
+      "name": "Celeste Solitaire Diamond Engagement Ring",
+      "categorySlug": "rings-engagement-solitaire",
+      "brand": "Aurelia",
+      "priceUsd": 2899,
+      "compareUsd": 3499,
+      "stock": 18,
+      "shortDescription": "A brilliant-cut 0.75ct lab-grown diamond set in a timeless six-prong 18K white gold band."
+    },
+    {
+      "slug": "aria-halo-diamond-engagement-ring",
+      "name": "Aria Halo Diamond Engagement Ring",
+      "categorySlug": "rings-engagement-halo",
+      "brand": "BlueStone",
+      "priceUsd": 1949,
+      "stock": 24,
+      "shortDescription": "A radiant centre stone framed by a sparkling halo of pavé diamonds for maximum brilliance."
+    },
+    {
+      "slug": "milgrain-classic-wedding-band",
+      "name": "Milgrain Classic Wedding Band",
+      "categorySlug": "rings-wedding-bands-classic",
+      "brand": "CaratLane",
+      "priceUsd": 459,
+      "compareUsd": 599,
+      "stock": 60,
+      "shortDescription": "A slim 14K yellow gold band with delicate milgrain edging, comfortable for everyday wear."
+    },
+    {
+      "slug": "infinity-diamond-eternity-band",
+      "name": "Infinity Diamond Eternity Band",
+      "categorySlug": "rings-wedding-bands-eternity",
+      "brand": "Étoile Fine Jewellery",
+      "priceUsd": 1299,
+      "compareUsd": 1599,
+      "stock": 30,
+      "shortDescription": "A full circle of channel-set round diamonds totalling 1ct in lustrous 18K white gold."
+    },
+    {
+      "slug": "stacking-trio-ring-set",
+      "name": "Petite Stacking Trio Ring Set",
+      "categorySlug": "rings-fashion-stackable",
+      "brand": "Mia by Tanishq",
+      "priceUsd": 329,
+      "stock": 75,
+      "shortDescription": "Three mix-and-match dainty bands in yellow, white and rose gold finishes to layer your way."
+    },
+    {
+      "slug": "emerald-cocktail-statement-ring",
+      "name": "Verena Emerald Cocktail Ring",
+      "categorySlug": "rings-fashion-cocktail",
+      "brand": "Verena",
+      "priceUsd": 789,
+      "compareUsd": 949,
+      "stock": 22,
+      "shortDescription": "A bold emerald-green gemstone surrounded by sparkling accents on a sculpted gold-tone band."
+    },
+    {
+      "slug": "classic-diamond-stud-earrings",
+      "name": "Classic Round Diamond Stud Earrings",
+      "categorySlug": "earrings-studs-diamond",
+      "brand": "Tanishq",
+      "priceUsd": 1099,
+      "compareUsd": 1349,
+      "stock": 40,
+      "shortDescription": "A timeless pair of 0.50ctw brilliant-round diamonds in secure four-prong 18K gold settings."
+    },
+    {
+      "slug": "akoya-pearl-stud-earrings",
+      "name": "Akoya Pearl Stud Earrings",
+      "categorySlug": "earrings-studs-pearl",
+      "brand": "Lustre & Co.",
+      "priceUsd": 219,
+      "stock": 65,
+      "shortDescription": "Lustrous 7mm cultured Akoya pearls on 14K gold posts — an elegant everyday classic."
+    },
+    {
+      "slug": "pave-diamond-huggie-hoops",
+      "name": "Pavé Diamond Huggie Hoop Earrings",
+      "categorySlug": "earrings-hoops-huggie",
+      "brand": "Maison Or",
+      "priceUsd": 549,
+      "compareUsd": 699,
+      "stock": 48,
+      "shortDescription": "Snug 14K gold huggie hoops lined with shimmering pavé diamonds for subtle all-day sparkle."
+    },
+    {
+      "slug": "amethyst-threader-drop-earrings",
+      "name": "Amethyst Threader Drop Earrings",
+      "categorySlug": "earrings-drops-threader",
+      "brand": "Solène",
+      "priceUsd": 189,
+      "stock": 54,
+      "shortDescription": "Delicate gold threaders ending in a faceted amethyst drop that glides gracefully through the ear."
+    },
+    {
+      "slug": "solitaire-diamond-pendant-necklace",
+      "name": "Solitaire Diamond Pendant Necklace",
+      "categorySlug": "necklaces-pendants-solitaire",
+      "brand": "CaratLane",
+      "priceUsd": 699,
+      "compareUsd": 849,
+      "stock": 38,
+      "shortDescription": "A floating 0.30ct round diamond on an adjustable 16–18 inch 18K white gold chain."
+    },
+    {
+      "slug": "18k-gold-rope-chain-necklace",
+      "name": "18K Gold Rope Chain Necklace",
+      "categorySlug": "necklaces-chains-rope",
+      "brand": "Malabar Gold & Diamonds",
+      "priceUsd": 1249,
+      "stock": 26,
+      "shortDescription": "A substantial 3mm twisted rope chain in solid 18K yellow gold with a secure lobster clasp."
+    },
+    {
+      "slug": "graduated-diamond-tennis-necklace",
+      "name": "Graduated Diamond Tennis Necklace",
+      "categorySlug": "necklaces-statement-tennis",
+      "brand": "Étoile Fine Jewellery",
+      "priceUsd": 4599,
+      "compareUsd": 5299,
+      "stock": 12,
+      "shortDescription": "A breathtaking line of graduated round diamonds totalling 5ctw set in 18K white gold."
+    },
+    {
+      "slug": "classic-diamond-tennis-bracelet",
+      "name": "Classic Diamond Tennis Bracelet",
+      "categorySlug": "bracelets-tennis-diamond",
+      "brand": "Aurelia",
+      "priceUsd": 2199,
+      "compareUsd": 2699,
+      "stock": 20,
+      "shortDescription": "A continuous row of 3ctw prong-set round diamonds in 14K gold with a safety box clasp."
+    },
+    {
+      "slug": "textured-gold-bangle",
+      "name": "Hammered Gold Bangle",
+      "categorySlug": "bracelets-bangles-gold",
+      "brand": "Senco Gold & Diamonds",
+      "priceUsd": 879,
+      "stock": 34,
+      "shortDescription": "A sleek hand-hammered 22K gold bangle that stacks beautifully or shines on its own."
+    },
+    {
+      "slug": "mother-of-pearl-bracelet-watch",
+      "name": "Mother-of-Pearl Bracelet Watch",
+      "categorySlug": "watches-womens-bracelet",
+      "brand": "Titan",
+      "priceUsd": 299,
+      "compareUsd": 379,
+      "stock": 50,
+      "shortDescription": "An elegant women's watch with a shimmering mother-of-pearl dial and a gold-tone link bracelet."
+    }
+  ]
+}

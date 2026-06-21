@@ -1,0 +1,499 @@
+{
+  "theme": "marketplace",
+  "categories": [
+    {
+      "slug": "electronics",
+      "name": "Electronics",
+      "children": [
+        {
+          "slug": "electronics-mobiles",
+          "name": "Mobiles & Tablets",
+          "children": [
+            {
+              "slug": "electronics-mobiles-smartphones",
+              "name": "Smartphones"
+            },
+            {
+              "slug": "electronics-mobiles-tablets",
+              "name": "Tablets"
+            },
+            {
+              "slug": "electronics-mobiles-accessories",
+              "name": "Phone Accessories"
+            }
+          ]
+        },
+        {
+          "slug": "electronics-audio",
+          "name": "Audio",
+          "children": [
+            {
+              "slug": "electronics-audio-headphones",
+              "name": "Headphones"
+            },
+            {
+              "slug": "electronics-audio-earbuds",
+              "name": "True Wireless Earbuds"
+            },
+            {
+              "slug": "electronics-audio-speakers",
+              "name": "Bluetooth Speakers"
+            }
+          ]
+        },
+        {
+          "slug": "electronics-computing",
+          "name": "Computing",
+          "children": [
+            {
+              "slug": "electronics-computing-laptops",
+              "name": "Laptops"
+            },
+            {
+              "slug": "electronics-computing-monitors",
+              "name": "Monitors"
+            },
+            {
+              "slug": "electronics-computing-peripherals",
+              "name": "Keyboards & Mice"
+            }
+          ]
+        },
+        {
+          "slug": "electronics-wearables",
+          "name": "Wearables",
+          "children": [
+            {
+              "slug": "electronics-wearables-smartwatches",
+              "name": "Smartwatches"
+            },
+            {
+              "slug": "electronics-wearables-fitness-bands",
+              "name": "Fitness Bands"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "fashion",
+      "name": "Fashion",
+      "children": [
+        {
+          "slug": "fashion-women",
+          "name": "Women",
+          "children": [
+            {
+              "slug": "fashion-women-dresses",
+              "name": "Dresses"
+            },
+            {
+              "slug": "fashion-women-kurtas",
+              "name": "Kurtas & Ethnic"
+            },
+            {
+              "slug": "fashion-women-tops",
+              "name": "Tops & Tees"
+            }
+          ]
+        },
+        {
+          "slug": "fashion-men",
+          "name": "Men",
+          "children": [
+            {
+              "slug": "fashion-men-tshirts",
+              "name": "T-Shirts"
+            },
+            {
+              "slug": "fashion-men-shirts",
+              "name": "Casual Shirts"
+            },
+            {
+              "slug": "fashion-men-jeans",
+              "name": "Jeans"
+            }
+          ]
+        },
+        {
+          "slug": "fashion-footwear",
+          "name": "Footwear",
+          "children": [
+            {
+              "slug": "fashion-footwear-sneakers",
+              "name": "Sneakers"
+            },
+            {
+              "slug": "fashion-footwear-sandals",
+              "name": "Sandals & Flip-Flops"
+            },
+            {
+              "slug": "fashion-footwear-formal",
+              "name": "Formal Shoes"
+            }
+          ]
+        },
+        {
+          "slug": "fashion-accessories",
+          "name": "Accessories",
+          "children": [
+            {
+              "slug": "fashion-accessories-bags",
+              "name": "Bags & Backpacks"
+            },
+            {
+              "slug": "fashion-accessories-watches",
+              "name": "Watches"
+            },
+            {
+              "slug": "fashion-accessories-sunglasses",
+              "name": "Sunglasses"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "home-kitchen",
+      "name": "Home & Kitchen",
+      "children": [
+        {
+          "slug": "home-kitchen-cookware",
+          "name": "Cookware & Appliances",
+          "children": [
+            {
+              "slug": "home-kitchen-cookware-pots-pans",
+              "name": "Pots & Pans"
+            },
+            {
+              "slug": "home-kitchen-cookware-small-appliances",
+              "name": "Small Appliances"
+            },
+            {
+              "slug": "home-kitchen-cookware-storage",
+              "name": "Kitchen Storage"
+            }
+          ]
+        },
+        {
+          "slug": "home-kitchen-decor",
+          "name": "Home Decor",
+          "children": [
+            {
+              "slug": "home-kitchen-decor-lighting",
+              "name": "Lighting"
+            },
+            {
+              "slug": "home-kitchen-decor-wall-art",
+              "name": "Wall Art"
+            },
+            {
+              "slug": "home-kitchen-decor-cushions",
+              "name": "Cushions & Throws"
+            }
+          ]
+        },
+        {
+          "slug": "home-kitchen-furnishing",
+          "name": "Furnishing",
+          "children": [
+            {
+              "slug": "home-kitchen-furnishing-bedsheets",
+              "name": "Bedsheets"
+            },
+            {
+              "slug": "home-kitchen-furnishing-curtains",
+              "name": "Curtains"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "beauty-personal-care",
+      "name": "Beauty & Personal Care",
+      "children": [
+        {
+          "slug": "beauty-skincare",
+          "name": "Skincare",
+          "children": [
+            {
+              "slug": "beauty-skincare-moisturisers",
+              "name": "Moisturisers"
+            },
+            {
+              "slug": "beauty-skincare-serums",
+              "name": "Serums"
+            },
+            {
+              "slug": "beauty-skincare-sunscreen",
+              "name": "Sunscreen"
+            }
+          ]
+        },
+        {
+          "slug": "beauty-makeup",
+          "name": "Makeup",
+          "children": [
+            {
+              "slug": "beauty-makeup-lips",
+              "name": "Lipstick"
+            },
+            {
+              "slug": "beauty-makeup-face",
+              "name": "Foundation & Face"
+            }
+          ]
+        },
+        {
+          "slug": "beauty-haircare",
+          "name": "Hair Care",
+          "children": [
+            {
+              "slug": "beauty-haircare-shampoo",
+              "name": "Shampoo & Conditioner"
+            },
+            {
+              "slug": "beauty-haircare-oils",
+              "name": "Hair Oils & Serums"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "sports-outdoors",
+      "name": "Sports & Outdoors",
+      "children": [
+        {
+          "slug": "sports-fitness",
+          "name": "Fitness Equipment",
+          "children": [
+            {
+              "slug": "sports-fitness-yoga",
+              "name": "Yoga & Mats"
+            },
+            {
+              "slug": "sports-fitness-strength",
+              "name": "Dumbbells & Strength"
+            },
+            {
+              "slug": "sports-fitness-cardio",
+              "name": "Cardio & Accessories"
+            }
+          ]
+        },
+        {
+          "slug": "sports-outdoor-gear",
+          "name": "Outdoor & Camping",
+          "children": [
+            {
+              "slug": "sports-outdoor-gear-tents",
+              "name": "Tents & Shelters"
+            },
+            {
+              "slug": "sports-outdoor-gear-bottles",
+              "name": "Water Bottles"
+            }
+          ]
+        },
+        {
+          "slug": "sports-team-sports",
+          "name": "Team & Racquet Sports",
+          "children": [
+            {
+              "slug": "sports-team-sports-cricket",
+              "name": "Cricket"
+            },
+            {
+              "slug": "sports-team-sports-badminton",
+              "name": "Badminton"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "brandsByCountry": {
+    "IN": [
+      "boAt",
+      "Noise",
+      "Mamaearth",
+      "Wildcraft",
+      "Allen Solly",
+      "Prestige",
+      "Sparx",
+      "Fastrack",
+      "Bewakoof",
+      "Yonex"
+    ],
+    "default": [
+      "Aria Living",
+      "NorthPeak",
+      "Lumina",
+      "UrbanForge",
+      "EverSoft",
+      "Vela & Co.",
+      "TrailMark",
+      "PureGlow"
+    ]
+  },
+  "products": [
+    {
+      "slug": "noise-colorfit-pulse-3-smartwatch",
+      "name": "Noise ColorFit Pulse 3 Smartwatch",
+      "categorySlug": "electronics-wearables-smartwatches",
+      "brand": "Noise",
+      "priceUsd": 34.99,
+      "compareUsd": 59.99,
+      "stock": 80,
+      "shortDescription": "A 1.96-inch AMOLED smartwatch with Bluetooth calling, 100+ sports modes and a week of battery life."
+    },
+    {
+      "slug": "boat-airdopes-141-true-wireless-earbuds",
+      "name": "boAt Airdopes 141 True Wireless Earbuds",
+      "categorySlug": "electronics-audio-earbuds",
+      "brand": "boAt",
+      "priceUsd": 17.99,
+      "compareUsd": 29.99,
+      "stock": 120,
+      "shortDescription": "Lightweight earbuds with 42 hours of total playback, low-latency BEAST mode and ENx call clarity."
+    },
+    {
+      "slug": "lumina-wave-bluetooth-speaker",
+      "name": "Lumina Wave Portable Bluetooth Speaker",
+      "categorySlug": "electronics-audio-speakers",
+      "brand": "Lumina",
+      "priceUsd": 39.99,
+      "stock": 64,
+      "shortDescription": "A pocket-sized waterproof speaker with punchy 360-degree sound and 20 hours of wireless playtime."
+    },
+    {
+      "slug": "northpeak-29-qhd-monitor",
+      "name": "NorthPeak 29-inch QHD Ultrawide Monitor",
+      "categorySlug": "electronics-computing-monitors",
+      "brand": "NorthPeak",
+      "priceUsd": 219,
+      "compareUsd": 279,
+      "stock": 22,
+      "shortDescription": "A 29-inch 100Hz ultrawide IPS display with HDR support, ideal for split-screen work and casual gaming."
+    },
+    {
+      "slug": "bewakoof-oversized-cotton-tshirt",
+      "name": "Bewakoof Oversized Cotton T-Shirt",
+      "categorySlug": "fashion-men-tshirts",
+      "brand": "Bewakoof",
+      "priceUsd": 11.99,
+      "compareUsd": 19.99,
+      "stock": 110,
+      "shortDescription": "A breathable 100% combed-cotton tee with a relaxed drop-shoulder fit for everyday street style."
+    },
+    {
+      "slug": "allen-solly-slim-fit-casual-shirt",
+      "name": "Allen Solly Slim-Fit Casual Shirt",
+      "categorySlug": "fashion-men-shirts",
+      "brand": "Allen Solly",
+      "priceUsd": 24.99,
+      "compareUsd": 44.99,
+      "stock": 70,
+      "shortDescription": "A crisp checked cotton shirt with a tailored slim fit that moves easily from desk to dinner."
+    },
+    {
+      "slug": "vela-co-floral-midi-dress",
+      "name": "Vela & Co. Floral Wrap Midi Dress",
+      "categorySlug": "fashion-women-dresses",
+      "brand": "Vela & Co.",
+      "priceUsd": 38,
+      "compareUsd": 65,
+      "stock": 48,
+      "shortDescription": "A flowy viscose wrap dress in a hand-painted floral print with a flattering tie waist."
+    },
+    {
+      "slug": "sparx-mens-running-sneakers",
+      "name": "Sparx Men's Lightweight Running Sneakers",
+      "categorySlug": "fashion-footwear-sneakers",
+      "brand": "Sparx",
+      "priceUsd": 22.99,
+      "compareUsd": 34.99,
+      "stock": 95,
+      "shortDescription": "Cushioned mesh running shoes with a grippy phylon sole built for long days on your feet."
+    },
+    {
+      "slug": "wildcraft-camo-laptop-backpack",
+      "name": "Wildcraft 35L Camo Laptop Backpack",
+      "categorySlug": "fashion-accessories-bags",
+      "brand": "Wildcraft",
+      "priceUsd": 29.99,
+      "stock": 60,
+      "shortDescription": "A rugged water-resistant backpack with a padded 15-inch laptop sleeve and ergonomic air-mesh straps."
+    },
+    {
+      "slug": "fastrack-reflex-vox-3-smartwatch",
+      "name": "Fastrack Reflex Vox 3 Smartwatch",
+      "categorySlug": "fashion-accessories-watches",
+      "brand": "Fastrack",
+      "priceUsd": 27.99,
+      "compareUsd": 49.99,
+      "stock": 75,
+      "shortDescription": "A bold 1.83-inch smartwatch with voice assistant, animated faces and quick-swap silicone straps."
+    },
+    {
+      "slug": "prestige-omega-deluxe-granite-kadai",
+      "name": "Prestige Omega Deluxe Granite Kadai",
+      "categorySlug": "home-kitchen-cookware-pots-pans",
+      "brand": "Prestige",
+      "priceUsd": 26.99,
+      "compareUsd": 39.99,
+      "stock": 54,
+      "shortDescription": "A 24cm non-stick granite-finish kadai with a stay-cool handle, safe for everyday low-oil cooking."
+    },
+    {
+      "slug": "aria-living-rattan-table-lamp",
+      "name": "Aria Living Rattan Table Lamp",
+      "categorySlug": "home-kitchen-decor-lighting",
+      "brand": "Aria Living",
+      "priceUsd": 44,
+      "compareUsd": 69,
+      "stock": 33,
+      "shortDescription": "A handwoven rattan accent lamp that casts a warm, textured glow over any reading nook or bedside."
+    },
+    {
+      "slug": "eversoft-300tc-cotton-bedsheet-set",
+      "name": "EverSoft 300TC Cotton King Bedsheet Set",
+      "categorySlug": "home-kitchen-furnishing-bedsheets",
+      "brand": "EverSoft",
+      "priceUsd": 34.99,
+      "stock": 58,
+      "shortDescription": "A breathable 300-thread-count sateen-weave king sheet set with two pillow covers and deep-pocket corners."
+    },
+    {
+      "slug": "mamaearth-vitamin-c-face-serum",
+      "name": "Mamaearth Vitamin C Face Serum",
+      "categorySlug": "beauty-skincare-serums",
+      "brand": "Mamaearth",
+      "priceUsd": 12.99,
+      "compareUsd": 18.99,
+      "stock": 100,
+      "shortDescription": "A lightweight 30ml serum with vitamin C and turmeric to brighten dull skin and even out tone."
+    },
+    {
+      "slug": "pureglow-spf50-matte-sunscreen",
+      "name": "PureGlow SPF 50 Matte Daily Sunscreen",
+      "categorySlug": "beauty-skincare-sunscreen",
+      "brand": "PureGlow",
+      "priceUsd": 15.99,
+      "stock": 90,
+      "shortDescription": "A no-white-cast broad-spectrum SPF 50 lotion with a matte finish that sits well under makeup."
+    },
+    {
+      "slug": "yonex-gr-303-badminton-racquet",
+      "name": "Yonex GR 303 Badminton Racquet",
+      "categorySlug": "sports-team-sports-badminton",
+      "brand": "Yonex",
+      "priceUsd": 18.99,
+      "compareUsd": 27.99,
+      "stock": 65,
+      "shortDescription": "A durable aluminium-blend racquet with a full cover, ideal for beginners and weekend rallies."
+    }
+  ]
+}

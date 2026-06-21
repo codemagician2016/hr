@@ -1,0 +1,22 @@
+# Cloudflare Tunnel config for production (`sitepresso.com`).
+#
+# Frontend is 100% Vercel; this tunnel serves ONLY the backend API.
+#
+# Install on the prod EC2 as `/etc/cloudflared/config.yml`:
+#   sudo cp scripts/cloudflared-sitepresso-prod.yml /etc/cloudflared/config.yml
+#   sudo cloudflared service install
+#   sudo systemctl enable --now cloudflared
+#
+# DNS route (one record only — api subdomain):
+#   cloudflared tunnel route dns sitepresso-prod api.sitepresso.com
+#
+# Also add in Cloudflare dashboard (sitepresso.com zone):
+#   Route: api.sitepresso.com/*  →  Workers: None
+#   (mirrors staging's api.aapkatech.com/* Workers-off bypass)
+tunnel: sitepresso-prod
+credentials-file: /etc/cloudflared/sitepresso-prod.json
+
+ingress:
+  - hostname: api.sitepresso.com
+    service: http://127.0.0.1:5000
+  - service: http_status:404

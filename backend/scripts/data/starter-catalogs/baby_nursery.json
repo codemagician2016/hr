@@ -1,0 +1,441 @@
+{
+  "theme": "baby_nursery",
+  "categories": [
+    {
+      "slug": "clothing",
+      "name": "Baby Clothing",
+      "children": [
+        {
+          "slug": "clothing-newborn",
+          "name": "Newborn (0-3M)",
+          "children": [
+            {
+              "slug": "clothing-newborn-bodysuits",
+              "name": "Bodysuits & Onesies"
+            },
+            {
+              "slug": "clothing-newborn-sleepwear",
+              "name": "Sleepsuits & Gowns"
+            },
+            {
+              "slug": "clothing-newborn-sets",
+              "name": "Coming-Home Sets"
+            }
+          ]
+        },
+        {
+          "slug": "clothing-baby",
+          "name": "Baby (3-24M)",
+          "children": [
+            {
+              "slug": "clothing-baby-rompers",
+              "name": "Rompers & Dungarees"
+            },
+            {
+              "slug": "clothing-baby-tops",
+              "name": "Tops & Tees"
+            },
+            {
+              "slug": "clothing-baby-outerwear",
+              "name": "Jackets & Cardigans"
+            }
+          ]
+        },
+        {
+          "slug": "clothing-accessories",
+          "name": "Clothing Accessories",
+          "children": [
+            {
+              "slug": "clothing-accessories-socks",
+              "name": "Socks & Booties"
+            },
+            {
+              "slug": "clothing-accessories-hats",
+              "name": "Caps & Mittens"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "feeding",
+      "name": "Feeding",
+      "children": [
+        {
+          "slug": "feeding-bottle",
+          "name": "Bottle Feeding",
+          "children": [
+            {
+              "slug": "feeding-bottle-bottles",
+              "name": "Bottles & Teats"
+            },
+            {
+              "slug": "feeding-bottle-sterilisers",
+              "name": "Sterilisers & Warmers"
+            }
+          ]
+        },
+        {
+          "slug": "feeding-nursing",
+          "name": "Breastfeeding",
+          "children": [
+            {
+              "slug": "feeding-nursing-pumps",
+              "name": "Breast Pumps"
+            },
+            {
+              "slug": "feeding-nursing-pillows",
+              "name": "Nursing Pillows"
+            }
+          ]
+        },
+        {
+          "slug": "feeding-weaning",
+          "name": "Weaning & Mealtime",
+          "children": [
+            {
+              "slug": "feeding-weaning-bibs",
+              "name": "Bibs & Cloths"
+            },
+            {
+              "slug": "feeding-weaning-tableware",
+              "name": "Plates & Cutlery"
+            },
+            {
+              "slug": "feeding-weaning-highchairs",
+              "name": "High Chairs"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "diapering",
+      "name": "Diapering",
+      "children": [
+        {
+          "slug": "diapering-nappies",
+          "name": "Nappies",
+          "children": [
+            {
+              "slug": "diapering-nappies-disposable",
+              "name": "Disposable Diapers"
+            },
+            {
+              "slug": "diapering-nappies-cloth",
+              "name": "Cloth & Reusable"
+            },
+            {
+              "slug": "diapering-nappies-wipes",
+              "name": "Wipes"
+            }
+          ]
+        },
+        {
+          "slug": "diapering-changing",
+          "name": "Changing Station",
+          "children": [
+            {
+              "slug": "diapering-changing-mats",
+              "name": "Changing Mats"
+            },
+            {
+              "slug": "diapering-changing-creams",
+              "name": "Rash Creams & Powder"
+            },
+            {
+              "slug": "diapering-changing-bins",
+              "name": "Diaper Pails & Bags"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "nursery",
+      "name": "Nursery Furniture & Decor",
+      "children": [
+        {
+          "slug": "nursery-sleep",
+          "name": "Sleep Furniture",
+          "children": [
+            {
+              "slug": "nursery-sleep-cots",
+              "name": "Cots & Cribs"
+            },
+            {
+              "slug": "nursery-sleep-mattresses",
+              "name": "Mattresses"
+            },
+            {
+              "slug": "nursery-sleep-bassinets",
+              "name": "Bassinets & Cradles"
+            }
+          ]
+        },
+        {
+          "slug": "nursery-storage",
+          "name": "Storage & Changing",
+          "children": [
+            {
+              "slug": "nursery-storage-dressers",
+              "name": "Dressers & Changers"
+            },
+            {
+              "slug": "nursery-storage-shelving",
+              "name": "Shelving & Baskets"
+            }
+          ]
+        },
+        {
+          "slug": "nursery-decor",
+          "name": "Decor & Lighting",
+          "children": [
+            {
+              "slug": "nursery-decor-nightlights",
+              "name": "Night Lights"
+            },
+            {
+              "slug": "nursery-decor-mobiles",
+              "name": "Cot Mobiles"
+            },
+            {
+              "slug": "nursery-decor-bedding",
+              "name": "Bedding & Blankets"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "gear-safety",
+      "name": "Gear, Toys & Safety",
+      "children": [
+        {
+          "slug": "gear-travel",
+          "name": "Travel Gear",
+          "children": [
+            {
+              "slug": "gear-travel-strollers",
+              "name": "Strollers & Prams"
+            },
+            {
+              "slug": "gear-travel-carseats",
+              "name": "Car Seats"
+            },
+            {
+              "slug": "gear-travel-carriers",
+              "name": "Baby Carriers"
+            }
+          ]
+        },
+        {
+          "slug": "gear-toys",
+          "name": "Toys & Development",
+          "children": [
+            {
+              "slug": "gear-toys-teethers",
+              "name": "Teethers & Rattles"
+            },
+            {
+              "slug": "gear-toys-playmats",
+              "name": "Play Mats & Gyms"
+            }
+          ]
+        },
+        {
+          "slug": "gear-safety-home",
+          "name": "Baby Safety",
+          "children": [
+            {
+              "slug": "gear-safety-monitors",
+              "name": "Baby Monitors"
+            },
+            {
+              "slug": "gear-safety-gates",
+              "name": "Gates & Guards"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "brandsByCountry": {
+    "IN": [
+      "Mee Mee",
+      "Chicco",
+      "Mothercare",
+      "LuvLap",
+      "R for Rabbit",
+      "Mamaearth",
+      "Pampers",
+      "Himalaya BabyCare",
+      "Firstcry Babyhug"
+    ],
+    "default": [
+      "Little Nest",
+      "DreamPod",
+      "PureBaby",
+      "NestMate",
+      "Nourish",
+      "TinyTots",
+      "MeadowFox"
+    ]
+  },
+  "products": [
+    {
+      "slug": "organic-cotton-bodysuit-5pack",
+      "name": "Organic Cotton Bodysuit 5-Pack",
+      "categorySlug": "clothing-newborn-bodysuits",
+      "brand": "Little Nest",
+      "priceUsd": 24.99,
+      "compareUsd": 32,
+      "stock": 84,
+      "shortDescription": "GOTS-certified cotton bodysuits with envelope necklines and nickel-free snaps for easy newborn dressing."
+    },
+    {
+      "slug": "footed-sleepsuit-2pack",
+      "name": "Footed Sleepsuit 2-Pack (0-3M)",
+      "categorySlug": "clothing-newborn-sleepwear",
+      "brand": "Babyhug",
+      "priceUsd": 18.5,
+      "stock": 62,
+      "shortDescription": "Soft two-way-zip sleepsuits with fold-over scratch mitts to keep newborns cosy through the night."
+    },
+    {
+      "slug": "knitted-cardigan-baby",
+      "name": "Knitted Button Cardigan",
+      "categorySlug": "clothing-baby-outerwear",
+      "brand": "MeadowFox",
+      "priceUsd": 21,
+      "compareUsd": 28,
+      "stock": 47,
+      "shortDescription": "Gently ribbed cotton-blend cardigan with wooden buttons, perfect for layering from spring to autumn."
+    },
+    {
+      "slug": "non-slip-baby-socks-6pair",
+      "name": "Non-Slip Baby Socks 6-Pair",
+      "categorySlug": "clothing-accessories-socks",
+      "brand": "Mee Mee",
+      "priceUsd": 9.99,
+      "stock": 110,
+      "shortDescription": "Breathable cotton socks with grippy soles that stay on busy little feet and ease early standing."
+    },
+    {
+      "slug": "anti-colic-bottle-set-3",
+      "name": "Anti-Colic Wide-Neck Bottle Set of 3",
+      "categorySlug": "feeding-bottle-bottles",
+      "brand": "Nourish",
+      "priceUsd": 27.99,
+      "compareUsd": 34.99,
+      "stock": 73,
+      "shortDescription": "BPA-free PPSU bottles with a vented anti-colic valve and slow-flow teats to reduce wind and reflux."
+    },
+    {
+      "slug": "electric-steam-steriliser",
+      "name": "6-in-1 Electric Steam Steriliser",
+      "categorySlug": "feeding-bottle-sterilisers",
+      "brand": "Chicco",
+      "priceUsd": 64,
+      "compareUsd": 79,
+      "stock": 31,
+      "shortDescription": "Kills 99.9% of germs in eight minutes and holds up to six bottles with their accessories upright."
+    },
+    {
+      "slug": "rechargeable-double-breast-pump",
+      "name": "Rechargeable Double Electric Breast Pump",
+      "categorySlug": "feeding-nursing-pumps",
+      "brand": "LuvLap",
+      "priceUsd": 89.99,
+      "compareUsd": 119,
+      "stock": 22,
+      "shortDescription": "Hospital-grade twin pump with nine suction levels and a quiet motor for faster, more comfortable expressing."
+    },
+    {
+      "slug": "silicone-suction-plate-set",
+      "name": "Silicone Suction Plate & Spoon Set",
+      "categorySlug": "feeding-weaning-tableware",
+      "brand": "TinyTots",
+      "priceUsd": 14.5,
+      "stock": 96,
+      "shortDescription": "Food-grade silicone plate that suctions to the table with soft-tip spoons ideal for first weaning meals."
+    },
+    {
+      "slug": "convertible-wooden-high-chair",
+      "name": "Convertible Wooden High Chair",
+      "categorySlug": "feeding-weaning-highchairs",
+      "brand": "NestMate",
+      "priceUsd": 129,
+      "compareUsd": 159,
+      "stock": 18,
+      "shortDescription": "Solid-beech high chair that adjusts through five heights and converts to a toddler seat as baby grows."
+    },
+    {
+      "slug": "sensitive-diapers-jumbo-pack",
+      "name": "Sensitive Diapers Jumbo Pack",
+      "categorySlug": "diapering-nappies-disposable",
+      "brand": "Pampers",
+      "priceUsd": 21.99,
+      "stock": 120,
+      "shortDescription": "Up to 12-hour absorbency with a wetness indicator and fragrance-free liner for delicate newborn skin."
+    },
+    {
+      "slug": "water-wipes-12pack",
+      "name": "Plant-Based Water Wipes 12-Pack",
+      "categorySlug": "diapering-nappies-wipes",
+      "brand": "PureBaby",
+      "priceUsd": 19,
+      "compareUsd": 24,
+      "stock": 105,
+      "shortDescription": "99% purified water and compostable cloth wipes, unscented and gentle enough for face, hands and bottom."
+    },
+    {
+      "slug": "diaper-rash-cream-zinc",
+      "name": "Zinc Diaper Rash Cream",
+      "categorySlug": "diapering-changing-creams",
+      "brand": "Himalaya BabyCare",
+      "priceUsd": 7.99,
+      "stock": 88,
+      "shortDescription": "Thick zinc-oxide barrier cream that soothes redness and protects against moisture between changes."
+    },
+    {
+      "slug": "convertible-cot-bed-natural",
+      "name": "Convertible Cot Bed",
+      "categorySlug": "nursery-sleep-cots",
+      "brand": "NestMate",
+      "priceUsd": 249,
+      "compareUsd": 299,
+      "stock": 14,
+      "shortDescription": "Non-toxic solid-wood cot with three mattress heights that converts into a toddler bed for years of use."
+    },
+    {
+      "slug": "breathable-cot-mattress",
+      "name": "Dual-Sided Breathable Cot Mattress",
+      "categorySlug": "nursery-sleep-mattresses",
+      "brand": "DreamPod",
+      "priceUsd": 89,
+      "stock": 26,
+      "shortDescription": "Hypoallergenic foam mattress with a firmer newborn side and softer toddler side under a washable cover."
+    },
+    {
+      "slug": "rechargeable-cloud-night-light",
+      "name": "Rechargeable Cloud Night Light",
+      "categorySlug": "nursery-decor-nightlights",
+      "brand": "DreamPod",
+      "priceUsd": 22.99,
+      "compareUsd": 29,
+      "stock": 64,
+      "shortDescription": "Tap-controlled silicone night light with a warm dimmable glow that runs cordless for night feeds."
+    },
+    {
+      "slug": "lightweight-travel-stroller",
+      "name": "Lightweight One-Hand-Fold Travel Stroller",
+      "categorySlug": "gear-travel-strollers",
+      "brand": "R for Rabbit",
+      "priceUsd": 159,
+      "compareUsd": 199,
+      "stock": 20,
+      "shortDescription": "Cabin-sized stroller that folds with one hand, reclines flat for newborns and has a UPF 50+ canopy."
+    }
+  ]
+}

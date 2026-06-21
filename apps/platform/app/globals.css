@@ -1,0 +1,316 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@keyframes marquee-ltr {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.animate-marquee-ltr {
+  animation: marquee-ltr 60s linear infinite;
+}
+
+@keyframes marquee-rtl {
+  from { transform: translateX(-50%); }
+  to   { transform: translateX(0); }
+}
+.animate-marquee-rtl {
+  animation: marquee-rtl 50s linear infinite;
+}
+:root {
+  /* Colors — editor UI */
+  --ae-bg:          #FBFAF7; /* page bg */
+  --ae-bg-2:        #F4F2EC; /* alt surface */
+  --ae-card:        #FFFFFF;
+  --ae-ink:         #0B0B14; /* text */
+  --ae-ink-2:       #2A2A35;
+  --ae-muted:       #6B6B78;
+  --ae-line:        #E7E4DB;
+  --ae-line-2:      #D9D5C8;
+  --ae-indigo:      #4F46E5; /* brand */
+  --ae-indigo-2:    #3730A3; /* hover */
+  --ae-indigo-soft: #EEF0FF; /* bg accent */
+  --ae-success:     #0F7A4F;
+
+  /* Radii */
+  --ae-r-sm: 8px;   /* chips, inputs, small cards */
+  --ae-r:    14px;  /* cards, modals, panels */
+  --ae-r-lg: 22px;  /* hero blocks, banners */
+
+  /* Layout */
+  --ae-topbar-h:   52px;
+  --ae-sidebar-w:  300px;
+  --ae-container:  1240px;
+
+  /* Shadows */
+  --ae-shadow-card-hover:   0 30px 60px -20px rgba(11,11,20,.18);
+  --ae-shadow-elevated:     0 12px 30px -15px rgba(11,11,20,.15);
+  --ae-shadow-mockup-stack: 0 80px 120px -40px rgba(79,70,229,.18);
+
+  /* Type families */
+  --ae-font-display: 'Inter Tight', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --ae-font-body:    'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --ae-font-italic:  'Playfair Display', ui-serif, Georgia, serif;
+  --ae-font-mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --ae-font-serif:   'DM Serif Display', ui-serif, Georgia, serif;
+  --ae-font-serif-italic: 'Cormorant Garamond', ui-serif, Georgia, serif;
+  --ae-font-bebas:   'Bebas Neue', 'Inter Tight', sans-serif;
+}
+
+/* Editor chrome utility classes — use inside the website editor only.
+   Public storefronts keep their theme-driven styles untouched. */
+.ae-editor-root {
+  background: var(--ae-bg);
+  color: var(--ae-ink);
+  font-family: var(--ae-font-body);
+}
+.ae-editor-root .ae-display    { font-family: var(--ae-font-display); letter-spacing: -0.01em; }
+.ae-editor-root .ae-italic     { font-family: var(--ae-font-italic); font-style: italic; font-weight: 500; }
+.ae-editor-root .ae-kicker     { font-family: var(--ae-font-mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ae-muted); }
+.ae-editor-root .ae-card       { background: var(--ae-card); border: 1px solid var(--ae-line); border-radius: var(--ae-r); }
+.ae-editor-root .ae-card-sm    { background: var(--ae-card); border: 1px solid var(--ae-line); border-radius: var(--ae-r-sm); }
+.ae-editor-root .ae-hairline   { border-color: var(--ae-line); }
+
+/* Selection outline used by canvas click-to-select.
+   Preview sections carry data-ae-section="<key>"; when the editor's
+   active tab matches, React also sets data-ae-selected="true". */
+.ae-selected,
+[data-ae-selected="true"] {
+  outline: 2px solid var(--ae-indigo) !important;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+.ae-selectable,
+[data-ae-section] {
+  cursor: pointer;
+  transition: outline-color 120ms ease;
+}
+.ae-selectable:hover,
+[data-ae-section]:hover:not([data-ae-selected="true"]) {
+  outline: 1px dashed rgba(79, 70, 229, 0.45);
+  outline-offset: 2px;
+}
+
+/* Scrollbar polish inside editor sidebar */
+.ae-sidebar::-webkit-scrollbar { width: 10px; }
+.ae-sidebar::-webkit-scrollbar-thumb { background: var(--ae-line-2); border-radius: 8px; border: 3px solid var(--ae-bg); }
+.ae-sidebar::-webkit-scrollbar-track { background: transparent; }
+
+/* Customer-portal custom scrollbar — thin, slate thumb, transparent track.
+   Applied globally to match the premium portal look without affecting the
+   editor surfaces above. */
+.ae-portal-scroll { scrollbar-width: thin; scrollbar-color: #E2E8F0 transparent; }
+.ae-portal-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+.ae-portal-scroll::-webkit-scrollbar-thumb { background: #E2E8F0; border-radius: 8px; }
+.ae-portal-scroll::-webkit-scrollbar-track { background: transparent; }
+.ae-portal-scroll::-webkit-scrollbar-thumb:hover { background: #CBD5E1; }
+
+/* ============================================================================
+   Storefront section rhythm — gives every section a subtle branded
+   "opening edge" so the page reads as chapters, not a scroll of same-
+   looking slabs. Hairline uses the active tenant's primary colour at low
+   opacity so it works across all three reference themes.
+   ============================================================================ */
+.ae-section-edge {
+  border-top: 1px solid color-mix(in srgb, var(--theme-primary) 14%, transparent);
+}
+
+/* Framed section — content sits in a bordered rounded card. Used for
+   FAQ, Contact, Booking. The outer section is on the neutral bg colour
+   so the surface-coloured card pops inside it; items within the card
+   keep their own bg (typically bg) for a three-tier hierarchy:
+     section-bg (white) → card (surface / pale tint) → item (white). */
+.ae-section-frame {
+  background-color: var(--theme-surface);
+  border: 1px solid var(--theme-border);
+  border-radius: 28px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03), 0 12px 36px -18px rgba(15, 23, 42, 0.08);
+}
+
+/* ============================================================================
+   Navbar shine — animated underline on link hover + Book-now button shine
+   sweep. Keeps the bar feeling alive without adding chrome.
+   ============================================================================ */
+
+/* Animated underline under each nav link. Uses ::after so there's no extra
+   markup. Grows from centre on hover — reads as a deliberate "active tab"
+   highlight rather than a plain text hover. */
+.ae-nav-link { position: relative; }
+.ae-nav-link::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  right: 50%;
+  bottom: -20px;  /* sits on the navbar bottom border */
+  height: 2px;
+  background: var(--theme-primary);
+  border-radius: 2px;
+  transition: left 0.25s ease, right 0.25s ease;
+}
+.ae-nav-link:hover::after,
+.ae-nav-link[data-active="true"]::after {
+  left: 0;
+  right: 0;
+}
+
+/* Book-now button shine — a soft highlight that sweeps across the button on
+   hover. Subtle enough that it reads as "button came alive", not as
+   decoration. The ::before creates the light band; transform animates it. */
+.ae-nav-cta { position: relative; overflow: hidden; isolation: isolate; }
+.ae-nav-cta::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -60%;
+  width: 45%;
+  height: 100%;
+  background: linear-gradient(120deg, transparent, rgba(255,255,255,0.45), transparent);
+  transform: skewX(-20deg);
+  transition: left 0.7s ease;
+  pointer-events: none;
+}
+.ae-nav-cta:hover::before { left: 130%; }
+
+/* Horizontal tab strip — invisible scrollbar so it never eats into the
+   strip's 52px height. Scroll still works via wheel/drag/touch. */
+.ae-tab-strip { scrollbar-width: none; -ms-overflow-style: none; }
+.ae-tab-strip::-webkit-scrollbar { display: none; height: 0; }
+
+/* ============================================================================
+   Per-theme storefront overrides (Design Spec v1.0 pages 15-17)
+   The core section components render with CSS variables; each theme adds
+   its own character here — typography weight, uppercase, accent shapes.
+   ============================================================================ */
+
+/* THEME · CHAMBERS — Law firm. Navy + gold, serif headlines, italic
+   Cormorant accents. Headlines use DM Serif Display, body uses Inter. */
+[data-theme="chambers"] h1,
+[data-theme="chambers"] h2,
+[data-theme="chambers"] h3 {
+  font-weight: 400; /* DM Serif Display ships a single weight */
+  letter-spacing: -0.005em;
+}
+[data-theme="chambers"] h1 em,
+[data-theme="chambers"] h2 em,
+[data-theme="chambers"] h3 em,
+[data-theme="chambers"] h1 i,
+[data-theme="chambers"] h2 i {
+  font-family: 'Cormorant Garamond', ui-serif, Georgia, serif;
+  font-style: italic;
+  font-weight: 500;
+  color: var(--theme-accent);
+}
+[data-theme="chambers"] .ae-eyebrow,
+[data-theme="chambers"] [class*="tracking-[0.12em]"] {
+  color: var(--theme-accent) !important;
+  letter-spacing: 0.22em;
+}
+
+/* THEME · RAZOR & CO. — Barbershop. Black + red, Bebas Neue condensed,
+   uppercase throughout. Sharp corners on buttons / cards. */
+[data-theme="razor"] h1,
+[data-theme="razor"] h2,
+[data-theme="razor"] h3 {
+  font-family: 'Bebas Neue', 'Inter Tight', sans-serif !important;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+[data-theme="razor"] .ae-eyebrow,
+[data-theme="razor"] [class*="tracking-[0.12em]"] {
+  color: var(--theme-primary) !important;
+  letter-spacing: 0.18em;
+}
+[data-theme="razor"] a[class*="rounded-full"],
+[data-theme="razor"] button[class*="rounded-full"],
+[data-theme="razor"] [class*="rounded-2xl"],
+[data-theme="razor"] [class*="rounded-3xl"],
+[data-theme="razor"] [class*="rounded-xl"] {
+  border-radius: 2px !important;
+}
+/* Barber-pole stripe decoration on the right edge of the page */
+[data-theme="razor"]::after {
+  content: '';
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 6px;
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--theme-primary) 0 10px,
+    #fff 10px 20px
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* THEME · COASTAL DENTAL — Clean, modern medical. Uses the Inter Tight
+   display family natively; no extra character overrides needed. */
+
+/* ============================================================================
+   Public-site hero animations — slow drifting mesh orbs + scroll hint dot +
+   subtle ken-burns on banner-image heroes. All GPU-only (transform/opacity),
+   respecting prefers-reduced-motion for users who'd rather sit still.
+   ============================================================================ */
+@keyframes heroOrbA {
+  0%,100% { transform: translate3d(0,0,0) scale(1); }
+  50%     { transform: translate3d(-6%,4%,0) scale(1.08); }
+}
+@keyframes heroOrbB {
+  0%,100% { transform: translate3d(0,0,0) scale(1); }
+  50%     { transform: translate3d(5%,-4%,0) scale(1.1); }
+}
+@keyframes heroOrbC {
+  0%,100% { transform: translate3d(-50%,0,0) scale(1); }
+  50%     { transform: translate3d(-50%,-6%,0) scale(1.12); }
+}
+@keyframes heroScrollHint {
+  0%,100% { transform: translateY(0); opacity: 0.9; }
+  50%     { transform: translateY(10px); opacity: 0.2; }
+}
+@keyframes heroKenBurns {
+  from { transform: scale(1.06); }
+  to   { transform: scale(1.0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [class*='animate-[heroOrb'],
+  [class*='animate-[heroScrollHint'],
+  [class*='animate-[heroKenBurns'] { animation: none !important; }
+}
+
+/* Theme the Tiptap-authored policy HTML to match the business's palette
+   instead of Tailwind's default neutral greys. Also re-enables pointer
+   interaction on links (overriding prose's anchor styling). */
+.policy-prose,
+.policy-prose p,
+.policy-prose li,
+.policy-prose ul,
+.policy-prose ol,
+.policy-prose blockquote {
+  color: var(--theme-text);
+}
+.policy-prose h1,
+.policy-prose h2,
+.policy-prose h3,
+.policy-prose h4,
+.policy-prose strong {
+  color: var(--theme-text);
+  font-family: var(--font-heading);
+}
+.policy-prose a {
+  color: var(--theme-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.policy-prose a:hover { opacity: 0.85; }
+.policy-prose ul > li::marker,
+.policy-prose ol > li::marker {
+  color: var(--theme-muted);
+}
+.policy-prose hr { border-color: var(--theme-border); }
+.policy-prose blockquote {
+  border-left-color: var(--theme-border);
+  color: var(--theme-muted);
+}

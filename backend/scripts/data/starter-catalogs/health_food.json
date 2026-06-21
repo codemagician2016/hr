@@ -1,0 +1,425 @@
+{
+  "theme": "health_food",
+  "categories": [
+    {
+      "slug": "sports-nutrition",
+      "name": "Sports Nutrition",
+      "children": [
+        {
+          "slug": "sports-protein",
+          "name": "Protein Powders",
+          "children": [
+            {
+              "slug": "sports-protein-whey",
+              "name": "Whey Protein"
+            },
+            {
+              "slug": "sports-protein-plant",
+              "name": "Plant Protein"
+            },
+            {
+              "slug": "sports-protein-casein",
+              "name": "Casein & Blends"
+            }
+          ]
+        },
+        {
+          "slug": "sports-performance",
+          "name": "Performance & Recovery",
+          "children": [
+            {
+              "slug": "sports-performance-preworkout",
+              "name": "Pre-Workout"
+            },
+            {
+              "slug": "sports-performance-creatine",
+              "name": "Creatine"
+            },
+            {
+              "slug": "sports-performance-bcaa",
+              "name": "BCAA & Recovery"
+            }
+          ]
+        },
+        {
+          "slug": "sports-bars-shakes",
+          "name": "Protein Bars & Shakes",
+          "children": [
+            {
+              "slug": "sports-bars",
+              "name": "Protein Bars"
+            },
+            {
+              "slug": "sports-rtd-shakes",
+              "name": "Ready-to-Drink Shakes"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "vitamins-supplements",
+      "name": "Vitamins & Supplements",
+      "children": [
+        {
+          "slug": "vitamins-daily",
+          "name": "Daily Essentials",
+          "children": [
+            {
+              "slug": "vitamins-multivitamins",
+              "name": "Multivitamins"
+            },
+            {
+              "slug": "vitamins-vitamin-d",
+              "name": "Vitamin D & K2"
+            },
+            {
+              "slug": "vitamins-omega-3",
+              "name": "Omega-3 & Fish Oil"
+            }
+          ]
+        },
+        {
+          "slug": "vitamins-minerals",
+          "name": "Minerals",
+          "children": [
+            {
+              "slug": "vitamins-minerals-magnesium",
+              "name": "Magnesium"
+            },
+            {
+              "slug": "vitamins-minerals-zinc",
+              "name": "Zinc & Immunity"
+            }
+          ]
+        },
+        {
+          "slug": "vitamins-herbal",
+          "name": "Herbal & Ayurvedic",
+          "children": [
+            {
+              "slug": "vitamins-herbal-ashwagandha",
+              "name": "Ashwagandha & Adaptogens"
+            },
+            {
+              "slug": "vitamins-herbal-turmeric",
+              "name": "Turmeric & Curcumin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "superfoods-greens",
+      "name": "Superfoods & Greens",
+      "children": [
+        {
+          "slug": "superfoods-powders",
+          "name": "Superfood Powders",
+          "children": [
+            {
+              "slug": "superfoods-greens-powder",
+              "name": "Greens Powders"
+            },
+            {
+              "slug": "superfoods-spirulina-moringa",
+              "name": "Spirulina & Moringa"
+            },
+            {
+              "slug": "superfoods-cacao-maca",
+              "name": "Cacao & Maca"
+            }
+          ]
+        },
+        {
+          "slug": "superfoods-seeds-nuts",
+          "name": "Seeds & Nuts",
+          "children": [
+            {
+              "slug": "superfoods-chia-flax",
+              "name": "Chia & Flax Seeds"
+            },
+            {
+              "slug": "superfoods-trail-mixes",
+              "name": "Trail Mixes"
+            }
+          ]
+        },
+        {
+          "slug": "superfoods-gut-health",
+          "name": "Gut Health",
+          "children": [
+            {
+              "slug": "superfoods-probiotics",
+              "name": "Probiotics"
+            },
+            {
+              "slug": "superfoods-fibre",
+              "name": "Prebiotic Fibre"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "organic-pantry",
+      "name": "Organic Pantry",
+      "children": [
+        {
+          "slug": "pantry-oils-ghee",
+          "name": "Oils & Ghee",
+          "children": [
+            {
+              "slug": "pantry-coconut-oil",
+              "name": "Coconut & Olive Oil"
+            },
+            {
+              "slug": "pantry-a2-ghee",
+              "name": "A2 Ghee"
+            }
+          ]
+        },
+        {
+          "slug": "pantry-sweeteners",
+          "name": "Honey & Sweeteners",
+          "children": [
+            {
+              "slug": "pantry-raw-honey",
+              "name": "Raw Honey"
+            },
+            {
+              "slug": "pantry-jaggery",
+              "name": "Jaggery & Date Syrup"
+            }
+          ]
+        },
+        {
+          "slug": "pantry-grains-flours",
+          "name": "Grains & Flours",
+          "children": [
+            {
+              "slug": "pantry-millets",
+              "name": "Millets & Quinoa"
+            },
+            {
+              "slug": "pantry-oats",
+              "name": "Oats & Muesli"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "healthy-snacks-beverages",
+      "name": "Healthy Snacks & Beverages",
+      "children": [
+        {
+          "slug": "snacks-guilt-free",
+          "name": "Guilt-Free Snacks",
+          "children": [
+            {
+              "slug": "snacks-baked-chips",
+              "name": "Baked Chips & Makhana"
+            },
+            {
+              "slug": "snacks-dried-fruit",
+              "name": "Dried Fruit & Berries"
+            }
+          ]
+        },
+        {
+          "slug": "beverages-functional",
+          "name": "Functional Beverages",
+          "children": [
+            {
+              "slug": "beverages-green-tea",
+              "name": "Green & Herbal Tea"
+            },
+            {
+              "slug": "beverages-kombucha",
+              "name": "Kombucha & Cold-Pressed"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "brandsByCountry": {
+    "IN": [
+      "MyProtein India",
+      "MuscleBlaze",
+      "OZiva",
+      "Kapiva",
+      "Wellbeing Nutrition",
+      "True Elements",
+      "Yogabar",
+      "Two Brothers Organic Farms",
+      "Patanjali Nutrela",
+      "The Whole Truth"
+    ],
+    "default": [
+      "PureFuel",
+      "GreenForm",
+      "VitaCore",
+      "EarthPantry",
+      "BioFlora",
+      "GlowWell",
+      "CalmRoot",
+      "SnackLab"
+    ]
+  },
+  "products": [
+    {
+      "slug": "whey-protein-isolate-chocolate",
+      "name": "Whey Protein Isolate",
+      "categorySlug": "sports-protein-whey",
+      "brand": "MuscleBlaze",
+      "priceUsd": 39.99,
+      "compareUsd": 49.99,
+      "stock": 64,
+      "shortDescription": "Fast-absorbing 27g whey isolate per scoop, third-party tested for purity and banned substances."
+    },
+    {
+      "slug": "plant-protein-blend-vanilla",
+      "name": "Plant Protein Blend",
+      "categorySlug": "sports-protein-plant",
+      "brand": "OZiva",
+      "priceUsd": 32.5,
+      "stock": 48,
+      "shortDescription": "Vegan pea-and-brown-rice protein with a smooth vanilla finish and no artificial sweeteners."
+    },
+    {
+      "slug": "micronized-creatine-monohydrate",
+      "name": "Micronized Creatine Monohydrate",
+      "categorySlug": "sports-performance-creatine",
+      "brand": "MyProtein India",
+      "priceUsd": 18.99,
+      "compareUsd": 24.99,
+      "stock": 90,
+      "shortDescription": "Unflavoured 5g creatine that dissolves cleanly to support strength and lean muscle gains."
+    },
+    {
+      "slug": "pre-workout-fruit-punch",
+      "name": "Pre-Workout Energy Blend",
+      "categorySlug": "sports-performance-preworkout",
+      "brand": "PureFuel",
+      "priceUsd": 27,
+      "stock": 35,
+      "shortDescription": "Fruit-punch pre-workout with caffeine, beta-alanine and L-citrulline for clean, crash-free energy."
+    },
+    {
+      "slug": "protein-bars-cocoa-box-12",
+      "name": "Protein Bars (Box of 12)",
+      "categorySlug": "sports-bars",
+      "brand": "The Whole Truth",
+      "priceUsd": 21.99,
+      "compareUsd": 26.99,
+      "stock": 72,
+      "shortDescription": "Whole-ingredient cocoa protein bars with 15g protein, no added sugar and no hidden nasties."
+    },
+    {
+      "slug": "daily-multivitamin-120-tablets",
+      "name": "Daily Multivitamin",
+      "categorySlug": "vitamins-multivitamins",
+      "brand": "VitaCore",
+      "priceUsd": 14.99,
+      "stock": 110,
+      "shortDescription": "Complete daily multivitamin with 23 essential nutrients to fill everyday dietary gaps."
+    },
+    {
+      "slug": "vitamin-d3-k2-softgels",
+      "name": "Vitamin D3 + K2 Softgels",
+      "categorySlug": "vitamins-vitamin-d",
+      "brand": "Wellbeing Nutrition",
+      "priceUsd": 16.5,
+      "compareUsd": 19.99,
+      "stock": 85,
+      "shortDescription": "Sunshine vitamin D3 paired with K2 for better calcium absorption and bone health."
+    },
+    {
+      "slug": "omega-3-fish-oil-triple-strength",
+      "name": "Omega-3 Fish Oil, Triple Strength",
+      "categorySlug": "vitamins-omega-3",
+      "brand": "VitaCore",
+      "priceUsd": 22,
+      "stock": 60,
+      "shortDescription": "Triple-strength fish oil with 1000mg EPA/DHA, molecularly distilled and free of fishy aftertaste."
+    },
+    {
+      "slug": "magnesium-glycinate-capsules",
+      "name": "Magnesium Glycinate",
+      "categorySlug": "vitamins-minerals-magnesium",
+      "brand": "CalmRoot",
+      "priceUsd": 17.99,
+      "compareUsd": 21.99,
+      "stock": 54,
+      "shortDescription": "Highly absorbable magnesium glycinate to support sleep, muscle recovery and calm focus."
+    },
+    {
+      "slug": "ashwagandha-ksm-66-capsules",
+      "name": "Ashwagandha KSM-66",
+      "categorySlug": "vitamins-herbal-ashwagandha",
+      "brand": "Kapiva",
+      "priceUsd": 19.5,
+      "stock": 78,
+      "shortDescription": "Clinically studied KSM-66 ashwagandha root extract to help manage stress and boost stamina."
+    },
+    {
+      "slug": "super-greens-powder-original",
+      "name": "Super Greens Powder",
+      "categorySlug": "superfoods-greens-powder",
+      "brand": "GreenForm",
+      "priceUsd": 34.99,
+      "compareUsd": 42,
+      "stock": 40,
+      "shortDescription": "Daily greens blend of spirulina, wheatgrass, moringa and 20 superfoods in one scoop."
+    },
+    {
+      "slug": "organic-chia-seeds-500g",
+      "name": "Organic Chia Seeds",
+      "categorySlug": "superfoods-chia-flax",
+      "brand": "True Elements",
+      "priceUsd": 8.99,
+      "stock": 120,
+      "shortDescription": "Raw, unroasted organic chia seeds packed with fibre and plant omega-3 for smoothies and bowls."
+    },
+    {
+      "slug": "probiotic-50-billion-cfu",
+      "name": "Probiotic 50 Billion CFU",
+      "categorySlug": "superfoods-probiotics",
+      "brand": "BioFlora",
+      "priceUsd": 24.99,
+      "compareUsd": 29.99,
+      "stock": 46,
+      "shortDescription": "Shelf-stable 12-strain probiotic with 50 billion CFU to support gut balance and digestion."
+    },
+    {
+      "slug": "a2-bilona-cow-ghee-500ml",
+      "name": "A2 Bilona Cow Ghee",
+      "categorySlug": "pantry-a2-ghee",
+      "brand": "Two Brothers Organic Farms",
+      "priceUsd": 28,
+      "stock": 33,
+      "shortDescription": "Hand-churned A2 cow ghee made the traditional bilona way from grass-fed desi cow milk."
+    },
+    {
+      "slug": "raw-forest-honey-1kg",
+      "name": "Raw Forest Honey",
+      "categorySlug": "pantry-raw-honey",
+      "brand": "EarthPantry",
+      "priceUsd": 12.99,
+      "compareUsd": 15.99,
+      "stock": 67,
+      "shortDescription": "Unprocessed, single-origin forest honey, NMR-tested and raw to keep its natural enzymes intact."
+    },
+    {
+      "slug": "roasted-makhana-peri-peri",
+      "name": "Roasted Makhana, Peri Peri",
+      "categorySlug": "snacks-baked-chips",
+      "brand": "Yogabar",
+      "priceUsd": 6.49,
+      "stock": 95,
+      "shortDescription": "Air-roasted foxnuts in a tangy peri-peri coating for a crunchy, guilt-free anytime snack."
+    }
+  ]
+}

@@ -1,0 +1,462 @@
+{
+  "theme": "florist_gifts",
+  "categories": [
+    {
+      "slug": "flowers",
+      "name": "Flowers",
+      "children": [
+        {
+          "slug": "flowers-bouquets",
+          "name": "Bouquets",
+          "children": [
+            {
+              "slug": "flowers-bouquets-hand-tied",
+              "name": "Hand-Tied"
+            },
+            {
+              "slug": "flowers-bouquets-mixed-seasonal",
+              "name": "Mixed & Seasonal"
+            },
+            {
+              "slug": "flowers-bouquets-bright-vibrant",
+              "name": "Bright & Vibrant"
+            }
+          ]
+        },
+        {
+          "slug": "flowers-roses",
+          "name": "Roses",
+          "children": [
+            {
+              "slug": "flowers-roses-red",
+              "name": "Red Roses"
+            },
+            {
+              "slug": "flowers-roses-pink-pastel",
+              "name": "Pink & Pastel Roses"
+            },
+            {
+              "slug": "flowers-roses-white-ivory",
+              "name": "White & Ivory Roses"
+            }
+          ]
+        },
+        {
+          "slug": "flowers-luxury-arrangements",
+          "name": "Luxury Arrangements",
+          "children": [
+            {
+              "slug": "flowers-luxury-vase",
+              "name": "Vase Arrangements"
+            },
+            {
+              "slug": "flowers-luxury-hatbox",
+              "name": "Hatbox & Signature Boxes"
+            },
+            {
+              "slug": "flowers-luxury-orchids",
+              "name": "Orchids & Exotics"
+            }
+          ]
+        },
+        {
+          "slug": "flowers-seasonal",
+          "name": "Seasonal Blooms",
+          "children": [
+            {
+              "slug": "flowers-seasonal-spring",
+              "name": "Spring Tulips & Peonies"
+            },
+            {
+              "slug": "flowers-seasonal-sunflowers",
+              "name": "Summer Sunflowers"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "plants",
+      "name": "Plants",
+      "children": [
+        {
+          "slug": "plants-flowering",
+          "name": "Flowering Plants",
+          "children": [
+            {
+              "slug": "plants-flowering-orchids",
+              "name": "Potted Orchids"
+            },
+            {
+              "slug": "plants-flowering-peace-lily",
+              "name": "Peace Lily & Anthurium"
+            }
+          ]
+        },
+        {
+          "slug": "plants-indoor",
+          "name": "Indoor Greenery",
+          "children": [
+            {
+              "slug": "plants-indoor-succulents",
+              "name": "Succulents & Cacti"
+            },
+            {
+              "slug": "plants-indoor-foliage",
+              "name": "Leafy Foliage Plants"
+            },
+            {
+              "slug": "plants-indoor-bonsai",
+              "name": "Bonsai"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "gift-hampers",
+      "name": "Gift Hampers",
+      "children": [
+        {
+          "slug": "gift-hampers-flowers-chocolates",
+          "name": "Flowers & Chocolates",
+          "children": [
+            {
+              "slug": "gift-hampers-flowers-chocolates-classic",
+              "name": "Classic Combos"
+            },
+            {
+              "slug": "gift-hampers-flowers-chocolates-luxe",
+              "name": "Luxe Combos"
+            }
+          ]
+        },
+        {
+          "slug": "gift-hampers-pamper",
+          "name": "Pamper & Spa",
+          "children": [
+            {
+              "slug": "gift-hampers-pamper-spa",
+              "name": "Spa & Bath Sets"
+            },
+            {
+              "slug": "gift-hampers-pamper-candle",
+              "name": "Candle & Aroma Sets"
+            }
+          ]
+        },
+        {
+          "slug": "gift-hampers-gourmet",
+          "name": "Gourmet Hampers",
+          "children": [
+            {
+              "slug": "gift-hampers-gourmet-sweet",
+              "name": "Sweet Treats"
+            },
+            {
+              "slug": "gift-hampers-gourmet-celebration",
+              "name": "Celebration Baskets"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "personalized-gifts",
+      "name": "Personalized Gifts",
+      "children": [
+        {
+          "slug": "personalized-keepsakes",
+          "name": "Keepsakes",
+          "children": [
+            {
+              "slug": "personalized-keepsakes-vases",
+              "name": "Engraved Vases"
+            },
+            {
+              "slug": "personalized-keepsakes-frames",
+              "name": "Photo Frames"
+            }
+          ]
+        },
+        {
+          "slug": "personalized-message-gifts",
+          "name": "Message Gifts",
+          "children": [
+            {
+              "slug": "personalized-message-flower-boxes",
+              "name": "Message Flower Boxes"
+            },
+            {
+              "slug": "personalized-message-cards",
+              "name": "Custom Greeting Cards"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "occasions",
+      "name": "Occasions",
+      "children": [
+        {
+          "slug": "occasions-celebration",
+          "name": "Celebration",
+          "children": [
+            {
+              "slug": "occasions-celebration-birthday",
+              "name": "Birthday"
+            },
+            {
+              "slug": "occasions-celebration-anniversary",
+              "name": "Anniversary"
+            },
+            {
+              "slug": "occasions-celebration-congratulations",
+              "name": "Congratulations"
+            }
+          ]
+        },
+        {
+          "slug": "occasions-sympathy",
+          "name": "Sympathy & Get Well",
+          "children": [
+            {
+              "slug": "occasions-sympathy-funeral",
+              "name": "Sympathy & Funeral"
+            },
+            {
+              "slug": "occasions-sympathy-get-well",
+              "name": "Get Well Soon"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "brandsByCountry": {
+    "IN": [
+      "Ferns N Petals",
+      "FlowerAura",
+      "Interflora India",
+      "Bloomsvilla",
+      "Floweraura",
+      "Phoolwala",
+      "BloomsyBox",
+      "Winni"
+    ],
+    "default": [
+      "Bloom & Co.",
+      "Petal & Stem",
+      "GreenLeaf Botanicals",
+      "The Wild Bunch",
+      "Maison Fleur",
+      "Verdant & Vine",
+      "Posy Lane"
+    ]
+  },
+  "products": [
+    {
+      "slug": "garden-rose-hand-tied-bouquet",
+      "name": "Garden Rose Hand-Tied Bouquet",
+      "categorySlug": "flowers-bouquets-hand-tied",
+      "brand": "Bloom & Co.",
+      "priceUsd": 54,
+      "compareUsd": 69,
+      "stock": 40,
+      "shortDescription": "A lush hand-tied bunch of garden roses, ranunculus and eucalyptus, wrapped in kraft paper and finished with twine."
+    },
+    {
+      "slug": "wildflower-meadow-bouquet",
+      "name": "Wildflower Meadow Bouquet",
+      "categorySlug": "flowers-bouquets-mixed-seasonal",
+      "brand": "The Wild Bunch",
+      "priceUsd": 44,
+      "stock": 55,
+      "shortDescription": "An informal, just-picked mix of seasonal stems gathered the way they grow in a summer meadow."
+    },
+    {
+      "slug": "sunburst-gerbera-bouquet",
+      "name": "Sunburst Gerbera Bouquet",
+      "categorySlug": "flowers-bouquets-bright-vibrant",
+      "brand": "FlowerAura",
+      "priceUsd": 39,
+      "compareUsd": 49,
+      "stock": 60,
+      "shortDescription": "Cheerful orange and yellow gerberas with chrysanthemums that instantly brighten any room."
+    },
+    {
+      "slug": "dozen-red-roses",
+      "name": "Classic Dozen Red Roses",
+      "categorySlug": "flowers-roses-red",
+      "brand": "Interflora India",
+      "priceUsd": 64,
+      "compareUsd": 79,
+      "stock": 50,
+      "shortDescription": "Twelve long-stemmed premium red roses hand-arranged with foliage for the timeless romantic gesture."
+    },
+    {
+      "slug": "blush-pink-rose-bouquet",
+      "name": "Blush Pink Rose Bouquet",
+      "categorySlug": "flowers-roses-pink-pastel",
+      "brand": "Maison Fleur",
+      "priceUsd": 58,
+      "stock": 35,
+      "shortDescription": "Soft pink and pastel roses layered with gypsophila for an elegant, romantic gift."
+    },
+    {
+      "slug": "ivory-rose-luxe-vase",
+      "name": "Ivory Rose Luxe Vase Arrangement",
+      "categorySlug": "flowers-luxury-vase",
+      "brand": "Maison Fleur",
+      "priceUsd": 95,
+      "compareUsd": 115,
+      "stock": 22,
+      "shortDescription": "Two dozen ivory roses styled in a clear glass vase and delivered ready to display."
+    },
+    {
+      "slug": "signature-rose-hatbox",
+      "name": "Signature Rose Hatbox",
+      "categorySlug": "flowers-luxury-hatbox",
+      "brand": "Ferns N Petals",
+      "priceUsd": 129,
+      "stock": 18,
+      "shortDescription": "A dome of velvety roses arranged in our keepsake hatbox for a show-stopping luxury statement."
+    },
+    {
+      "slug": "phalaenopsis-orchid-stem-arrangement",
+      "name": "White Phalaenopsis Orchid Arrangement",
+      "categorySlug": "flowers-luxury-orchids",
+      "brand": "Verdant & Vine",
+      "priceUsd": 110,
+      "compareUsd": 135,
+      "stock": 20,
+      "shortDescription": "Architectural white phalaenopsis orchid stems set in a ceramic vessel for understated luxury."
+    },
+    {
+      "slug": "spring-tulip-peony-bunch",
+      "name": "Spring Tulip & Peony Bunch",
+      "categorySlug": "flowers-seasonal-spring",
+      "brand": "Petal & Stem",
+      "priceUsd": 49,
+      "compareUsd": 59,
+      "stock": 45,
+      "shortDescription": "Seasonal tulips and blousy peonies bunched together to celebrate the first days of spring."
+    },
+    {
+      "slug": "rustic-sunflower-bunch",
+      "name": "Rustic Sunflower Bunch",
+      "categorySlug": "flowers-seasonal-sunflowers",
+      "brand": "The Wild Bunch",
+      "priceUsd": 42,
+      "stock": 50,
+      "shortDescription": "A generous armful of golden sunflowers tied simply with raffia for a sunny, rustic feel."
+    },
+    {
+      "slug": "potted-moth-orchid",
+      "name": "Potted Moth Orchid",
+      "categorySlug": "plants-flowering-orchids",
+      "brand": "GreenLeaf Botanicals",
+      "priceUsd": 56,
+      "compareUsd": 68,
+      "stock": 30,
+      "shortDescription": "A long-flowering moth orchid in a decorative ceramic pot that keeps blooming for months."
+    },
+    {
+      "slug": "peace-lily-plant",
+      "name": "Peace Lily Plant",
+      "categorySlug": "plants-flowering-peace-lily",
+      "brand": "GreenLeaf Botanicals",
+      "priceUsd": 38,
+      "stock": 48,
+      "shortDescription": "An easy-care peace lily that purifies the air and produces elegant white blooms indoors."
+    },
+    {
+      "slug": "succulent-trio-gift-set",
+      "name": "Succulent Trio Gift Set",
+      "categorySlug": "plants-indoor-succulents",
+      "brand": "Verdant & Vine",
+      "priceUsd": 32,
+      "compareUsd": 42,
+      "stock": 70,
+      "shortDescription": "Three hardy little succulents in matching pots, perfect for a desk or sunny windowsill."
+    },
+    {
+      "slug": "flowers-and-belgian-chocolates-combo",
+      "name": "Flowers & Belgian Chocolates Combo",
+      "categorySlug": "gift-hampers-flowers-chocolates-classic",
+      "brand": "FlowerAura",
+      "priceUsd": 72,
+      "compareUsd": 89,
+      "stock": 38,
+      "shortDescription": "A fresh seasonal bouquet paired with a box of Belgian chocolates for an instant celebration."
+    },
+    {
+      "slug": "spa-and-bloom-pamper-hamper",
+      "name": "Spa & Bloom Pamper Hamper",
+      "categorySlug": "gift-hampers-pamper-spa",
+      "brand": "Posy Lane",
+      "priceUsd": 88,
+      "stock": 26,
+      "shortDescription": "Bath soak, body lotion and a scented candle nestled beside a posy of fresh flowers."
+    },
+    {
+      "slug": "gourmet-celebration-basket",
+      "name": "Gourmet Celebration Basket",
+      "categorySlug": "gift-hampers-gourmet-celebration",
+      "brand": "Winni",
+      "priceUsd": 99,
+      "compareUsd": 119,
+      "stock": 24,
+      "shortDescription": "A wicker basket of artisan treats, sparkling cider and fresh blooms to toast any milestone."
+    },
+    {
+      "slug": "engraved-keepsake-vase-bouquet",
+      "name": "Engraved Keepsake Vase Bouquet",
+      "categorySlug": "personalized-keepsakes-vases",
+      "brand": "Bloom & Co.",
+      "priceUsd": 76,
+      "stock": 28,
+      "shortDescription": "A seasonal bouquet arranged in a glass vase you can personalize with a name or date."
+    },
+    {
+      "slug": "message-flower-box",
+      "name": "Personalized Message Flower Box",
+      "categorySlug": "personalized-message-flower-boxes",
+      "brand": "FlowerAura",
+      "priceUsd": 52,
+      "compareUsd": 64,
+      "stock": 40,
+      "shortDescription": "Roses arranged in a gift box with your own message spelled out on the lid."
+    },
+    {
+      "slug": "birthday-celebration-bouquet",
+      "name": "Birthday Celebration Bouquet",
+      "categorySlug": "occasions-celebration-birthday",
+      "brand": "Ferns N Petals",
+      "priceUsd": 47,
+      "compareUsd": 57,
+      "stock": 52,
+      "shortDescription": "A joyful mix of bright blooms and a balloon topper to make their birthday extra special."
+    },
+    {
+      "slug": "anniversary-romance-arrangement",
+      "name": "Anniversary Romance Arrangement",
+      "categorySlug": "occasions-celebration-anniversary",
+      "brand": "Interflora India",
+      "priceUsd": 84,
+      "stock": 30,
+      "shortDescription": "Red and pink roses with lilies, hand-arranged to mark another year of love together."
+    },
+    {
+      "slug": "get-well-soon-posy",
+      "name": "Get Well Soon Posy",
+      "categorySlug": "occasions-sympathy-get-well",
+      "brand": "Petal & Stem",
+      "priceUsd": 36,
+      "compareUsd": 45,
+      "stock": 58,
+      "shortDescription": "A cheerful, low-fragrance posy in a vase to brighten a recovery and lift spirits."
+    }
+  ]
+}

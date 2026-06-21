@@ -1,0 +1,461 @@
+{
+  "theme": "beauty_shop",
+  "categories": [
+    {
+      "slug": "skincare",
+      "name": "Skincare",
+      "children": [
+        {
+          "slug": "skincare-cleansers",
+          "name": "Cleansers",
+          "children": [
+            {
+              "slug": "skincare-cleansers-face-wash",
+              "name": "Face Wash"
+            },
+            {
+              "slug": "skincare-cleansers-micellar-water",
+              "name": "Micellar Water"
+            },
+            {
+              "slug": "skincare-cleansers-makeup-remover",
+              "name": "Makeup Remover"
+            }
+          ]
+        },
+        {
+          "slug": "skincare-serums-treatments",
+          "name": "Serums & Treatments",
+          "children": [
+            {
+              "slug": "skincare-serums-vitamin-c",
+              "name": "Vitamin C Serums"
+            },
+            {
+              "slug": "skincare-serums-hyaluronic",
+              "name": "Hyaluronic Acid"
+            },
+            {
+              "slug": "skincare-serums-retinol",
+              "name": "Retinol & Anti-Ageing"
+            },
+            {
+              "slug": "skincare-serums-niacinamide",
+              "name": "Niacinamide"
+            }
+          ]
+        },
+        {
+          "slug": "skincare-moisturisers",
+          "name": "Moisturisers",
+          "children": [
+            {
+              "slug": "skincare-moisturisers-day-cream",
+              "name": "Day Creams"
+            },
+            {
+              "slug": "skincare-moisturisers-night-cream",
+              "name": "Night Creams"
+            },
+            {
+              "slug": "skincare-moisturisers-eye-cream",
+              "name": "Eye Creams"
+            }
+          ]
+        },
+        {
+          "slug": "skincare-sun-care",
+          "name": "Sun Care",
+          "children": [
+            {
+              "slug": "skincare-sun-care-face-spf",
+              "name": "Face Sunscreen"
+            },
+            {
+              "slug": "skincare-sun-care-mineral",
+              "name": "Mineral Sunscreen"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "makeup",
+      "name": "Makeup",
+      "children": [
+        {
+          "slug": "makeup-face",
+          "name": "Face",
+          "children": [
+            {
+              "slug": "makeup-face-foundation",
+              "name": "Foundation"
+            },
+            {
+              "slug": "makeup-face-concealer",
+              "name": "Concealer"
+            },
+            {
+              "slug": "makeup-face-blush",
+              "name": "Blush & Highlighter"
+            }
+          ]
+        },
+        {
+          "slug": "makeup-lips",
+          "name": "Lips",
+          "children": [
+            {
+              "slug": "makeup-lips-lipstick",
+              "name": "Lipstick"
+            },
+            {
+              "slug": "makeup-lips-liquid-lipstick",
+              "name": "Liquid Lipstick"
+            },
+            {
+              "slug": "makeup-lips-lip-balm",
+              "name": "Lip Balm & Care"
+            }
+          ]
+        },
+        {
+          "slug": "makeup-eyes",
+          "name": "Eyes",
+          "children": [
+            {
+              "slug": "makeup-eyes-mascara",
+              "name": "Mascara"
+            },
+            {
+              "slug": "makeup-eyes-eyeliner",
+              "name": "Eyeliner & Kajal"
+            },
+            {
+              "slug": "makeup-eyes-eyeshadow",
+              "name": "Eyeshadow Palettes"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "haircare",
+      "name": "Haircare",
+      "children": [
+        {
+          "slug": "haircare-wash",
+          "name": "Shampoo & Conditioner",
+          "children": [
+            {
+              "slug": "haircare-wash-shampoo",
+              "name": "Shampoo"
+            },
+            {
+              "slug": "haircare-wash-conditioner",
+              "name": "Conditioner"
+            }
+          ]
+        },
+        {
+          "slug": "haircare-treatments",
+          "name": "Treatments",
+          "children": [
+            {
+              "slug": "haircare-treatments-hair-mask",
+              "name": "Hair Masks"
+            },
+            {
+              "slug": "haircare-treatments-hair-oil",
+              "name": "Hair Oils & Serums"
+            }
+          ]
+        },
+        {
+          "slug": "haircare-styling",
+          "name": "Styling",
+          "children": [
+            {
+              "slug": "haircare-styling-heat-protectant",
+              "name": "Heat Protectant"
+            },
+            {
+              "slug": "haircare-styling-dry-shampoo",
+              "name": "Dry Shampoo"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "fragrance",
+      "name": "Fragrance",
+      "children": [
+        {
+          "slug": "fragrance-women",
+          "name": "Women's Perfume",
+          "children": [
+            {
+              "slug": "fragrance-women-eau-de-parfum",
+              "name": "Eau de Parfum"
+            },
+            {
+              "slug": "fragrance-women-body-mist",
+              "name": "Body Mist"
+            }
+          ]
+        },
+        {
+          "slug": "fragrance-men",
+          "name": "Men's Fragrance",
+          "children": [
+            {
+              "slug": "fragrance-men-eau-de-toilette",
+              "name": "Eau de Toilette"
+            },
+            {
+              "slug": "fragrance-men-deodorant",
+              "name": "Deodorant & Body Spray"
+            }
+          ]
+        },
+        {
+          "slug": "fragrance-unisex",
+          "name": "Unisex",
+          "children": [
+            {
+              "slug": "fragrance-unisex-eau-de-parfum",
+              "name": "Eau de Parfum"
+            },
+            {
+              "slug": "fragrance-unisex-roll-on",
+              "name": "Attar & Roll-On"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "tools-accessories",
+      "name": "Tools & Accessories",
+      "children": [
+        {
+          "slug": "tools-makeup",
+          "name": "Makeup Tools",
+          "children": [
+            {
+              "slug": "tools-makeup-brushes",
+              "name": "Brushes"
+            },
+            {
+              "slug": "tools-makeup-sponges",
+              "name": "Sponges & Applicators"
+            }
+          ]
+        },
+        {
+          "slug": "tools-skincare-devices",
+          "name": "Skincare Tools",
+          "children": [
+            {
+              "slug": "tools-skincare-devices-rollers",
+              "name": "Face Rollers & Gua Sha"
+            },
+            {
+              "slug": "tools-skincare-devices-cleansing",
+              "name": "Cleansing Brushes"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "brandsByCountry": {
+    "IN": [
+      "Lakmé",
+      "Mamaearth",
+      "Sugar Cosmetics",
+      "Nykaa",
+      "Forest Essentials",
+      "Plum",
+      "Minimalist",
+      "The Derma Co",
+      "Biotique",
+      "Kama Ayurveda"
+    ],
+    "default": [
+      "Lumière",
+      "GlowLab",
+      "PureSkin",
+      "Velvet Cosmetics",
+      "Botaniq",
+      "Aurelle",
+      "Maison Bloom"
+    ]
+  },
+  "products": [
+    {
+      "slug": "vitamin-c-brightening-serum",
+      "name": "Vitamin C Brightening Serum 10%",
+      "categorySlug": "skincare-serums-vitamin-c",
+      "brand": "Minimalist",
+      "priceUsd": 14.99,
+      "compareUsd": 18.99,
+      "stock": 68,
+      "shortDescription": "A lightweight 10% vitamin C serum that fades dark spots and brightens dull skin over time."
+    },
+    {
+      "slug": "hyaluronic-hydra-moisturiser",
+      "name": "Hyaluronic Acid Hydra Moisturiser",
+      "categorySlug": "skincare-moisturisers-day-cream",
+      "brand": "The Derma Co",
+      "priceUsd": 12.49,
+      "stock": 54,
+      "shortDescription": "A gel-cream moisturiser that drenches skin in hyaluronic acid for plump, all-day hydration."
+    },
+    {
+      "slug": "gentle-foaming-face-wash",
+      "name": "Gentle Foaming Face Wash",
+      "categorySlug": "skincare-cleansers-face-wash",
+      "brand": "Plum",
+      "priceUsd": 8.99,
+      "compareUsd": 10.99,
+      "stock": 90,
+      "shortDescription": "A soap-free foaming cleanser that lifts away dirt and oil without stripping the skin barrier."
+    },
+    {
+      "slug": "retinol-renewal-night-cream",
+      "name": "Retinol Renewal Night Cream",
+      "categorySlug": "skincare-moisturisers-night-cream",
+      "brand": "GlowLab",
+      "priceUsd": 22,
+      "compareUsd": 28,
+      "stock": 37,
+      "shortDescription": "An overnight retinol cream that smooths fine lines and refines texture while you sleep."
+    },
+    {
+      "slug": "invisible-gel-sunscreen-spf50",
+      "name": "Invisible Gel Sunscreen SPF 50 PA+++",
+      "categorySlug": "skincare-sun-care-face-spf",
+      "brand": "Minimalist",
+      "priceUsd": 13.49,
+      "stock": 75,
+      "shortDescription": "A no-white-cast SPF 50 gel sunscreen that sits weightlessly under makeup."
+    },
+    {
+      "slug": "matte-liquid-lipstick",
+      "name": "Stay-All-Day Matte Liquid Lipstick",
+      "categorySlug": "makeup-lips-liquid-lipstick",
+      "brand": "Sugar Cosmetics",
+      "priceUsd": 9.99,
+      "compareUsd": 12.99,
+      "stock": 110,
+      "shortDescription": "A transfer-proof liquid lipstick with intense matte colour that lasts through meals."
+    },
+    {
+      "slug": "silk-serum-foundation",
+      "name": "Silk Serum Foundation",
+      "categorySlug": "makeup-face-foundation",
+      "brand": "Lakmé",
+      "priceUsd": 16.5,
+      "stock": 62,
+      "shortDescription": "A skin-like medium-coverage foundation infused with serum for a natural radiant finish."
+    },
+    {
+      "slug": "volumising-mascara",
+      "name": "Lash Volumising Mascara",
+      "categorySlug": "makeup-eyes-mascara",
+      "brand": "Velvet Cosmetics",
+      "priceUsd": 11.99,
+      "compareUsd": 14.99,
+      "stock": 84,
+      "shortDescription": "A buildable mascara that adds dramatic volume and length without clumping or smudging."
+    },
+    {
+      "slug": "sunset-eyeshadow-palette",
+      "name": "Sunset 12-Shade Eyeshadow Palette",
+      "categorySlug": "makeup-eyes-eyeshadow",
+      "brand": "Sugar Cosmetics",
+      "priceUsd": 24.99,
+      "compareUsd": 32,
+      "stock": 41,
+      "shortDescription": "Twelve warm-toned mattes and shimmers for everyday to glam eye looks in one palette."
+    },
+    {
+      "slug": "argan-repair-shampoo",
+      "name": "Argan Oil Repair Shampoo",
+      "categorySlug": "haircare-wash-shampoo",
+      "brand": "Botaniq",
+      "priceUsd": 9.49,
+      "stock": 96,
+      "shortDescription": "A sulphate-free shampoo with argan oil that cleanses gently and tames frizz on dry hair."
+    },
+    {
+      "slug": "deep-nourish-hair-mask",
+      "name": "Deep Nourish Repair Hair Mask",
+      "categorySlug": "haircare-treatments-hair-mask",
+      "brand": "Mamaearth",
+      "priceUsd": 10.99,
+      "compareUsd": 13.49,
+      "stock": 58,
+      "shortDescription": "A weekly intensive mask that restores softness and shine to damaged, over-processed hair."
+    },
+    {
+      "slug": "ayurvedic-bringadi-hair-oil",
+      "name": "Ayurvedic Bringadi Hair Oil",
+      "categorySlug": "haircare-treatments-hair-oil",
+      "brand": "Kama Ayurveda",
+      "priceUsd": 28,
+      "stock": 33,
+      "shortDescription": "A classic herb-infused oil that nourishes the scalp and helps reduce hair fall and greying."
+    },
+    {
+      "slug": "eau-de-parfum-bloom",
+      "name": "Bloom Eau de Parfum",
+      "categorySlug": "fragrance-women-eau-de-parfum",
+      "brand": "Maison Bloom",
+      "priceUsd": 49,
+      "compareUsd": 62,
+      "stock": 24,
+      "shortDescription": "A floral eau de parfum of jasmine, peony and white musk that lingers softly all day."
+    },
+    {
+      "slug": "eau-de-toilette-noir-homme",
+      "name": "Noir Homme Eau de Toilette",
+      "categorySlug": "fragrance-men-eau-de-toilette",
+      "brand": "Aurelle",
+      "priceUsd": 44,
+      "stock": 29,
+      "shortDescription": "A woody-spicy men's fragrance with bergamot, cedar and amber for an evening signature scent."
+    },
+    {
+      "slug": "rose-oud-roll-on-attar",
+      "name": "Rose Oud Roll-On Attar",
+      "categorySlug": "fragrance-unisex-roll-on",
+      "brand": "Forest Essentials",
+      "priceUsd": 26,
+      "compareUsd": 32,
+      "stock": 47,
+      "shortDescription": "An alcohol-free roll-on attar blending Indian rose and oud for a rich, long-lasting trail."
+    },
+    {
+      "slug": "pro-makeup-brush-set-12pc",
+      "name": "Pro Makeup Brush Set (12 Piece)",
+      "categorySlug": "tools-makeup-brushes",
+      "brand": "Velvet Cosmetics",
+      "priceUsd": 19.99,
+      "compareUsd": 26.99,
+      "stock": 52,
+      "shortDescription": "A complete 12-piece set of soft synthetic brushes for face and eye makeup, with travel pouch."
+    },
+    {
+      "slug": "rose-quartz-face-roller-gua-sha",
+      "name": "Rose Quartz Face Roller & Gua Sha Set",
+      "categorySlug": "tools-skincare-devices-rollers",
+      "brand": "PureSkin",
+      "priceUsd": 15.99,
+      "stock": 70,
+      "shortDescription": "A natural rose quartz roller and gua sha duo to de-puff, sculpt and boost serum absorption."
+    }
+  ]
+}

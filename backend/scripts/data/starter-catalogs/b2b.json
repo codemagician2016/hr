@@ -1,0 +1,430 @@
+{
+  "theme": "b2b",
+  "categories": [
+    {
+      "slug": "packaging-shipping",
+      "name": "Packaging & Shipping",
+      "children": [
+        {
+          "slug": "pkg-boxes-mailers",
+          "name": "Boxes & Mailers",
+          "children": [
+            {
+              "slug": "pkg-boxes-corrugated-cartons",
+              "name": "Corrugated Cartons"
+            },
+            {
+              "slug": "pkg-boxes-mailing-envelopes",
+              "name": "Mailing Envelopes"
+            },
+            {
+              "slug": "pkg-boxes-pallet-boxes",
+              "name": "Pallet Boxes"
+            }
+          ]
+        },
+        {
+          "slug": "pkg-tapes-strapping",
+          "name": "Tapes & Strapping",
+          "children": [
+            {
+              "slug": "pkg-tapes-packing-tape",
+              "name": "Packing Tape"
+            },
+            {
+              "slug": "pkg-tapes-strapping-rolls",
+              "name": "Strapping Rolls"
+            }
+          ]
+        },
+        {
+          "slug": "pkg-void-fill-protection",
+          "name": "Void Fill & Protection",
+          "children": [
+            {
+              "slug": "pkg-protect-bubble-wrap",
+              "name": "Bubble Wrap"
+            },
+            {
+              "slug": "pkg-protect-stretch-film",
+              "name": "Stretch Film"
+            },
+            {
+              "slug": "pkg-protect-foam-rolls",
+              "name": "Foam Rolls"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "office-supplies",
+      "name": "Office Supplies",
+      "children": [
+        {
+          "slug": "off-paper-print",
+          "name": "Paper & Printing",
+          "children": [
+            {
+              "slug": "off-paper-copier-paper",
+              "name": "Copier Paper"
+            },
+            {
+              "slug": "off-paper-toner-cartridges",
+              "name": "Toner Cartridges"
+            }
+          ]
+        },
+        {
+          "slug": "off-writing-desk",
+          "name": "Writing & Desk",
+          "children": [
+            {
+              "slug": "off-writing-pens",
+              "name": "Pens"
+            },
+            {
+              "slug": "off-writing-sticky-notes",
+              "name": "Sticky Notes"
+            },
+            {
+              "slug": "off-writing-markers",
+              "name": "Markers & Highlighters"
+            }
+          ]
+        },
+        {
+          "slug": "off-filing-storage",
+          "name": "Filing & Storage",
+          "children": [
+            {
+              "slug": "off-filing-box-files",
+              "name": "Box Files & Binders"
+            },
+            {
+              "slug": "off-filing-storage-boxes",
+              "name": "Archive Storage Boxes"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "industrial-mro",
+      "name": "Industrial & MRO",
+      "children": [
+        {
+          "slug": "ind-fasteners-fixings",
+          "name": "Fasteners & Fixings",
+          "children": [
+            {
+              "slug": "ind-fasteners-cable-ties",
+              "name": "Cable Ties"
+            },
+            {
+              "slug": "ind-fasteners-bolts-nuts",
+              "name": "Bolts & Nuts"
+            }
+          ]
+        },
+        {
+          "slug": "ind-handling-storage",
+          "name": "Material Handling",
+          "children": [
+            {
+              "slug": "ind-handling-bin-bags",
+              "name": "Heavy-Duty Bin Bags"
+            },
+            {
+              "slug": "ind-handling-storage-bins",
+              "name": "Storage Bins"
+            },
+            {
+              "slug": "ind-handling-hand-trucks",
+              "name": "Hand Trucks & Trolleys"
+            }
+          ]
+        },
+        {
+          "slug": "ind-power-hand-tools",
+          "name": "Power & Hand Tools",
+          "children": [
+            {
+              "slug": "ind-tools-cordless-drills",
+              "name": "Cordless Drills"
+            },
+            {
+              "slug": "ind-tools-utility-knives",
+              "name": "Utility Knives"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "cleaning-janitorial",
+      "name": "Cleaning & Janitorial",
+      "children": [
+        {
+          "slug": "cln-chemicals-soaps",
+          "name": "Chemicals & Soaps",
+          "children": [
+            {
+              "slug": "cln-chem-disinfectant",
+              "name": "Disinfectants"
+            },
+            {
+              "slug": "cln-chem-hand-soap",
+              "name": "Hand Soap & Sanitiser"
+            }
+          ]
+        },
+        {
+          "slug": "cln-paper-wipes",
+          "name": "Paper & Wipes",
+          "children": [
+            {
+              "slug": "cln-paper-towel-rolls",
+              "name": "Paper Towel Rolls"
+            },
+            {
+              "slug": "cln-paper-microfibre-cloths",
+              "name": "Microfibre Cloths"
+            }
+          ]
+        },
+        {
+          "slug": "cln-equipment-accessories",
+          "name": "Equipment & Accessories",
+          "children": [
+            {
+              "slug": "cln-equip-mops-buckets",
+              "name": "Mops & Buckets"
+            },
+            {
+              "slug": "cln-equip-floor-pads",
+              "name": "Floor Pads"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "safety-ppe",
+      "name": "Safety & PPE",
+      "children": [
+        {
+          "slug": "ppe-hand-body",
+          "name": "Hand & Body Protection",
+          "children": [
+            {
+              "slug": "ppe-gloves-nitrile",
+              "name": "Nitrile Gloves"
+            },
+            {
+              "slug": "ppe-body-hi-vis-vests",
+              "name": "Hi-Vis Vests"
+            }
+          ]
+        },
+        {
+          "slug": "ppe-head-face",
+          "name": "Head & Face Protection",
+          "children": [
+            {
+              "slug": "ppe-face-safety-goggles",
+              "name": "Safety Goggles"
+            },
+            {
+              "slug": "ppe-face-masks",
+              "name": "Face Masks"
+            },
+            {
+              "slug": "ppe-head-hard-hats",
+              "name": "Hard Hats"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "brandsByCountry": {
+    "IN": [
+      "Uflex",
+      "JK Paper",
+      "Cello",
+      "Luxor",
+      "Karam",
+      "Venus Safety",
+      "Eureka Forbes",
+      "Bosch",
+      "Stanley",
+      "Godrej"
+    ],
+    "default": [
+      "PackPro",
+      "ClearWrite",
+      "GripGuard",
+      "PureClean",
+      "ServeWell",
+      "SafeLine",
+      "DuraBox",
+      "ProShield"
+    ]
+  },
+  "products": [
+    {
+      "slug": "corrugated-shipping-carton-medium-bundle-25",
+      "name": "Corrugated Shipping Carton, Medium (Bundle of 25)",
+      "categorySlug": "pkg-boxes-corrugated-cartons",
+      "brand": "PackPro",
+      "priceUsd": 32.5,
+      "compareUsd": 41,
+      "stock": 90,
+      "shortDescription": "Single-wall 3-ply RSC kraft cartons, 305 x 229 x 229 mm, sold in bundles of 25 for shipping and storage."
+    },
+    {
+      "slug": "poly-mailing-bags-mixed-case-500",
+      "name": "Poly Mailing Bags, Mixed Sizes (Case of 500)",
+      "categorySlug": "pkg-boxes-mailing-envelopes",
+      "brand": "DuraBox",
+      "priceUsd": 44,
+      "stock": 75,
+      "shortDescription": "Tear-resistant co-extruded mailers with peel-and-seal strip, opaque grey, case of 500 across three popular sizes."
+    },
+    {
+      "slug": "clear-packing-tape-48mm-carton-36",
+      "name": "Clear Packing Tape 48mm (Carton of 36 Rolls)",
+      "categorySlug": "pkg-tapes-packing-tape",
+      "brand": "Uflex",
+      "priceUsd": 38.9,
+      "compareUsd": 49.5,
+      "stock": 110,
+      "shortDescription": "Low-noise acrylic-adhesive tape, 48 mm x 75 m per roll, supplied as a trade carton of 36 rolls."
+    },
+    {
+      "slug": "stretch-pallet-wrap-film-500mm-6-pack",
+      "name": "Stretch Pallet Wrap Film 500mm (6-Roll Pack)",
+      "categorySlug": "pkg-protect-stretch-film",
+      "brand": "Uflex",
+      "priceUsd": 58,
+      "compareUsd": 72,
+      "stock": 64,
+      "shortDescription": "23-micron cast hand film with high puncture resistance, 500 mm x 300 m rolls in a six-roll pack."
+    },
+    {
+      "slug": "bubble-wrap-roll-750mm-x-100m",
+      "name": "Bubble Wrap Roll 750mm x 100m",
+      "categorySlug": "pkg-protect-bubble-wrap",
+      "brand": "PackPro",
+      "priceUsd": 27.5,
+      "stock": 58,
+      "shortDescription": "Protective 10 mm air-bubble cushioning film on a 750 mm wide by 100 m perforated roll for fragile goods."
+    },
+    {
+      "slug": "a4-copier-paper-80gsm-box-5-reams",
+      "name": "A4 Copier Paper 80gsm (Box of 5 Reams)",
+      "categorySlug": "off-paper-copier-paper",
+      "brand": "JK Paper",
+      "priceUsd": 29.9,
+      "compareUsd": 36,
+      "stock": 120,
+      "shortDescription": "Bright-white 80 gsm multipurpose paper, 500 sheets per ream, jam-free guaranteed, boxed as 5 reams (2,500 sheets)."
+    },
+    {
+      "slug": "retractable-ballpoint-pens-blue-box-50",
+      "name": "Retractable Ballpoint Pens, Blue (Box of 50)",
+      "categorySlug": "off-writing-pens",
+      "brand": "Cello",
+      "priceUsd": 14.5,
+      "stock": 100,
+      "shortDescription": "Smooth oil-based 1.0 mm medium-tip retractable pens in blue, bulk box of 50 for office and reception use."
+    },
+    {
+      "slug": "chisel-tip-highlighters-assorted-pack-48",
+      "name": "Chisel-Tip Highlighters, Assorted (Pack of 48)",
+      "categorySlug": "off-writing-markers",
+      "brand": "Luxor",
+      "priceUsd": 21,
+      "compareUsd": 27.5,
+      "stock": 85,
+      "shortDescription": "Quick-drying fluorescent highlighters with chisel tips, pack of 48 across six assorted colours."
+    },
+    {
+      "slug": "lever-arch-box-files-foolscap-carton-10",
+      "name": "Lever-Arch Box Files, Foolscap (Carton of 10)",
+      "categorySlug": "off-filing-box-files",
+      "brand": "ClearWrite",
+      "priceUsd": 33,
+      "stock": 70,
+      "shortDescription": "Laminated-board foolscap files with 70 mm spine and lever-arch mechanism, holding 500 sheets, carton of 10."
+    },
+    {
+      "slug": "uv-stabilised-cable-ties-200mm-pack-1000",
+      "name": "UV-Stabilised Cable Ties 200mm (Pack of 1000)",
+      "categorySlug": "ind-fasteners-cable-ties",
+      "brand": "GripGuard",
+      "priceUsd": 18.5,
+      "compareUsd": 24,
+      "stock": 95,
+      "shortDescription": "Nylon 6.6 self-locking ties, 200 x 4.8 mm with 22 kg tensile strength, UV-stabilised, in a trade pack of 1000."
+    },
+    {
+      "slug": "heavy-duty-bin-bags-120l-roll-200",
+      "name": "Heavy-Duty Bin Bags 120L (Case of 200)",
+      "categorySlug": "ind-handling-bin-bags",
+      "brand": "DuraBox",
+      "priceUsd": 26,
+      "stock": 88,
+      "shortDescription": "Puncture-resistant 100-micron LDPE refuse sacks, 120 L capacity, supplied on rolls totalling 200 bags per case."
+    },
+    {
+      "slug": "cordless-drill-driver-18v-2-battery-kit",
+      "name": "Cordless Drill Driver 18V (2-Battery Kit)",
+      "categorySlug": "ind-tools-cordless-drills",
+      "brand": "Bosch",
+      "priceUsd": 139,
+      "compareUsd": 169,
+      "stock": 24,
+      "shortDescription": "18V brushless drill driver with two 2.0Ah batteries, charger and case for maintenance and assembly teams."
+    },
+    {
+      "slug": "concentrated-disinfectant-cleaner-5l-case-4",
+      "name": "Concentrated Disinfectant Cleaner 5L (Case of 4)",
+      "categorySlug": "cln-chem-disinfectant",
+      "brand": "PureClean",
+      "priceUsd": 47,
+      "compareUsd": 58,
+      "stock": 66,
+      "shortDescription": "Kills 99.9% of germs, dilutes 1:40 for surfaces and floors, supplied as four 5 L jerry cans per case."
+    },
+    {
+      "slug": "2ply-centrefeed-paper-towel-rolls-case-6",
+      "name": "2-Ply Centrefeed Paper Towel Rolls (Case of 6)",
+      "categorySlug": "cln-paper-towel-rolls",
+      "brand": "Eureka Forbes",
+      "priceUsd": 34.5,
+      "stock": 80,
+      "shortDescription": "Absorbent 2-ply centrefeed rolls, 100 m each, ideal for washrooms and food-prep areas, case of 6 rolls."
+    },
+    {
+      "slug": "powder-free-nitrile-gloves-blue-case-1000",
+      "name": "Powder-Free Nitrile Gloves, Blue (Case of 1000)",
+      "categorySlug": "ppe-gloves-nitrile",
+      "brand": "Venus Safety",
+      "priceUsd": 72,
+      "compareUsd": 89,
+      "stock": 54,
+      "shortDescription": "5-mil powder-free examination-grade nitrile gloves, case of 1000 (10 boxes of 100) in assorted sizes."
+    },
+    {
+      "slug": "class-2-hi-vis-safety-vests-pack-25",
+      "name": "Class 2 Hi-Vis Safety Vests (Pack of 25)",
+      "categorySlug": "ppe-body-hi-vis-vests",
+      "brand": "Karam",
+      "priceUsd": 86,
+      "stock": 40,
+      "shortDescription": "EN 20471 Class 2 retroreflective vests with hook-and-loop closure, breathable mesh, pack of 25 for site crews."
+    }
+  ]
+}

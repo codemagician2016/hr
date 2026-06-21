@@ -1,0 +1,426 @@
+{
+  "theme": "pharmacy",
+  "categories": [
+    {
+      "slug": "medicines",
+      "name": "Medicines",
+      "children": [
+        {
+          "slug": "medicines-pain-fever",
+          "name": "Pain & Fever",
+          "children": [
+            {
+              "slug": "medicines-pain-fever-tablets",
+              "name": "Pain Relief Tablets"
+            },
+            {
+              "slug": "medicines-pain-fever-balms",
+              "name": "Pain Balms & Sprays"
+            },
+            {
+              "slug": "medicines-pain-fever-fever",
+              "name": "Fever Relief"
+            }
+          ]
+        },
+        {
+          "slug": "medicines-cold-cough",
+          "name": "Cold & Cough",
+          "children": [
+            {
+              "slug": "medicines-cold-cough-syrups",
+              "name": "Cough Syrups"
+            },
+            {
+              "slug": "medicines-cold-cough-lozenges",
+              "name": "Lozenges & Throat Care"
+            },
+            {
+              "slug": "medicines-cold-cough-allergy",
+              "name": "Anti-Allergy"
+            }
+          ]
+        },
+        {
+          "slug": "medicines-digestive",
+          "name": "Digestive Care",
+          "children": [
+            {
+              "slug": "medicines-digestive-antacids",
+              "name": "Acidity & Antacids"
+            },
+            {
+              "slug": "medicines-digestive-ors",
+              "name": "ORS & Rehydration"
+            },
+            {
+              "slug": "medicines-digestive-laxatives",
+              "name": "Laxatives & Constipation"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "vitamins-supplements",
+      "name": "Vitamins & Supplements",
+      "children": [
+        {
+          "slug": "vitamins-multivitamins",
+          "name": "Multivitamins",
+          "children": [
+            {
+              "slug": "vitamins-multivitamins-daily",
+              "name": "Daily Multivitamins"
+            },
+            {
+              "slug": "vitamins-multivitamins-women",
+              "name": "Women's Health"
+            },
+            {
+              "slug": "vitamins-multivitamins-men",
+              "name": "Men's Health"
+            }
+          ]
+        },
+        {
+          "slug": "vitamins-single",
+          "name": "Single Vitamins",
+          "children": [
+            {
+              "slug": "vitamins-single-vitamin-c",
+              "name": "Vitamin C"
+            },
+            {
+              "slug": "vitamins-single-vitamin-d",
+              "name": "Vitamin D3"
+            },
+            {
+              "slug": "vitamins-single-omega",
+              "name": "Omega-3 & Fish Oil"
+            }
+          ]
+        },
+        {
+          "slug": "vitamins-minerals",
+          "name": "Minerals",
+          "children": [
+            {
+              "slug": "vitamins-minerals-calcium",
+              "name": "Calcium & Bone Health"
+            },
+            {
+              "slug": "vitamins-minerals-iron",
+              "name": "Iron & Folic Acid"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "personal-care",
+      "name": "Personal Care",
+      "children": [
+        {
+          "slug": "personal-care-skin",
+          "name": "Skin Care",
+          "children": [
+            {
+              "slug": "personal-care-skin-moisturisers",
+              "name": "Moisturisers & Lotions"
+            },
+            {
+              "slug": "personal-care-skin-sunscreen",
+              "name": "Sunscreen"
+            },
+            {
+              "slug": "personal-care-skin-medicated",
+              "name": "Medicated Creams"
+            }
+          ]
+        },
+        {
+          "slug": "personal-care-oral",
+          "name": "Oral Care",
+          "children": [
+            {
+              "slug": "personal-care-oral-toothpaste",
+              "name": "Toothpaste & Brushes"
+            },
+            {
+              "slug": "personal-care-oral-mouthwash",
+              "name": "Mouthwash"
+            }
+          ]
+        },
+        {
+          "slug": "personal-care-feminine",
+          "name": "Feminine Hygiene",
+          "children": [
+            {
+              "slug": "personal-care-feminine-sanitary",
+              "name": "Sanitary Care"
+            },
+            {
+              "slug": "personal-care-feminine-intimate",
+              "name": "Intimate Wash"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "baby-care",
+      "name": "Baby Care",
+      "children": [
+        {
+          "slug": "baby-care-feeding",
+          "name": "Diapers & Feeding",
+          "children": [
+            {
+              "slug": "baby-care-feeding-diapers",
+              "name": "Diapers & Wipes"
+            },
+            {
+              "slug": "baby-care-feeding-formula",
+              "name": "Infant Formula"
+            }
+          ]
+        },
+        {
+          "slug": "baby-care-skin",
+          "name": "Baby Skin Care",
+          "children": [
+            {
+              "slug": "baby-care-skin-lotions",
+              "name": "Baby Lotions & Oils"
+            },
+            {
+              "slug": "baby-care-skin-bath",
+              "name": "Baby Bath & Wash"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "first-aid-devices",
+      "name": "First Aid & Devices",
+      "children": [
+        {
+          "slug": "first-aid",
+          "name": "First Aid",
+          "children": [
+            {
+              "slug": "first-aid-antiseptics",
+              "name": "Antiseptics & Wound Care"
+            },
+            {
+              "slug": "first-aid-bandages",
+              "name": "Bandages & Dressings"
+            },
+            {
+              "slug": "first-aid-supports",
+              "name": "Supports & Braces"
+            }
+          ]
+        },
+        {
+          "slug": "devices-monitoring",
+          "name": "Health Monitors",
+          "children": [
+            {
+              "slug": "devices-monitoring-bp",
+              "name": "BP Monitors"
+            },
+            {
+              "slug": "devices-monitoring-glucose",
+              "name": "Glucometers & Strips"
+            },
+            {
+              "slug": "devices-monitoring-thermometers",
+              "name": "Thermometers & Oximeters"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "brandsByCountry": {
+    "IN": [
+      "Dabur",
+      "Himalaya",
+      "Cipla",
+      "Dr. Reddy's",
+      "Mankind",
+      "Zandu",
+      "Volini",
+      "Sebamed",
+      "Mamaearth",
+      "Dr. Morepen"
+    ],
+    "default": [
+      "CarePlus",
+      "VitaWell",
+      "PureLeaf Naturals",
+      "MediTrust",
+      "NurtureBaby",
+      "FirstAid Pro",
+      "DailyDose"
+    ]
+  },
+  "products": [
+    {
+      "slug": "paracetamol-500mg-tablets-strip-of-15",
+      "name": "Paracetamol 500mg Tablets (Strip of 15)",
+      "categorySlug": "medicines-pain-fever-tablets",
+      "brand": "Cipla",
+      "priceUsd": 1.2,
+      "compareUsd": 1.8,
+      "stock": 120,
+      "shortDescription": "Fast-acting relief from headache, body ache and fever for everyday use."
+    },
+    {
+      "slug": "pain-relief-spray-55g",
+      "name": "Pain Relief Spray 55g",
+      "categorySlug": "medicines-pain-fever-balms",
+      "brand": "Volini",
+      "priceUsd": 3.9,
+      "stock": 64,
+      "shortDescription": "Targeted cooling spray that soothes muscle and joint pain on contact."
+    },
+    {
+      "slug": "herbal-cough-syrup-100ml",
+      "name": "Herbal Cough Syrup 100ml",
+      "categorySlug": "medicines-cold-cough-syrups",
+      "brand": "Dabur",
+      "priceUsd": 2.5,
+      "compareUsd": 3.2,
+      "stock": 88,
+      "shortDescription": "Sugar-free Ayurvedic syrup that calms dry and chesty coughs naturally."
+    },
+    {
+      "slug": "cetirizine-10mg-anti-allergy-tablets",
+      "name": "Cetirizine 10mg Anti-Allergy Tablets",
+      "categorySlug": "medicines-cold-cough-allergy",
+      "brand": "Dr. Reddy's",
+      "priceUsd": 1.5,
+      "stock": 100,
+      "shortDescription": "24-hour relief from sneezing, runny nose and seasonal allergies."
+    },
+    {
+      "slug": "antacid-mint-suspension-170ml",
+      "name": "Antacid Mint Suspension 170ml",
+      "categorySlug": "medicines-digestive-antacids",
+      "brand": "MediTrust",
+      "priceUsd": 2.2,
+      "compareUsd": 2.9,
+      "stock": 75,
+      "shortDescription": "Cooling mint liquid that neutralises acidity and eases heartburn quickly."
+    },
+    {
+      "slug": "ors-electrolyte-powder-pack-of-6",
+      "name": "ORS Electrolyte Powder (Pack of 6)",
+      "categorySlug": "medicines-digestive-ors",
+      "brand": "DailyDose",
+      "priceUsd": 3,
+      "stock": 110,
+      "shortDescription": "WHO-formula rehydration sachets to replenish fluids during heat and illness."
+    },
+    {
+      "slug": "daily-multivitamin-tablets-60-count",
+      "name": "Daily Multivitamin Tablets (60 Count)",
+      "categorySlug": "vitamins-multivitamins-daily",
+      "brand": "VitaWell",
+      "priceUsd": 9.5,
+      "compareUsd": 12,
+      "stock": 70,
+      "shortDescription": "Complete daily blend of 22 vitamins and minerals to fill nutrition gaps."
+    },
+    {
+      "slug": "womens-multivitamin-with-iron-30-count",
+      "name": "Women's Multivitamin with Iron (30 Count)",
+      "categorySlug": "vitamins-multivitamins-women",
+      "brand": "Himalaya",
+      "priceUsd": 8,
+      "stock": 55,
+      "shortDescription": "Tailored support for women with iron, folic acid and antioxidants."
+    },
+    {
+      "slug": "vitamin-c-1000mg-effervescent-tablets",
+      "name": "Vitamin C 1000mg Effervescent Tablets",
+      "categorySlug": "vitamins-single-vitamin-c",
+      "brand": "VitaWell",
+      "priceUsd": 5.5,
+      "compareUsd": 7,
+      "stock": 90,
+      "shortDescription": "Orange-flavoured fizzy tablets to support immunity and skin health."
+    },
+    {
+      "slug": "vitamin-d3-60k-iu-capsules-pack-of-4",
+      "name": "Vitamin D3 60K IU Capsules (Pack of 4)",
+      "categorySlug": "vitamins-single-vitamin-d",
+      "brand": "Mankind",
+      "priceUsd": 4.2,
+      "stock": 80,
+      "shortDescription": "High-strength weekly capsules to correct vitamin D deficiency and aid bones."
+    },
+    {
+      "slug": "omega-3-fish-oil-1000mg-90-capsules",
+      "name": "Omega-3 Fish Oil 1000mg (90 Capsules)",
+      "categorySlug": "vitamins-single-omega",
+      "brand": "PureLeaf Naturals",
+      "priceUsd": 13,
+      "compareUsd": 16.5,
+      "stock": 48,
+      "shortDescription": "Purified fish oil rich in EPA and DHA for heart, brain and joint health."
+    },
+    {
+      "slug": "calcium-plus-d3-tablets-60-count",
+      "name": "Calcium + D3 Tablets (60 Count)",
+      "categorySlug": "vitamins-minerals-calcium",
+      "brand": "CarePlus",
+      "priceUsd": 6.5,
+      "stock": 65,
+      "shortDescription": "Daily calcium with vitamin D3 to maintain strong bones and teeth."
+    },
+    {
+      "slug": "spf-50-sunscreen-gel-50ml",
+      "name": "SPF 50 PA+++ Sunscreen Gel 50ml",
+      "categorySlug": "personal-care-skin-sunscreen",
+      "brand": "Sebamed",
+      "priceUsd": 11,
+      "compareUsd": 14,
+      "stock": 52,
+      "shortDescription": "Lightweight non-greasy gel offering broad-spectrum protection without white cast."
+    },
+    {
+      "slug": "gentle-baby-lotion-200ml",
+      "name": "Gentle Baby Lotion 200ml",
+      "categorySlug": "baby-care-skin-lotions",
+      "brand": "Mamaearth",
+      "priceUsd": 6,
+      "stock": 60,
+      "shortDescription": "Mild, fragrance-free lotion that keeps delicate baby skin soft and hydrated."
+    },
+    {
+      "slug": "digital-thermometer-flexible-tip",
+      "name": "Digital Thermometer (Flexible Tip)",
+      "categorySlug": "devices-monitoring-thermometers",
+      "brand": "Dr. Morepen",
+      "priceUsd": 7.5,
+      "compareUsd": 10,
+      "stock": 40,
+      "shortDescription": "Fast, accurate readings in 10 seconds with a waterproof flexible tip."
+    },
+    {
+      "slug": "antiseptic-liquid-100ml",
+      "name": "Antiseptic Liquid 100ml",
+      "categorySlug": "first-aid-antiseptics",
+      "brand": "FirstAid Pro",
+      "priceUsd": 2.8,
+      "stock": 95,
+      "shortDescription": "Trusted antiseptic for cleaning cuts, wounds and grazes to prevent infection."
+    }
+  ]
+}

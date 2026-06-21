@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node10",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noImplicitAny": false,
+    "resolveJsonModule": true,
+    "ignoreDeprecations": "6.0",
+    // Allow .js and .ts side-by-side. checkJs=false means plain .js files
+    // are NOT type-checked — they run as-is. Only .ts files are checked.
+    "allowJs": true,
+    "checkJs": false,
+    // Don't emit compiled .js — the runtime uses ts-node for .ts files
+    // and plain node for .js. This is a type-check-only toolchain.
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  },
+  // Include everything so tsc doesn't complain about no inputs. Since
+  // checkJs is false, .js files are effectively ignored by the checker.
+  "include": ["src/**/*", "test/**/*"],
+  "exclude": ["node_modules", "prisma/migrations", "dist", "build"]
+}

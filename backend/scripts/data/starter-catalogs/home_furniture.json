@@ -1,0 +1,439 @@
+{
+  "theme": "home_furniture",
+  "categories": [
+    {
+      "slug": "living-room",
+      "name": "Living Room",
+      "children": [
+        {
+          "slug": "living-seating",
+          "name": "Seating",
+          "children": [
+            {
+              "slug": "living-seating-sofas",
+              "name": "Sofas"
+            },
+            {
+              "slug": "living-seating-sectionals",
+              "name": "Sectionals"
+            },
+            {
+              "slug": "living-seating-armchairs",
+              "name": "Armchairs"
+            },
+            {
+              "slug": "living-seating-recliners",
+              "name": "Recliners"
+            }
+          ]
+        },
+        {
+          "slug": "living-tables",
+          "name": "Living Room Tables",
+          "children": [
+            {
+              "slug": "living-tables-coffee",
+              "name": "Coffee Tables"
+            },
+            {
+              "slug": "living-tables-side",
+              "name": "Side Tables"
+            },
+            {
+              "slug": "living-tables-console",
+              "name": "Console Tables"
+            }
+          ]
+        },
+        {
+          "slug": "living-media",
+          "name": "Media & TV",
+          "children": [
+            {
+              "slug": "living-media-tv-units",
+              "name": "TV Units"
+            },
+            {
+              "slug": "living-media-entertainment-centers",
+              "name": "Entertainment Centers"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "bedroom",
+      "name": "Bedroom",
+      "children": [
+        {
+          "slug": "bedroom-beds",
+          "name": "Beds",
+          "children": [
+            {
+              "slug": "bedroom-beds-platform",
+              "name": "Platform Beds"
+            },
+            {
+              "slug": "bedroom-beds-upholstered",
+              "name": "Upholstered Beds"
+            },
+            {
+              "slug": "bedroom-beds-storage",
+              "name": "Storage Beds"
+            }
+          ]
+        },
+        {
+          "slug": "bedroom-storage",
+          "name": "Bedroom Storage",
+          "children": [
+            {
+              "slug": "bedroom-storage-wardrobes",
+              "name": "Wardrobes"
+            },
+            {
+              "slug": "bedroom-storage-dressers",
+              "name": "Dressers & Chests"
+            },
+            {
+              "slug": "bedroom-storage-nightstands",
+              "name": "Nightstands"
+            }
+          ]
+        },
+        {
+          "slug": "bedroom-mattresses",
+          "name": "Mattresses",
+          "children": [
+            {
+              "slug": "bedroom-mattresses-memory-foam",
+              "name": "Memory Foam"
+            },
+            {
+              "slug": "bedroom-mattresses-spring",
+              "name": "Pocket Spring"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "dining",
+      "name": "Dining",
+      "children": [
+        {
+          "slug": "dining-tables",
+          "name": "Dining Tables",
+          "children": [
+            {
+              "slug": "dining-tables-fixed",
+              "name": "Fixed Dining Tables"
+            },
+            {
+              "slug": "dining-tables-extendable",
+              "name": "Extendable Tables"
+            }
+          ]
+        },
+        {
+          "slug": "dining-seating",
+          "name": "Dining Seating",
+          "children": [
+            {
+              "slug": "dining-seating-chairs",
+              "name": "Dining Chairs"
+            },
+            {
+              "slug": "dining-seating-benches",
+              "name": "Benches"
+            },
+            {
+              "slug": "dining-seating-bar-stools",
+              "name": "Bar Stools"
+            }
+          ]
+        },
+        {
+          "slug": "dining-storage",
+          "name": "Dining Storage",
+          "children": [
+            {
+              "slug": "dining-storage-sideboards",
+              "name": "Sideboards"
+            },
+            {
+              "slug": "dining-storage-crockery-units",
+              "name": "Crockery Units"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "lighting-decor",
+      "name": "Lighting & Decor",
+      "children": [
+        {
+          "slug": "lighting",
+          "name": "Lighting",
+          "children": [
+            {
+              "slug": "lighting-floor-lamps",
+              "name": "Floor Lamps"
+            },
+            {
+              "slug": "lighting-table-lamps",
+              "name": "Table Lamps"
+            },
+            {
+              "slug": "lighting-pendant",
+              "name": "Pendant Lights"
+            }
+          ]
+        },
+        {
+          "slug": "decor-soft-furnishings",
+          "name": "Soft Furnishings",
+          "children": [
+            {
+              "slug": "decor-soft-rugs",
+              "name": "Rugs"
+            },
+            {
+              "slug": "decor-soft-cushions",
+              "name": "Cushions & Throws"
+            },
+            {
+              "slug": "decor-soft-curtains",
+              "name": "Curtains"
+            }
+          ]
+        },
+        {
+          "slug": "decor-wall-accents",
+          "name": "Wall & Accents",
+          "children": [
+            {
+              "slug": "decor-wall-mirrors",
+              "name": "Mirrors"
+            },
+            {
+              "slug": "decor-wall-art",
+              "name": "Wall Art"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "storage-organization",
+      "name": "Storage & Organization",
+      "children": [
+        {
+          "slug": "storage-shelving",
+          "name": "Shelving",
+          "children": [
+            {
+              "slug": "storage-shelving-bookcases",
+              "name": "Bookcases"
+            },
+            {
+              "slug": "storage-shelving-wall",
+              "name": "Wall Shelves"
+            }
+          ]
+        },
+        {
+          "slug": "storage-cabinets",
+          "name": "Cabinets",
+          "children": [
+            {
+              "slug": "storage-cabinets-shoe",
+              "name": "Shoe Cabinets"
+            },
+            {
+              "slug": "storage-cabinets-multipurpose",
+              "name": "Multipurpose Cabinets"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "brandsByCountry": {
+    "IN": [
+      "Urban Ladder",
+      "Pepperfry",
+      "Godrej Interio",
+      "Nilkamal",
+      "Wakefit",
+      "Durian",
+      "Hometown",
+      "@home by Nilkamal"
+    ],
+    "default": [
+      "Oakhaus",
+      "Nordix",
+      "Casa Vista",
+      "Lumen Works",
+      "Maison & Co",
+      "Loomwell",
+      "Veranda"
+    ]
+  },
+  "products": [
+    {
+      "slug": "linden-3-seater-fabric-sofa",
+      "name": "Linden 3-Seater Fabric Sofa",
+      "categorySlug": "living-seating-sofas",
+      "brand": "Urban Ladder",
+      "priceUsd": 729,
+      "compareUsd": 899,
+      "stock": 24,
+      "shortDescription": "A deep-seated three-seater in stain-resistant linen-blend upholstery over a solid-wood frame."
+    },
+    {
+      "slug": "halden-l-shaped-sectional",
+      "name": "Halden L-Shaped Sectional",
+      "categorySlug": "living-seating-sectionals",
+      "brand": "Nordix",
+      "priceUsd": 1249,
+      "compareUsd": 1499,
+      "stock": 14,
+      "shortDescription": "Roomy left-hand sectional with a chaise, feather-blend cushions and a removable washable cover."
+    },
+    {
+      "slug": "marlow-velvet-accent-armchair",
+      "name": "Marlow Velvet Accent Armchair",
+      "categorySlug": "living-seating-armchairs",
+      "brand": "Casa Vista",
+      "priceUsd": 329,
+      "stock": 40,
+      "shortDescription": "A curved-back accent chair in soft velvet on tapered beech legs, perfect for a reading nook."
+    },
+    {
+      "slug": "aspen-oak-coffee-table",
+      "name": "Aspen Solid Oak Coffee Table",
+      "categorySlug": "living-tables-coffee",
+      "brand": "Oakhaus",
+      "priceUsd": 219,
+      "compareUsd": 269,
+      "stock": 55,
+      "shortDescription": "A solid-oak coffee table with a lower display shelf and a hand-rubbed natural finish."
+    },
+    {
+      "slug": "fenwick-tv-media-unit",
+      "name": "Fenwick 65-inch TV Media Unit",
+      "categorySlug": "living-media-tv-units",
+      "brand": "Pepperfry",
+      "priceUsd": 289,
+      "stock": 33,
+      "shortDescription": "Low-profile media console with cable management and two soft-close cabinet doors for consoles."
+    },
+    {
+      "slug": "soren-upholstered-queen-bed",
+      "name": "Soren Upholstered Queen Bed",
+      "categorySlug": "bedroom-beds-upholstered",
+      "brand": "Wakefit",
+      "priceUsd": 549,
+      "compareUsd": 649,
+      "stock": 21,
+      "shortDescription": "A wingback-headboard queen bed in charcoal fabric with a sturdy slatted base, no box spring needed."
+    },
+    {
+      "slug": "harlow-storage-king-bed",
+      "name": "Harlow Hydraulic Storage King Bed",
+      "categorySlug": "bedroom-beds-storage",
+      "brand": "Durian",
+      "priceUsd": 799,
+      "stock": 16,
+      "shortDescription": "King bed with a lift-up hydraulic platform that hides full-mattress-footprint storage underneath."
+    },
+    {
+      "slug": "nordvik-3-door-wardrobe",
+      "name": "Nordvik 3-Door Wardrobe",
+      "categorySlug": "bedroom-storage-wardrobes",
+      "brand": "Godrej Interio",
+      "priceUsd": 469,
+      "compareUsd": 559,
+      "stock": 18,
+      "shortDescription": "A spacious three-door wardrobe with a hanging rail, adjustable shelves and a full-length mirror."
+    },
+    {
+      "slug": "elm-3-drawer-nightstand",
+      "name": "Elm 3-Drawer Nightstand",
+      "categorySlug": "bedroom-storage-nightstands",
+      "brand": "Oakhaus",
+      "priceUsd": 139,
+      "stock": 62,
+      "shortDescription": "A compact bedside table with three soft-close drawers and a discreet rear cable port."
+    },
+    {
+      "slug": "cloudrest-memory-foam-mattress",
+      "name": "CloudRest Memory Foam Mattress",
+      "categorySlug": "bedroom-mattresses-memory-foam",
+      "brand": "Wakefit",
+      "priceUsd": 399,
+      "compareUsd": 499,
+      "stock": 47,
+      "shortDescription": "A medium-firm gel-infused memory-foam mattress that cradles pressure points and sleeps cool."
+    },
+    {
+      "slug": "bramble-extendable-dining-table",
+      "name": "Bramble Extendable Dining Table",
+      "categorySlug": "dining-tables-extendable",
+      "brand": "Maison & Co",
+      "priceUsd": 689,
+      "compareUsd": 819,
+      "stock": 12,
+      "shortDescription": "An acacia-wood dining table that extends from six to eight seats with a hidden butterfly leaf."
+    },
+    {
+      "slug": "wishbone-dining-chair-set-of-2",
+      "name": "Wishbone Dining Chair (Set of 2)",
+      "categorySlug": "dining-seating-chairs",
+      "brand": "Nordix",
+      "priceUsd": 199,
+      "stock": 58,
+      "shortDescription": "A pair of mid-century dining chairs with a hand-woven paper-cord seat and solid ash frame."
+    },
+    {
+      "slug": "fjord-oak-sideboard",
+      "name": "Fjord Oak Sideboard Buffet",
+      "categorySlug": "dining-storage-sideboards",
+      "brand": "Oakhaus",
+      "priceUsd": 459,
+      "stock": 20,
+      "shortDescription": "A long oak sideboard with two cabinets and three drawers for tableware and table linens."
+    },
+    {
+      "slug": "halo-arc-floor-lamp",
+      "name": "Halo Arc Floor Lamp",
+      "categorySlug": "lighting-floor-lamps",
+      "brand": "Lumen Works",
+      "priceUsd": 129,
+      "compareUsd": 159,
+      "stock": 44,
+      "shortDescription": "A sweeping arc floor lamp on a marble base, arcing a warm glow over the sofa or reading chair."
+    },
+    {
+      "slug": "berber-handwoven-area-rug",
+      "name": "Berber Hand-Woven Area Rug 5x8",
+      "categorySlug": "decor-soft-rugs",
+      "brand": "Loomwell",
+      "priceUsd": 179,
+      "compareUsd": 229,
+      "stock": 36,
+      "shortDescription": "A plush hand-woven wool-blend rug with a tonal diamond motif and a soft, durable low pile."
+    },
+    {
+      "slug": "atlas-5-tier-oak-bookcase",
+      "name": "Atlas 5-Tier Oak Bookcase",
+      "categorySlug": "storage-shelving-bookcases",
+      "brand": "Veranda",
+      "priceUsd": 199,
+      "stock": 50,
+      "shortDescription": "A tall five-shelf bookcase in warm oak veneer with an anti-tip wall strap included."
+    }
+  ]
+}

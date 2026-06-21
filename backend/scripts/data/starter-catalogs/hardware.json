@@ -1,0 +1,422 @@
+{
+  "theme": "hardware",
+  "categories": [
+    {
+      "name": "Power Tools",
+      "slug": "power-tools",
+      "children": [
+        {
+          "name": "Drills & Drivers",
+          "slug": "power-drills-drivers",
+          "children": [
+            {
+              "name": "Cordless Drills",
+              "slug": "power-drills-cordless"
+            },
+            {
+              "name": "Impact Drivers",
+              "slug": "power-drills-impact-drivers"
+            },
+            {
+              "name": "Hammer Drills",
+              "slug": "power-drills-hammer"
+            },
+            {
+              "name": "Rotary Hammers",
+              "slug": "power-drills-rotary-hammers"
+            }
+          ]
+        },
+        {
+          "name": "Saws",
+          "slug": "power-saws",
+          "children": [
+            {
+              "name": "Circular Saws",
+              "slug": "power-saws-circular"
+            },
+            {
+              "name": "Jigsaws",
+              "slug": "power-saws-jigsaw"
+            },
+            {
+              "name": "Angle Grinders",
+              "slug": "power-saws-angle-grinders"
+            }
+          ]
+        },
+        {
+          "name": "Sanders & Routers",
+          "slug": "power-sanders-routers",
+          "children": [
+            {
+              "name": "Orbital Sanders",
+              "slug": "power-sanders-orbital"
+            },
+            {
+              "name": "Wood Routers",
+              "slug": "power-routers-wood"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Hand Tools",
+      "slug": "hand-tools",
+      "children": [
+        {
+          "name": "Wrenches & Sockets",
+          "slug": "hand-wrenches-sockets",
+          "children": [
+            {
+              "name": "Socket Sets",
+              "slug": "hand-socket-sets"
+            },
+            {
+              "name": "Adjustable Wrenches",
+              "slug": "hand-adjustable-wrenches"
+            },
+            {
+              "name": "Combination Spanners",
+              "slug": "hand-combination-spanners"
+            }
+          ]
+        },
+        {
+          "name": "Pliers & Cutters",
+          "slug": "hand-pliers-cutters",
+          "children": [
+            {
+              "name": "Combination Pliers",
+              "slug": "hand-pliers-combination"
+            },
+            {
+              "name": "Wire Cutters",
+              "slug": "hand-cutters-wire"
+            }
+          ]
+        },
+        {
+          "name": "Screwdrivers & Hammers",
+          "slug": "hand-screwdrivers-hammers",
+          "children": [
+            {
+              "name": "Screwdriver Sets",
+              "slug": "hand-screwdriver-sets"
+            },
+            {
+              "name": "Claw Hammers",
+              "slug": "hand-hammers-claw"
+            }
+          ]
+        },
+        {
+          "name": "Measuring & Layout",
+          "slug": "hand-measuring-layout",
+          "children": [
+            {
+              "name": "Tape Measures",
+              "slug": "hand-measuring-tape"
+            },
+            {
+              "name": "Spirit Levels",
+              "slug": "hand-measuring-levels"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Building & Fasteners",
+      "slug": "building-fasteners",
+      "children": [
+        {
+          "name": "Screws & Bolts",
+          "slug": "fasteners-screws-bolts",
+          "children": [
+            {
+              "name": "Wood Screws",
+              "slug": "fasteners-screws-wood"
+            },
+            {
+              "name": "Hex Bolts",
+              "slug": "fasteners-bolts-hex"
+            },
+            {
+              "name": "Wall Anchors",
+              "slug": "fasteners-wall-anchors"
+            }
+          ]
+        },
+        {
+          "name": "Adhesives & Sealants",
+          "slug": "building-adhesives-sealants",
+          "children": [
+            {
+              "name": "Silicone Sealants",
+              "slug": "building-sealants-silicone"
+            },
+            {
+              "name": "Construction Adhesives",
+              "slug": "building-adhesives-construction"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Plumbing & Electrical",
+      "slug": "plumbing-electrical",
+      "children": [
+        {
+          "name": "Plumbing Supplies",
+          "slug": "plumbing-supplies",
+          "children": [
+            {
+              "name": "Pipes & Fittings",
+              "slug": "plumbing-pipes-fittings"
+            },
+            {
+              "name": "Taps & Faucets",
+              "slug": "plumbing-taps-faucets"
+            }
+          ]
+        },
+        {
+          "name": "Electrical Supplies",
+          "slug": "electrical-supplies",
+          "children": [
+            {
+              "name": "Switches & Sockets",
+              "slug": "electrical-switches-sockets"
+            },
+            {
+              "name": "Wires & Cables",
+              "slug": "electrical-wires-cables"
+            },
+            {
+              "name": "Hand Test Tools",
+              "slug": "electrical-test-tools"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Paint & Safety",
+      "slug": "paint-safety",
+      "children": [
+        {
+          "name": "Paint & Sundries",
+          "slug": "paint-sundries",
+          "children": [
+            {
+              "name": "Wall Paint",
+              "slug": "paint-wall"
+            },
+            {
+              "name": "Brushes & Rollers",
+              "slug": "paint-brushes-rollers"
+            }
+          ]
+        },
+        {
+          "name": "Safety Gear",
+          "slug": "safety-gear",
+          "children": [
+            {
+              "name": "Work Gloves",
+              "slug": "safety-gloves"
+            },
+            {
+              "name": "Safety Glasses",
+              "slug": "safety-glasses"
+            },
+            {
+              "name": "Dust Masks & Respirators",
+              "slug": "safety-respirators"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "brandsByCountry": {
+    "IN": [
+      "Bosch",
+      "Stanley",
+      "Taparia",
+      "Cumi",
+      "Crompton",
+      "Asian Paints",
+      "Finolex",
+      "Havells",
+      "Astral",
+      "Pidilite"
+    ],
+    "default": [
+      "DeWalt",
+      "Makita",
+      "Milwaukee",
+      "Irwin",
+      "Klein Tools",
+      "TitanGrip",
+      "ForgeLine"
+    ]
+  },
+  "products": [
+    {
+      "slug": "bosch-gsb-18v-cordless-hammer-drill",
+      "name": "Bosch GSB 18V-50 Cordless Hammer Drill Kit",
+      "categorySlug": "power-drills-cordless",
+      "brand": "Bosch",
+      "priceUsd": 189,
+      "compareUsd": 229,
+      "stock": 42,
+      "shortDescription": "Brushless 18V hammer drill with two 2.0Ah batteries, charger and carry case."
+    },
+    {
+      "slug": "dewalt-dcf887-impact-driver",
+      "name": "DeWalt DCF887 20V Max Brushless Impact Driver",
+      "categorySlug": "power-drills-impact-drivers",
+      "brand": "DeWalt",
+      "priceUsd": 159,
+      "stock": 28,
+      "shortDescription": "Compact 1/4-inch hex impact driver delivering 1825 in-lbs of torque with 3-speed control."
+    },
+    {
+      "slug": "bosch-gbh-2-26-rotary-hammer-sds",
+      "name": "Bosch GBH 2-26 SDS-Plus Rotary Hammer",
+      "categorySlug": "power-drills-rotary-hammers",
+      "brand": "Bosch",
+      "priceUsd": 175,
+      "compareUsd": 209,
+      "stock": 19,
+      "shortDescription": "800W SDS-Plus rotary hammer for fast drilling and light chiselling in concrete and masonry."
+    },
+    {
+      "slug": "makita-5007mg-circular-saw",
+      "name": "Makita 5007MG 7-1/4 in. Magnesium Circular Saw",
+      "categorySlug": "power-saws-circular",
+      "brand": "Makita",
+      "priceUsd": 149,
+      "stock": 23,
+      "shortDescription": "15-amp circular saw with lightweight magnesium base and 56-degree bevel capacity."
+    },
+    {
+      "slug": "cumi-cag-100-angle-grinder",
+      "name": "Cumi CAG-100 4-inch Angle Grinder 850W",
+      "categorySlug": "power-saws-angle-grinders",
+      "brand": "Cumi",
+      "priceUsd": 38,
+      "compareUsd": 49,
+      "stock": 65,
+      "shortDescription": "850W 100mm angle grinder for cutting, grinding and polishing metal and stone."
+    },
+    {
+      "slug": "milwaukee-random-orbital-sander",
+      "name": "Milwaukee M18 Random Orbital Sander 5 in.",
+      "categorySlug": "power-sanders-orbital",
+      "brand": "Milwaukee",
+      "priceUsd": 129,
+      "stock": 17,
+      "shortDescription": "Cordless 5-inch orbital sander with dust-sealed switch and integrated dust canister."
+    },
+    {
+      "slug": "stanley-94-248-socket-set-75pc",
+      "name": "Stanley 94-248 75-Piece Socket & Wrench Set",
+      "categorySlug": "hand-socket-sets",
+      "brand": "Stanley",
+      "priceUsd": 64,
+      "compareUsd": 89,
+      "stock": 54,
+      "shortDescription": "1/4 and 3/8 inch drive chrome-vanadium socket set in a durable blow-moulded case."
+    },
+    {
+      "slug": "irwin-vise-grip-adjustable-wrench-10in",
+      "name": "Irwin 10-inch Adjustable Wrench",
+      "categorySlug": "hand-adjustable-wrenches",
+      "brand": "Irwin",
+      "priceUsd": 18.5,
+      "stock": 88,
+      "shortDescription": "Wide-jaw 10-inch adjustable wrench with laser-etched scale and corrosion-resistant finish."
+    },
+    {
+      "slug": "taparia-1119-combination-pliers-8in",
+      "name": "Taparia 1119 Combination Pliers 8-inch",
+      "categorySlug": "hand-pliers-combination",
+      "brand": "Taparia",
+      "priceUsd": 9,
+      "compareUsd": 12.5,
+      "stock": 110,
+      "shortDescription": "Insulated 8-inch combination pliers with induction-hardened cutting edge for everyday wiring work."
+    },
+    {
+      "slug": "klein-tools-screwdriver-set-11pc",
+      "name": "Klein Tools 11-Piece Cushion-Grip Screwdriver Set",
+      "categorySlug": "hand-screwdriver-sets",
+      "brand": "Klein Tools",
+      "priceUsd": 49,
+      "stock": 47,
+      "shortDescription": "Professional 11-piece Phillips, slotted and square screwdriver set with precision-machined tips."
+    },
+    {
+      "slug": "stanley-fatmax-tape-measure-8m",
+      "name": "Stanley FatMax 8m / 26ft Tape Measure",
+      "categorySlug": "hand-measuring-tape",
+      "brand": "Stanley",
+      "priceUsd": 21,
+      "compareUsd": 27,
+      "stock": 72,
+      "shortDescription": "Wide blade tape with BladeArmor coating for a 3.3m standout and long-lasting markings."
+    },
+    {
+      "slug": "forgeline-wood-screws-4x40-200pc",
+      "name": "ForgeLine Wood Screws 4 x 40mm (Box of 200)",
+      "categorySlug": "fasteners-screws-wood",
+      "brand": "ForgeLine",
+      "priceUsd": 11,
+      "stock": 120,
+      "shortDescription": "Zinc-plated countersunk Pozi-drive wood screws ideal for general carpentry and furniture assembly."
+    },
+    {
+      "slug": "titangrip-wall-anchors-assortment-100pc",
+      "name": "TitanGrip Wall Anchor Assortment (100 Pieces)",
+      "categorySlug": "fasteners-wall-anchors",
+      "brand": "TitanGrip",
+      "priceUsd": 8.5,
+      "compareUsd": 12,
+      "stock": 95,
+      "shortDescription": "Mixed-size nylon expansion wall plugs with matching screws for drywall, brick and concrete."
+    },
+    {
+      "slug": "pidilite-fevicol-construction-adhesive-tube",
+      "name": "Pidilite Fevicol Heavy-Duty Construction Adhesive 300ml",
+      "categorySlug": "building-adhesives-construction",
+      "brand": "Pidilite",
+      "priceUsd": 6.5,
+      "stock": 84,
+      "shortDescription": "High-grab solvent-free construction adhesive for bonding panels, skirting and trim to most surfaces."
+    },
+    {
+      "slug": "astral-cpvc-pipe-fitting-elbow-pack",
+      "name": "Astral CPVC 3/4-inch Elbow Fittings (Pack of 10)",
+      "categorySlug": "plumbing-pipes-fittings",
+      "brand": "Astral",
+      "priceUsd": 7.5,
+      "stock": 100,
+      "shortDescription": "Lead-free 90-degree CPVC elbow fittings rated for hot and cold potable water plumbing."
+    },
+    {
+      "slug": "asian-paints-apcolite-emulsion-white-4l",
+      "name": "Asian Paints Apcolite Premium Emulsion White 4L",
+      "categorySlug": "paint-wall",
+      "brand": "Asian Paints",
+      "priceUsd": 32,
+      "compareUsd": 39,
+      "stock": 60,
+      "shortDescription": "Smooth low-odour interior emulsion with rich matte finish and excellent washability."
+    }
+  ]
+}

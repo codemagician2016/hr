@@ -1,0 +1,147 @@
+{
+  "environment": "test",
+  "country": "NZ",
+  "currency": "NZD",
+  "tiers": {
+    "static-starter:STATIC": {
+      "tierSlug": "static-starter",
+      "vertical": "STATIC",
+      "tierName": "Starter",
+      "productId": "prod_Udg9W8E1PqoDFP",
+      "monthly": {
+        "priceId": "price_1TeQ6pE10X6CzHufvom0eeNz",
+        "amountMinor": 2500
+      },
+      "annual": {
+        "priceId": "price_1TeQ6qE10X6CzHufY2E4u2TA",
+        "amountMinor": 24000
+      }
+    },
+    "free:APPOINTMENT": {
+      "tierSlug": "free",
+      "vertical": "APPOINTMENT",
+      "tierName": "Solo",
+      "productId": "prod_Udg9Thulz9AXkM",
+      "monthly": {
+        "priceId": "price_1TeOmpE10X6CzHufw5Sj7ihY",
+        "amountMinor": 1400
+      },
+      "annual": {
+        "priceId": "price_1TeOmpE10X6CzHufvBhqLfJx",
+        "amountMinor": 13440
+      }
+    },
+    "starter:APPOINTMENT": {
+      "tierSlug": "starter",
+      "vertical": "APPOINTMENT",
+      "tierName": "Starter",
+      "productId": "prod_Udg9pqlFyvl39v",
+      "monthly": {
+        "priceId": "price_1TeOmsE10X6CzHuf1uQkmYUl",
+        "amountMinor": 2900
+      },
+      "annual": {
+        "priceId": "price_1TeOmsE10X6CzHufocua7pZE",
+        "amountMinor": 27840
+      }
+    },
+    "ecom-starter:ECOMMERCE": {
+      "tierSlug": "ecom-starter",
+      "vertical": "ECOMMERCE",
+      "tierName": "Starter",
+      "productId": "prod_Udg9DLUlTpvwbi",
+      "monthly": {
+        "priceId": "price_1TeQ6sE10X6CzHufhNCN5uVZ",
+        "amountMinor": 6400
+      },
+      "annual": {
+        "priceId": "price_1TeQ6tE10X6CzHuf39accjVg",
+        "amountMinor": 61440
+      }
+    },
+    "static-professional:STATIC": {
+      "tierSlug": "static-professional",
+      "vertical": "STATIC",
+      "tierName": "Professional",
+      "productId": "prod_Udg9PqCCXXyVok",
+      "monthly": {
+        "priceId": "price_1TeQ6uE10X6CzHufYW1GPSg5",
+        "amountMinor": 4800
+      },
+      "annual": {
+        "priceId": "price_1TeQ6vE10X6CzHufIzdBlkcM",
+        "amountMinor": 46080
+      }
+    },
+    "professional:APPOINTMENT": {
+      "tierSlug": "professional",
+      "vertical": "APPOINTMENT",
+      "tierName": "Professional",
+      "productId": "prod_Udg99piKSeaj1V",
+      "monthly": {
+        "priceId": "price_1TeOmwE10X6CzHuf1sf0OvD3",
+        "amountMinor": 7500
+      },
+      "annual": {
+        "priceId": "price_1TeOmwE10X6CzHufiJHc1EP9",
+        "amountMinor": 72000
+      }
+    },
+    "ecom-professional:ECOMMERCE": {
+      "tierSlug": "ecom-professional",
+      "vertical": "ECOMMERCE",
+      "tierName": "Professional",
+      "productId": "prod_Udg9Wa2ZbyEh8k",
+      "monthly": {
+        "priceId": "price_1TeQ6wE10X6CzHufhPcx2T1N",
+        "amountMinor": 16300
+      },
+      "annual": {
+        "priceId": "price_1TeQ6xE10X6CzHufrZ4I2jNq",
+        "amountMinor": 156480
+      }
+    },
+    "business:APPOINTMENT": {
+      "tierSlug": "business",
+      "vertical": "APPOINTMENT",
+      "tierName": "Business",
+      "productId": "prod_Udg9XjJ6YVOIDJ",
+      "monthly": {
+        "priceId": "price_1TeOmyE10X6CzHufsvjPWQ1p",
+        "amountMinor": 19900
+      },
+      "annual": {
+        "priceId": "price_1TeOmyE10X6CzHuf9I3RrfCr",
+        "amountMinor": 191040
+      }
+    },
+    "ecom-business:ECOMMERCE": {
+      "tierSlug": "ecom-business",
+      "vertical": "ECOMMERCE",
+      "tierName": "Business",
+      "productId": "prod_Udg9wxrMzHdn78",
+      "monthly": {
+        "priceId": "price_1TeQ6zE10X6CzHuftUZM6uPZ",
+        "amountMinor": 49300
+      },
+      "annual": {
+        "priceId": "price_1TeQ6zE10X6CzHufTjPa9fjj",
+        "amountMinor": 473280
+      }
+    },
+    "static-business:STATIC": {
+      "tierSlug": "static-business",
+      "vertical": "STATIC",
+      "tierName": "Business",
+      "productId": "prod_Udg98JDh66L632",
+      "monthly": {
+        "priceId": "price_1TeQ70E10X6CzHufGAbcS39z",
+        "amountMinor": 13000
+      },
+      "annual": {
+        "priceId": "price_1TeQ71E10X6CzHufNVGWjHif",
+        "amountMinor": 124800
+      }
+    }
+  }
+}

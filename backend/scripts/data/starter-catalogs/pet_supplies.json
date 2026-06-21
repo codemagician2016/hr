@@ -1,0 +1,448 @@
+{
+  "theme": "pet_supplies",
+  "categories": [
+    {
+      "slug": "dog",
+      "name": "Dog",
+      "children": [
+        {
+          "slug": "dog-food",
+          "name": "Dog Food",
+          "children": [
+            {
+              "slug": "dog-food-dry",
+              "name": "Dry Food (Kibble)"
+            },
+            {
+              "slug": "dog-food-wet",
+              "name": "Wet & Canned Food"
+            },
+            {
+              "slug": "dog-food-puppy",
+              "name": "Puppy Food"
+            },
+            {
+              "slug": "dog-food-senior",
+              "name": "Senior & Prescription"
+            }
+          ]
+        },
+        {
+          "slug": "dog-treats",
+          "name": "Treats & Chews",
+          "children": [
+            {
+              "slug": "dog-treats-dental",
+              "name": "Dental Chews"
+            },
+            {
+              "slug": "dog-treats-training",
+              "name": "Training Treats"
+            },
+            {
+              "slug": "dog-treats-biscuits",
+              "name": "Biscuits & Bones"
+            }
+          ]
+        },
+        {
+          "slug": "dog-toys",
+          "name": "Toys",
+          "children": [
+            {
+              "slug": "dog-toys-chew",
+              "name": "Chew Toys"
+            },
+            {
+              "slug": "dog-toys-fetch",
+              "name": "Balls & Fetch"
+            },
+            {
+              "slug": "dog-toys-rope",
+              "name": "Rope & Tug"
+            }
+          ]
+        },
+        {
+          "slug": "dog-walking",
+          "name": "Collars, Leashes & Harnesses",
+          "children": [
+            {
+              "slug": "dog-walking-harness",
+              "name": "Harnesses"
+            },
+            {
+              "slug": "dog-walking-leash",
+              "name": "Leashes"
+            },
+            {
+              "slug": "dog-walking-collar",
+              "name": "Collars & ID Tags"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "cat",
+      "name": "Cat",
+      "children": [
+        {
+          "slug": "cat-food",
+          "name": "Cat Food",
+          "children": [
+            {
+              "slug": "cat-food-dry",
+              "name": "Dry Food"
+            },
+            {
+              "slug": "cat-food-wet",
+              "name": "Wet Food & Pouches"
+            },
+            {
+              "slug": "cat-food-kitten",
+              "name": "Kitten Food"
+            }
+          ]
+        },
+        {
+          "slug": "cat-litter",
+          "name": "Litter & Hygiene",
+          "children": [
+            {
+              "slug": "cat-litter-clumping",
+              "name": "Clumping Litter"
+            },
+            {
+              "slug": "cat-litter-boxes",
+              "name": "Litter Boxes & Trays"
+            }
+          ]
+        },
+        {
+          "slug": "cat-toys-scratchers",
+          "name": "Toys & Scratchers",
+          "children": [
+            {
+              "slug": "cat-toys-wand",
+              "name": "Wands & Teasers"
+            },
+            {
+              "slug": "cat-toys-scratching-post",
+              "name": "Scratching Posts"
+            },
+            {
+              "slug": "cat-toys-catnip",
+              "name": "Catnip Toys"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "small-pets",
+      "name": "Small Pets & Birds",
+      "children": [
+        {
+          "slug": "small-pets-food",
+          "name": "Food & Hay",
+          "children": [
+            {
+              "slug": "small-pets-food-rabbit",
+              "name": "Rabbit & Guinea Pig Food"
+            },
+            {
+              "slug": "small-pets-food-hamster",
+              "name": "Hamster & Gerbil Food"
+            },
+            {
+              "slug": "small-pets-food-bird-seed",
+              "name": "Bird Seed & Pellets"
+            }
+          ]
+        },
+        {
+          "slug": "small-pets-habitats",
+          "name": "Cages & Habitats",
+          "children": [
+            {
+              "slug": "small-pets-habitats-cages",
+              "name": "Cages & Hutches"
+            },
+            {
+              "slug": "small-pets-habitats-bedding",
+              "name": "Bedding & Litter"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "aquarium",
+      "name": "Fish & Aquarium",
+      "children": [
+        {
+          "slug": "aquarium-food",
+          "name": "Fish Food",
+          "children": [
+            {
+              "slug": "aquarium-food-flakes",
+              "name": "Flakes & Pellets"
+            },
+            {
+              "slug": "aquarium-food-tropical",
+              "name": "Tropical & Specialty"
+            }
+          ]
+        },
+        {
+          "slug": "aquarium-equipment",
+          "name": "Tanks & Equipment",
+          "children": [
+            {
+              "slug": "aquarium-equipment-tanks",
+              "name": "Tanks & Kits"
+            },
+            {
+              "slug": "aquarium-equipment-filters",
+              "name": "Filters & Pumps"
+            }
+          ]
+        },
+        {
+          "slug": "aquarium-care",
+          "name": "Water Care & Decor",
+          "children": [
+            {
+              "slug": "aquarium-care-conditioner",
+              "name": "Water Conditioners"
+            },
+            {
+              "slug": "aquarium-care-decor",
+              "name": "Gravel & Decor"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "grooming-health",
+      "name": "Grooming & Health",
+      "children": [
+        {
+          "slug": "grooming-bath",
+          "name": "Bath & Coat",
+          "children": [
+            {
+              "slug": "grooming-bath-shampoo",
+              "name": "Shampoo & Conditioner"
+            },
+            {
+              "slug": "grooming-bath-brushes",
+              "name": "Brushes & Combs"
+            },
+            {
+              "slug": "grooming-bath-clippers",
+              "name": "Clippers & Nail Care"
+            }
+          ]
+        },
+        {
+          "slug": "health-care",
+          "name": "Health & Wellness",
+          "children": [
+            {
+              "slug": "health-care-flea-tick",
+              "name": "Flea & Tick"
+            },
+            {
+              "slug": "health-care-supplements",
+              "name": "Supplements & Vitamins"
+            },
+            {
+              "slug": "health-care-dewormer",
+              "name": "Dewormers & First Aid"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "brandsByCountry": {
+    "IN": [
+      "Pedigree",
+      "Drools",
+      "Royal Canin",
+      "Whiskas",
+      "Himalaya Erina",
+      "Farmina N&D",
+      "Sheba",
+      "Heads Up For Tails",
+      "Taiyo Pluss",
+      "Venky's"
+    ],
+    "default": [
+      "PawFuel",
+      "FurFriend",
+      "Whiskers & Co.",
+      "TailWagger",
+      "AquaLife",
+      "NibbleNest",
+      "MeadowHutch"
+    ]
+  },
+  "products": [
+    {
+      "slug": "drools-focus-adult-dry-dog-food",
+      "name": "Drools Focus Adult Dry Dog Food (Chicken & Egg)",
+      "categorySlug": "dog-food-dry",
+      "brand": "Drools",
+      "priceUsd": 32.99,
+      "compareUsd": 39.99,
+      "stock": 64,
+      "shortDescription": "High-protein chicken-and-egg kibble with omega oils for a healthy coat and strong muscles."
+    },
+    {
+      "slug": "royal-canin-maxi-puppy",
+      "name": "Royal Canin Maxi Puppy Dry Food",
+      "categorySlug": "dog-food-puppy",
+      "brand": "Royal Canin",
+      "priceUsd": 44.5,
+      "stock": 38,
+      "shortDescription": "Breed-size tailored nutrition for large-breed puppies up to 15 months, supporting digestion and growth."
+    },
+    {
+      "slug": "pedigree-gravy-chicken-pouches-15pk",
+      "name": "Pedigree Adult Wet Food Gravy Pouches (15-Pack)",
+      "categorySlug": "dog-food-wet",
+      "brand": "Pedigree",
+      "priceUsd": 18.99,
+      "compareUsd": 22.99,
+      "stock": 90,
+      "shortDescription": "Tender chunks in savoury chicken gravy, a complete daily meal dogs find hard to resist."
+    },
+    {
+      "slug": "pedigree-dentastix-dental-chews",
+      "name": "Pedigree Dentastix Daily Dental Chews (28 ct)",
+      "categorySlug": "dog-treats-dental",
+      "brand": "Pedigree",
+      "priceUsd": 14.99,
+      "stock": 75,
+      "shortDescription": "X-shaped chews scientifically proven to reduce tartar build-up and freshen doggy breath."
+    },
+    {
+      "slug": "tailwagger-freeze-dried-liver-training-treats",
+      "name": "TailWagger Freeze-Dried Liver Training Treats",
+      "categorySlug": "dog-treats-training",
+      "brand": "TailWagger",
+      "priceUsd": 9.99,
+      "compareUsd": 12.99,
+      "stock": 110,
+      "shortDescription": "Single-ingredient bite-sized liver rewards perfect for high-value recall and obedience training."
+    },
+    {
+      "slug": "furfriend-natural-rubber-chew-bone",
+      "name": "FurFriend Natural Rubber Chew Bone",
+      "categorySlug": "dog-toys-chew",
+      "brand": "FurFriend",
+      "priceUsd": 11.49,
+      "stock": 52,
+      "shortDescription": "Durable textured rubber bone built for power chewers, with a treat-stuffable hollow centre."
+    },
+    {
+      "slug": "tailwagger-no-pull-padded-harness",
+      "name": "TailWagger No-Pull Padded Dog Harness",
+      "categorySlug": "dog-walking-harness",
+      "brand": "TailWagger",
+      "priceUsd": 24.99,
+      "compareUsd": 32,
+      "stock": 46,
+      "shortDescription": "Breathable mesh harness with a front clip and reflective trim to stop pulling on every walk."
+    },
+    {
+      "slug": "heads-up-for-tails-personalised-collar",
+      "name": "Heads Up For Tails Personalised Leather Collar",
+      "categorySlug": "dog-walking-collar",
+      "brand": "Heads Up For Tails",
+      "priceUsd": 27,
+      "stock": 30,
+      "shortDescription": "Hand-finished leather collar with an engraved brass nameplate and matching D-ring for ID tags."
+    },
+    {
+      "slug": "whiskas-adult-ocean-fish-dry-cat-food",
+      "name": "Whiskas Adult Ocean Fish Dry Cat Food",
+      "categorySlug": "cat-food-dry",
+      "brand": "Whiskas",
+      "priceUsd": 21.99,
+      "compareUsd": 26.99,
+      "stock": 68,
+      "shortDescription": "Crunchy ocean-fish kibble fortified with taurine and vitamins for indoor adult cats."
+    },
+    {
+      "slug": "sheba-premium-wet-cat-food-tray",
+      "name": "Sheba Premium Wet Cat Food Trays (Variety, 24-Pack)",
+      "categorySlug": "cat-food-wet",
+      "brand": "Sheba",
+      "priceUsd": 28.99,
+      "stock": 54,
+      "shortDescription": "Fine flaked cuts in delicate jelly across four fish-and-poultry recipes for the fussiest feline."
+    },
+    {
+      "slug": "whiskers-co-clumping-cat-litter-10kg",
+      "name": "Whiskers & Co. Fast-Clumping Bentonite Cat Litter (10kg)",
+      "categorySlug": "cat-litter-clumping",
+      "brand": "Whiskers & Co.",
+      "priceUsd": 16.99,
+      "compareUsd": 19.99,
+      "stock": 82,
+      "shortDescription": "Low-dust bentonite litter that locks in odour and forms tight clumps for easy daily scooping."
+    },
+    {
+      "slug": "whiskers-co-sisal-scratching-post",
+      "name": "Whiskers & Co. Sisal Scratching Post with Toy",
+      "categorySlug": "cat-toys-scratching-post",
+      "brand": "Whiskers & Co.",
+      "priceUsd": 22.5,
+      "stock": 40,
+      "shortDescription": "Tall sisal-wrapped post on a weighted base with a dangling feather to redirect claws from furniture."
+    },
+    {
+      "slug": "himalaya-erina-ep-tick-flea-shampoo",
+      "name": "Himalaya Erina-EP Tick & Flea Pet Shampoo",
+      "categorySlug": "grooming-bath-shampoo",
+      "brand": "Himalaya Erina",
+      "priceUsd": 8.49,
+      "stock": 96,
+      "shortDescription": "Herbal anti-tick-and-flea shampoo with neem and eucalyptus that cleans without drying the skin."
+    },
+    {
+      "slug": "furfriend-self-cleaning-slicker-brush",
+      "name": "FurFriend Self-Cleaning Slicker Brush",
+      "categorySlug": "grooming-bath-brushes",
+      "brand": "FurFriend",
+      "priceUsd": 13.99,
+      "compareUsd": 17.99,
+      "stock": 70,
+      "shortDescription": "Fine bent bristles lift loose undercoat and mats, then retract at the push of a button for cleanup."
+    },
+    {
+      "slug": "aqualife-tropical-flakes-fish-food",
+      "name": "AquaLife Tropical Flakes Fish Food",
+      "categorySlug": "aquarium-food-flakes",
+      "brand": "AquaLife",
+      "priceUsd": 7.99,
+      "stock": 100,
+      "shortDescription": "Colour-enhancing daily flakes for community tropical fish that stay firm and won't cloud the water."
+    },
+    {
+      "slug": "aqualife-3-stage-internal-aquarium-filter",
+      "name": "AquaLife 3-Stage Internal Aquarium Filter (100L)",
+      "categorySlug": "aquarium-equipment-filters",
+      "brand": "AquaLife",
+      "priceUsd": 34.99,
+      "compareUsd": 42.99,
+      "stock": 28,
+      "shortDescription": "Quiet submersible filter with mechanical, biological and carbon media for crystal-clear tanks up to 100 litres."
+    }
+  ]
+}

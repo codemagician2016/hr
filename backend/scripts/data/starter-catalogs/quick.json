@@ -1,0 +1,362 @@
+{
+  "theme": "quick",
+  "categories": [
+    {
+      "slug": "snacks-munchies",
+      "name": "Snacks & Munchies",
+      "children": [
+        {
+          "slug": "snacks-savoury",
+          "name": "Savoury Snacks",
+          "children": [
+            {
+              "slug": "snacks-savoury-chips",
+              "name": "Chips & Crisps"
+            },
+            {
+              "slug": "snacks-savoury-namkeen",
+              "name": "Namkeen & Mixtures"
+            },
+            {
+              "slug": "snacks-savoury-nuts",
+              "name": "Nuts & Trail Mix"
+            }
+          ]
+        },
+        {
+          "slug": "snacks-sweet",
+          "name": "Sweet & Chocolate",
+          "children": [
+            {
+              "slug": "snacks-sweet-chocolate",
+              "name": "Chocolates & Bars"
+            },
+            {
+              "slug": "snacks-sweet-biscuits",
+              "name": "Biscuits & Cookies"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "beverages",
+      "name": "Cold Drinks & Beverages",
+      "children": [
+        {
+          "slug": "beverages-cold",
+          "name": "Cold Drinks",
+          "children": [
+            {
+              "slug": "beverages-cold-soft",
+              "name": "Soft Drinks & Soda"
+            },
+            {
+              "slug": "beverages-cold-juices",
+              "name": "Juices & Smoothies"
+            },
+            {
+              "slug": "beverages-cold-water",
+              "name": "Water & Sparkling"
+            }
+          ]
+        },
+        {
+          "slug": "beverages-hot",
+          "name": "Tea, Coffee & Energy",
+          "children": [
+            {
+              "slug": "beverages-hot-coffee",
+              "name": "Coffee & Cold Brew"
+            },
+            {
+              "slug": "beverages-hot-energy",
+              "name": "Energy & Sports Drinks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "dairy-breakfast",
+      "name": "Dairy, Bread & Eggs",
+      "children": [
+        {
+          "slug": "dairy-fresh",
+          "name": "Fresh Dairy",
+          "children": [
+            {
+              "slug": "dairy-fresh-milk",
+              "name": "Milk & Curd"
+            },
+            {
+              "slug": "dairy-fresh-paneer",
+              "name": "Paneer & Butter"
+            }
+          ]
+        },
+        {
+          "slug": "dairy-bakery",
+          "name": "Bakery & Eggs",
+          "children": [
+            {
+              "slug": "dairy-bakery-bread",
+              "name": "Bread & Buns"
+            },
+            {
+              "slug": "dairy-bakery-eggs",
+              "name": "Eggs"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "instant-frozen",
+      "name": "Instant & Frozen Food",
+      "children": [
+        {
+          "slug": "instant-ready",
+          "name": "Instant & Ready to Eat",
+          "children": [
+            {
+              "slug": "instant-ready-noodles",
+              "name": "Noodles & Pasta"
+            },
+            {
+              "slug": "instant-ready-meals",
+              "name": "Ready Meals & Cup"
+            }
+          ]
+        },
+        {
+          "slug": "instant-frozen-foods",
+          "name": "Frozen Foods",
+          "children": [
+            {
+              "slug": "instant-frozen-snacks",
+              "name": "Frozen Snacks & Parathas"
+            },
+            {
+              "slug": "instant-frozen-dessert",
+              "name": "Ice Cream & Frozen Desserts"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "household-care",
+      "name": "Household & Personal Care",
+      "children": [
+        {
+          "slug": "household-cleaning",
+          "name": "Cleaning & Home",
+          "children": [
+            {
+              "slug": "household-cleaning-surface",
+              "name": "Surface & Floor Cleaners"
+            },
+            {
+              "slug": "household-cleaning-paper",
+              "name": "Tissues & Paper"
+            }
+          ]
+        },
+        {
+          "slug": "household-personal",
+          "name": "Personal Care",
+          "children": [
+            {
+              "slug": "household-personal-oral",
+              "name": "Oral Care"
+            },
+            {
+              "slug": "household-personal-hair",
+              "name": "Hair & Body"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "brandsByCountry": {
+    "IN": [
+      "Amul",
+      "Britannia",
+      "Lay's",
+      "Haldiram's",
+      "Maggi",
+      "Parle",
+      "Coca-Cola",
+      "Mother Dairy",
+      "Dabur",
+      "Colgate"
+    ],
+    "default": [
+      "Crispline",
+      "GreenVale Farms",
+      "FizzCo",
+      "Pantरी Basics",
+      "PureSip",
+      "HomeKeep",
+      "FreshNest",
+      "EverydayCo"
+    ]
+  },
+  "products": [
+    {
+      "slug": "lays-classic-salted-chips",
+      "name": "Lay's Classic Salted Potato Chips",
+      "categorySlug": "snacks-savoury-chips",
+      "brand": "Lay's",
+      "priceUsd": 0.59,
+      "compareUsd": 0.79,
+      "stock": 96,
+      "shortDescription": "Crispy thin-cut potato chips, lightly salted, in a 52g grab-pack."
+    },
+    {
+      "slug": "haldirams-aloo-bhujia",
+      "name": "Haldiram's Aloo Bhujia",
+      "categorySlug": "snacks-savoury-namkeen",
+      "brand": "Haldiram's",
+      "priceUsd": 0.85,
+      "stock": 74,
+      "shortDescription": "Classic spiced potato-and-gram-flour bhujia, perfect with evening chai."
+    },
+    {
+      "slug": "crispline-roasted-almonds",
+      "name": "Crispline Roasted & Salted Almonds",
+      "categorySlug": "snacks-savoury-nuts",
+      "brand": "Crispline",
+      "priceUsd": 3.49,
+      "compareUsd": 3.99,
+      "stock": 40,
+      "shortDescription": "Dry-roasted whole almonds with a pinch of sea salt in a 200g resealable pouch."
+    },
+    {
+      "slug": "amul-dark-chocolate-bar",
+      "name": "Amul 55% Dark Chocolate Bar",
+      "categorySlug": "snacks-sweet-chocolate",
+      "brand": "Amul",
+      "priceUsd": 1.29,
+      "stock": 62,
+      "shortDescription": "Rich 55% cocoa dark chocolate, smooth and slightly bittersweet, 80g bar."
+    },
+    {
+      "slug": "britannia-bourbon-biscuits",
+      "name": "Britannia Bourbon Chocolate Biscuits",
+      "categorySlug": "snacks-sweet-biscuits",
+      "brand": "Britannia",
+      "priceUsd": 0.69,
+      "compareUsd": 0.85,
+      "stock": 110,
+      "shortDescription": "Crunchy cocoa sandwich biscuits with a creamy chocolate filling."
+    },
+    {
+      "slug": "coca-cola-can",
+      "name": "Coca-Cola Original Taste Can",
+      "categorySlug": "beverages-cold-soft",
+      "brand": "Coca-Cola",
+      "priceUsd": 0.55,
+      "stock": 120,
+      "shortDescription": "Chilled 300ml can of classic Coca-Cola, best served ice-cold."
+    },
+    {
+      "slug": "puresip-orange-juice",
+      "name": "PureSip 100% Orange Juice",
+      "categorySlug": "beverages-cold-juices",
+      "brand": "PureSip",
+      "priceUsd": 1.99,
+      "compareUsd": 2.49,
+      "stock": 48,
+      "shortDescription": "No-added-sugar orange juice with pulp, ready to pour from a 1L carton."
+    },
+    {
+      "slug": "puresip-sparkling-water-lime",
+      "name": "PureSip Sparkling Water Lime",
+      "categorySlug": "beverages-cold-water",
+      "brand": "PureSip",
+      "priceUsd": 0.89,
+      "stock": 85,
+      "shortDescription": "Zero-calorie lime-infused sparkling water in a crisp 500ml bottle."
+    },
+    {
+      "slug": "fizzco-cold-brew-coffee",
+      "name": "FizzCo Smooth Cold Brew Coffee",
+      "categorySlug": "beverages-hot-coffee",
+      "brand": "FizzCo",
+      "priceUsd": 2.29,
+      "compareUsd": 2.79,
+      "stock": 36,
+      "shortDescription": "Slow-steeped ready-to-drink cold brew, strong and naturally smooth, 200ml."
+    },
+    {
+      "slug": "fizzco-energy-drink",
+      "name": "FizzCo Charge Energy Drink",
+      "categorySlug": "beverages-hot-energy",
+      "brand": "FizzCo",
+      "priceUsd": 1.49,
+      "stock": 70,
+      "shortDescription": "Caffeine-and-taurine energy boost in a 250ml can for a quick pick-me-up."
+    },
+    {
+      "slug": "amul-toned-milk-pouch",
+      "name": "Amul Toned Fresh Milk Pouch",
+      "categorySlug": "dairy-fresh-milk",
+      "brand": "Amul",
+      "priceUsd": 0.45,
+      "stock": 100,
+      "shortDescription": "Farm-fresh 3% fat toned milk in a 500ml pouch, delivered chilled."
+    },
+    {
+      "slug": "mother-dairy-paneer",
+      "name": "Mother Dairy Fresh Paneer",
+      "categorySlug": "dairy-fresh-paneer",
+      "brand": "Mother Dairy",
+      "priceUsd": 1.39,
+      "compareUsd": 1.59,
+      "stock": 44,
+      "shortDescription": "Soft, fresh cottage cheese block, high in protein, in a 200g pack."
+    },
+    {
+      "slug": "freshnest-brown-bread",
+      "name": "FreshNest Whole Wheat Brown Bread",
+      "categorySlug": "dairy-bakery-bread",
+      "brand": "FreshNest",
+      "priceUsd": 0.75,
+      "stock": 58,
+      "shortDescription": "Soft 100% whole wheat loaf baked fresh daily, 400g sliced."
+    },
+    {
+      "slug": "greenvale-farm-eggs-6",
+      "name": "GreenVale Farms Fresh Eggs (6 pcs)",
+      "categorySlug": "dairy-bakery-eggs",
+      "brand": "GreenVale Farms",
+      "priceUsd": 1.19,
+      "compareUsd": 1.45,
+      "stock": 66,
+      "shortDescription": "Six protein-rich, quality-checked farm eggs in a protective carton."
+    },
+    {
+      "slug": "maggi-masala-noodles-4pack",
+      "name": "Maggi 2-Minute Masala Noodles (Pack of 4)",
+      "categorySlug": "instant-ready-noodles",
+      "brand": "Maggi",
+      "priceUsd": 0.89,
+      "compareUsd": 1.05,
+      "stock": 90,
+      "shortDescription": "Everyone's favourite masala instant noodles, ready in two minutes, 4 x 70g."
+    },
+    {
+      "slug": "colgate-maxfresh-toothpaste",
+      "name": "Colgate MaxFresh Cooling Crystals Toothpaste",
+      "categorySlug": "household-personal-oral",
+      "brand": "Colgate",
+      "priceUsd": 1.59,
+      "compareUsd": 1.85,
+      "stock": 52,
+      "shortDescription": "Mint-fresh fluoride toothpaste with cooling crystals for all-day freshness, 150g."
+    }
+  ]
+}

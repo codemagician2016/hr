@@ -1,0 +1,54 @@
+{
+  "theme": "fashion",
+  "note": "Starter fashion catalog. Prices are USD base, converted to the tenant currency on load. Images fall back to placeholders until curated (workflow phase).",
+  "categories": [
+    { "slug": "women", "name": "Women", "children": [
+      { "slug": "women-clothing", "name": "Clothing", "children": [
+        { "slug": "women-dresses", "name": "Dresses" },
+        { "slug": "women-tops", "name": "Tops" },
+        { "slug": "women-bottoms", "name": "Bottoms" }
+      ] },
+      { "slug": "women-footwear", "name": "Footwear", "children": [
+        { "slug": "women-heels", "name": "Heels" },
+        { "slug": "women-flats", "name": "Flats" }
+      ] }
+    ] },
+    { "slug": "men", "name": "Men", "children": [
+      { "slug": "men-clothing", "name": "Clothing", "children": [
+        { "slug": "men-shirts", "name": "Shirts" },
+        { "slug": "men-tshirts", "name": "T-Shirts" },
+        { "slug": "men-trousers", "name": "Trousers" }
+      ] },
+      { "slug": "men-footwear", "name": "Footwear", "children": [
+        { "slug": "men-sneakers", "name": "Sneakers" },
+        { "slug": "men-formal-shoes", "name": "Formal Shoes" }
+      ] }
+    ] },
+    { "slug": "accessories", "name": "Accessories", "children": [
+      { "slug": "acc-bags", "name": "Bags" },
+      { "slug": "acc-watches", "name": "Watches" },
+      { "slug": "acc-jewellery", "name": "Jewellery" }
+    ] }
+  ],
+  "brandsByCountry": {
+    "IN": ["FabIndia", "Biba", "W for Woman", "Global Desi", "Allen Solly", "Peter England", "Louis Philippe", "Manyavar"],
+    "default": ["Aria", "Vellure", "Northbound", "Marlowe", "Studio Mason", "Atelier 9"]
+  },
+  "products": [
+    { "slug": "floral-wrap-midi-dress", "name": "Floral Wrap Midi Dress", "categorySlug": "women-dresses", "brand": "Biba", "priceUsd": 49, "compareUsd": 69, "stock": 30, "shortDescription": "Breezy wrap-front midi in a soft floral print." },
+    { "slug": "linen-shift-dress", "name": "Linen Shift Dress", "categorySlug": "women-dresses", "brand": "FabIndia", "priceUsd": 59, "compareUsd": 79, "stock": 22, "shortDescription": "Relaxed pure-linen shift for everyday ease." },
+    { "slug": "ribbed-knit-top", "name": "Ribbed Knit Top", "categorySlug": "women-tops", "brand": "W for Woman", "priceUsd": 22, "compareUsd": 29, "stock": 50, "shortDescription": "Soft ribbed top that layers with anything." },
+    { "slug": "high-rise-straight-jeans", "name": "High-Rise Straight Jeans", "categorySlug": "women-bottoms", "brand": "Global Desi", "priceUsd": 39, "compareUsd": 55, "stock": 40, "shortDescription": "Flattering high-rise cut in stretch denim." },
+    { "slug": "block-heel-sandals", "name": "Block Heel Sandals", "categorySlug": "women-heels", "brand": "Aria", "priceUsd": 45, "stock": 18, "shortDescription": "Comfortable block heels for all-day wear." },
+    { "slug": "pointed-ballet-flats", "name": "Pointed Ballet Flats", "categorySlug": "women-flats", "brand": "Marlowe", "priceUsd": 35, "compareUsd": 45, "stock": 26, "shortDescription": "Classic pointed flats in soft faux-leather." },
+    { "slug": "oxford-cotton-shirt", "name": "Oxford Cotton Shirt", "categorySlug": "men-shirts", "brand": "Louis Philippe", "priceUsd": 42, "compareUsd": 55, "stock": 45, "shortDescription": "Crisp oxford-weave shirt, smart or casual." },
+    { "slug": "slim-fit-formal-shirt", "name": "Slim-Fit Formal Shirt", "categorySlug": "men-shirts", "brand": "Peter England", "priceUsd": 32, "stock": 60, "shortDescription": "Wrinkle-resistant slim shirt for the office." },
+    { "slug": "pima-crew-tshirt", "name": "Pima Crew T-Shirt", "categorySlug": "men-tshirts", "brand": "Allen Solly", "priceUsd": 19, "compareUsd": 25, "stock": 80, "shortDescription": "Buttery-soft pima cotton crew neck." },
+    { "slug": "tailored-chino-trousers", "name": "Tailored Chino Trousers", "categorySlug": "men-trousers", "brand": "Allen Solly", "priceUsd": 39, "compareUsd": 49, "stock": 35, "shortDescription": "Versatile chinos with a clean tailored line." },
+    { "slug": "retro-court-sneakers", "name": "Retro Court Sneakers", "categorySlug": "men-sneakers", "brand": "Northbound", "priceUsd": 55, "compareUsd": 75, "stock": 28, "shortDescription": "Low-profile court sneakers in clean white." },
+    { "slug": "leather-derby-shoes", "name": "Leather Derby Shoes", "categorySlug": "men-formal-shoes", "brand": "Louis Philippe", "priceUsd": 69, "compareUsd": 89, "stock": 16, "shortDescription": "Hand-finished leather derbies for formal days." },
+    { "slug": "everyday-tote-bag", "name": "Everyday Tote Bag", "categorySlug": "acc-bags", "brand": "Studio Mason", "priceUsd": 38, "compareUsd": 49, "stock": 33, "shortDescription": "Roomy structured tote for work and weekends." },
+    { "slug": "minimal-mesh-watch", "name": "Minimal Mesh Watch", "categorySlug": "acc-watches", "brand": "Atelier 9", "priceUsd": 59, "compareUsd": 85, "stock": 20, "shortDescription": "Slim mesh-strap watch with a clean dial." },
+    { "slug": "gold-tone-hoop-earrings", "name": "Gold-Tone Hoop Earrings", "categorySlug": "acc-jewellery", "brand": "Vellure", "priceUsd": 18, "stock": 70, "shortDescription": "Lightweight everyday hoops with a warm finish." }
+  ]
+}

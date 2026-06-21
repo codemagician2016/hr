@@ -1,0 +1,42 @@
+#!/usr/bin/env node
+// Pet supplies demo — theme pet_supplies. node scripts/seed-pet_supplies-demo.js [slug] [--create]
+const seed = require('./lib/seedThemeDemo');
+seed({
+  theme: 'pet_supplies', defaultSlug: 'pet-demo', bizName: 'PawFuel — Pet Supplies Demo', imgPrefix: 'pet',
+  descTail: 'Vet-recommended. Free delivery on repeat orders.',
+  categories: ['Dog Food', 'Cat Food', 'Treats', 'Toys', 'Grooming', 'Beds', 'Walking', 'Health'],
+  subcategories: {
+    'Dog Food': [['Dry Food', 'dog-dry'], ['Puppy', 'dog-puppy'], ['Senior', 'dog-senior']],
+    'Cat Food': [['Dry Food', 'cat-dry'], ['Kitten', 'cat-kitten'], ['Wet Food', 'cat-wet']],
+    'Treats': [['Dental', 'treats-dental'], ['Training', 'treats-training'], ['Cat Treats', 'treats-cat']],
+    'Toys': [['Dog Toys', 'dog-toys'], ['Cat Toys', 'cat-toys']],
+    'Grooming': [['Shampoo', 'grooming-shampoo'], ['Brushes', 'grooming-brushes']],
+    'Beds': [['Dog Beds', 'dog-beds'], ['Cat Beds', 'cat-beds']],
+    'Walking': [['Harnesses', 'harnesses'], ['Leashes', 'leashes']],
+    'Health': [['Supplements', 'health-supplements'], ['Flea & Tick', 'health-flea']],
+  },
+  reviewBodies: ['My dog devours this — coat looks shinier too.', 'Great quality and fast delivery.', 'Kitty approved! Will reorder.', 'Sturdy and well made, survives heavy chewing.', 'Good value, my pet loves it.', 'Exactly what we needed, thank you.'],
+  reviewers: ['Tara', 'Sam', 'Priya', 'Alex', 'Neha', 'Jordan', 'Maya', 'Chris'],
+  products: [
+    { name: 'Grain-Free Adult Dog Food', cat: 'Dog Food', subcat: 'dog-dry', brand: 'PawFuel', price: 1499, mrp: 1799, o1: { name: 'Size', values: ['1.5 kg', { label: '3 kg', add: 1000 }, { label: '7 kg', add: 2800 }] }, o2: { name: 'Flavour', values: [['Chicken', null], ['Lamb', null], ['Salmon', null]] } },
+    { name: 'Puppy Starter Food', cat: 'Dog Food', subcat: 'dog-puppy', brand: 'PawFuel', price: 1299, mrp: null, o1: { name: 'Size', values: ['1.5 kg', { label: '3 kg', add: 900 }] } },
+    { name: 'Senior Dog Formula', cat: 'Dog Food', subcat: 'dog-senior', brand: 'FurFriend', price: 1599, mrp: 1899 },
+    { name: 'Indoor Cat Food', cat: 'Cat Food', subcat: 'cat-dry', brand: 'Whiskers', price: 999, mrp: 1199, o1: { name: 'Size', values: ['1 kg', { label: '3 kg', add: 1500 }] }, o2: { name: 'Flavour', values: [['Tuna', null], ['Chicken', null]] } },
+    { name: 'Kitten Food', cat: 'Cat Food', subcat: 'cat-kitten', brand: 'Whiskers', price: 899, mrp: null },
+    { name: 'Wet Food Pouches (12 pack)', cat: 'Cat Food', subcat: 'cat-wet', brand: 'Whiskers', price: 699, mrp: 799 },
+    { name: 'Dental Dog Chews (30 ct)', cat: 'Treats', subcat: 'treats-dental', brand: 'PawFuel', price: 599, mrp: 699 },
+    { name: 'Freeze-Dried Liver Treats', cat: 'Treats', subcat: 'treats-training', brand: 'FurFriend', price: 449, mrp: null },
+    { name: 'Catnip Treats', cat: 'Treats', subcat: 'treats-cat', brand: 'Whiskers', price: 299, mrp: 349 },
+    { name: 'Rope Tug Toy', cat: 'Toys', subcat: 'dog-toys', brand: 'FurFriend', price: 349, mrp: null, o1: { name: 'Size', values: ['Small', 'Medium', 'Large'] } },
+    { name: 'Squeaky Plush Toy', cat: 'Toys', subcat: 'dog-toys', brand: 'FurFriend', price: 399, mrp: 499 },
+    { name: 'Feather Cat Wand', cat: 'Toys', subcat: 'cat-toys', brand: 'Whiskers', price: 249, mrp: null },
+    { name: 'Oatmeal Pet Shampoo', cat: 'Grooming', subcat: 'grooming-shampoo', brand: 'PawFuel', price: 449, mrp: 549 },
+    { name: 'Slicker Brush', cat: 'Grooming', subcat: 'grooming-brushes', brand: 'FurFriend', price: 399, mrp: null },
+    { name: 'Orthopedic Dog Bed', cat: 'Beds', subcat: 'dog-beds', brand: 'FurFriend', price: 2499, mrp: 2999, o1: { name: 'Size', values: ['Medium', { label: 'Large', add: 700 }, { label: 'XL', add: 1400 }] } },
+    { name: 'Cat Cave Bed', cat: 'Beds', subcat: 'cat-beds', brand: 'Whiskers', price: 1299, mrp: null },
+    { name: 'No-Pull Harness', cat: 'Walking', subcat: 'harnesses', brand: 'PawFuel', price: 899, mrp: 1099, o1: { name: 'Size', values: ['S', 'M', 'L'] }, o2: { name: 'Colour', values: [['Black', '#1A1A1A'], ['Red', '#B7410E'], ['Teal', '#0D9488']] } },
+    { name: 'Retractable Leash', cat: 'Walking', subcat: 'leashes', brand: 'PawFuel', price: 749, mrp: null },
+    { name: 'Multivitamin Chews', cat: 'Health', subcat: 'health-supplements', brand: 'PawFuel', price: 699, mrp: 849 },
+    { name: 'Flea & Tick Spot-On', cat: 'Health', subcat: 'health-flea', brand: 'FurFriend', price: 599, mrp: null },
+  ],
+}).catch((e) => { console.error(e); process.exit(1); });

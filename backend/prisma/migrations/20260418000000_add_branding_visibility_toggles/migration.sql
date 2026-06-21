@@ -1,0 +1,16 @@
+-- AlterTable
+ALTER TABLE "BusinessContent" ADD COLUMN     "businessAddressOverride" TEXT,
+ADD COLUMN     "ctaBody" TEXT,
+ADD COLUMN     "ctaHeadline" TEXT,
+ADD COLUMN     "navbarBusinessName" TEXT,
+ADD COLUMN     "showBusinessName" BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN     "showLogo" BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN     "showSocialFacebook" BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN     "showSocialInstagram" BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN     "showSocialLinkedin" BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN     "showSocialTwitter" BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN     "showSocialYoutube" BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN     "showTagline" BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN     "showTopBarAddress" BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN     "showTopBarEmail" BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN     "showTopBarHours" BOOLEAN NOT NULL DEFAULT true;

@@ -1,0 +1,408 @@
+{
+  "theme": "food",
+  "categories": [
+    {
+      "slug": "pantry-essentials",
+      "name": "Pantry & Essentials",
+      "children": [
+        {
+          "slug": "pantry-oils-ghee",
+          "name": "Oils & Ghee",
+          "children": [
+            {
+              "slug": "pantry-oils-cold-pressed",
+              "name": "Cold-Pressed Oils"
+            },
+            {
+              "slug": "pantry-oils-olive",
+              "name": "Olive Oils"
+            },
+            {
+              "slug": "pantry-oils-ghee-clarified",
+              "name": "Ghee & Clarified Butter"
+            }
+          ]
+        },
+        {
+          "slug": "pantry-spices-seasonings",
+          "name": "Spices & Seasonings",
+          "children": [
+            {
+              "slug": "pantry-spices-whole",
+              "name": "Whole Spices"
+            },
+            {
+              "slug": "pantry-spices-blends",
+              "name": "Spice Blends & Masalas"
+            },
+            {
+              "slug": "pantry-spices-salt-pepper",
+              "name": "Salt & Peppercorns"
+            }
+          ]
+        },
+        {
+          "slug": "pantry-grains-pasta",
+          "name": "Grains, Rice & Pasta",
+          "children": [
+            {
+              "slug": "pantry-grains-rice",
+              "name": "Rice & Basmati"
+            },
+            {
+              "slug": "pantry-grains-pasta-noodles",
+              "name": "Pasta & Noodles"
+            },
+            {
+              "slug": "pantry-grains-lentils",
+              "name": "Lentils & Pulses"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "condiments-sauces",
+      "name": "Condiments & Sauces",
+      "children": [
+        {
+          "slug": "condiments-spreads",
+          "name": "Spreads & Preserves",
+          "children": [
+            {
+              "slug": "condiments-spreads-nut-butters",
+              "name": "Nut Butters"
+            },
+            {
+              "slug": "condiments-spreads-jams-honey",
+              "name": "Jams & Honey"
+            }
+          ]
+        },
+        {
+          "slug": "condiments-sauces-hot",
+          "name": "Hot Sauces & Chilli",
+          "children": [
+            {
+              "slug": "condiments-sauces-hot-fermented",
+              "name": "Fermented Hot Sauce"
+            },
+            {
+              "slug": "condiments-sauces-chilli-oil",
+              "name": "Chilli Oils & Crisp"
+            }
+          ]
+        },
+        {
+          "slug": "condiments-cooking-sauces",
+          "name": "Cooking & Dipping Sauces",
+          "children": [
+            {
+              "slug": "condiments-cooking-pasta-sauce",
+              "name": "Pasta & Tomato Sauces"
+            },
+            {
+              "slug": "condiments-cooking-asian",
+              "name": "Soy, Teriyaki & Asian"
+            },
+            {
+              "slug": "condiments-cooking-pickles-chutney",
+              "name": "Pickles & Chutneys"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "snacks-confectionery",
+      "name": "Snacks & Confectionery",
+      "children": [
+        {
+          "slug": "snacks-savoury",
+          "name": "Savoury Snacks",
+          "children": [
+            {
+              "slug": "snacks-savoury-chips",
+              "name": "Chips & Crisps"
+            },
+            {
+              "slug": "snacks-savoury-nuts-trail",
+              "name": "Nuts & Trail Mix"
+            },
+            {
+              "slug": "snacks-savoury-namkeen",
+              "name": "Namkeen & Mixtures"
+            }
+          ]
+        },
+        {
+          "slug": "snacks-sweet",
+          "name": "Chocolate & Sweets",
+          "children": [
+            {
+              "slug": "snacks-sweet-dark-chocolate",
+              "name": "Dark & Craft Chocolate"
+            },
+            {
+              "slug": "snacks-sweet-cookies-biscuits",
+              "name": "Cookies & Biscuits"
+            },
+            {
+              "slug": "snacks-sweet-energy-bars",
+              "name": "Energy & Granola Bars"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "beverages",
+      "name": "Beverages",
+      "children": [
+        {
+          "slug": "beverages-hot",
+          "name": "Coffee & Tea",
+          "children": [
+            {
+              "slug": "beverages-hot-coffee",
+              "name": "Coffee Beans & Ground"
+            },
+            {
+              "slug": "beverages-hot-tea",
+              "name": "Tea & Chai"
+            }
+          ]
+        },
+        {
+          "slug": "beverages-cold",
+          "name": "Cold Drinks & Mixers",
+          "children": [
+            {
+              "slug": "beverages-cold-juices",
+              "name": "Juices & Cordials"
+            },
+            {
+              "slug": "beverages-cold-kombucha-soda",
+              "name": "Kombucha & Craft Soda"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "ready-to-eat-international",
+      "name": "Ready-to-Eat & International",
+      "children": [
+        {
+          "slug": "ready-to-eat-meals",
+          "name": "Ready Meals & Instant",
+          "children": [
+            {
+              "slug": "ready-to-eat-curry-kits",
+              "name": "Heat-&-Eat Curries"
+            },
+            {
+              "slug": "ready-to-eat-instant-noodles",
+              "name": "Instant Noodles & Bowls"
+            }
+          ]
+        },
+        {
+          "slug": "international-pantry",
+          "name": "International Pantry",
+          "children": [
+            {
+              "slug": "international-italian",
+              "name": "Italian & Mediterranean"
+            },
+            {
+              "slug": "international-east-asian",
+              "name": "Japanese & Korean"
+            },
+            {
+              "slug": "international-mexican",
+              "name": "Mexican & Latin"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "brandsByCountry": {
+    "IN": [
+      "Fabindia",
+      "24 Mantra Organic",
+      "Paper Boat",
+      "Sleepy Owl",
+      "Too Yumm",
+      "Wingreens Farms",
+      "The Whole Truth",
+      "Bira 91",
+      "Slurrp Farm",
+      "Nourish Organics"
+    ],
+    "default": [
+      "Maison Verde",
+      "Wildcrest Pantry",
+      "Golden Harvest Co.",
+      "Stonemill Larder",
+      "Saltrock & Co.",
+      "Verdant Grove",
+      "Copper Kettle"
+    ]
+  },
+  "products": [
+    {
+      "slug": "cold-pressed-virgin-coconut-oil-500ml",
+      "name": "Cold-Pressed Virgin Coconut Oil 500ml",
+      "categorySlug": "pantry-oils-cold-pressed",
+      "brand": "24 Mantra Organic",
+      "priceUsd": 9.5,
+      "compareUsd": 12,
+      "stock": 64,
+      "shortDescription": "Unrefined, single-origin coconut oil cold-pressed in small batches for cooking, baking and skin."
+    },
+    {
+      "slug": "extra-virgin-olive-oil-tin-1l",
+      "name": "Extra Virgin Olive Oil Tin 1L",
+      "categorySlug": "pantry-oils-olive",
+      "brand": "Maison Verde",
+      "priceUsd": 18,
+      "compareUsd": 22.5,
+      "stock": 40,
+      "shortDescription": "First cold-extraction estate olive oil with a peppery finish, bottled in a light-proof tin."
+    },
+    {
+      "slug": "a2-cultured-cow-ghee-500g",
+      "name": "A2 Cultured Cow Ghee 500g",
+      "categorySlug": "pantry-oils-ghee-clarified",
+      "brand": "Fabindia",
+      "priceUsd": 14,
+      "stock": 52,
+      "shortDescription": "Slow-simmered bilona ghee from grass-fed A2 milk with a rich, nutty aroma."
+    },
+    {
+      "slug": "single-origin-tellicherry-peppercorns-100g",
+      "name": "Tellicherry Black Peppercorns 100g",
+      "categorySlug": "pantry-spices-salt-pepper",
+      "brand": "Stonemill Larder",
+      "priceUsd": 7.25,
+      "compareUsd": 9,
+      "stock": 88,
+      "shortDescription": "Bold, fruity hand-picked peppercorns graded for size and packed whole for the grinder."
+    },
+    {
+      "slug": "garam-masala-blend-tin-80g",
+      "name": "Garam Masala Whole-Roasted Blend 80g",
+      "categorySlug": "pantry-spices-blends",
+      "brand": "24 Mantra Organic",
+      "priceUsd": 5.5,
+      "stock": 96,
+      "shortDescription": "Twelve spices dry-roasted and stone-ground for a warm, fragrant finish to curries and dals."
+    },
+    {
+      "slug": "aged-basmati-rice-5kg",
+      "name": "Aged Long-Grain Basmati Rice 5kg",
+      "categorySlug": "pantry-grains-rice",
+      "brand": "Golden Harvest Co.",
+      "priceUsd": 16.5,
+      "compareUsd": 19,
+      "stock": 34,
+      "shortDescription": "Two-year aged basmati that cooks up fluffy and separate with a delicate floral fragrance."
+    },
+    {
+      "slug": "bronze-cut-spaghetti-500g",
+      "name": "Bronze-Cut Durum Spaghetti 500g",
+      "categorySlug": "pantry-grains-pasta-noodles",
+      "brand": "Copper Kettle",
+      "priceUsd": 4.25,
+      "stock": 110,
+      "shortDescription": "Slow-dried bronze-die spaghetti with a rough texture that grips every kind of sauce."
+    },
+    {
+      "slug": "stone-ground-peanut-butter-crunchy-500g",
+      "name": "Stone-Ground Crunchy Peanut Butter 500g",
+      "categorySlug": "condiments-spreads-nut-butters",
+      "brand": "The Whole Truth",
+      "priceUsd": 8,
+      "compareUsd": 10,
+      "stock": 72,
+      "shortDescription": "Just roasted peanuts and a pinch of salt, ground chunky with no added sugar or palm oil."
+    },
+    {
+      "slug": "raw-wildflower-honey-jar-350g",
+      "name": "Raw Wildflower Honey 350g",
+      "categorySlug": "condiments-spreads-jams-honey",
+      "brand": "Verdant Grove",
+      "priceUsd": 11,
+      "stock": 58,
+      "shortDescription": "Unpasteurised, single-source honey from mixed-bloom apiaries, naturally crystallising over time."
+    },
+    {
+      "slug": "fermented-scotch-bonnet-hot-sauce-150ml",
+      "name": "Fermented Scotch Bonnet Hot Sauce 150ml",
+      "categorySlug": "condiments-sauces-hot-fermented",
+      "brand": "Saltrock & Co.",
+      "priceUsd": 9.75,
+      "compareUsd": 12.5,
+      "stock": 47,
+      "shortDescription": "Barrel-aged chillies fermented for sixty days into a bright, tangy and fiery table sauce."
+    },
+    {
+      "slug": "sichuan-chilli-crisp-200g",
+      "name": "Sichuan Chilli Crisp 200g",
+      "categorySlug": "condiments-sauces-chilli-oil",
+      "brand": "Wildcrest Pantry",
+      "priceUsd": 8.5,
+      "stock": 80,
+      "shortDescription": "Crunchy fried garlic, shallots and chilli flakes in numbing Sichuan-pepper infused oil."
+    },
+    {
+      "slug": "mango-ginger-pickle-300g",
+      "name": "Mango & Ginger Pickle 300g",
+      "categorySlug": "condiments-cooking-pickles-chutney",
+      "brand": "Wingreens Farms",
+      "priceUsd": 6,
+      "stock": 65,
+      "shortDescription": "Sun-cured raw mango in a mustard-oil masala with a sharp ginger kick, made the homestyle way."
+    },
+    {
+      "slug": "baked-veggie-chips-multigrain-90g",
+      "name": "Baked Multigrain Veggie Chips 90g",
+      "categorySlug": "snacks-savoury-chips",
+      "brand": "Too Yumm",
+      "priceUsd": 2.5,
+      "stock": 118,
+      "shortDescription": "Lightly baked, never fried crisps with real beetroot and spinach for a guilt-free crunch."
+    },
+    {
+      "slug": "70-percent-single-origin-dark-chocolate-bar",
+      "name": "70% Single-Origin Dark Chocolate Bar 80g",
+      "categorySlug": "snacks-sweet-dark-chocolate",
+      "brand": "Maison Verde",
+      "priceUsd": 5.25,
+      "compareUsd": 6.5,
+      "stock": 90,
+      "shortDescription": "Bean-to-bar dark chocolate with notes of dried cherry and toasted hazelnut, ethically sourced."
+    },
+    {
+      "slug": "cold-brew-coffee-bags-12pack",
+      "name": "Cold Brew Coffee Bags 12-Pack",
+      "categorySlug": "beverages-hot-coffee",
+      "brand": "Sleepy Owl",
+      "priceUsd": 13,
+      "compareUsd": 16,
+      "stock": 44,
+      "shortDescription": "Steep-overnight bags of medium-roast Arabica for smooth, low-acidity cold brew at home."
+    },
+    {
+      "slug": "heat-and-eat-paneer-makhani-285g",
+      "name": "Heat-&-Eat Paneer Makhani 285g",
+      "categorySlug": "ready-to-eat-curry-kits",
+      "brand": "Slurrp Farm",
+      "priceUsd": 4.75,
+      "stock": 70,
+      "shortDescription": "Restaurant-style paneer in a creamy tomato-butter gravy, ready in three minutes with no prep."
+    }
+  ]
+}

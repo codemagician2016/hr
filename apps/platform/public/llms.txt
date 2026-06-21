@@ -1,0 +1,29 @@
+# Sitepresso
+
+> Sitepresso is a website builder SaaS for small businesses to create marketing websites,
+> booking websites and e-commerce websites — no code required.
+
+## Verticals
+
+- Marketing website builder — professional brand sites (home, about, services, contact, local SEO)
+- Booking website builder — online appointments, service menus, staff profiles, reminders
+- E-commerce website builder — product catalogue, cart, checkout, payments, delivery/pickup
+
+## Important pages
+
+- https://sitepresso.com/ — overview, themes, pricing
+- https://sitepresso.com/blog — guides and comparisons
+
+## Key facts
+
+- Audience: small and local businesses, professionals, clinics, salons, restaurants, retail, trades, consultants.
+- Features: industry themes, layouts, color systems, custom domains, SEO settings, AI-assisted content, online booking, online store, payments, multi-language.
+- No coding required; sites can go live in minutes.
+
+## Topics
+
+- small business website builder
+- booking website builder
+- e-commerce website builder
+- salon, dental, law firm, restaurant, fitness and other industry websites
+- no-code website creation

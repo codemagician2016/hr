@@ -1,0 +1,385 @@
+{
+  "theme": "subscription",
+  "categories": [
+    {
+      "slug": "curated-boxes",
+      "name": "Curated Boxes",
+      "children": [
+        {
+          "slug": "boxes-snacks",
+          "name": "Snack Boxes",
+          "children": [
+            {
+              "slug": "boxes-snacks-sweet",
+              "name": "Sweet & Treat Boxes"
+            },
+            {
+              "slug": "boxes-snacks-savoury",
+              "name": "Savoury & Crunch Boxes"
+            },
+            {
+              "slug": "boxes-snacks-healthy",
+              "name": "Healthy & Protein Boxes"
+            }
+          ]
+        },
+        {
+          "slug": "boxes-coffee",
+          "name": "Coffee Boxes",
+          "children": [
+            {
+              "slug": "boxes-coffee-roasters",
+              "name": "Roaster's Choice"
+            },
+            {
+              "slug": "boxes-coffee-single-origin",
+              "name": "Single-Origin Discovery"
+            },
+            {
+              "slug": "boxes-coffee-decaf",
+              "name": "Decaf & Half-Caf"
+            }
+          ]
+        },
+        {
+          "slug": "boxes-beauty",
+          "name": "Beauty Boxes",
+          "children": [
+            {
+              "slug": "boxes-beauty-skincare",
+              "name": "Skincare Edit"
+            },
+            {
+              "slug": "boxes-beauty-makeup",
+              "name": "Makeup Edit"
+            },
+            {
+              "slug": "boxes-beauty-clean",
+              "name": "Clean & Natural Edit"
+            }
+          ]
+        },
+        {
+          "slug": "boxes-books",
+          "name": "Book Boxes",
+          "children": [
+            {
+              "slug": "boxes-books-fiction",
+              "name": "Fiction Club"
+            },
+            {
+              "slug": "boxes-books-thriller",
+              "name": "Mystery & Thriller Club"
+            },
+            {
+              "slug": "boxes-books-kids",
+              "name": "Kids' Reading Club"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "refills-add-ons",
+      "name": "Refills & Add-ons",
+      "children": [
+        {
+          "slug": "refills-coffee",
+          "name": "Coffee Refills",
+          "children": [
+            {
+              "slug": "refills-coffee-beans",
+              "name": "Whole Bean Refills"
+            },
+            {
+              "slug": "refills-coffee-ground",
+              "name": "Ground Refills"
+            },
+            {
+              "slug": "refills-coffee-pods",
+              "name": "Pods & Capsules"
+            }
+          ]
+        },
+        {
+          "slug": "refills-snacks",
+          "name": "Snack Refills",
+          "children": [
+            {
+              "slug": "refills-snacks-bars",
+              "name": "Bars & Bites"
+            },
+            {
+              "slug": "refills-snacks-nuts",
+              "name": "Nuts & Trail Mix"
+            }
+          ]
+        },
+        {
+          "slug": "refills-beauty",
+          "name": "Beauty Refills",
+          "children": [
+            {
+              "slug": "refills-beauty-serum",
+              "name": "Serum Refills"
+            },
+            {
+              "slug": "refills-beauty-cleanser",
+              "name": "Cleanser Refills"
+            },
+            {
+              "slug": "refills-beauty-tools",
+              "name": "Tools & Applicators"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "gifting",
+      "name": "Gifts & Memberships",
+      "children": [
+        {
+          "slug": "gifting-gift-boxes",
+          "name": "Prepaid Gift Boxes",
+          "children": [
+            {
+              "slug": "gifting-gift-boxes-3month",
+              "name": "3-Month Gift Plans"
+            },
+            {
+              "slug": "gifting-gift-boxes-6month",
+              "name": "6-Month Gift Plans"
+            }
+          ]
+        },
+        {
+          "slug": "gifting-cards",
+          "name": "Gift Cards",
+          "children": [
+            {
+              "slug": "gifting-cards-digital",
+              "name": "Digital Gift Cards"
+            },
+            {
+              "slug": "gifting-cards-printed",
+              "name": "Printed Gift Cards"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "lifestyle",
+      "name": "Lifestyle & Wellness",
+      "children": [
+        {
+          "slug": "lifestyle-wellness",
+          "name": "Wellness Boxes",
+          "children": [
+            {
+              "slug": "lifestyle-wellness-vitamins",
+              "name": "Daily Vitamins Box"
+            },
+            {
+              "slug": "lifestyle-wellness-self-care",
+              "name": "Self-Care & Spa Box"
+            }
+          ]
+        },
+        {
+          "slug": "lifestyle-tea",
+          "name": "Tea Boxes",
+          "children": [
+            {
+              "slug": "lifestyle-tea-loose-leaf",
+              "name": "Loose-Leaf Discovery"
+            },
+            {
+              "slug": "lifestyle-tea-herbal",
+              "name": "Herbal & Wellness Tea"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "brandsByCountry": {
+    "IN": [
+      "The Souled Store",
+      "Sugar Box",
+      "Sleepy Owl",
+      "Blue Tokai",
+      "Sugar Cosmetics",
+      "Plix",
+      "Country Bean",
+      "Bibliophile Box",
+      "Open Secret",
+      "Vahdam"
+    ],
+    "default": [
+      "Renew & Co.",
+      "Daybreak Roasters",
+      "CrunchLab",
+      "GlowEdit",
+      "Chapter & Verse",
+      "VitalRoot",
+      "Leaf & Steep",
+      "Everyday Co."
+    ]
+  },
+  "products": [
+    {
+      "slug": "sweet-tooth-monthly-box",
+      "name": "Sweet Tooth Monthly Box",
+      "categorySlug": "boxes-snacks-sweet",
+      "brand": "CrunchLab",
+      "priceUsd": 29,
+      "compareUsd": 38,
+      "stock": 64,
+      "shortDescription": "A hand-curated box of 8-10 artisanal cookies, chocolates and candies delivered to your door each month."
+    },
+    {
+      "slug": "savoury-crunch-snack-box",
+      "name": "Savoury Crunch Snack Box",
+      "categorySlug": "boxes-snacks-savoury",
+      "brand": "CrunchLab",
+      "priceUsd": 27,
+      "stock": 58,
+      "shortDescription": "Chips, popcorn, roasted chickpeas and bold savoury bites picked fresh for crunch lovers every month."
+    },
+    {
+      "slug": "protein-power-snack-box",
+      "name": "Protein Power Snack Box",
+      "categorySlug": "boxes-snacks-healthy",
+      "brand": "Open Secret",
+      "priceUsd": 32,
+      "compareUsd": 40,
+      "stock": 47,
+      "shortDescription": "High-protein bars, seed clusters and clean jerky with no refined sugar, refreshed every delivery."
+    },
+    {
+      "slug": "roasters-choice-coffee-box",
+      "name": "Roaster's Choice Coffee Box",
+      "categorySlug": "boxes-coffee-roasters",
+      "brand": "Blue Tokai",
+      "priceUsd": 24,
+      "stock": 72,
+      "shortDescription": "Two rotating 250g bags chosen by our head roaster, so you discover a new favourite every single month."
+    },
+    {
+      "slug": "single-origin-discovery-box",
+      "name": "Single-Origin Discovery Box",
+      "categorySlug": "boxes-coffee-single-origin",
+      "brand": "Daybreak Roasters",
+      "priceUsd": 28,
+      "compareUsd": 34,
+      "stock": 55,
+      "shortDescription": "Three traceable single-farm coffees with tasting notes and brew cards to explore origins around the world."
+    },
+    {
+      "slug": "smooth-decaf-coffee-box",
+      "name": "Smooth Decaf Coffee Box",
+      "categorySlug": "boxes-coffee-decaf",
+      "brand": "Sleepy Owl",
+      "priceUsd": 22,
+      "stock": 40,
+      "shortDescription": "Swiss-water decaf and half-caf blends so you can enjoy the ritual any time of day, caffeine-light."
+    },
+    {
+      "slug": "glow-skincare-edit-box",
+      "name": "Glow Skincare Edit Box",
+      "categorySlug": "boxes-beauty-skincare",
+      "brand": "GlowEdit",
+      "priceUsd": 35,
+      "compareUsd": 52,
+      "stock": 50,
+      "shortDescription": "Five deluxe-size skincare picks worth twice the price, curated by our beauty editors each month."
+    },
+    {
+      "slug": "makeup-edit-beauty-box",
+      "name": "Makeup Edit Beauty Box",
+      "categorySlug": "boxes-beauty-makeup",
+      "brand": "Sugar Cosmetics",
+      "priceUsd": 33,
+      "stock": 44,
+      "shortDescription": "A monthly mix of lip, eye and complexion makeup from cult-favourite and emerging brands."
+    },
+    {
+      "slug": "clean-beauty-natural-box",
+      "name": "Clean Beauty Natural Box",
+      "categorySlug": "boxes-beauty-clean",
+      "brand": "Plix",
+      "priceUsd": 31,
+      "compareUsd": 44,
+      "stock": 38,
+      "shortDescription": "Cruelty-free, clean-formula skincare and body picks for a conscious monthly self-care ritual."
+    },
+    {
+      "slug": "fiction-club-book-box",
+      "name": "Fiction Club Book Box",
+      "categorySlug": "boxes-books-fiction",
+      "brand": "Bibliophile Box",
+      "priceUsd": 26,
+      "stock": 60,
+      "shortDescription": "One handpicked new-release novel plus a bookish surprise and themed extras, mailed every month."
+    },
+    {
+      "slug": "mystery-thriller-book-box",
+      "name": "Mystery & Thriller Book Box",
+      "categorySlug": "boxes-books-thriller",
+      "brand": "Chapter & Verse",
+      "priceUsd": 27,
+      "compareUsd": 33,
+      "stock": 42,
+      "shortDescription": "A gripping page-turner and clue-themed goodies for readers who love a twist they never saw coming."
+    },
+    {
+      "slug": "kids-reading-club-box",
+      "name": "Kids' Reading Club Box",
+      "categorySlug": "boxes-books-kids",
+      "brand": "Bibliophile Box",
+      "priceUsd": 24,
+      "stock": 56,
+      "shortDescription": "An age-matched picture or chapter book with a craft and activity sheet to spark a love of reading."
+    },
+    {
+      "slug": "whole-bean-coffee-refill-1kg",
+      "name": "Whole Bean Coffee Refill 1kg",
+      "categorySlug": "refills-coffee-beans",
+      "brand": "Blue Tokai",
+      "priceUsd": 18,
+      "compareUsd": 22,
+      "stock": 90,
+      "shortDescription": "A 1kg refill of your house roast whole beans, roasted to order and topped up between curated boxes."
+    },
+    {
+      "slug": "ground-coffee-refill-500g",
+      "name": "Ground Coffee Refill 500g",
+      "categorySlug": "refills-coffee-ground",
+      "brand": "Country Bean",
+      "priceUsd": 11,
+      "stock": 85,
+      "shortDescription": "Pre-ground filter-grind refill in a resealable pouch for an easy mid-month top-up."
+    },
+    {
+      "slug": "protein-bar-refill-12pack",
+      "name": "Protein Bar Refill 12-Pack",
+      "categorySlug": "refills-snacks-bars",
+      "brand": "Open Secret",
+      "priceUsd": 16,
+      "compareUsd": 20,
+      "stock": 110,
+      "shortDescription": "Restock your favourites with a dozen of our best-selling protein bars added to any subscription."
+    },
+    {
+      "slug": "vitamin-c-serum-refill-30ml",
+      "name": "Vitamin C Serum Refill 30ml",
+      "categorySlug": "refills-beauty-serum",
+      "brand": "GlowEdit",
+      "priceUsd": 19,
+      "stock": 70,
+      "shortDescription": "A 30ml brightening vitamin C serum refill that ships in eco packaging alongside your beauty box."
+    }
+  ]
+}

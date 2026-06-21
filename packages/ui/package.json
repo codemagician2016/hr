@@ -1,0 +1,11 @@
+{
+  "name": "@sitepresso/ui",
+  "version": "0.0.1",
+  "private": true,
+  "main": "index.js",
+  "description": "Cross-vertical UI primitives and admin-shell formatters shared by Sitepresso apps.",
+  "peerDependencies": {
+    "react": "^18",
+    "react-dom": "^18"
+  }
+}

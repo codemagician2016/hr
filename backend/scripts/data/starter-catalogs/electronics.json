@@ -1,0 +1,565 @@
+{
+  "theme": "electronics",
+  "categories": [
+    {
+      "slug": "mobiles-tablets",
+      "name": "Mobiles & Tablets",
+      "children": [
+        {
+          "slug": "mobiles-smartphones",
+          "name": "Smartphones",
+          "children": [
+            {
+              "slug": "mobiles-smartphones-flagship",
+              "name": "Flagship Phones"
+            },
+            {
+              "slug": "mobiles-smartphones-midrange",
+              "name": "Mid-Range Phones"
+            },
+            {
+              "slug": "mobiles-smartphones-budget",
+              "name": "Budget Phones"
+            }
+          ]
+        },
+        {
+          "slug": "mobiles-tablets-devices",
+          "name": "Tablets",
+          "children": [
+            {
+              "slug": "mobiles-tablets-android",
+              "name": "Android Tablets"
+            },
+            {
+              "slug": "mobiles-tablets-premium",
+              "name": "Premium Tablets"
+            }
+          ]
+        },
+        {
+          "slug": "mobiles-phone-accessories",
+          "name": "Phone Accessories",
+          "children": [
+            {
+              "slug": "mobiles-phone-cases",
+              "name": "Cases & Covers"
+            },
+            {
+              "slug": "mobiles-phone-screen-guards",
+              "name": "Screen Protectors"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "computing",
+      "name": "Computing",
+      "children": [
+        {
+          "slug": "computing-laptops",
+          "name": "Laptops",
+          "children": [
+            {
+              "slug": "computing-laptops-ultrabooks",
+              "name": "Ultrabooks"
+            },
+            {
+              "slug": "computing-laptops-gaming",
+              "name": "Gaming Laptops"
+            },
+            {
+              "slug": "computing-laptops-business",
+              "name": "Business Laptops"
+            }
+          ]
+        },
+        {
+          "slug": "computing-monitors",
+          "name": "Monitors",
+          "children": [
+            {
+              "slug": "computing-monitors-4k",
+              "name": "4K Monitors"
+            },
+            {
+              "slug": "computing-monitors-gaming",
+              "name": "Gaming Monitors"
+            }
+          ]
+        },
+        {
+          "slug": "computing-peripherals",
+          "name": "Peripherals",
+          "children": [
+            {
+              "slug": "computing-peripherals-keyboards",
+              "name": "Keyboards"
+            },
+            {
+              "slug": "computing-peripherals-mice",
+              "name": "Mice"
+            },
+            {
+              "slug": "computing-peripherals-storage",
+              "name": "Storage & SSDs"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "audio",
+      "name": "Audio",
+      "children": [
+        {
+          "slug": "audio-headphones",
+          "name": "Headphones & Earbuds",
+          "children": [
+            {
+              "slug": "audio-headphones-earbuds",
+              "name": "True Wireless Earbuds"
+            },
+            {
+              "slug": "audio-headphones-overear",
+              "name": "Over-Ear Headphones"
+            },
+            {
+              "slug": "audio-headphones-neckband",
+              "name": "Neckbands"
+            }
+          ]
+        },
+        {
+          "slug": "audio-speakers",
+          "name": "Speakers",
+          "children": [
+            {
+              "slug": "audio-speakers-bluetooth",
+              "name": "Bluetooth Speakers"
+            },
+            {
+              "slug": "audio-speakers-soundbars",
+              "name": "Soundbars"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "wearables",
+      "name": "Wearables",
+      "children": [
+        {
+          "slug": "wearables-watches",
+          "name": "Smartwatches",
+          "children": [
+            {
+              "slug": "wearables-watches-premium",
+              "name": "Premium Smartwatches"
+            },
+            {
+              "slug": "wearables-watches-fitness",
+              "name": "Fitness Smartwatches"
+            }
+          ]
+        },
+        {
+          "slug": "wearables-bands",
+          "name": "Fitness Bands",
+          "children": [
+            {
+              "slug": "wearables-bands-trackers",
+              "name": "Activity Trackers"
+            },
+            {
+              "slug": "wearables-bands-kids",
+              "name": "Kids Bands"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "smart-home",
+      "name": "Smart Home",
+      "children": [
+        {
+          "slug": "smart-home-control",
+          "name": "Voice & Control",
+          "children": [
+            {
+              "slug": "smart-home-control-speakers",
+              "name": "Smart Speakers"
+            },
+            {
+              "slug": "smart-home-control-displays",
+              "name": "Smart Displays"
+            },
+            {
+              "slug": "smart-home-control-plugs",
+              "name": "Smart Plugs & Switches"
+            }
+          ]
+        },
+        {
+          "slug": "smart-home-security",
+          "name": "Home Security",
+          "children": [
+            {
+              "slug": "smart-home-security-cameras",
+              "name": "Security Cameras"
+            },
+            {
+              "slug": "smart-home-security-doorbells",
+              "name": "Video Doorbells"
+            }
+          ]
+        },
+        {
+          "slug": "smart-home-power",
+          "name": "Power & Charging",
+          "children": [
+            {
+              "slug": "smart-home-power-chargers",
+              "name": "Chargers & Adapters"
+            },
+            {
+              "slug": "smart-home-power-powerbanks",
+              "name": "Power Banks"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "brandsByCountry": {
+    "IN": [
+      "Samsung",
+      "OnePlus",
+      "boAt",
+      "Realme",
+      "Mi",
+      "Noise",
+      "Portronics",
+      "Croma",
+      "Ambrane",
+      "Nothing"
+    ],
+    "default": [
+      "Vol-tex",
+      "Nexora",
+      "AuraSound",
+      "Pulsewave",
+      "Cobalt",
+      "Lumio",
+      "Driftwave"
+    ]
+  },
+  "products": [
+    {
+      "slug": "galaxy-s-ultra-titan-5g",
+      "name": "Galaxy S Ultra Titan 5G",
+      "categorySlug": "mobiles-smartphones-flagship",
+      "brand": "Samsung",
+      "priceUsd": 1199,
+      "compareUsd": 1349,
+      "stock": 32,
+      "shortDescription": "6.8-inch QHD+ AMOLED flagship with a 200MP quad camera, titanium frame, and built-in S-Pen."
+    },
+    {
+      "slug": "nothing-phone-edge-5g",
+      "name": "Nothing Phone Edge 5G",
+      "categorySlug": "mobiles-smartphones-midrange",
+      "brand": "Nothing",
+      "priceUsd": 449,
+      "compareUsd": 529,
+      "stock": 58,
+      "shortDescription": "Mid-range 5G phone with a 120Hz AMOLED display, Glyph lighting, and a clean near-stock Android."
+    },
+    {
+      "slug": "realme-narzo-lite-5g",
+      "name": "Realme Narzo Lite 5G",
+      "categorySlug": "mobiles-smartphones-budget",
+      "brand": "Realme",
+      "priceUsd": 159,
+      "stock": 96,
+      "shortDescription": "Affordable 5G smartphone with a 90Hz display, 50MP camera, and a 5000mAh all-day battery."
+    },
+    {
+      "slug": "galaxy-tab-air-11",
+      "name": "Galaxy Tab Air 11",
+      "categorySlug": "mobiles-tablets-android",
+      "brand": "Samsung",
+      "priceUsd": 329,
+      "compareUsd": 379,
+      "stock": 41,
+      "shortDescription": "11-inch Android tablet with quad speakers and an included stylus, perfect for notes and streaming."
+    },
+    {
+      "slug": "nexora-slate-pro-12",
+      "name": "Nexora Slate Pro 12.4",
+      "categorySlug": "mobiles-tablets-premium",
+      "brand": "Nexora",
+      "priceUsd": 699,
+      "compareUsd": 799,
+      "stock": 24,
+      "shortDescription": "Premium 12.4-inch 120Hz tablet with a magnetic keyboard cover and laptop-class performance."
+    },
+    {
+      "slug": "portronics-rugged-case-edge",
+      "name": "Portronics Rugged Armor Case",
+      "categorySlug": "mobiles-phone-cases",
+      "brand": "Portronics",
+      "priceUsd": 14.99,
+      "stock": 110,
+      "shortDescription": "Military-grade shockproof phone case with raised camera bezels and a built-in kickstand."
+    },
+    {
+      "slug": "cobalt-tempered-glass-3pack",
+      "name": "Cobalt 9H Tempered Glass (3-Pack)",
+      "categorySlug": "mobiles-phone-screen-guards",
+      "brand": "Cobalt",
+      "priceUsd": 9.99,
+      "compareUsd": 16.99,
+      "stock": 120,
+      "shortDescription": "Three-pack of 9H tempered-glass screen protectors with an oleophobic, fingerprint-resistant coating."
+    },
+    {
+      "slug": "nexora-zenbook-ultra-14-oled",
+      "name": "Nexora ZenBook Ultra 14 OLED",
+      "categorySlug": "computing-laptops-ultrabooks",
+      "brand": "Nexora",
+      "priceUsd": 1099,
+      "compareUsd": 1299,
+      "stock": 28,
+      "shortDescription": "Featherweight 14-inch 2.8K OLED ultrabook with Core Ultra 7, 16GB RAM, and 14-hour battery life."
+    },
+    {
+      "slug": "pulsewave-raptor-16-rtx",
+      "name": "Pulsewave Raptor 16 RTX",
+      "categorySlug": "computing-laptops-gaming",
+      "brand": "Pulsewave",
+      "priceUsd": 1599,
+      "compareUsd": 1799,
+      "stock": 18,
+      "shortDescription": "16-inch 240Hz gaming laptop with an RTX GPU, vapor-chamber cooling, and per-key RGB keyboard."
+    },
+    {
+      "slug": "volt-tex-probook-15-business",
+      "name": "Vol-tex ProBook 15",
+      "categorySlug": "computing-laptops-business",
+      "brand": "Volt-tex",
+      "priceUsd": 849,
+      "stock": 36,
+      "shortDescription": "Durable 15-inch business laptop with a spill-resistant keyboard, fingerprint login, and all-day battery."
+    },
+    {
+      "slug": "lumio-ultrawide-4k-monitor-32",
+      "name": "Lumio UltraView 32 4K Monitor",
+      "categorySlug": "computing-monitors-4k",
+      "brand": "Lumio",
+      "priceUsd": 399,
+      "compareUsd": 499,
+      "stock": 30,
+      "shortDescription": "32-inch 4K UHD monitor with 99% sRGB colour accuracy, USB-C 90W power delivery, and a height-adjustable stand."
+    },
+    {
+      "slug": "pulsewave-arena-27-240hz",
+      "name": "Pulsewave Arena 27 240Hz",
+      "categorySlug": "computing-monitors-gaming",
+      "brand": "Pulsewave",
+      "priceUsd": 279,
+      "compareUsd": 329,
+      "stock": 44,
+      "shortDescription": "27-inch QHD gaming monitor with a 240Hz refresh rate, 1ms response, and adaptive-sync support."
+    },
+    {
+      "slug": "nexora-mechkey-tkl-wireless",
+      "name": "Nexora MechKey TKL Wireless",
+      "categorySlug": "computing-peripherals-keyboards",
+      "brand": "Nexora",
+      "priceUsd": 79.99,
+      "compareUsd": 99.99,
+      "stock": 62,
+      "shortDescription": "Hot-swappable tenkeyless mechanical keyboard with tri-mode wireless and south-facing RGB."
+    },
+    {
+      "slug": "portronics-glide-wireless-mouse",
+      "name": "Portronics Glide Wireless Mouse",
+      "categorySlug": "computing-peripherals-mice",
+      "brand": "Portronics",
+      "priceUsd": 24.99,
+      "stock": 88,
+      "shortDescription": "Ergonomic 26K-DPI wireless mouse with silent clicks and a USB-C rechargeable battery."
+    },
+    {
+      "slug": "ambrane-rapid-nvme-ssd-1tb",
+      "name": "Ambrane RapidStore NVMe SSD 1TB",
+      "categorySlug": "computing-peripherals-storage",
+      "brand": "Ambrane",
+      "priceUsd": 89.99,
+      "compareUsd": 119.99,
+      "stock": 70,
+      "shortDescription": "Portable 1TB NVMe SSD delivering up to 1050MB/s transfers in a pocket-sized aluminium shell."
+    },
+    {
+      "slug": "boat-airdopes-pro-anc",
+      "name": "boAt Airdopes Pro ANC",
+      "categorySlug": "audio-headphones-earbuds",
+      "brand": "boAt",
+      "priceUsd": 39.99,
+      "compareUsd": 79.99,
+      "stock": 105,
+      "shortDescription": "True wireless earbuds with 45dB active noise cancellation, low-latency game mode, and 40-hour playback."
+    },
+    {
+      "slug": "aurasound-studio-x700-overear",
+      "name": "AuraSound Studio X700",
+      "categorySlug": "audio-headphones-overear",
+      "brand": "AuraSound",
+      "priceUsd": 199,
+      "compareUsd": 249,
+      "stock": 34,
+      "shortDescription": "Over-ear headphones with adaptive noise cancellation, Hi-Res certified drivers, and 30-hour battery."
+    },
+    {
+      "slug": "noise-flex-neckband-bt",
+      "name": "Noise Flex Neckband",
+      "categorySlug": "audio-headphones-neckband",
+      "brand": "Noise",
+      "priceUsd": 17.99,
+      "stock": 92,
+      "shortDescription": "Sweat-resistant Bluetooth neckband with magnetic earbuds, fast charging, and 30-hour playtime."
+    },
+    {
+      "slug": "boat-stone-boom-bt-speaker",
+      "name": "boAt Stone Boom Speaker",
+      "categorySlug": "audio-speakers-bluetooth",
+      "brand": "boAt",
+      "priceUsd": 49.99,
+      "compareUsd": 69.99,
+      "stock": 76,
+      "shortDescription": "Portable IPX7 waterproof Bluetooth speaker with 24W stereo sound and 12-hour battery."
+    },
+    {
+      "slug": "aurasound-cinema-soundbar-31",
+      "name": "AuraSound Cinema Soundbar 3.1",
+      "categorySlug": "audio-speakers-soundbars",
+      "brand": "AuraSound",
+      "priceUsd": 229,
+      "compareUsd": 299,
+      "stock": 26,
+      "shortDescription": "3.1-channel Dolby Atmos soundbar with a wireless subwoofer and HDMI eARC connectivity."
+    },
+    {
+      "slug": "samsung-galaxy-watch-pro-46",
+      "name": "Samsung Galaxy Watch Pro 46mm",
+      "categorySlug": "wearables-watches-premium",
+      "brand": "Samsung",
+      "priceUsd": 349,
+      "compareUsd": 399,
+      "stock": 38,
+      "shortDescription": "Premium smartwatch with a sapphire AMOLED display, ECG and SpO2 sensors, and dual-band GPS."
+    },
+    {
+      "slug": "noise-colorfit-pulse-fit",
+      "name": "Noise ColorFit Pulse",
+      "categorySlug": "wearables-watches-fitness",
+      "brand": "Noise",
+      "priceUsd": 44.99,
+      "compareUsd": 69.99,
+      "stock": 100,
+      "shortDescription": "Fitness smartwatch with a 1.9-inch display, 100+ sport modes, and a 7-day battery."
+    },
+    {
+      "slug": "mi-smart-band-9-tracker",
+      "name": "Mi Smart Band 9",
+      "categorySlug": "wearables-bands-trackers",
+      "brand": "Mi",
+      "priceUsd": 34.99,
+      "stock": 115,
+      "shortDescription": "Slim activity tracker with an AMOLED display, heart-rate and SpO2 monitoring, and a 14-day battery."
+    },
+    {
+      "slug": "noise-jr-kids-band-gps",
+      "name": "Noise Jr Kids Band",
+      "categorySlug": "wearables-bands-kids",
+      "brand": "Noise",
+      "priceUsd": 29.99,
+      "compareUsd": 39.99,
+      "stock": 64,
+      "shortDescription": "Kid-friendly fitness band with step tracking, parental controls, and a colourful swappable strap."
+    },
+    {
+      "slug": "nexora-echo-mini-smart-speaker",
+      "name": "Nexora Echo Mini",
+      "categorySlug": "smart-home-control-speakers",
+      "brand": "Nexora",
+      "priceUsd": 39.99,
+      "compareUsd": 54.99,
+      "stock": 80,
+      "shortDescription": "Compact voice-assistant smart speaker with rich 360-degree sound and smart-home control built in."
+    },
+    {
+      "slug": "lumio-hub-show-8-display",
+      "name": "Lumio Hub Show 8",
+      "categorySlug": "smart-home-control-displays",
+      "brand": "Lumio",
+      "priceUsd": 89.99,
+      "compareUsd": 119.99,
+      "stock": 42,
+      "shortDescription": "8-inch smart display for video calls, recipes, and one-tap control of your connected home."
+    },
+    {
+      "slug": "portronics-smart-plug-wifi",
+      "name": "Portronics Smart Wi-Fi Plug",
+      "categorySlug": "smart-home-control-plugs",
+      "brand": "Portronics",
+      "priceUsd": 12.99,
+      "stock": 118,
+      "shortDescription": "16A Wi-Fi smart plug with energy monitoring, scheduling, and voice-assistant compatibility."
+    },
+    {
+      "slug": "driftwave-guard-2k-cam",
+      "name": "Driftwave Guard 2K Camera",
+      "categorySlug": "smart-home-security-cameras",
+      "brand": "Driftwave",
+      "priceUsd": 54.99,
+      "compareUsd": 74.99,
+      "stock": 50,
+      "shortDescription": "Indoor 2K security camera with night vision, motion alerts, two-way audio, and local SD recording."
+    },
+    {
+      "slug": "driftwave-doorbell-cam-pro",
+      "name": "Driftwave Doorbell Cam Pro",
+      "categorySlug": "smart-home-security-doorbells",
+      "brand": "Driftwave",
+      "priceUsd": 99.99,
+      "compareUsd": 129.99,
+      "stock": 33,
+      "shortDescription": "Battery-powered 2K video doorbell with person detection, head-to-toe view, and instant phone alerts."
+    },
+    {
+      "slug": "ambrane-65w-gan-charger",
+      "name": "Ambrane 65W GaN Charger",
+      "categorySlug": "smart-home-power-chargers",
+      "brand": "Ambrane",
+      "priceUsd": 22.99,
+      "compareUsd": 34.99,
+      "stock": 95,
+      "shortDescription": "Compact 65W GaN charger with dual USB-C and one USB-A port to fast-charge a laptop and phone together."
+    },
+    {
+      "slug": "ambrane-powerbank-20000-30w",
+      "name": "Ambrane PowerLit 20000 30W",
+      "categorySlug": "smart-home-power-powerbanks",
+      "brand": "Ambrane",
+      "priceUsd": 29.99,
+      "compareUsd": 44.99,
+      "stock": 84,
+      "shortDescription": "20000mAh power bank with 30W USB-C PD that fast-charges phones, tablets, and laptops on the go."
+    }
+  ]
+}
