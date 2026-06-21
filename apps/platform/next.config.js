@@ -12,7 +12,6 @@ const withNextIntl = createNextIntlPlugin('./i18n/request.js');
 const nextConfig = {
   transpilePackages: [
     '@hr/admin-core',
-    '@hr/ecom-ui',
     '@hr/theme-engine',
     '@hr/types',
     '@hr/ui',

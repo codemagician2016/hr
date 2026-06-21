@@ -19,7 +19,7 @@
 // are well under the 30MB Express body limit.
 
 import { useRef, useState } from 'react';
-import { api } from '@/components/ecom-ui/api';
+import { api } from '@/lib/adminApi';
 
 const COPY = {
   brands: {

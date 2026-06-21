@@ -16,7 +16,6 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@sentry/nextjs": "^10.50.0",
     "@hr/admin-core": "file:../../packages/admin-core",
-    "@hr/ecom-ui": "file:../../packages/ecom-ui",
     "@hr/theme-engine": "file:../../packages/theme-engine",
     "@hr/types": "file:../../packages/types",
     "@hr/ui": "file:../../packages/ui",

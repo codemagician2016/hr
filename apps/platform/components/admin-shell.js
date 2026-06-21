@@ -14,7 +14,6 @@ import LanguageSelector from '@/components/LanguageSelector';
 import EcommerceLocationSwitcher, { EcommerceLocationProvider } from '@/components/EcommerceLocationSwitcher';
 import EcommerceAdminShell from '@/components/EcommerceAdminShell';
 import AapkaChatActionWidget from '@/components/AapkaChatActionWidget';
-import EcommerceOverviewTab from '@/components/admin-tabs/EcommerceOverviewTab';
 import AppointmentsPanel from '@/components/AppointmentsPanel';
 import WalkInsPanel from '@/components/WalkInsPanel';
 import EmailDeliveryHistoryPanel from '@/components/EmailDeliveryHistoryPanel';
@@ -86,26 +85,12 @@ import WaterRevenuePanel from '@/components/admin-tabs/water-purifier/RevenuePan
 // ECOMMERCE Path B (2026-05-01) — grocery seller console panels.
 // Stubs today, real implementations port from `Grocery E-Commerce/<slug>.html`.
 import InventoryPanel from '@/components/admin-tabs/InventoryPanel';
-import EcommerceCouponsPanel from '@/components/admin-tabs/EcommerceCouponsPanel';
-import BannersPanel from '@/components/admin-tabs/BannersPanel';
-import CmsPanel from '@/components/admin-tabs/CmsPanel';
-import EcommerceNotificationsPanel from '@/components/admin-tabs/EcommerceNotificationsPanel';
 import DomainsTab from '@/components/admin-tabs/DomainsTab';
 import ReviewsPanel from '@/components/admin-tabs/ReviewsPanel';
 import PoliciesPanel from '@/components/admin-tabs/PoliciesPanel';
-import SlotsPanel from '@/components/admin-tabs/SlotsPanel';
-import PickupLocationsPanel from '@/components/admin-tabs/PickupLocationsPanel';
 import DispatchPanel from '@/components/admin-tabs/DispatchPanel';
-import BrandsPanel from '@/components/admin-tabs/BrandsPanel';
 import ReturnsPanel from '@/components/admin-tabs/ReturnsPanel';
-import BulkOpsPanel from '@/components/admin-tabs/BulkOpsPanel';
 import PaymentsPanel from '@/components/admin-tabs/PaymentsPanel';
-import EcommerceReportsPanel from '@/components/admin-tabs/EcommerceReportsPanel';
-import TaxPanel from '@/components/admin-tabs/TaxPanel';
-import CitiesPanel from '@/components/admin-tabs/CitiesPanel';
-import RolesPermissionsPanel from '@/components/admin-tabs/RolesPermissionsPanel';
-import EcommerceStaffPanel from '@/components/admin-tabs/EcommerceStaffPanel';
-import ActivityLogPanel from '@/components/admin-tabs/ActivityLogPanel';
 import VideoIntegrationsCard from '@/components/admin-cards/VideoIntegrationsCard';
 import SettingsTab from '@/components/admin-tabs/SettingsTab';
 import WebsiteContentTab from '@/components/admin-tabs/WebsiteContentTab';
@@ -126,12 +111,12 @@ import {
 const HIDDEN_TAB_KEYS_BY_VERTICAL = {
   STATIC: ['notifications', 'reports'],
   APPOINTMENT: ['notifications', 'emails', 'reports', 'coupons', 'embed'],
-  // locations/slots/pickup-locations/cities are folded into Store Setup but
-  // stay valid keys so the hub's Advanced deep-links + old bookmarks resolve.
+  // locations is folded into Store Setup but stays a valid key so the hub's
+  // Advanced deep-links + old bookmarks resolve.
   // 'dispatch' is folded into Fulfillment (OrdersPanel already has the dispatch
   // bar + rider routing); it stays a valid key so old ?tab=dispatch links resolve.
   // 'developers' now lives inside Integrations as API & webhooks.
-  ECOMMERCE: ['notifications', 'locations', 'slots', 'pickup-locations', 'cities', 'dispatch', 'developers'],
+  ECOMMERCE: ['notifications', 'locations', 'dispatch', 'developers'],
 };
 
 // The global location switcher scopes branch-level panels (orders, inventory,
@@ -140,7 +125,7 @@ const HIDDEN_TAB_KEYS_BY_VERTICAL = {
 // there — otherwise it reads as a filter that silently has no effect. Verified:
 // each of these panels does NOT consume useEcommerceLocation().
 const LOCATION_SWITCHER_HIDDEN_TABS = new Set([
-  'store-setup', 'subscription', 'domains', 'settings', 'tax', 'pages', 'blog', 'content',
+  'store-setup', 'subscription', 'domains', 'settings', 'pages', 'blog', 'content',
 ]);
 
 function BusinessAdminContent() {
@@ -302,25 +287,11 @@ function BusinessAdminContent() {
     { key: 'settings',     label: tNav('settings'),     sub: tNav('settingsSub'),     icon: IconCog },
     // ── ECOMMERCE Path B (2026-05-01) — seller console ──
     { key: 'inventory',    label: 'Inventory',          sub: 'Stock by location, GRNs, transfers',     icon: IconBoxes },
-    { key: 'brands',       label: 'Brands',             sub: 'Family + brand catalog',                 icon: IconTag },
-    { key: 'ecom-coupons', label: 'Coupons',            sub: 'Discount codes + auto-promotions',       icon: IconTag },
-    { key: 'banners',      label: 'Banners',            sub: 'Hero carousels + storefront promos',     icon: IconImage },
-    { key: 'cms',          label: 'CMS',                sub: 'Storefront content blocks',              icon: IconLayout },
-    { key: 'ecom-notifications', label: 'Notifications', sub: 'Email + SMS + WhatsApp templates',     icon: IconBell },
     { key: 'reviews',      label: 'Reviews',            sub: 'Ratings + customer feedback',            icon: IconStar },
     { key: 'policies',     label: 'Policies',           sub: 'Privacy, terms, refunds — footer + signup', icon: IconShield },
-    { key: 'slots',        label: 'Delivery slots',     sub: 'Time windows + capacity',                icon: IconClock },
-    { key: 'pickup-locations', label: 'Pickup locations', sub: 'Click & Collect counters',             icon: IconMapPin },
     { key: 'dispatch',     label: 'Dispatch',           sub: 'Routes from fulfillment board',          icon: IconTruck },
     { key: 'returns',      label: 'Returns',            sub: 'Refunds + damaged-goods log',            icon: IconRotateCcw },
-    { key: 'bulk',         label: 'Bulk ops',           sub: 'CSV import / export jobs',               icon: IconUpload },
     { key: 'payments',     label: 'Payments',           sub: 'Settlements + gateway fees',             icon: IconWallet },
-    { key: 'ecom-reports', label: 'Reports',            sub: 'Sales, basket, inventory analytics',     icon: IconBarChart },
-    { key: 'tax',          label: 'Tax',                sub: 'UK VAT + Indian GST + invoicing',        icon: IconReceipt },
-    { key: 'cities',       label: 'Cities',             sub: 'Service areas + delivery zones',         icon: IconMapPin },
-    { key: 'roles',        label: 'Roles & permissions', sub: 'RBAC: 6 roles × 24 permissions',        icon: IconShield },
-    { key: 'ecom-staff',   label: 'Staff',              sub: 'Team, role assignments, 2FA',            icon: IconUserCog },
-    { key: 'activity',     label: 'Activity log',       sub: 'Who did what, when',                     icon: IconHistory },
   ];
 
   // ECOMMERCE Path B grouping (2026-05-01). Rider/delivery fleet management
@@ -331,10 +302,10 @@ function BusinessAdminContent() {
   // valid as HIDDEN_TAB_KEYS so the hub's "Advanced" deep-links still work).
   const ECOMMERCE_NAV_GROUPS = [
     { label: 'Setup',      keys: ['store-setup'] },
-    { label: 'Main',       keys: ['overview', 'orders', 'returns', 'products', 'categories', 'brands', 'inventory', 'bulk', 'customers'] },
-    { label: 'Marketing',  keys: ['ecom-coupons', 'banners', 'cms', 'ecom-notifications', 'reviews'] },
-    { label: 'Finance',    keys: ['payments', 'ecom-reports', 'tax'] },
-    { label: 'System',     keys: ['roles', 'ecom-staff', 'activity', 'subscription', 'integrations', 'enquiries', 'blog', 'domains', 'content', 'policies', 'settings'] },
+    { label: 'Main',       keys: ['overview', 'orders', 'returns', 'products', 'categories', 'inventory', 'customers'] },
+    { label: 'Marketing',  keys: ['reviews'] },
+    { label: 'Finance',    keys: ['payments'] },
+    { label: 'System',     keys: ['subscription', 'integrations', 'enquiries', 'blog', 'domains', 'content', 'policies', 'settings'] },
   ];
 
   // Per-vertical visibility map. Order in the array reflects sidebar order.
@@ -351,10 +322,10 @@ function BusinessAdminContent() {
     // Main → Marketing → Finance → System left-to-right.
     ECOMMERCE: [
       'store-setup',
-      'overview', 'orders', 'returns', 'products', 'categories', 'brands', 'inventory', 'bulk', 'customers',
-      'ecom-coupons', 'banners', 'cms', 'ecom-notifications', 'reviews',
-      'payments', 'ecom-reports', 'tax',
-      'roles', 'ecom-staff', 'activity', 'subscription', 'integrations',
+      'overview', 'orders', 'returns', 'products', 'categories', 'inventory', 'customers',
+      'reviews',
+      'payments',
+      'subscription', 'integrations',
       'enquiries', 'blog', 'domains', 'content', 'policies', 'settings',
     ],
   };
@@ -381,11 +352,9 @@ function BusinessAdminContent() {
   const hiddenTabKeys = HIDDEN_TAB_KEYS_BY_VERTICAL[tenantVertical] || [];
   const VALID_KEYS = [...NAV_ITEMS.map((n) => n.key), ...hiddenTabKeys];
   const requestedTab = VALID_KEYS.includes(searchParams.get('tab')) ? searchParams.get('tab') : 'overview';
-  const normalizedRequestedTab = tenantVertical === 'ECOMMERCE' && requestedTab === 'notifications'
-    ? 'ecom-notifications'
-    : tenantVertical === 'ECOMMERCE' && requestedTab === 'developers'
-      ? 'integrations'
-      : requestedTab;
+  const normalizedRequestedTab = tenantVertical === 'ECOMMERCE' && requestedTab === 'developers'
+    ? 'integrations'
+    : requestedTab;
   const [tab, setTabState] = useState(normalizedRequestedTab);
   const [tabResetNonce, setTabResetNonce] = useState(0);
   useEffect(() => {
@@ -406,9 +375,7 @@ function BusinessAdminContent() {
 
   const setTab = useCallback((key, options = {}) => {
     const safeKey = VALID_KEYS.includes(key) ? key : 'overview';
-    const nextTab = tenantVertical === 'ECOMMERCE' && safeKey === 'notifications'
-      ? 'ecom-notifications'
-      : safeKey;
+    const nextTab = safeKey;
     const isSameTabReset = nextTab === tab;
     setTabState(nextTab);
     if (isSameTabReset) setTabResetNonce((value) => value + 1);
@@ -755,8 +722,7 @@ function BusinessAdminContent() {
       {tab === 'store-setup' && tenantVertical === 'ECOMMERCE' && (
         <StoreSetupHub business={business} subscription={tenant?.subscription} refreshTenant={refreshTenant} onTabChange={setTab} />
       )}
-      {tab === 'overview' && tenantVertical === 'ECOMMERCE' && <EcommerceOverviewTab me={me} />}
-      {tab === 'overview' && tenantVertical !== 'ECOMMERCE' && <OverviewTab stats={stats} themeVocab={themeVocab} vertical={tenantVertical} onNavigate={setTab} />}
+      {tab === 'overview' && <OverviewTab stats={stats} themeVocab={themeVocab} vertical={tenantVertical} onNavigate={setTab} />}
       {tab === 'appointments' && isRestaurantReservations && <RestaurantHostStandPanel />}
       {tab === 'appointments' && !isRestaurantReservations && (
         <div className="bg-white rounded-2xl border border-gray-200 p-6">
@@ -922,25 +888,11 @@ function BusinessAdminContent() {
       )}
       {/* ── ECOMMERCE Path B panels (stubs today, real impl ports from prototype) ── */}
       {tab === 'inventory' && <InventoryPanel />}
-      {tab === 'ecom-coupons' && <EcommerceCouponsPanel />}
-      {tab === 'banners' && <BannersPanel />}
-      {tab === 'cms' && <CmsPanel />}
-      {tab === 'ecom-notifications' && <EcommerceNotificationsPanel />}
       {tab === 'reviews' && <ReviewsPanel />}
       {tab === 'policies' && <PoliciesPanel />}
-      {tab === 'slots' && <SlotsPanel />}
-      {tab === 'pickup-locations' && <PickupLocationsPanel />}
       {tab === 'dispatch' && <DispatchPanel />}
-      {tab === 'brands' && <BrandsPanel />}
       {tab === 'returns' && <ReturnsPanel />}
-      {tab === 'bulk' && <BulkOpsPanel />}
       {tab === 'payments' && <PaymentsPanel />}
-      {tab === 'ecom-reports' && <EcommerceReportsPanel />}
-      {tab === 'tax' && <TaxPanel />}
-      {tab === 'cities' && <CitiesPanel />}
-      {tab === 'roles' && <RolesPermissionsPanel />}
-      {tab === 'ecom-staff' && <EcommerceStaffPanel />}
-      {tab === 'activity' && <ActivityLogPanel />}
     </>
   );
 
@@ -1026,8 +978,8 @@ function BusinessAdminContent() {
               compact
             />
             <NotificationsBell
-              onOpen={() => setTab(tenantVertical === 'ECOMMERCE' ? 'ecom-notifications' : 'notifications')}
-              active={tab === (tenantVertical === 'ECOMMERCE' ? 'ecom-notifications' : 'notifications')}
+              onOpen={() => setTab('notifications')}
+              active={tab === 'notifications'}
             />
             {checklist?.isLive && (
               <span className="hidden sm:inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-[11px] font-mono tracking-wider text-emerald-700">
@@ -1183,8 +1135,8 @@ function BusinessAdminContent() {
           activeKey={tab}
           setTab={setTab}
           notificationsBell={<NotificationsBell
-            onOpen={() => setTab(tenantVertical === 'ECOMMERCE' ? 'ecom-notifications' : 'notifications')}
-            active={tab === (tenantVertical === 'ECOMMERCE' ? 'ecom-notifications' : 'notifications')}
+            onOpen={() => setTab('notifications')}
+            active={tab === 'notifications'}
           />}
           isLive={!!checklist?.isLive}
           onPublish={handlePublish}
