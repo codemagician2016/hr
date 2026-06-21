@@ -1,3 +1,3 @@
 'use client';
 
-export * from '@sitepresso/ui/admin';
+export * from '@hr/ui/admin';

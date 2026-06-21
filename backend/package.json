@@ -29,7 +29,7 @@
     "@aws-sdk/credential-providers": "^3.1061.0",
     "@prisma/client": "^5.15.0",
     "@sentry/node": "^10.50.0",
-    "@sitepresso/theme-engine": "file:../packages/theme-engine",
+    "@hr/theme-engine": "file:../packages/theme-engine",
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",

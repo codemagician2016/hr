@@ -5,7 +5,7 @@ import type {
   ThemeMode,
   ThemeSlotGroup,
   Vertical,
-} from '@sitepresso/types';
+} from '@hr/types';
 
 export const THEME_CONTRACT_VERSION: 1;
 export const VERTICALS: Record<string, Vertical>;

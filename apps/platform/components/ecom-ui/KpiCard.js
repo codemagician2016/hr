@@ -1,1 +1,1 @@
-export * from '@sitepresso/ecom-ui/KpiCard';
+export * from '@hr/ecom-ui/KpiCard';

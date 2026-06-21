@@ -5,7 +5,7 @@ const {
   SECTION_KEYS,
   resolvePreset,
   sanitizeSectionVariants,
-} = require('@sitepresso/theme-engine/layout-presets.cjs');
+} = require('@hr/theme-engine/layout-presets.cjs');
 
 module.exports = {
   LAYOUT_PRESETS: LAYOUT_PRESET_KEYS,

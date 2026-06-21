@@ -1,1 +1,1 @@
-export * from '@sitepresso/ecom-ui/StatusBadge';
+export * from '@hr/ecom-ui/StatusBadge';

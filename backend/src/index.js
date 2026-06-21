@@ -29,16 +29,6 @@ const prisma = require('./core/lib/prisma');
 
 const authRoutes = require('./core/routes/auth.routes');
 const businessRoutes = require('./core/routes/business.routes');
-const serviceRoutes = require('./booking/routes/service.routes');
-const specialtyRoutes = require('./booking/routes/specialty.routes');
-const reviewRoutes = require('./booking/routes/review.routes');
-const privacyRoutes = require('./booking/routes/privacy.routes');
-const scheduleRoutes = require('./booking/routes/schedule.routes');
-const bookingRoutes = require('./booking/routes/booking.routes');
-const appointmentRoutes = require('./booking/routes/appointment.routes');
-const restaurantRoutes = require('./booking/routes/restaurant.routes');
-const lawFirmRoutes = require('./booking/routes/law-firm.routes');
-const waterPurifierRoutes = require('./booking/routes/water-purifier.routes');
 const publicPricingRoutes = require('./core/routes/publicPricing.routes');
 const subscriptionRoutes = require('./core/routes/subscription.routes');
 const adminRoutes = require('./superadmin/routes/admin.routes');
@@ -46,12 +36,9 @@ const pricingAdminRoutes = require('./core/routes/pricing.routes');
 const adminCouponRoutes = require('./core/routes/adminCoupon.routes');
 const tenantRoutes = require('./core/routes/tenant.routes');
 const customerRoutes = require('./core/routes/customer.routes');
-const leaveRoutes = require('./booking/routes/leave.routes');
 const notificationRoutes = require('./core/routes/notification.routes');
 const inboxRoutes = require('./core/routes/inbox.routes');
 const chatRoutes = require('./core/routes/chat.routes');
-const calendarRoutes = require('./booking/routes/calendar.routes');
-const couponRoutes = require('./booking/routes/coupon.routes');
 const storefrontRoutes = require('./core/routes/storefront.routes');
 const uploadRoutes = require('./core/routes/upload.routes');
 const localeRoutes = require('./core/routes/locale.routes');
@@ -93,7 +80,7 @@ app.use((req, res, next) => {
   next();
 });
 
-const PLATFORM_DOMAIN = (process.env.PLATFORM_DOMAIN || 'sitepresso.com').toLowerCase();
+const PLATFORM_DOMAIN = (process.env.PLATFORM_DOMAIN || 'hr.com').toLowerCase();
 
 const configuredMobileOrigins = (process.env.MOBILE_ALLOWED_ORIGINS || '')
   .split(',')
@@ -339,16 +326,6 @@ app.get('/version', (req, res) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/api/business', businessRoutes);
-app.use('/api/services', serviceRoutes);
-app.use('/api/specialties', specialtyRoutes);
-app.use('/api/reviews', reviewRoutes);
-app.use('/api/privacy', privacyRoutes);
-app.use('/api/schedule', scheduleRoutes);
-app.use('/api/booking', bookingRoutes);
-app.use('/api/appointments', appointmentRoutes);
-app.use('/api/restaurant', restaurantRoutes);
-app.use('/api/law-firm', lawFirmRoutes);
-app.use('/api/water-purifier', waterPurifierRoutes);
 app.use('/api/public/pricing', publicPricingRoutes);
 app.use('/api/subscription', subscriptionRoutes);
 app.use('/api/admin/pricing', pricingAdminRoutes);
@@ -357,35 +334,22 @@ app.use('/api/admin/notification-access', require('./core/routes/notificationAcc
 app.use('/api/admin', adminRoutes);
 app.use('/api/tenant', tenantRoutes);
 app.use('/api/customer', customerRoutes);
-app.use('/api', leaveRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/notifications/webhook', require('./core/routes/notificationWebhook.routes'));
 app.use('/api/notification-config', require('./core/routes/notificationConfig.routes'));
-app.use('/api/marketing-automation', require('./booking/routes/marketingAutomation.routes'));
 app.use('/api/unsubscribe', require('./core/routes/unsubscribe.routes'));
-app.use('/api/intake-forms', require('./booking/routes/intakeForms.routes'));
-app.use('/api/intake-submissions', require('./booking/routes/intakeSubmissions.routes'));
-app.use('/api/crm', require('./booking/routes/customerTags.routes'));
 app.use('/api/locations', require('./core/routes/locations.routes'));
-app.use('/api/store-brands', require('./shop/routes/storeBrands.routes'));
 app.use('/api/rbac', require('./core/routes/businessRoles.routes'));
 app.use('/api/public-api', require('./core/routes/publicApi.routes'));
 app.use('/api/v1', require('./core/routes/publicV1.routes'));
 app.use('/api/payments', require('./core/routes/payments.routes'));
-app.use('/api/blog', require('./web/routes/blog.routes'));
-app.use('/api/seo', require('./web/routes/seo.routes'));
 app.use('/api/ai', require('./core/routes/ai.routes'));
 app.use('/api/inbox', inboxRoutes);
 app.use('/api/chat', chatRoutes);
-app.use('/api/calendar', calendarRoutes);
-app.use('/api/coupons', couponRoutes);
 app.use('/api/storefront', storefrontRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/locale', localeRoutes);
 app.use('/api/internal', require('./core/routes/internal.routes'));
-app.use('/api/qa', require('./qa/qa.routes'));
-// ECOMMERCE Path B (2026-05-01) — admin routes for the operations vertical.
-app.use('/api/ecom', require('./shop/routes/ecom.routes'));
 app.use('/api/geo', require('./core/routes/geo.routes'));
 app.use('/api/integrations', require('./core/routes/integrations.routes'));
 
@@ -403,7 +367,7 @@ app.use((err, _req, res, _next) => {
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
-  console.log(`Sitepresso backend running on port ${PORT}`);
+  console.log(`HR platform backend running on port ${PORT}`);
   // Surface social-login readiness loudly at boot — a missing provider
   // credential otherwise fails silently as a confusing 401 at sign-in time.
   try {

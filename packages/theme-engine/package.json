@@ -1,12 +1,12 @@
 {
-  "name": "@sitepresso/theme-engine",
+  "name": "@hr/theme-engine",
   "version": "0.0.1",
   "private": true,
   "main": "index.js",
   "types": "index.d.ts",
   "description": "Shared theme contract normalization, registry, manifest, and slot resolution helpers.",
   "dependencies": {
-    "@sitepresso/types": "file:../types"
+    "@hr/types": "file:../types"
   },
   "scripts": {
     "test": "node test/theme-engine.test.js && node test/profession-registry.test.mjs && node test/layout-presets.test.cjs"

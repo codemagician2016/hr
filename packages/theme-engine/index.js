@@ -4,7 +4,7 @@ const {
   THEME_MODES,
   THEME_INHERITANCE_MODES,
   SLOT_GROUPS,
-} = require('@sitepresso/types');
+} = require('@hr/types');
 
 const VERTICAL_ALIASES = Object.freeze({
   booking: VERTICALS.APPOINTMENT,

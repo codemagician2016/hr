@@ -1,5 +1,5 @@
 import staticThemeConfigs from '../../web/lib/themeConfigs';
-import { createProfessionThemeSurface } from '@sitepresso/theme-engine/profession-registry.mjs';
+import { createProfessionThemeSurface } from '@hr/theme-engine/profession-registry.mjs';
 
 const surface = createProfessionThemeSurface({ surface: 'platform', staticThemeConfigs });
 

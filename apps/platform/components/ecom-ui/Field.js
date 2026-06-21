@@ -1,1 +1,1 @@
-export * from '@sitepresso/ecom-ui/Field';
+export * from '@hr/ecom-ui/Field';

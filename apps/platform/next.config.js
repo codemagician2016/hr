@@ -11,11 +11,11 @@ const withNextIntl = createNextIntlPlugin('./i18n/request.js');
 
 const nextConfig = {
   transpilePackages: [
-    '@sitepresso/admin-core',
-    '@sitepresso/ecom-ui',
-    '@sitepresso/theme-engine',
-    '@sitepresso/types',
-    '@sitepresso/ui',
+    '@hr/admin-core',
+    '@hr/ecom-ui',
+    '@hr/theme-engine',
+    '@hr/types',
+    '@hr/ui',
   ],
   env: {
     NEXT_PUBLIC_API_URL: apiOrigin,

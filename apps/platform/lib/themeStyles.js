@@ -1,1 +1,1 @@
-export * from '@sitepresso/theme-engine/profession-styles.mjs';
+export * from '@hr/theme-engine/profession-styles.mjs';

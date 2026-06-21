@@ -1,1 +1,1 @@
-export { api } from '@sitepresso/ecom-ui/api';
+export { api } from '@hr/ecom-ui/api';

@@ -1,1 +1,1 @@
-export * from '@sitepresso/ecom-ui/PageHeader';
+export * from '@hr/ecom-ui/PageHeader';

@@ -1,3 +1,3 @@
 'use client';
 
-export * from '@sitepresso/ecom-ui';
+export * from '@hr/ecom-ui';

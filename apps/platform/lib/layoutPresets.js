@@ -1,4 +1,4 @@
-import layoutPresets from '@sitepresso/theme-engine/layout-presets.cjs';
+import layoutPresets from '@hr/theme-engine/layout-presets.cjs';
 
 export const {
   LAYOUT_PRESETS,

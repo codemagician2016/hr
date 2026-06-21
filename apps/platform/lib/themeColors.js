@@ -1,1 +1,1 @@
-export * from '@sitepresso/theme-engine/theme-colors.mjs';
+export * from '@hr/theme-engine/theme-colors.mjs';

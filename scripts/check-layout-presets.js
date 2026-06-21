@@ -34,7 +34,7 @@ if (!VALID_LAYOUT_PRESETS.has('logistics-network')) {
 
 for (const file of WRAPPER_FILES) {
   const content = fs.readFileSync(path.join(ROOT, file), 'utf8');
-  if (!content.includes('@sitepresso/theme-engine/layout-presets.cjs')) {
+  if (!content.includes('@hr/theme-engine/layout-presets.cjs')) {
     errors.push(`${file} does not re-export the shared layout preset registry.`);
   }
   if (content.includes('export const LAYOUT_PRESETS = [')) {

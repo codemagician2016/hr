@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { buildBackendThemeManifest } = require('@sitepresso/theme-engine');
+const { buildBackendThemeManifest } = require('@hr/theme-engine');
 
 const root = path.resolve(__dirname, '..');
 

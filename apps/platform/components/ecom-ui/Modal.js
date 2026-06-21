@@ -1,1 +1,1 @@
-export * from '@sitepresso/ecom-ui/Modal';
+export * from '@hr/ecom-ui/Modal';
