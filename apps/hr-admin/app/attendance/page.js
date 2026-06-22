@@ -1,23 +1,218 @@
 'use client';
 
-// Attendance console: four tabs against /api/hr/attendance/*.
+// Attendance console (Feature 2, Phase 4) against /api/hr/attendance/*.
+//
+// Tabs:
+//  - Dashboard:       GET /summary?from=&to=&groupBy=status — today's status
+//                     counts + a present% bar. Data is server-scoped: a Manager
+//                     sees only their sub-tree (banner makes that explicit).
 //  - Punches:         GET /punches (paginated).
-//  - Shifts:          GET /shifts + inline create POST /shifts (canManageAttendance).
+//  - Shifts:          GET/POST/PATCH/DELETE /shifts (full ShiftPattern fields);
+//                     row → detail drawer with employee assignment (overlap 409).
+//  - Holidays:        GET/POST/DELETE /holidays + POST /holidays/import.
 //  - Timesheets:      GET /timesheets with approve/reject (canManageAttendance).
-//  - Regularizations: GET /regularizations with approve/reject; note the route
-//    uses :requestId, not :id.
+//  - Regularizations: GET /regularizations (real status/decidedBy); approve/reject
+//                     only on PENDING. Route uses :requestId, not :id.
+//  - Period close:    POST /period/close — preview blockers (409) then lock.
+//                     Hidden for operators without canManageAttendance.
+//
+// All reads/writes are cookie-authed and tenant- + scope-filtered server-side.
 
-import { useCallback, useEffect, useState } from 'react';
-import { ErrorBanner, PrimaryButton, TextInput, TimeField, formatAdminDate, formatAdminDateTime } from '@hr/ui';
-import { get, post } from '@/lib/api';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  ErrorBanner,
+  Empty,
+  Spinner,
+  PrimaryButton,
+  TextInput,
+  TimeField,
+  DateField,
+  Modal,
+  ModalActions,
+  formatAdminDate,
+  formatAdminDateTime,
+} from '@hr/ui';
+import { get, post, patch, del } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, employeeLabel } from '@/lib/ui';
+import { permissionsFromSession, hasPermission } from '@/lib/nav';
 
-const TABS = [
+const BASE_TABS = [
+  { key: 'dashboard', label: 'Dashboard' },
   { key: 'punches', label: 'Punches' },
   { key: 'shifts', label: 'Shifts' },
+  { key: 'holidays', label: 'Holidays' },
   { key: 'timesheets', label: 'Timesheets' },
   { key: 'regularizations', label: 'Regularizations' },
 ];
+const CLOSE_TAB = { key: 'close', label: 'Period close' };
+
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+function isoToDateInput(v) {
+  if (!v) return '';
+  return String(v).slice(0, 10);
+}
+
+// ─── Read-only banner shown to operators without canManageAttendance ─────────
+function ReadOnlyBanner() {
+  return (
+    <p className="mb-4 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+      You have read-only access to attendance. Managing shifts, holidays and period close requires the
+      <span className="font-medium"> canManageAttendance</span> permission.
+    </p>
+  );
+}
+
+// ─── Dashboard ───────────────────────────────────────────────────────────────
+
+// Present-ish statuses for the headline percentage. Spec §3.5 status vocabulary.
+const PRESENTISH = new Set(['PRESENT', 'WORK_FROM_HOME', 'ON_DUTY', 'HALF_DAY', 'HOLIDAY_WORKED']);
+const STATUS_TONE = {
+  PRESENT: 'bg-emerald-500',
+  WORK_FROM_HOME: 'bg-teal-500',
+  ON_DUTY: 'bg-cyan-500',
+  HALF_DAY: 'bg-lime-500',
+  HOLIDAY_WORKED: 'bg-green-600',
+  ON_LEAVE: 'bg-violet-500',
+  HOLIDAY: 'bg-blue-400',
+  WEEKLY_OFF: 'bg-slate-400',
+  ABSENT: 'bg-red-500',
+  MISSING_PUNCH: 'bg-amber-500',
+};
+
+function prettyStatus(s) {
+  return String(s || '')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// Normalise the /summary payload into [{ status, count }] regardless of whether
+// the server returns an array, a { items } envelope, or a { counts: {} } map.
+function normaliseCounts(res) {
+  if (!res) return [];
+  if (Array.isArray(res)) return res.map((r) => ({ status: r.status, count: Number(r.count ?? r.total ?? 0) }));
+  if (Array.isArray(res.items)) return res.items.map((r) => ({ status: r.status, count: Number(r.count ?? r.total ?? 0) }));
+  const map = res.counts || res.byStatus || res.summary;
+  if (map && typeof map === 'object') {
+    return Object.entries(map).map(([status, count]) => ({ status, count: Number(count) || 0 }));
+  }
+  return [];
+}
+
+function DashboardTab() {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [scoped, setScoped] = useState(false); // true → manager (TEAM/DEPARTMENT) → show team banner
+
+  useEffect(() => {
+    const day = todayISO();
+    setLoading(true);
+    Promise.all([
+      get('/api/hr/attendance/summary', { from: day, to: day, groupBy: 'status' }),
+      get('/api/auth/me').catch(() => null),
+    ])
+      .then(([res, me]) => {
+        setData(res);
+        const session = me?.user || me;
+        const band = String(session?.businessRole?.defaultScope || '').toUpperCase();
+        setScoped(band === 'TEAM' || band === 'DEPARTMENT' || band === 'SELF');
+      })
+      .catch((e) => setError(e.data?.message || e.message || 'Failed to load the attendance summary.'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const counts = useMemo(() => normaliseCounts(data), [data]);
+  const lopDays = useMemo(() => {
+    const v = data?.lopDays ?? data?.totals?.lopDays;
+    return v == null ? null : Number(v);
+  }, [data]);
+
+  const total = counts.reduce((s, c) => s + c.count, 0);
+  const present = counts.filter((c) => PRESENTISH.has(String(c.status).toUpperCase())).reduce((s, c) => s + c.count, 0);
+  const presentPct = total > 0 ? Math.round((present / total) * 100) : 0;
+  const sorted = [...counts].sort((a, b) => b.count - a.count);
+
+  if (loading) return <Spinner />;
+
+  return (
+    <div className="space-y-6">
+      {error && <ErrorBanner message={error} />}
+
+      {scoped && (
+        <p className="text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+          Showing your team. Figures cover only the people in your reporting sub-tree.
+        </p>
+      )}
+
+      {total === 0 && !error ? (
+        <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-10 text-center">
+          <p className="text-sm font-medium text-gray-900">No attendance recorded for today yet.</p>
+          <p className="text-sm text-gray-500 mt-1">
+            Counts appear here as punches are derived through the day{scoped ? ' for your team' : ''}.
+          </p>
+        </div>
+      ) : (
+        <>
+          {/* Present% headline + bar */}
+          <section className="rounded-2xl border border-gray-200 bg-white p-5">
+            <div className="flex items-end justify-between mb-3">
+              <div>
+                <h2 className="text-sm font-semibold text-gray-900">Present today</h2>
+                <p className="text-xs text-gray-500">{present} of {total} {total === 1 ? 'person' : 'people'} present-equivalent</p>
+              </div>
+              <div className="text-3xl font-semibold" style={{ color: 'var(--theme-primary)' }}>
+                {presentPct}%
+              </div>
+            </div>
+            <div
+              className="h-3 w-full rounded-full bg-gray-100 overflow-hidden"
+              role="progressbar"
+              aria-label="Present today"
+              aria-valuenow={presentPct}
+              aria-valuemin={0}
+              aria-valuemax={100}
+            >
+              <div className="h-full rounded-full transition-all" style={{ width: `${presentPct}%`, backgroundColor: 'var(--theme-primary)' }} />
+            </div>
+          </section>
+
+          {/* Status breakdown — dependency-free flex bars */}
+          <section className="rounded-2xl border border-gray-200 bg-white p-5">
+            <h2 className="text-sm font-semibold text-gray-900 mb-4">By status</h2>
+            <ul className="space-y-2.5">
+              {sorted.map((c) => {
+                const pct = total > 0 ? Math.round((c.count / total) * 100) : 0;
+                const tone = STATUS_TONE[String(c.status).toUpperCase()] || 'bg-gray-400';
+                return (
+                  <li key={c.status} className="flex items-center gap-3 text-sm">
+                    <span className="w-36 shrink-0 text-gray-700">{prettyStatus(c.status)}</span>
+                    <span className="flex-1 h-2.5 rounded-full bg-gray-100 overflow-hidden" aria-hidden="true">
+                      <span className={`block h-full rounded-full ${tone}`} style={{ width: `${Math.max(pct, c.count > 0 ? 4 : 0)}%` }} />
+                    </span>
+                    <span className="w-16 shrink-0 text-right tabular-nums text-gray-900 font-medium">{c.count}</span>
+                    <span className="w-10 shrink-0 text-right tabular-nums text-gray-400 text-xs">{pct}%</span>
+                  </li>
+                );
+              })}
+            </ul>
+            {lopDays != null && (
+              <p className="mt-4 text-xs text-gray-500">
+                Loss-of-pay accrued in range: <span className="font-medium text-gray-700">{lopDays}</span> day{lopDays === 1 ? '' : 's'}.
+              </p>
+            )}
+          </section>
+          <p className="text-xs text-gray-400">
+            Server-authoritative counts for {formatAdminDate(todayISO())}.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Punches ─────────────────────────────────────────────────────────────────
 
 function PunchesTab() {
   const [data, setData] = useState(null);
@@ -28,14 +223,14 @@ function PunchesTab() {
     setLoading(true);
     get('/api/hr/attendance/punches', { page: 1, pageSize: 50 })
       .then(setData)
-      .catch((e) => setError(e.message || 'Failed to load punches.'))
+      .catch((e) => setError(e.data?.message || e.message || 'Failed to load punches.'))
       .finally(() => setLoading(false));
   }, []);
 
   const columns = [
     { key: 'employee', header: 'Employee', render: (r) => <span className="font-medium text-gray-900">{employeeLabel(r)}</span> },
-    { key: 'direction', header: 'Direction', render: (r) => r.direction || r.type || '—' },
-    { key: 'at', header: 'Time', render: (r) => formatAdminDateTime(r.punchedAt || r.timestamp || r.at) },
+    { key: 'direction', header: 'Type', render: (r) => r.punchType || r.direction || r.type || '—' },
+    { key: 'at', header: 'Time', render: (r) => formatAdminDateTime(r.punchAt || r.punchedAt || r.timestamp || r.at) },
     { key: 'source', header: 'Source', render: (r) => r.source || r.method || '—' },
   ];
 
@@ -47,18 +242,408 @@ function PunchesTab() {
   );
 }
 
-function ShiftsTab() {
+// ─── Shifts (full ShiftPattern fields) + assignment drawer ──────────────────
+
+// Field groups for the shift editor. Booleans render as checkboxes, the rest as
+// number/text/time inputs. weeklyOffDays is a CSV of 0=Sun..6=Sat.
+const NUMBER_FIELDS = [
+  ['breakMinutes', 'Break minutes'],
+  ['graceInMinutes', 'Grace in (min)'],
+  ['graceOutMinutes', 'Grace out (min)'],
+  ['fullDayMinutes', 'Full-day minutes'],
+  ['halfDayThresholdMinutes', 'Half-day threshold (min)'],
+  ['minMinutesForPresent', 'Min minutes for present'],
+  ['dailyOtThresholdMin', 'Daily OT threshold (min)'],
+];
+const BOOL_FIELDS = [
+  ['isActive', 'Active'],
+  ['isFlexi', 'Flexi (no fixed start/end)'],
+  ['isNightShift', 'Night shift'],
+  ['crossesMidnight', 'Crosses midnight'],
+  ['otEligible', 'Overtime eligible'],
+];
+const WEEKDAYS = [
+  ['0', 'Sun'],
+  ['1', 'Mon'],
+  ['2', 'Tue'],
+  ['3', 'Wed'],
+  ['4', 'Thu'],
+  ['5', 'Fri'],
+  ['6', 'Sat'],
+];
+
+const EMPTY_SHIFT = {
+  name: '',
+  code: '',
+  startTime: '',
+  endTime: '',
+  entityId: '',
+  breakMinutes: '',
+  graceInMinutes: '',
+  graceOutMinutes: '',
+  fullDayMinutes: '',
+  halfDayThresholdMinutes: '',
+  minMinutesForPresent: '',
+  dailyOtThresholdMin: '',
+  weeklyOffDays: '0', // Sunday off by default
+  isActive: true,
+  isFlexi: false,
+  isNightShift: false,
+  crossesMidnight: false,
+  otEligible: false,
+};
+
+function shiftToDraft(s) {
+  if (!s) return { ...EMPTY_SHIFT };
+  const d = { ...EMPTY_SHIFT };
+  for (const k of Object.keys(EMPTY_SHIFT)) {
+    if (s[k] === undefined || s[k] === null) continue;
+    d[k] = s[k];
+  }
+  // weeklyOffDays may come back as an array — normalise to CSV.
+  if (Array.isArray(s.weeklyOffDays)) d.weeklyOffDays = s.weeklyOffDays.join(',');
+  else if (s.weeklyOffDays != null) d.weeklyOffDays = String(s.weeklyOffDays);
+  return d;
+}
+
+// Build the POST/PATCH payload: numbers parsed, blanks dropped, booleans kept.
+function shiftPayload(draft) {
+  const out = {};
+  for (const [k, v] of Object.entries(draft)) {
+    if (typeof v === 'boolean') {
+      out[k] = v;
+      continue;
+    }
+    if (v === '' || v === null || v === undefined) continue;
+    if (NUMBER_FIELDS.some(([key]) => key === k)) {
+      const n = Number(v);
+      if (!Number.isNaN(n)) out[k] = n;
+      continue;
+    }
+    out[k] = v;
+  }
+  return out;
+}
+
+function ShiftEditor({ shift, canManage, onClose, onSaved }) {
+  const isNew = !shift;
+  const [draft, setDraft] = useState(() => shiftToDraft(shift));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const readOnly = !canManage;
+
+  function set(k, v) {
+    setDraft((d) => ({ ...d, [k]: v }));
+  }
+  function toggleWeekly(dayValue) {
+    const set = new Set(String(draft.weeklyOffDays || '').split(',').map((x) => x.trim()).filter(Boolean));
+    if (set.has(dayValue)) set.delete(dayValue);
+    else set.add(dayValue);
+    setDraft((d) => ({ ...d, weeklyOffDays: [...set].sort().join(',') }));
+  }
+
+  async function save() {
+    if (readOnly) return;
+    setSaving(true);
+    setError('');
+    try {
+      const payload = shiftPayload(draft);
+      if (isNew) await post('/api/hr/attendance/shifts', payload);
+      else await patch(`/api/hr/attendance/shifts/${shift.id}`, payload);
+      onSaved();
+    } catch (e) {
+      // 409 = duplicate code; surface inline per spec §5.1.
+      setError(e.data?.message || (e.status === 409 ? 'A shift with this code already exists.' : e.message) || 'Failed to save shift.');
+      setSaving(false);
+    }
+  }
+
+  const weeklyOffSet = new Set(String(draft.weeklyOffDays || '').split(',').map((x) => x.trim()).filter(Boolean));
+
+  return (
+    <Modal title={isNew ? 'New shift pattern' : readOnly ? draft.name || 'Shift pattern' : `Edit ${draft.name || 'shift'}`} onClose={onClose} size="lg">
+      {error && (
+        <div className="mb-3">
+          <ErrorBanner message={error} />
+        </div>
+      )}
+      {readOnly && (
+        <p className="mb-4 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          Read-only — you don&apos;t have permission to edit shift patterns.
+        </p>
+      )}
+
+      <div className="grid sm:grid-cols-2 gap-4 mb-4">
+        <TextInput label="Name" value={draft.name} onChange={readOnly ? () => {} : (v) => set('name', v)} required />
+        <TextInput label="Code" value={draft.code} onChange={readOnly ? () => {} : (v) => set('code', v)} hint="Unique per tenant" />
+        <TimeField label="Start time" value={draft.startTime} onChange={readOnly ? () => {} : (v) => set('startTime', v)} />
+        <TimeField label="End time" value={draft.endTime} onChange={readOnly ? () => {} : (v) => set('endTime', v)} />
+        <TextInput label="Entity ID" value={draft.entityId} onChange={readOnly ? () => {} : (v) => set('entityId', v)} hint="Optional — scopes the pattern to one legal entity" />
+      </div>
+
+      <fieldset className="mb-4">
+        <legend className="text-sm font-medium text-gray-700 mb-2">Derivation thresholds</legend>
+        <div className="grid sm:grid-cols-2 gap-4">
+          {NUMBER_FIELDS.map(([key, label]) => (
+            <TextInput
+              key={key}
+              label={label}
+              type="number"
+              min={0}
+              value={draft[key] === '' ? '' : String(draft[key])}
+              onChange={readOnly ? () => {} : (v) => set(key, v)}
+            />
+          ))}
+        </div>
+      </fieldset>
+
+      <fieldset className="mb-4">
+        <legend className="text-sm font-medium text-gray-700 mb-2">Weekly off days</legend>
+        <div className="flex flex-wrap gap-2">
+          {WEEKDAYS.map(([value, label]) => {
+            const on = weeklyOffSet.has(value);
+            return (
+              <button
+                key={value}
+                type="button"
+                onClick={readOnly ? undefined : () => toggleWeekly(value)}
+                aria-pressed={on}
+                disabled={readOnly}
+                className={`px-3 py-1.5 text-sm font-medium rounded-lg border transition-colors disabled:opacity-60 ${
+                  on ? 'border-transparent text-white' : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                }`}
+                style={on ? { backgroundColor: 'var(--theme-primary)' } : undefined}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </fieldset>
+
+      <fieldset className="mb-5">
+        <legend className="text-sm font-medium text-gray-700 mb-2">Flags</legend>
+        <div className="grid sm:grid-cols-2 gap-2">
+          {BOOL_FIELDS.map(([key, label]) => (
+            <label key={key} className={`flex items-center gap-2 text-sm ${readOnly ? '' : 'cursor-pointer'}`}>
+              <input
+                type="checkbox"
+                checked={!!draft[key]}
+                onChange={readOnly ? undefined : (e) => set(key, e.target.checked)}
+                disabled={readOnly}
+              />
+              <span className="text-gray-800">{label}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+
+      <ModalActions>
+        <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50">
+          {readOnly ? 'Close' : 'Cancel'}
+        </button>
+        {!readOnly && (
+          <PrimaryButton loading={saving} onClick={save} disabled={!draft.name?.trim()}>
+            {isNew ? 'Create shift' : 'Save changes'}
+          </PrimaryButton>
+        )}
+      </ModalActions>
+    </Modal>
+  );
+}
+
+// Employee picker backed by GET /api/hr/employees?q= (debounced).
+function EmployeePicker({ value, onChange }) {
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState([]);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!q.trim()) {
+      setResults([]);
+      return;
+    }
+    let alive = true;
+    const t = setTimeout(() => {
+      get('/api/hr/employees', { q: q.trim(), pageSize: 8 })
+        .then((res) => {
+          if (alive) setResults(asList(res).slice(0, 8));
+        })
+        .catch(() => {
+          if (alive) setResults([]);
+        });
+    }, 250);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [q]);
+
+  return (
+    <div className="relative">
+      <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="emp-picker">
+        Employee
+      </label>
+      <input
+        id="emp-picker"
+        type="text"
+        value={value ? employeeLabel(value) : q}
+        onChange={(e) => {
+          onChange(null);
+          setQ(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        placeholder="Search by name or code…"
+        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm"
+        autoComplete="off"
+      />
+      {open && results.length > 0 && !value && (
+        <ul className="absolute z-10 mt-1 w-full max-h-56 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg text-sm">
+          {results.map((emp) => (
+            <li key={emp.id}>
+              <button
+                type="button"
+                onClick={() => {
+                  onChange(emp);
+                  setOpen(false);
+                  setQ('');
+                }}
+                className="block w-full text-left px-3 py-2 hover:bg-gray-50"
+              >
+                <span className="font-medium text-gray-900">{employeeLabel(emp)}</span>
+                {emp.code && <span className="text-gray-400 ml-2">{emp.code}</span>}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function ShiftDetailDrawer({ shiftId, canManage, onClose }) {
+  const [detail, setDetail] = useState(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  // Assignment form
+  const [emp, setEmp] = useState(null);
+  const [from, setFrom] = useState(todayISO());
+  const [to, setTo] = useState('');
+  const [assigning, setAssigning] = useState(false);
+  const [assignError, setAssignError] = useState('');
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setError('');
+    get(`/api/hr/attendance/shifts/${shiftId}`)
+      .then(setDetail)
+      .catch((e) => setError(e.data?.message || e.message || 'Failed to load shift.'))
+      .finally(() => setLoading(false));
+  }, [shiftId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function assign(e) {
+    e.preventDefault();
+    if (!emp?.id) {
+      setAssignError('Pick an employee first.');
+      return;
+    }
+    setAssigning(true);
+    setAssignError('');
+    try {
+      await post(`/api/hr/attendance/shifts/${shiftId}/assign`, {
+        employeeId: emp.id,
+        shiftPatternId: shiftId,
+        effectiveFrom: from,
+        effectiveTo: to || undefined,
+      });
+      setEmp(null);
+      setFrom(todayISO());
+      setTo('');
+      load();
+    } catch (err) {
+      // 409 = overlapping assignment for this employee.
+      setAssignError(
+        err.data?.message ||
+          (err.status === 409 ? 'This employee already has an overlapping assignment for that date range.' : err.message) ||
+          'Failed to assign.'
+      );
+    } finally {
+      setAssigning(false);
+    }
+  }
+
+  const list = Array.isArray(detail?.assignments) ? detail.assignments : asList(detail?.assignments);
+
+  return (
+    <Modal title={detail?.name ? `${detail.name} — assignments` : 'Shift assignments'} onClose={onClose} size="lg">
+      {error && (
+        <div className="mb-3">
+          <ErrorBanner message={error} />
+        </div>
+      )}
+      {loading ? (
+        <Spinner />
+      ) : (
+        <>
+          {canManage ? (
+            <form onSubmit={assign} className="rounded-xl border border-gray-200 bg-gray-50 p-4 mb-5 space-y-3">
+              <h3 className="text-sm font-semibold text-gray-900">Assign an employee</h3>
+              {assignError && <ErrorBanner message={assignError} />}
+              <EmployeePicker value={emp} onChange={setEmp} />
+              <div className="grid sm:grid-cols-2 gap-3">
+                <DateField label="Effective from" value={from} onChange={setFrom} required />
+                <DateField label="Effective to" value={to} onChange={setTo} hint="Leave blank for open-ended" />
+              </div>
+              <PrimaryButton type="submit" loading={assigning} disabled={!emp}>
+                Assign employee
+              </PrimaryButton>
+            </form>
+          ) : (
+            <p className="mb-4 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              Read-only — assigning employees requires canManageAttendance.
+            </p>
+          )}
+
+          <h3 className="text-sm font-semibold text-gray-900 mb-2">Current assignments</h3>
+          {!list || list.length === 0 ? (
+            <Empty text="No employees assigned to this shift yet." />
+          ) : (
+            <ul className="rounded-xl border border-gray-200 divide-y divide-gray-100">
+              {list.map((a) => (
+                <li key={a.id} className="flex items-center justify-between px-4 py-2.5 text-sm">
+                  <span className="font-medium text-gray-900">{employeeLabel(a)}</span>
+                  <span className="text-gray-500">
+                    {formatAdminDate(a.effectiveFrom)} – {a.effectiveTo ? formatAdminDate(a.effectiveTo) : 'open'}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </Modal>
+  );
+}
+
+function ShiftsTab({ canManage }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [draft, setDraft] = useState({ name: '', code: '', startTime: '', endTime: '' });
+  const [editing, setEditing] = useState(undefined); // undefined closed | null new | obj edit
+  const [detailId, setDetailId] = useState(null);
+  const [deleting, setDeleting] = useState(null);
 
   const load = useCallback(() => {
     setError('');
     get('/api/hr/attendance/shifts')
       .then((r) => setRows(asList(r)))
       .catch((e) => {
-        setError(e.message || 'Failed to load shifts.');
+        setError(e.data?.message || e.message || 'Failed to load shifts.');
         setRows([]);
       });
   }, []);
@@ -67,53 +652,452 @@ function ShiftsTab() {
     load();
   }, [load]);
 
-  async function onCreate(e) {
-    e.preventDefault();
-    setSaving(true);
-    setError('');
+  async function confirmDelete() {
     try {
-      const payload = Object.fromEntries(Object.entries(draft).filter(([, v]) => v !== ''));
-      await post('/api/hr/attendance/shifts', payload);
-      setDraft({ name: '', code: '', startTime: '', endTime: '' });
+      await del(`/api/hr/attendance/shifts/${deleting.id}`);
+      setDeleting(null);
       load();
     } catch (e) {
-      setError(e.data?.message || e.message || 'Failed to create shift.');
-    } finally {
-      setSaving(false);
+      setError(e.data?.message || e.message || 'Failed to delete shift.');
+      setDeleting(null);
     }
   }
 
   const columns = [
     { key: 'name', header: 'Shift', render: (r) => <span className="font-medium text-gray-900">{r.name}</span> },
     { key: 'code', header: 'Code', render: (r) => r.code || '—' },
-    { key: 'start', header: 'Start', render: (r) => r.startTime || r.start || '—' },
-    { key: 'end', header: 'End', render: (r) => r.endTime || r.end || '—' },
+    { key: 'window', header: 'Window', render: (r) => (r.isFlexi ? 'Flexi' : `${r.startTime || '—'} – ${r.endTime || '—'}`) },
+    {
+      key: 'flags',
+      header: 'Flags',
+      render: (r) => (
+        <div className="flex flex-wrap gap-1">
+          {r.isNightShift && <span className="rounded bg-indigo-50 text-indigo-700 px-1.5 py-0.5 text-[11px]">Night</span>}
+          {r.otEligible && <span className="rounded bg-emerald-50 text-emerald-700 px-1.5 py-0.5 text-[11px]">OT</span>}
+          {r.isActive === false && <span className="rounded bg-gray-100 text-gray-500 px-1.5 py-0.5 text-[11px]">Inactive</span>}
+        </div>
+      ),
+    },
+    {
+      key: 'actions',
+      header: '',
+      className: 'text-right',
+      cellClassName: 'text-right whitespace-nowrap',
+      render: (r) => (
+        <div className="inline-flex gap-2">
+          <ActionButton onClick={() => setDetailId(r.id)}>Assignments</ActionButton>
+          <ActionButton onClick={() => setEditing(r)}>{canManage ? 'Edit' : 'View'}</ActionButton>
+          {canManage && (
+            <ActionButton tone="danger" onClick={() => setDeleting(r)}>
+              Delete
+            </ActionButton>
+          )}
+        </div>
+      ),
+    },
   ];
 
   return (
-    <div className="grid lg:grid-cols-3 gap-4">
-      <div className="lg:col-span-2">
-        {error && <ErrorBanner message={error} />}
-        <DataTable columns={columns} rows={rows} loading={rows === null} emptyText="No shifts defined." />
-      </div>
-      <form onSubmit={onCreate} className="rounded-2xl border border-gray-200 bg-white p-5 space-y-3 h-fit">
-        <h2 className="text-sm font-semibold text-gray-900">Add shift</h2>
-        <TextInput label="Name" value={draft.name} onChange={(v) => setDraft((d) => ({ ...d, name: v }))} required />
-        <TextInput label="Code" value={draft.code} onChange={(v) => setDraft((d) => ({ ...d, code: v }))} />
-        <TimeField label="Start time" value={draft.startTime} onChange={(v) => setDraft((d) => ({ ...d, startTime: v }))} />
-        <TimeField label="End time" value={draft.endTime} onChange={(v) => setDraft((d) => ({ ...d, endTime: v }))} />
-        <PrimaryButton type="submit" loading={saving}>
-          Save shift
-        </PrimaryButton>
-      </form>
+    <div>
+      {error && <ErrorBanner message={error} />}
+      {!canManage && <ReadOnlyBanner />}
+      {canManage && (
+        <div className="flex justify-end mb-4">
+          <PrimaryButton onClick={() => setEditing(null)}>New shift</PrimaryButton>
+        </div>
+      )}
+      <DataTable columns={columns} rows={rows} loading={rows === null} emptyText="No shifts defined." />
+
+      {editing !== undefined && (
+        <ShiftEditor
+          shift={editing}
+          canManage={canManage}
+          onClose={() => setEditing(undefined)}
+          onSaved={() => {
+            setEditing(undefined);
+            load();
+          }}
+        />
+      )}
+      {detailId && <ShiftDetailDrawer shiftId={detailId} canManage={canManage} onClose={() => setDetailId(null)} />}
+      {deleting && (
+        <Modal title={`Delete ${deleting.name}?`} onClose={() => setDeleting(null)}>
+          <p className="text-sm text-gray-600 mb-5">
+            This shift pattern will be removed. Employees currently assigned to it lose their schedule until reassigned.
+          </p>
+          <ModalActions>
+            <button type="button" onClick={() => setDeleting(null)} className="px-4 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50">
+              Cancel
+            </button>
+            <button type="button" onClick={confirmDelete} className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-red-600 hover:bg-red-700">
+              Delete shift
+            </button>
+          </ModalActions>
+        </Modal>
+      )}
     </div>
   );
 }
 
-// Shared approve/reject list used by timesheets + regularizations. `idKey`
-// selects the path param the route expects (timesheets → :id;
-// regularizations → :requestId).
-function ApprovalListTab({ endpoint, idField, pending = 'SUBMITTED', columnsFor }) {
+// ─── Holidays ────────────────────────────────────────────────────────────────
+
+const COUNTRY_OPTIONS = [
+  ['', 'All countries'],
+  ['IN', 'India'],
+  ['NZ', 'New Zealand'],
+];
+
+function HolidayForm({ defaults, canManage, onClose, onSaved }) {
+  const [draft, setDraft] = useState({
+    name: '',
+    date: '',
+    countryCode: defaults.countryCode || 'IN',
+    type: 'PUBLIC',
+    isRestricted: false,
+    entityId: defaults.entityId || '',
+    locationId: defaults.locationId || '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  function set(k, v) {
+    setDraft((d) => ({ ...d, [k]: v }));
+  }
+
+  async function save() {
+    setSaving(true);
+    setError('');
+    try {
+      const payload = Object.fromEntries(
+        Object.entries(draft).filter(([, v]) => v !== '' && v !== null && v !== undefined)
+      );
+      await post('/api/hr/attendance/holidays', payload);
+      onSaved();
+    } catch (e) {
+      setError(e.data?.message || e.message || 'Failed to add holiday.');
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal title="Add holiday" onClose={onClose}>
+      {error && (
+        <div className="mb-3">
+          <ErrorBanner message={error} />
+        </div>
+      )}
+      <div className="space-y-4">
+        <TextInput label="Holiday name" value={draft.name} onChange={(v) => set('name', v)} required />
+        <DateField label="Date" value={draft.date} onChange={(v) => set('date', v)} required />
+        <div className="grid sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="hol-country">Country</label>
+            <select
+              id="hol-country"
+              value={draft.countryCode}
+              onChange={(e) => set('countryCode', e.target.value)}
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm bg-white"
+            >
+              <option value="IN">India</option>
+              <option value="NZ">New Zealand</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="hol-type">Type</label>
+            <select
+              id="hol-type"
+              value={draft.type}
+              onChange={(e) => set('type', e.target.value)}
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm bg-white"
+            >
+              <option value="PUBLIC">Public</option>
+              <option value="RESTRICTED">Restricted / optional</option>
+              <option value="PROVINCIAL">Provincial</option>
+            </select>
+          </div>
+          <TextInput label="Entity ID" value={draft.entityId} onChange={(v) => set('entityId', v)} hint="Optional scope" />
+          <TextInput label="Location ID" value={draft.locationId} onChange={(v) => set('locationId', v)} hint="Optional scope" />
+        </div>
+        <label className="flex items-center gap-2 text-sm cursor-pointer">
+          <input type="checkbox" checked={draft.isRestricted} onChange={(e) => set('isRestricted', e.target.checked)} />
+          <span className="text-gray-800">Restricted (employee may opt in)</span>
+        </label>
+      </div>
+      <ModalActions>
+        <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50">
+          Cancel
+        </button>
+        <PrimaryButton loading={saving} onClick={save} disabled={!draft.name.trim() || !draft.date}>
+          Add holiday
+        </PrimaryButton>
+      </ModalActions>
+    </Modal>
+  );
+}
+
+function ImportHolidaysModal({ year, onClose, onDone }) {
+  const [countryCode, setCountryCode] = useState('NZ');
+  const [importYear, setImportYear] = useState(String(year));
+  const [entityId, setEntityId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState(null);
+
+  async function run() {
+    setBusy(true);
+    setError('');
+    try {
+      const res = await post('/api/hr/attendance/holidays/import', {
+        countryCode,
+        year: Number(importYear),
+        entityId: entityId || undefined,
+      });
+      setResult(res);
+      onDone();
+    } catch (e) {
+      setError(e.data?.message || e.message || 'Import failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const importedCount = result?.imported ?? result?.count ?? (Array.isArray(result?.items) ? result.items.length : null);
+
+  return (
+    <Modal title="Import statutory holiday set" onClose={onClose}>
+      {error && (
+        <div className="mb-3">
+          <ErrorBanner message={error} />
+        </div>
+      )}
+      {result ? (
+        <div className="space-y-3">
+          <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+            Imported {importedCount != null ? importedCount : 'the'} statutory holiday{importedCount === 1 ? '' : 's'} for {countryCode} {importYear}.
+          </p>
+          <p className="text-xs text-gray-500">
+            Re-running is safe — existing holidays are de-duplicated, not doubled.
+          </p>
+          <ModalActions>
+            <PrimaryButton onClick={onClose}>Done</PrimaryButton>
+          </ModalActions>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">
+            Seeds the official public-holiday set (NZ mondayised + provincial, India restricted/optional) for the chosen country and year.
+          </p>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="imp-country">Country</label>
+              <select
+                id="imp-country"
+                value={countryCode}
+                onChange={(e) => setCountryCode(e.target.value)}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm bg-white"
+              >
+                <option value="NZ">New Zealand</option>
+                <option value="IN">India</option>
+              </select>
+            </div>
+            <TextInput label="Year" type="number" value={importYear} onChange={setImportYear} />
+          </div>
+          <TextInput label="Entity ID" value={entityId} onChange={setEntityId} hint="Optional — restrict the import to one entity" />
+          <ModalActions>
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50">
+              Cancel
+            </button>
+            <PrimaryButton loading={busy} onClick={run}>
+              Import {countryCode} {importYear}
+            </PrimaryButton>
+          </ModalActions>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function HolidaysTab({ canManage }) {
+  const thisYear = new Date().getFullYear();
+  const [year, setYear] = useState(thisYear);
+  const [countryCode, setCountryCode] = useState('');
+  const [entityId, setEntityId] = useState('');
+  const [locationId, setLocationId] = useState('');
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [deleting, setDeleting] = useState(null);
+
+  const load = useCallback(() => {
+    setError('');
+    setRows(null);
+    get('/api/hr/attendance/holidays', { year, countryCode, entityId, locationId })
+      .then((r) => setRows(asList(r)))
+      .catch((e) => {
+        setError(e.data?.message || e.message || 'Failed to load holidays.');
+        setRows([]);
+      });
+  }, [year, countryCode, entityId, locationId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function confirmDelete() {
+    try {
+      await del(`/api/hr/attendance/holidays/${deleting.id}`);
+      setDeleting(null);
+      load();
+    } catch (e) {
+      setError(e.data?.message || e.message || 'Failed to delete holiday.');
+      setDeleting(null);
+    }
+  }
+
+  const yearOptions = [];
+  for (let y = thisYear - 2; y <= thisYear + 2; y += 1) yearOptions.push(y);
+
+  const columns = [
+    { key: 'date', header: 'Date', render: (r) => formatAdminDate(r.date) },
+    { key: 'name', header: 'Holiday', render: (r) => <span className="font-medium text-gray-900">{r.name}</span> },
+    { key: 'country', header: 'Country', render: (r) => r.countryCode || '—' },
+    { key: 'type', header: 'Type', render: (r) => r.type || '—' },
+    {
+      key: 'flags',
+      header: 'Flags',
+      render: (r) => (
+        <div className="flex flex-wrap gap-1">
+          {r.isRestricted && <span className="rounded bg-amber-50 text-amber-700 px-1.5 py-0.5 text-[11px]">Restricted</span>}
+          {r.observedDate && r.observedDate !== r.date && (
+            <span className="rounded bg-blue-50 text-blue-700 px-1.5 py-0.5 text-[11px]">
+              Observed {formatAdminDate(r.observedDate)}
+            </span>
+          )}
+          {r.isMondayised && <span className="rounded bg-blue-50 text-blue-700 px-1.5 py-0.5 text-[11px]">Mondayised</span>}
+        </div>
+      ),
+    },
+    ...(canManage
+      ? [
+          {
+            key: 'actions',
+            header: '',
+            className: 'text-right',
+            cellClassName: 'text-right whitespace-nowrap',
+            render: (r) => (
+              <ActionButton tone="danger" onClick={() => setDeleting(r)}>
+                Delete
+              </ActionButton>
+            ),
+          },
+        ]
+      : []),
+  ];
+
+  return (
+    <div>
+      {error && <ErrorBanner message={error} />}
+      {!canManage && <ReadOnlyBanner />}
+
+      {/* Filters */}
+      <div className="flex flex-wrap items-end gap-3 mb-4">
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor="hol-year">Year</label>
+          <select
+            id="hol-year"
+            value={year}
+            onChange={(e) => setYear(Number(e.target.value))}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+          >
+            {yearOptions.map((y) => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor="hol-filter-country">Country</label>
+          <select
+            id="hol-filter-country"
+            value={countryCode}
+            onChange={(e) => setCountryCode(e.target.value)}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+          >
+            {COUNTRY_OPTIONS.map(([v, l]) => (
+              <option key={v} value={v}>{l}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor="hol-filter-entity">Entity ID</label>
+          <input
+            id="hol-filter-entity"
+            value={entityId}
+            onChange={(e) => setEntityId(e.target.value)}
+            placeholder="any"
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-32"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor="hol-filter-location">Location ID</label>
+          <input
+            id="hol-filter-location"
+            value={locationId}
+            onChange={(e) => setLocationId(e.target.value)}
+            placeholder="any"
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-32"
+          />
+        </div>
+        {canManage && (
+          <div className="ml-auto flex gap-2">
+            <button
+              type="button"
+              onClick={() => setImporting(true)}
+              className="px-3 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50"
+            >
+              Import statutory set
+            </button>
+            <PrimaryButton onClick={() => setAdding(true)}>Add holiday</PrimaryButton>
+          </div>
+        )}
+      </div>
+
+      <DataTable columns={columns} rows={rows} loading={rows === null} emptyText="No holidays for this filter." />
+
+      {adding && (
+        <HolidayForm
+          defaults={{ countryCode: countryCode || 'IN', entityId, locationId }}
+          canManage={canManage}
+          onClose={() => setAdding(false)}
+          onSaved={() => {
+            setAdding(false);
+            load();
+          }}
+        />
+      )}
+      {importing && (
+        <ImportHolidaysModal year={year} onClose={() => setImporting(false)} onDone={load} />
+      )}
+      {deleting && (
+        <Modal title={`Delete ${deleting.name}?`} onClose={() => setDeleting(null)}>
+          <p className="text-sm text-gray-600 mb-5">This holiday will be removed from the calendar for the selected scope.</p>
+          <ModalActions>
+            <button type="button" onClick={() => setDeleting(null)} className="px-4 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50">
+              Cancel
+            </button>
+            <button type="button" onClick={confirmDelete} className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-red-600 hover:bg-red-700">
+              Delete holiday
+            </button>
+          </ModalActions>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── Approval lists (timesheets + regularizations) ──────────────────────────
+
+function ApprovalListTab({ endpoint, idField, pending, columnsFor, emptyText }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -124,7 +1108,7 @@ function ApprovalListTab({ endpoint, idField, pending = 'SUBMITTED', columnsFor 
     setError('');
     get(`/api/hr/attendance/${endpoint}`, { page: 1, pageSize: 50 })
       .then(setData)
-      .catch((e) => setError(e.message || 'Failed to load.'))
+      .catch((e) => setError(e.data?.message || e.message || 'Failed to load.'))
       .finally(() => setLoading(false));
   }, [endpoint]);
 
@@ -152,12 +1136,14 @@ function ApprovalListTab({ endpoint, idField, pending = 'SUBMITTED', columnsFor 
     {
       key: 'actions',
       header: '',
+      className: 'text-right',
+      cellClassName: 'text-right',
       render: (r) => {
         const id = r[idField] || r.id;
         const isPending = String(r.status || pending).toUpperCase() === String(pending).toUpperCase();
         if (!isPending) return null;
         return (
-          <div className="flex gap-2">
+          <div className="inline-flex gap-2">
             <ActionButton tone="positive" disabled={busyId === id} onClick={() => decide(r, 'approve')}>
               Approve
             </ActionButton>
@@ -177,26 +1163,199 @@ function ApprovalListTab({ endpoint, idField, pending = 'SUBMITTED', columnsFor 
         columns={columns}
         rows={asList(data)}
         loading={loading}
-        emptyText="Nothing awaiting action."
+        emptyText={emptyText || 'Nothing awaiting action.'}
         rowKey={(r) => r[idField] || r.id}
       />
     </div>
   );
 }
 
+// ─── Period close ────────────────────────────────────────────────────────────
+
+function PeriodCloseTab() {
+  const monthStart = useMemo(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
+  }, []);
+  const [from, setFrom] = useState(monthStart);
+  const [to, setTo] = useState(todayISO());
+  const [entityId, setEntityId] = useState('');
+  const [phase, setPhase] = useState('idle'); // idle | checking | blocked | ready | locking | done
+  const [blockers, setBlockers] = useState([]);
+  const [error, setError] = useState('');
+
+  // Preview: call /period/close; a 409 means blockers exist (don't lock); a 2xx
+  // here would mean nothing blocks — but to keep preview side-effect-free we only
+  // *confirm* after the operator explicitly clicks Lock. So preview surfaces the
+  // 409 blocker list; if no blockers, we move to a "ready to lock" state.
+  async function preview() {
+    setPhase('checking');
+    setError('');
+    setBlockers([]);
+    try {
+      // Ask the backend to dry-run if supported; otherwise the first call is the
+      // real close. We pass confirm:false so the server treats this as a check.
+      const res = await post('/api/hr/attendance/period/close', { from, to, entityId: entityId || undefined, confirm: false });
+      // No 409 → nothing blocks. If the server already locked (confirm ignored),
+      // treat as done; otherwise mark ready for an explicit lock.
+      if (res?.locked || res?.closed) setPhase('done');
+      else setPhase('ready');
+    } catch (e) {
+      if (e.status === 409) {
+        const list = e.data?.blockers || e.data?.issues || e.data?.errors || [];
+        setBlockers(Array.isArray(list) ? list : []);
+        setPhase('blocked');
+        if (!Array.isArray(list) || list.length === 0) setError(e.data?.message || 'The period cannot be closed yet.');
+      } else {
+        setError(e.data?.message || e.message || 'Failed to check the period.');
+        setPhase('idle');
+      }
+    }
+  }
+
+  async function lock() {
+    setPhase('locking');
+    setError('');
+    try {
+      await post('/api/hr/attendance/period/close', { from, to, entityId: entityId || undefined, confirm: true });
+      setPhase('done');
+    } catch (e) {
+      if (e.status === 409) {
+        const list = e.data?.blockers || e.data?.issues || e.data?.errors || [];
+        setBlockers(Array.isArray(list) ? list : []);
+        setPhase('blocked');
+      } else {
+        setError(e.data?.message || e.message || 'Failed to lock the period.');
+        setPhase('ready');
+      }
+    }
+  }
+
+  function blockerLink(b) {
+    // Deep-link a blocker to the relevant tab if we can infer its kind.
+    const kind = String(b.kind || b.type || '').toLowerCase();
+    if (kind.includes('regular')) return '/attendance?tab=regularizations';
+    if (kind.includes('timesheet')) return '/attendance?tab=timesheets';
+    return null;
+  }
+
+  return (
+    <div className="max-w-2xl space-y-5">
+      <p className="text-sm text-gray-500">
+        Locking a period freezes its attendance rows so payroll can compute against immutable inputs. The period can only
+        be locked once pending regularizations are decided and all timesheets are submitted.
+      </p>
+
+      {error && <ErrorBanner message={error} />}
+
+      <div className="rounded-2xl border border-gray-200 bg-white p-5 space-y-4">
+        <div className="grid sm:grid-cols-2 gap-4">
+          <DateField label="From" value={from} onChange={(v) => { setFrom(v); setPhase('idle'); }} required />
+          <DateField label="To" value={to} onChange={(v) => { setTo(v); setPhase('idle'); }} required />
+        </div>
+        <TextInput label="Entity ID" value={entityId} onChange={(v) => { setEntityId(v); setPhase('idle'); }} hint="Optional — close one legal entity only" />
+        <div className="flex gap-2">
+          <PrimaryButton onClick={preview} loading={phase === 'checking'} disabled={!from || !to}>
+            Check for blockers
+          </PrimaryButton>
+          {phase === 'ready' && (
+            <button
+              type="button"
+              onClick={lock}
+              className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50"
+              disabled={phase === 'locking'}
+            >
+              Lock period
+            </button>
+          )}
+        </div>
+      </div>
+
+      {phase === 'blocked' && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
+          <h3 className="text-sm font-semibold text-amber-800 mb-2">Resolve these before locking</h3>
+          {blockers.length === 0 ? (
+            <p className="text-sm text-amber-700">The period has unresolved items. Check pending regularizations and unsubmitted timesheets.</p>
+          ) : (
+            <ul className="space-y-1.5 text-sm text-amber-800">
+              {blockers.map((b, i) => {
+                const link = blockerLink(b);
+                const label = b.message || b.label || `${b.kind || b.type || 'Item'}${b.count != null ? `: ${b.count}` : ''}`;
+                return (
+                  <li key={i} className="flex items-center justify-between gap-3">
+                    <span>• {label}</span>
+                    {link && (
+                      <a href={link} className="text-amber-900 underline underline-offset-2 hover:text-amber-700 whitespace-nowrap">
+                        Resolve →
+                      </a>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {phase === 'ready' && (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-800">
+          No blockers found for {formatAdminDate(from)} – {formatAdminDate(to)}. Click <span className="font-medium">Lock period</span> to freeze it. This cannot be undone.
+        </div>
+      )}
+
+      {phase === 'done' && (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-800">
+          Period {formatAdminDate(from)} – {formatAdminDate(to)} is locked. Attendance rows in range are now immutable; payroll can compute against them.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Page ────────────────────────────────────────────────────────────────────
+
 export default function AttendancePage() {
-  const [tab, setTab] = useState('punches');
+  const [tab, setTab] = useState('dashboard');
+  const [canManage, setCanManage] = useState(false);
+  const [permsLoaded, setPermsLoaded] = useState(false);
+
+  useEffect(() => {
+    // Read the deep-link tab from the query (period-close blocker links use it).
+    if (typeof window !== 'undefined') {
+      const t = new URLSearchParams(window.location.search).get('tab');
+      if (t && BASE_TABS.concat(CLOSE_TAB).some((x) => x.key === t)) setTab(t);
+    }
+    get('/api/auth/me')
+      .then((me) => {
+        const session = me?.user || me;
+        setCanManage(hasPermission(permissionsFromSession(session), 'canManageAttendance'));
+      })
+      .catch(() => setCanManage(false))
+      .finally(() => setPermsLoaded(true));
+  }, []);
+
+  const tabs = useMemo(() => (canManage ? [...BASE_TABS, CLOSE_TAB] : BASE_TABS), [canManage]);
+
+  // If perms loaded and the active tab is gated-away, fall back to dashboard.
+  useEffect(() => {
+    if (permsLoaded && tab === 'close' && !canManage) setTab('dashboard');
+  }, [permsLoaded, tab, canManage]);
+
   return (
     <div>
-      <PageHeader title="Attendance" subtitle="Punches, shifts, timesheets and regularizations" />
-      <Tabs tabs={TABS} active={tab} onChange={setTab} />
+      <PageHeader title="Attendance" subtitle="Dashboard, punches, shifts, holidays, timesheets and regularizations" />
+      <Tabs tabs={tabs} active={tab} onChange={setTab} />
+
+      {tab === 'dashboard' && <DashboardTab />}
       {tab === 'punches' && <PunchesTab />}
-      {tab === 'shifts' && <ShiftsTab />}
+      {tab === 'shifts' && <ShiftsTab canManage={canManage} />}
+      {tab === 'holidays' && <HolidaysTab canManage={canManage} />}
       {tab === 'timesheets' && (
         <ApprovalListTab
           endpoint="timesheets"
           idField="id"
           pending="SUBMITTED"
+          emptyText="No timesheets awaiting action."
           columnsFor={() => [
             { key: 'employee', header: 'Employee', render: (r) => <span className="font-medium text-gray-900">{employeeLabel(r)}</span> },
             { key: 'period', header: 'Period', render: (r) => `${formatAdminDate(r.periodStart || r.weekStart)} – ${formatAdminDate(r.periodEnd || r.weekEnd)}` },
@@ -209,14 +1368,21 @@ export default function AttendancePage() {
           endpoint="regularizations"
           idField="requestId"
           pending="PENDING"
+          emptyText="No correction requests."
           columnsFor={() => [
             { key: 'employee', header: 'Employee', render: (r) => <span className="font-medium text-gray-900">{employeeLabel(r)}</span> },
             { key: 'date', header: 'Date', render: (r) => formatAdminDate(r.date || r.forDate || r.createdAt) },
-            { key: 'count', header: 'Punches', render: (r) => r.punchCount ?? '—' },
-            { key: 'reason', header: 'Reason', render: (r) => r.reason || '—' },
+            { key: 'kind', header: 'Kind', render: (r) => prettyStatus(r.kind) || '—' },
+            { key: 'reason', header: 'Reason', render: (r) => <span className="text-gray-600">{r.reason || '—'}</span> },
+            {
+              key: 'decidedBy',
+              header: 'Decided by',
+              render: (r) => (r.decidedBy ? employeeLabel({ employee: r.decidedBy }) : r.decidedByName || '—'),
+            },
           ]}
         />
       )}
+      {tab === 'close' && canManage && <PeriodCloseTab />}
     </div>
   );
 }

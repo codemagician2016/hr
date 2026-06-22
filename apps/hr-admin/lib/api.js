@@ -56,5 +56,9 @@ export function patch(path, data) {
   return request(path, { method: 'PATCH', body: JSON.stringify(data ?? {}) });
 }
 
-export const api = { request, get, post, patch, qs };
+export function del(path) {
+  return request(path, { method: 'DELETE' });
+}
+
+export const api = { request, get, post, patch, del, qs };
 export default api;
