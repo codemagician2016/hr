@@ -472,6 +472,7 @@ model Business {
   expenseCategories        ExpenseCategory[]
   expensePolicies          ExpensePolicy[]
   expenseClaims            ExpenseClaim[]
+  expenseClaimLines        ExpenseClaimLine[]
   loanSchemes              LoanScheme[]
   loans                    Loan[]
   loanInstallments         LoanInstallment[]
@@ -490,17 +491,28 @@ model Business {
   reviewCycles             ReviewCycle[]
   performanceReviews       PerformanceReview[]
   goals                    Goal[]
+  employeeSkills           EmployeeSkill[]
   // Recruitment
   jobs                     Job[]
+  jobStages                JobStage[]
   candidates               Candidate[]
   applications             Application[]
+  interviews               Interview[]
+  offers                   Offer[]
   // Helpdesk
   helpdeskCategories       HelpdeskCategory[]
   helpdeskTickets          HelpdeskTicket[]
+  helpdeskMessages         HelpdeskMessage[]
   // Workflow / approval
   workflowDefinitions      WorkflowDefinition[]
+  workflowSteps            WorkflowStep[]
   approvalRequests         ApprovalRequest[]
   approvalActions          ApprovalAction[]
+  // Child/line tables that carry the mandatory tenant FK (§1.2) and so need
+  // a reciprocal collection here even though they are owned via a parent row.
+  statutoryElectionHistory StatutoryElectionHistory[]
+  accrualRules             AccrualRule[]
+  timesheetEntries         TimesheetEntry[]
   // Audit / notify / sequence  (AuditLog.businessId is nullable, no FK)
   hrNotifications          Notification[]
   numberSequences          NumberSequence[]
@@ -3720,6 +3732,8 @@ model BusinessRole {
   members          User[]
   // ── ECOMMERCE Path B Phase 2a (2026-05-01) — relational RBAC ──
   permissionGrants EcomRolePermissionGrant[]
+  // ── HR fork — relational HR permission grants ──
+  hrPermissionGrants HrRolePermissionGrant[] @relation("HrRoleGrants")
 
   @@unique([businessId, name])
   @@index([businessId])
@@ -7641,4 +7655,901 @@ model TimesheetEntry {
   createdAt   DateTime @default(now())
 
   @@index([businessId, timesheetId, date])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Expense reimbursement
+//
+// Employees raise an ExpenseClaim (one or more lines) against an ExpenseCategory;
+// the claim moves through a DRAFT → SUBMITTED → APPROVED/REJECTED → REIMBURSED
+// state machine. ExpensePolicy caps per-category spend. Money is Decimal — never
+// parse it. Tenant-scoped by businessId; soft-delete via deletedAt.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ExpenseCategory {
+  id           String   @id @default(uuid())
+  businessId   String
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  code         String
+  name         String
+  glCode       String?  // general-ledger / cost-account mapping
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  deletedAt    DateTime?
+  version      Int      @default(0)
+  policies     ExpensePolicy[]
+  claims       ExpenseClaim[]
+
+  @@unique([businessId, code])
+  @@index([businessId, isActive])
+}
+
+model ExpensePolicy {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  categoryId    String
+  category      ExpenseCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  name          String
+  maxPerClaim   Decimal? @db.Decimal(15, 2)
+  maxPerMonth   Decimal? @db.Decimal(15, 2)
+  requireReceipt Boolean @default(true)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+  version       Int      @default(0)
+
+  @@index([businessId, categoryId])
+}
+
+model ExpenseClaim {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId    String
+  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  categoryId    String?
+  category      ExpenseCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  claimNumber   String?  // human-friendly reference
+  amount        Decimal  @db.Decimal(15, 2)
+  currencyCode  String   @default("INR")
+  description   String?
+  receiptUrl    String?
+  expenseDate   DateTime? @db.Date
+  status        ExpenseClaimStatus @default(DRAFT)
+  // Workflow stamps
+  submittedAt   DateTime?
+  decidedAt     DateTime?
+  decidedBy     String?  // operator userId who approved/rejected
+  rejectReason  String?
+  reimbursedAt  DateTime?
+  reimbursedBy  String?
+  paymentRef    String?  // bank/payout reference once reimbursed
+  payRunId      String?  // when settled through payroll
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+  version       Int      @default(0)
+  lines         ExpenseClaimLine[]
+
+  @@index([businessId, employeeId])
+  @@index([businessId, status])
+  @@index([businessId, categoryId])
+}
+
+model ExpenseClaimLine {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  claimId       String
+  claim         ExpenseClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  description   String?
+  amount        Decimal  @db.Decimal(15, 2)
+  receiptUrl    String?
+  expenseDate   DateTime? @db.Date
+  createdAt     DateTime @default(now())
+
+  @@index([businessId, claimId])
+}
+
+enum ExpenseClaimStatus { DRAFT SUBMITTED APPROVED REJECTED REIMBURSED CANCELLED }
+
+// ── Employee loans / salary advances ──────────────────────────────────────
+// A LoanScheme is the reusable product/template (interest rate, max tenure).
+// A Loan is an employee's borrowing against an optional scheme, with a generated
+// LoanInstallment repayment schedule (EMI). Money is Decimal(15,2); recovery is
+// driven through payroll via the LOAN_REPAYMENT / ADVANCE_RECOVERY deduction kinds.
+
+model LoanScheme {
+  id              String   @id @default(uuid())
+  businessId      String
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  code            String
+  name            String
+  loanType        LoanType @default(LOAN)
+  interestRate    Decimal? @db.Decimal(5, 2) // annual %, null = interest-free
+  maxPrincipal    Decimal? @db.Decimal(15, 2)
+  maxTenureMonths Int?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  deletedAt       DateTime?
+  version         Int      @default(0)
+  loans           Loan[]
+
+  @@unique([businessId, code])
+  @@index([businessId, isActive])
+}
+
+model Loan {
+  id              String   @id @default(uuid())
+  businessId      String
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId      String
+  employee        Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  schemeId        String?
+  scheme          LoanScheme? @relation(fields: [schemeId], references: [id], onDelete: SetNull)
+  loanNumber      String?  // human-friendly reference
+  loanType        LoanType @default(LOAN)
+  principal       Decimal  @db.Decimal(15, 2)
+  interestRate    Decimal? @db.Decimal(5, 2) // annual %, snapshot from scheme
+  currencyCode    String   @default("INR")
+  tenureMonths    Int      // number of installments
+  emiAmount       Decimal? @db.Decimal(15, 2) // per-installment; null = auto-computed
+  startDate       DateTime @db.Date
+  reason          String?
+  status          LoanStatus @default(DRAFT)
+  // Repayment running totals (denormalised; source of truth is the schedule)
+  totalPayable    Decimal? @db.Decimal(15, 2)
+  amountRepaid    Decimal  @default(0) @db.Decimal(15, 2)
+  outstanding     Decimal? @db.Decimal(15, 2)
+  // Workflow stamps
+  submittedAt     DateTime?
+  approvedAt      DateTime?
+  approvedBy      String?  // operator userId who approved
+  rejectedAt      DateTime?
+  rejectReason    String?
+  disbursedAt     DateTime?
+  disbursedBy     String?
+  disbursementRef String?  // bank/payout reference once disbursed
+  closedAt        DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  deletedAt       DateTime?
+  version         Int      @default(0)
+  installments    LoanInstallment[]
+
+  @@index([businessId, employeeId])
+  @@index([businessId, status])
+  @@index([businessId, schemeId])
+}
+
+model LoanInstallment {
+  id           String   @id @default(uuid())
+  businessId   String
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  loanId       String
+  loan         Loan     @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  seq          Int      // 1-based installment number
+  dueDate      DateTime @db.Date
+  principalComponent Decimal @db.Decimal(15, 2)
+  interestComponent  Decimal @default(0) @db.Decimal(15, 2)
+  amount       Decimal  @db.Decimal(15, 2) // principal + interest for this installment
+  status       InstallmentStatus @default(PENDING)
+  paidAt       DateTime?
+  payRunId     String?  // when recovered through payroll
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([loanId, seq])
+  @@index([businessId, loanId])
+  @@index([businessId, status])
+}
+
+enum LoanType { LOAN ADVANCE }
+enum LoanStatus { DRAFT PENDING APPROVED REJECTED DISBURSED CLOSED CANCELLED }
+enum InstallmentStatus { PENDING PAID WAIVED }
+
+// =============================================================================
+// HR FORK — schema-gap-fix: previously-dangling relation targets now defined.
+// Per docs/03-data-model.md §§11A,12,12.1,13,14,15,16,18,19. Every model is
+// tenant-scoped (businessId + business FK + leading @@index); money is Decimal.
+// =============================================================================
+
+// ── §11A Separation & Full-and-Final settlement ──
+model SeparationCase {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId    String
+  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  entityId      String                                  // entity for statutory exit obligations
+  code          String                                  // SEP-000017
+  type          SeparationType
+  reason        String?
+  // Key dates
+  initiatedAt   DateTime @db.Date
+  resignationDate DateTime? @db.Date                    // employee notice date
+  noticePeriodDays Int?
+  noticeShortfallDays Int @default(0)                   // -> NOTICE_RECOVERY component
+  lastWorkingDay DateTime? @db.Date                     // payroll cutoff for FNF
+  relievingDate  DateTime? @db.Date
+  // Settlement components (snapshot of computed FNF inputs; engine fills)
+  gratuityAmount        Decimal? @db.Decimal(15, 2)     // IN: 15/26 x last-drawn x completed yrs
+  leaveEncashmentDays   Decimal? @db.Decimal(8, 4)
+  leaveEncashmentAmount Decimal? @db.Decimal(15, 2)
+  nzHolidayPayoutAmount Decimal? @db.Decimal(15, 2)     // NZ: 8% accrued + untaken annual @ OWP/AWE
+  noticeRecoveryAmount  Decimal? @db.Decimal(15, 2)
+  loanForeclosureAmount Decimal? @db.Decimal(15, 2)
+  assetRecoveryAmount   Decimal? @db.Decimal(15, 2)
+  netSettlement         Decimal? @db.Decimal(15, 2)
+  currencyCode  String   @db.Char(3)
+  fnfPayRunId   String?                                 // FNF PayRun (type=FNF) that paid it
+  clearanceJson Json?                                   // {assets,it,finance,knowledge_transfer}
+  status        SeparationStatus @default(INITIATED)
+  approvalRequestId String?
+  exitInterviewJson Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+  version       Int      @default(0)
+
+  @@unique([businessId, code])
+  @@unique([businessId, employeeId, initiatedAt])       // one active case per separation event
+  @@index([businessId, status])
+  @@index([businessId, entityId, lastWorkingDay])
+}
+
+enum SeparationType {
+  RESIGNATION TERMINATION_FOR_CAUSE RETRENCHMENT REDUNDANCY
+  END_OF_CONTRACT RETIREMENT DEATH ABSCONDING PROBATION_FAILURE MUTUAL_SEPARATION
+}
+enum SeparationStatus {
+  INITIATED NOTICE_SERVING CLEARANCE_PENDING FNF_PENDING
+  FNF_COMPUTED FNF_APPROVED SETTLED CANCELLED
+}
+
+// ── §12 Documents ──
+model EmployeeDocument {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  category    DocumentCategory
+  name        String
+  fileUrl     String   @db.Text                         // object storage key (R2/S3)
+  fileHash    String?                                   // SHA-256 integrity
+  mimeType    String?
+  sizeBytes   Int?
+  documentNumber String?                                // @pii:identity (masked at rest)
+  expiresAt   DateTime? @db.Date                        // visa/permit/license expiry -> reminders
+  verifiedAt  DateTime?
+  verifiedBy  String?
+  visibility  DocumentVisibility @default(HR_ONLY)
+  isEmployeeUploaded Boolean @default(false)
+  signatureStatus SignatureStatus?                      // offer letters / policy ack
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(0)
+  @@index([businessId, employeeId, category])
+  @@index([businessId, expiresAt])
+}
+
+enum DocumentCategory {
+  ID_PROOF ADDRESS_PROOF PAN AADHAAR PASSPORT VISA WORK_PERMIT
+  EDUCATION EXPERIENCE OFFER_LETTER CONTRACT PAYSLIP_COPY
+  TAX_DECLARATION FORM16 BANK_PROOF MEDICAL POLICY_ACK OTHER
+}
+enum DocumentVisibility { HR_ONLY MANAGER_AND_HR EMPLOYEE_VISIBLE }
+enum SignatureStatus    { NOT_REQUIRED PENDING SIGNED DECLINED EXPIRED }
+
+model DocumentTemplate {                                // fixed-layout, merge-field templates
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId    String?
+  code        String
+  name        String
+  kind        TemplateKind                              // OFFER_LETTER, RELIEVING_LETTER, PAYSLIP, ...
+  layoutKey   String                                    // one of N fixed system layouts
+  countryCode String?  @db.Char(2)
+  bodyMarkdown String  @db.Text                         // merge fields {{employee.name}} -- no HTML/script
+  mergeFieldsJson Json?                                 // declared allowed merge fields (validation)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(0)
+  @@unique([businessId, code])
+  @@index([businessId, kind, isActive])
+}
+
+enum TemplateKind {
+  OFFER_LETTER APPOINTMENT_LETTER CONFIRMATION_LETTER PROMOTION_LETTER
+  RELIEVING_LETTER EXPERIENCE_LETTER SALARY_CERTIFICATE WARNING_LETTER
+  PAYSLIP FORM16 FNF_STATEMENT POLICY_ACK OTHER
+}
+
+// ── §12.1 ESS request entities ──
+model ProfileChangeRequest {                            // ESS self-service edit to gated fields
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  field       String                                   // "phone","addressLine1","bankAccount"...
+  oldValue    String?
+  newValue    String
+  status      RequestStatus @default(PENDING)
+  approvalRequestId String?
+  decidedBy   String?
+  decidedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  version     Int      @default(0)
+  @@index([businessId, employeeId, status])
+}
+
+model DocumentRequest {                                 // employee asks HR for a letter/certificate
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  templateKind TemplateKind                            // what they want (SALARY_CERTIFICATE, etc.)
+  purpose     String?
+  status      RequestStatus @default(PENDING)
+  generatedDocumentId String?                          // resulting EmployeeDocument
+  approvalRequestId String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([businessId, employeeId, status])
+}
+
+model AttendanceRegularizationRequest {                // backs AttendancePunch.regularizationRequestId
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  date        DateTime @db.Date
+  requestedInAt  DateTime?
+  requestedOutAt DateTime?
+  reason      String
+  status      RequestStatus @default(PENDING)
+  approvalRequestId String?
+  decidedBy   String?
+  decidedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([businessId, employeeId, date])
+}
+
+enum RequestStatus { PENDING APPROVED REJECTED CANCELLED }
+
+// ── §13 Asset management ──
+model Asset {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId    String?
+  code        String                                   // AST-000045
+  name        String
+  category    AssetCategory
+  serialNumber String?
+  purchaseDate DateTime? @db.Date
+  purchaseCost Decimal? @db.Decimal(15, 2)
+  currencyCode String?  @db.Char(3)
+  condition   AssetCondition @default(GOOD)
+  status      AssetStatus @default(AVAILABLE)
+  warrantyExpiry DateTime? @db.Date
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(0)
+  assignments AssetAssignment[]
+  @@unique([businessId, code])
+  @@index([businessId, status, category])
+}
+
+enum AssetCategory  { LAPTOP DESKTOP MOBILE MONITOR ACCESSORY SIM VEHICLE FURNITURE ID_CARD ACCESS_CARD SOFTWARE_LICENSE OTHER }
+enum AssetCondition { NEW GOOD FAIR DAMAGED RETIRED }
+enum AssetStatus    { AVAILABLE ASSIGNED IN_REPAIR LOST RETIRED }
+
+model AssetAssignment {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  assetId     String
+  asset       Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  assignedAt  DateTime @db.Date
+  returnedAt  DateTime? @db.Date
+  conditionOut AssetCondition?
+  conditionIn AssetCondition?
+  acknowledgmentSignedAt DateTime?
+  recoveryAmount Decimal? @db.Decimal(15, 2)           // if lost/damaged -> payroll recovery
+  notes       String?
+  status      AssetAssignmentStatus @default(ASSIGNED)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([businessId, employeeId, status])
+  @@index([businessId, assetId])
+}
+
+enum AssetAssignmentStatus { ASSIGNED RETURNED LOST DAMAGED PENDING_RECOVERY }
+
+// ── §14 Performance ──
+model ReviewCycle {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId    String?
+  code        String
+  name        String                                   // "FY2026 Annual", "H1 2026"
+  type        ReviewCycleType
+  periodStart DateTime @db.Date
+  periodEnd   DateTime @db.Date
+  status      ReviewCycleStatus @default(DRAFT)
+  ratingScaleJson Json                                 // fixed scale options (1-5 / labels)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  reviews     PerformanceReview[]
+  @@unique([businessId, code])
+  @@index([businessId, status])
+}
+
+enum ReviewCycleType   { ANNUAL HALF_YEARLY QUARTERLY PROBATION PROJECT CONTINUOUS }
+enum ReviewCycleStatus { DRAFT ACTIVE SELF_REVIEW MANAGER_REVIEW CALIBRATION CLOSED }
+
+model PerformanceReview {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  reviewCycleId String
+  reviewCycle ReviewCycle @relation(fields: [reviewCycleId], references: [id], onDelete: Cascade)
+  employeeId  String                                   // reviewee
+  employee    Employee @relation("RevieweeReviews", fields: [employeeId], references: [id], onDelete: Cascade)
+  reviewerId  String                                   // manager
+  reviewer    Employee @relation("ReviewerReviews", fields: [reviewerId], references: [id], onDelete: Restrict)
+  selfRating  Decimal? @db.Decimal(4, 2)
+  managerRating Decimal? @db.Decimal(4, 2)
+  finalRating Decimal? @db.Decimal(4, 2)               // post-calibration
+  selfComments String?
+  managerComments String?
+  status      ReviewStatus @default(NOT_STARTED)
+  outcomeJson Json?                                    // promotion/PIP/hike recommendation
+  linkedCompensationId String?                          // hike -> CompensationRevision
+  submittedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  version     Int      @default(0)
+  @@unique([businessId, reviewCycleId, employeeId])
+  @@index([businessId, reviewerId, status])
+}
+
+enum ReviewStatus { NOT_STARTED SELF_SUBMITTED MANAGER_SUBMITTED CALIBRATED ACKNOWLEDGED CLOSED }
+
+model Goal {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  reviewCycleId String?
+  title       String
+  description String?
+  category    GoalCategory @default(INDIVIDUAL)
+  weight      Decimal? @db.Decimal(5, 2)
+  target      String?
+  progress    Decimal  @db.Decimal(5, 2) @default(0)
+  status      GoalStatus @default(DRAFT)
+  dueDate     DateTime? @db.Date
+  parentGoalId String?                                 // cascade from org/dept OKR
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  version     Int      @default(0)
+  @@index([businessId, employeeId, status])
+}
+
+enum GoalCategory { ORGANIZATION DEPARTMENT TEAM INDIVIDUAL DEVELOPMENT }
+enum GoalStatus   { DRAFT ACTIVE ON_TRACK AT_RISK ACHIEVED MISSED CANCELLED }
+
+model EmployeeSkill {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  skillName   String
+  proficiency Int                                      // 1-5
+  isPrimary   Boolean  @default(false)
+  endorsedBy  String?
+  createdAt   DateTime @default(now())
+  @@index([businessId, employeeId])
+}
+
+// ── §15 Recruitment (ATS) ──
+model Job {                                             // requisition
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId    String?
+  code        String                                   // JOB-000012
+  title       String
+  departmentId String?
+  designationId String?
+  locationId  String?
+  countryCode String   @db.Char(2)
+  employmentType EmploymentType
+  openings    Int      @default(1)
+  description String?  @db.Text
+  minSalary   Decimal? @db.Decimal(15, 2)
+  maxSalary   Decimal? @db.Decimal(15, 2)
+  currencyCode String? @db.Char(3)
+  hiringManagerId String?
+  status      JobStatus @default(DRAFT)
+  publishedAt DateTime?
+  closedAt    DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(0)
+  stages      JobStage[]
+  applications Application[]
+  @@unique([businessId, code])
+  @@index([businessId, status])
+}
+
+enum JobStatus { DRAFT OPEN ON_HOLD CLOSED CANCELLED FILLED }
+
+model JobStage {                                        // configurable pipeline (fixed stage kinds)
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  jobId       String
+  job         Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  name        String
+  kind        StageKind
+  sortOrder   Int
+  createdAt   DateTime @default(now())
+  @@unique([businessId, jobId, sortOrder])
+  @@index([businessId, jobId])
+}
+
+enum StageKind { SOURCED SCREENING INTERVIEW ASSESSMENT OFFER HIRED REJECTED WITHDRAWN }
+
+model Candidate {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  firstName   String                                   // @pii:identity
+  lastName    String
+  email       String                                   // @pii:contact
+  phone       String?
+  resumeUrl   String?  @db.Text
+  source      String?                                  // referral/job-board/agency
+  linkedinUrl String?
+  consentAt   DateTime?                                // candidate data-processing consent
+  consentExpiresAt DateTime?                            // auto-purge after retention window
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  applications Application[]
+  @@unique([businessId, email])
+  @@index([businessId, email])
+}
+
+model Application {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  jobId       String
+  job         Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  candidateId String
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  currentStageId String?
+  status      ApplicationStatus @default(APPLIED)
+  rating      Decimal? @db.Decimal(4, 2)
+  rejectReason String?
+  convertedEmployeeId String?                           // set on hire -> onboarding
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  version     Int      @default(0)
+  interviews  Interview[]
+  offers      Offer[]
+  @@unique([businessId, jobId, candidateId])
+  @@index([businessId, status])
+}
+
+enum ApplicationStatus { APPLIED SCREENING INTERVIEWING ASSESSMENT OFFERED HIRED REJECTED WITHDRAWN ON_HOLD }
+
+model Interview {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  applicationId String
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  round       Int
+  scheduledAt DateTime?
+  mode        InterviewMode
+  interviewerIds String                                // CSV employee ids
+  feedbackJson Json?
+  recommendation InterviewRecommendation?
+  status      InterviewStatus @default(SCHEDULED)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([businessId, applicationId])
+}
+
+enum InterviewMode           { ONSITE VIDEO PHONE }
+enum InterviewRecommendation { STRONG_YES YES NEUTRAL NO STRONG_NO }
+enum InterviewStatus         { SCHEDULED COMPLETED NO_SHOW CANCELLED RESCHEDULED }
+
+model Offer {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  applicationId String
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  ctcAnnual   Decimal? @db.Decimal(15, 2)
+  grossMonthly Decimal? @db.Decimal(15, 2)
+  currencyCode String  @db.Char(3)
+  joiningDate DateTime? @db.Date
+  structureId String?                                  // proposed SalaryStructure
+  status      OfferStatus @default(DRAFT)
+  letterUrl   String?  @db.Text
+  sentAt      DateTime?
+  respondedAt DateTime?
+  expiresAt   DateTime?
+  approvalRequestId String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  version     Int      @default(0)
+  @@index([businessId, applicationId, status])
+}
+
+enum OfferStatus { DRAFT PENDING_APPROVAL APPROVED SENT ACCEPTED DECLINED EXPIRED REVOKED }
+
+// ── §16 Helpdesk (HR case management) ──
+model HelpdeskCategory {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name        String
+  slaHours    Int?
+  defaultAssigneeId String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  @@unique([businessId, name])
+  @@index([businessId, isActive])
+}
+
+model HelpdeskTicket {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  code        String                                   // HD-000219
+  employeeId  String                                   // raiser
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  categoryId  String?
+  subject     String
+  description String?  @db.Text
+  priority    TicketPriority @default(NORMAL)
+  status      TicketStatus @default(OPEN)
+  assigneeId  String?
+  slaDueAt    DateTime?
+  resolvedAt  DateTime?
+  closedAt    DateTime?
+  satisfactionRating Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(0)
+  messages    HelpdeskMessage[]
+  @@unique([businessId, code])
+  @@index([businessId, status, priority])
+  @@index([businessId, assigneeId, status])
+}
+
+enum TicketPriority { LOW NORMAL HIGH URGENT }
+enum TicketStatus   { OPEN IN_PROGRESS WAITING_ON_EMPLOYEE RESOLVED CLOSED REOPENED CANCELLED }
+
+model HelpdeskMessage {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  ticketId    String
+  ticket      HelpdeskTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorUserId String
+  body        String   @db.Text
+  isInternal  Boolean  @default(false)                 // internal HR note vs employee-visible
+  attachmentsJson Json?
+  createdAt   DateTime @default(now())
+  @@index([businessId, ticketId])
+}
+
+// ── §18 Workflow & approval ──
+model WorkflowDefinition {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  code        String
+  name        String
+  module      WorkflowModule
+  entityId    String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  version     Int      @default(0)
+  steps       WorkflowStep[]
+  @@unique([businessId, code])
+  @@index([businessId, module, isActive])
+}
+
+enum WorkflowModule {
+  LEAVE EXPENSE LOAN COMPENSATION OFFER PROFILE_CHANGE
+  TIMESHEET ATTENDANCE_REGULARIZATION SEPARATION ASSET DOCUMENT_SIGN PAYRUN
+}
+
+model WorkflowStep {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  workflowDefinitionId String
+  workflow    WorkflowDefinition @relation(fields: [workflowDefinitionId], references: [id], onDelete: Cascade)
+  stepOrder   Int
+  name        String
+  approverType ApproverType
+  approverRefId String?                                // role id / employee id (for SPECIFIC)
+  conditionJson Json?                                  // e.g. {"amount":{">":50000}} amount-tiered routing
+  isParallel  Boolean  @default(false)                 // all approvers at this level
+  minApprovals Int     @default(1)
+  slaHours    Int?
+  onTimeoutAction TimeoutAction @default(ESCALATE)
+  createdAt   DateTime @default(now())
+  @@unique([businessId, workflowDefinitionId, stepOrder])
+  @@index([businessId, workflowDefinitionId])
+}
+
+enum ApproverType   { REPORTING_MANAGER DEPARTMENT_HEAD HR PAYROLL_MANAGER SPECIFIC_ROLE SPECIFIC_EMPLOYEE AUTO_APPROVE }
+enum TimeoutAction  { ESCALATE AUTO_APPROVE AUTO_REJECT REMIND }
+
+model ApprovalRequest {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  workflowDefinitionId String?
+  module      WorkflowModule
+  entityType  String                                   // "LeaveTransaction","ExpenseClaim"...
+  entityId    String                                   // the row under approval
+  requesterEmployeeId String?
+  requester   Employee? @relation("RequesterApprovals", fields: [requesterEmployeeId], references: [id], onDelete: SetNull)
+  currentStepOrder Int   @default(1)
+  status      ApprovalStatus @default(PENDING)
+  payloadJson Json?                                    // snapshot of request for approver view
+  slaDueAt    DateTime?
+  decidedBy   String?
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  version     Int      @default(0)
+  actions     ApprovalAction[]
+  @@index([businessId, module, status])
+  @@index([businessId, entityType, entityId])
+}
+
+enum ApprovalStatus { PENDING APPROVED REJECTED CANCELLED ESCALATED EXPIRED WITHDRAWN }
+
+model ApprovalAction {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  approvalRequestId String
+  approvalRequest ApprovalRequest @relation(fields: [approvalRequestId], references: [id], onDelete: Cascade)
+  stepOrder   Int
+  approverUserId String
+  decision    ApprovalDecision
+  comment     String?
+  actedAt     DateTime @default(now())
+  createdAt   DateTime @default(now())
+  delegatedFromUserId String?                          // approval delegation
+  @@index([businessId, approvalRequestId])
+}
+
+enum ApprovalDecision { APPROVED REJECTED REQUESTED_CHANGES DELEGATED ABSTAINED }
+
+// ── §19.2 Notification ──
+model Notification {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  recipientUserId String
+  type        NotificationType
+  channel     NotificationChannel
+  title       String
+  body        String?  @db.Text
+  dataJson    Json?
+  entityType  String?
+  entityId    String?
+  readAt      DateTime?
+  sentAt      DateTime?
+  status      DeliveryStatus @default(QUEUED)
+  createdAt   DateTime @default(now())
+  @@index([businessId, recipientUserId, readAt])
+  @@index([businessId, type, createdAt])
+}
+
+enum NotificationType {
+  PAYSLIP_PUBLISHED LEAVE_REQUESTED LEAVE_APPROVED LEAVE_REJECTED
+  EXPENSE_SUBMITTED EXPENSE_APPROVED LOAN_APPROVED APPROVAL_PENDING
+  DOC_EXPIRING BIRTHDAY ANNIVERSARY REVIEW_DUE TIMESHEET_DUE
+  STATUTORY_DUE ONBOARDING_TASK OFFBOARDING_TASK ASSET_RETURN_DUE
+}
+enum NotificationChannel { IN_APP EMAIL SMS WHATSAPP PUSH }
+enum DeliveryStatus      { QUEUED SENT DELIVERED FAILED READ }
+
+// ── §19.3 NumberSequence — tenant-safe human codes ──
+model NumberSequence {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId    String?
+  scope       String                                   // "EMPLOYEE","PAYRUN","EXPENSE","LOAN"...
+  prefix      String                                   // "EMP-","PR-"
+  nextValue   Int      @default(1)
+  padding     Int      @default(6)
+  periodKey   String?                                  // optional yearly reset "2026-27"
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+  @@unique([businessId, entityId, scope, periodKey])
+  @@index([businessId, scope])
+}
+
+// ── Tenant branding (referenced by Business.tenantBrands; backs DocumentTemplate / ESS theming) ──
+model TenantBrand {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId    String?                                  // NULL = tenant-wide default brand
+  code        String
+  name        String
+  logoUrl     String?  @db.Text
+  faviconUrl  String?  @db.Text
+  primaryColor   String?                               // hex, e.g. "#1A73E8"
+  secondaryColor String?
+  accentColor    String?
+  emailFromName  String?
+  emailFooter    String?  @db.Text
+  supportEmail   String?
+  isDefault   Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(0)
+  @@unique([businessId, code])
+  @@index([businessId, entityId, isActive])
+}
+
+// ── HR relational RBAC grant (HR analog of EcomRolePermissionGrant) ──
+model HrRolePermissionGrant {
+  id           String   @id @default(uuid())
+  businessId   String                                  // denormalised for fast tenant-scoped queries
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  roleId       String
+  role         BusinessRole @relation("HrRoleGrants", fields: [roleId], references: [id], onDelete: Cascade)
+  permissionKey String                                 // fixed HR permission catalog key, e.g. "PAYRUN_APPROVE"
+  entityId     String?                                 // optional entity scope (NULL = all entities)
+  grantedAt    DateTime @default(now())
+  expiresAt    DateTime?                               // optional time-bound grant
+  createdAt    DateTime @default(now())
+  @@unique([roleId, permissionKey, entityId])
+  @@index([businessId])
+  @@index([businessId, roleId])
 }
