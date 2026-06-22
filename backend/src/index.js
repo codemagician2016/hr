@@ -334,6 +334,8 @@ app.use('/api/locale', localeRoutes);
 app.use('/api/internal', require('./core/routes/internal.routes'));
 app.use('/api/geo', require('./core/routes/geo.routes'));
 app.use('/api/integrations', require('./core/routes/integrations.routes'));
+// HR vertical API (employees, org, and — as built — attendance/leave/payroll/compliance).
+app.use('/api/hr', require('./hr/routes'));
 
 // Sentry error handler — must come AFTER all routes but BEFORE any
 // custom 500 handler. No-op if Sentry wasn't initialised.
