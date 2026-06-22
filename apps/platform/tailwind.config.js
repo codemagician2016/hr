@@ -9,6 +9,20 @@ module.exports = {
   ],
   theme: {
     extend: {
+      colors: {
+        // DriftHR product brand (NOT the per-tenant white-label palette).
+        drifthr: {
+          teal: '#16B6A6',
+          blue: '#3B6FE3',
+          ink: '#16243B',
+          mist: '#EAF1F4',
+        },
+      },
+      fontFamily: {
+        // Manrope is wired via next/font in app/layout.js, exposed as --font-manrope.
+        sans: ['var(--font-manrope)', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'],
+        brand: ['var(--font-manrope)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+      },
       keyframes: {
         shake: {
           '0%, 100%': { transform: 'translateX(0)' },

@@ -172,7 +172,7 @@ function Sidebar({ business, me, logoUrl, logoAspect, navItems, navGroups, activ
           <EcommerceBusinessLogo business={business} logoUrl={logoUrl} logoAspect={logoAspect} />
           {!collapsed && (
             <div className="min-w-0">
-              <div className="font-bold text-gray-900 leading-tight truncate">{business?.name || 'Sitepresso'}</div>
+              <div className="font-bold text-gray-900 leading-tight truncate">{business?.name || 'DriftHR'}</div>
               <div className="text-[9px] font-mono tracking-[0.22em] text-gray-500 uppercase mt-0.5">Seller console</div>
             </div>
           )}

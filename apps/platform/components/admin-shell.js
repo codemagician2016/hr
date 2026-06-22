@@ -295,7 +295,7 @@ function BusinessAdminContent() {
   ];
 
   // ECOMMERCE Path B grouping (2026-05-01). Rider/delivery fleet management
-  // now lives in AapkaRider; Sitepresso keeps Fulfillment for order handoff.
+  // now lives in AapkaRider; DriftHR keeps Fulfillment for order handoff.
   // Keys here MUST be a subset of VERTICAL_NAV_KEYS.ECOMMERCE.
   // Store Setup (2026-06-06) folds Locations + Slots + Pickup + Cities into
   // one layman-friendly window, so those four leave the sidebar (they stay
@@ -966,7 +966,7 @@ function BusinessAdminContent() {
           <Link href="/" className="flex items-center gap-3 min-w-0">
             <AdminBusinessLogo business={business} logoUrl={adminLogoUrl} logoAspect={adminLogoAspect} />
             <div className="min-w-0 hidden sm:block">
-              <div className="font-semibold text-gray-900 leading-tight truncate">{business?.name || 'Sitepresso'}</div>
+              <div className="font-semibold text-gray-900 leading-tight truncate">{business?.name || 'DriftHR'}</div>
               <div className="text-[10px] font-mono tracking-[0.2em] text-gray-500 uppercase leading-tight mt-0.5">Business admin</div>
             </div>
           </Link>

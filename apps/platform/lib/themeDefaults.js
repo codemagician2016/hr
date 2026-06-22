@@ -1,5 +1,5 @@
 // ============================================================================
-// Sitepresso — Default Section Content Registry (Phase 1.5 · April 2026)
+// DriftHR — Default Section Content Registry (Phase 1.5 · April 2026)
 //
 // Every profession ships with a complete, nice-looking storefront before the
 // tenant adds any of their own data:

@@ -38,7 +38,7 @@ export function loadRazorpayCheckout() {
 export async function openRazorpaySubscriptionCheckout({
   keyId,
   subscriptionId,
-  name = 'Sitepresso',
+  name = 'DriftHR',
   description = 'Activate your plan',
   prefill = {},
   onSuccess,

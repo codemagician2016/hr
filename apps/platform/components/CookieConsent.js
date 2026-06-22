@@ -89,7 +89,7 @@ export default function CookieConsent() {
             <p id="cookie-consent-description" className="mt-1 text-xs text-gray-600 leading-relaxed">
               Strictly-necessary cookies (sign-in, session, language) always run.
               We&rsquo;d also like to set optional analytics cookies to understand how
-              Sitepresso is used so we can improve it. You can accept or reject the
+              DriftHR is used so we can improve it. You can accept or reject the
               optional cookies — your choice is saved and you can change it anytime.{' '}
               <Link href="/legal/cookies" className="text-indigo-600 hover:underline whitespace-nowrap">
                 Learn more →

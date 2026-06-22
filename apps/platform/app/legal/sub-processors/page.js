@@ -1,6 +1,6 @@
 export const metadata = {
-  title: 'Sub-Processors · Sitepresso',
-  description: 'Third-party service providers Sitepresso uses to deliver the Service.',
+  title: 'Sub-Processors · DriftHR',
+  description: 'Third-party service providers DriftHR uses to deliver the Service.',
 };
 
 export default function SubProcessorsPage() {
@@ -11,7 +11,7 @@ export default function SubProcessorsPage() {
       <p className="text-sm text-gray-500 mt-0 mb-8">Last updated: 28 April 2026</p>
 
       <p>
-        Sitepresso uses the following third-party service providers (&ldquo;sub-processors&rdquo;)
+        DriftHR uses the following third-party service providers (&ldquo;sub-processors&rdquo;)
         to deliver the Service. Each is bound by contract to protect personal data handled on our
         behalf and to process it only on our documented instructions, consistent with our
         {' '}<a href="/legal/privacy">Privacy Policy</a> and any Data Processing Addendum we have
@@ -60,7 +60,7 @@ export default function SubProcessorsPage() {
           <tbody className="text-gray-700">
             <tr className="border-b border-gray-200">
               <td className="py-3 pr-4 align-top font-medium">Paddle.com Market Limited</td>
-              <td className="py-3 pr-4 align-top">Merchant of Record for Sitepresso subscription payments outside India and New Zealand &mdash; checkout, taxes, card processing, invoices, dunning</td>
+              <td className="py-3 pr-4 align-top">Merchant of Record for DriftHR subscription payments outside India and New Zealand &mdash; checkout, taxes, card processing, invoices, dunning</td>
               <td className="py-3 pr-4 align-top">UK / EU / US</td>
               <td className="py-3 align-top">Billing name and address, email, payment method (handled by Paddle; we receive only token + last-4), country of residence for tax</td>
             </tr>

@@ -1,6 +1,6 @@
 export const metadata = {
-  title: 'Privacy Policy · Sitepresso',
-  description: 'How Loominfo Limited collects, uses, and protects personal information on Sitepresso.',
+  title: 'Privacy Policy · DriftHR',
+  description: 'How Loominfo Limited collects, uses, and protects personal information on DriftHR.',
 };
 
 // IMPORTANT: This is a comprehensive starter draft for global compliance
@@ -24,7 +24,7 @@ export default function PrivacyPage() {
         This Privacy Policy explains how <strong>Loominfo Limited</strong>
         (&ldquo;<strong>Loominfo</strong>&rdquo;, &ldquo;<strong>we</strong>&rdquo;,
         &ldquo;<strong>us</strong>&rdquo;) collects, uses, discloses, and protects personal
-        information when you use the Sitepresso platform at sitepresso.com (the
+        information when you use the DriftHR platform at sitepresso.com (the
         &ldquo;<strong>Service</strong>&rdquo;).
       </p>
       <p>

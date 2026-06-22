@@ -2,7 +2,7 @@
 
 // HR company-setup wizard (hr.com/onboarding).
 //
-// Adapted from the Sitepresso onboarding shell — same draft-persistence +
+// Adapted from the DriftHR onboarding shell — same draft-persistence +
 // auth-gate + stepper pattern, rebuilt for the HR vertical. Six steps:
 //   1. Company    — name + country (IN / NZ)
 //   2. Entity     — legal entity + statutory IDs (PAN/TAN/GSTIN for IN, IRD for NZ)
@@ -195,7 +195,7 @@ export default function OnboardingPage() {
     } catch { /* private mode */ }
   }, [s, step, draftReady]);
 
-  // Auth gate — same recovery flow as the Sitepresso shell.
+  // Auth gate — same recovery flow as the DriftHR shell.
   useEffect(() => {
     axios.get('/api/auth/me', { withCredentials: true })
       .then(async ({ data }) => {

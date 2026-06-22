@@ -57,7 +57,7 @@ function isProdBuyTransferPaused() {
 /* ------------------------------------------------------------------ *
  * Domain Studio — premium custom-domain experience.
  * Three entry paths (Register / Transfer / Connect existing), a persistent cart
- * rail, a live setup stepper, and a lifecycle hub. The free Sitepresso
+ * rail, a live setup stepper, and a lifecycle hub. The free DriftHR
  * subdomain is the permanent safety net surfaced on every screen.
  * ------------------------------------------------------------------ */
 
@@ -66,7 +66,7 @@ const ENTRY_CARDS = [
     key: 'register',
     icon: 'register',
     title: 'Register new',
-    blurb: 'Find and buy a brand-new domain through Sitepresso.',
+    blurb: 'Find and buy a brand-new domain through DriftHR.',
     price: 'From ₹999 / year',
     accent: 'from-indigo-500/10 to-indigo-500/0 border-indigo-200',
     ring: 'ring-indigo-500',
@@ -862,10 +862,10 @@ function TransferOutModal({ domain, busy, result, onClose, onConfirm }) {
         </div>
       ) : (
         <div className="space-y-4">
-          <p className="text-sm text-gray-600">Sitepresso will unlock the domain, turn off renewal reminders, and reveal the authorization code. This is your right — there’s no lock-in.</p>
+          <p className="text-sm text-gray-600">DriftHR will unlock the domain, turn off renewal reminders, and reveal the authorization code. This is your right — there’s no lock-in.</p>
           <label className="flex items-start gap-3 rounded-lg border border-gray-200 p-3 text-sm text-gray-700">
             <input type="checkbox" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-gray-300" />
-            <span>I understand this domain can leave Sitepresso once the transfer completes — my store will fall back to its free subdomain.</span>
+            <span>I understand this domain can leave DriftHR once the transfer completes — my store will fall back to its free subdomain.</span>
           </label>
           <ModalActions>
             <button type="button" onClick={onClose} className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700">Cancel</button>
@@ -957,7 +957,7 @@ function DomainSetupNotification({ domain, onOpenSettings }) {
               <span className="font-mono font-semibold">{guide.recordHost}</span> →{' '}
               <span className="font-mono font-semibold">{CUSTOM_DOMAIN_CNAME_TARGET}</span>. DNS usually updates in a few minutes, but some providers take up to 30 minutes.
             </p>
-            <p className="mt-1">Sitepresso will keep checking automatically. Your free Sitepresso URL stays live while this is pending.</p>
+            <p className="mt-1">DriftHR will keep checking automatically. Your free DriftHR URL stays live while this is pending.</p>
           </div>
           {domain.primary && (
             <button type="button" onClick={onOpenSettings} className="shrink-0 rounded-md border border-blue-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-50">
@@ -1364,7 +1364,7 @@ function RedirectSetupModal({ setup, onClose }) {
         {records.length > 0 && (
           <div className="rounded-xl border border-gray-200 p-3">
             <p className="text-sm font-semibold text-gray-900">DNS records for this redirect domain</p>
-            <p className="mt-0.5 text-xs text-gray-500">Add these wherever the domain is managed. Once DNS reaches Sitepresso, the redirect is handled automatically.</p>
+            <p className="mt-0.5 text-xs text-gray-500">Add these wherever the domain is managed. Once DNS reaches DriftHR, the redirect is handled automatically.</p>
             <div className="mt-3 space-y-3">
               {records.map((r, i) => (
                 <div key={i} className="grid gap-2 rounded-lg bg-gray-50/70 p-2.5 sm:grid-cols-3">
@@ -1415,7 +1415,7 @@ function DnsSetupGuide({ domainInput, onUseWww }) {
         <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <p>
-              Use <span className="font-mono font-semibold">{guide.www}</span> in Sitepresso. It is the easiest setup because every registrar supports a <span className="font-mono">www</span> CNAME record.
+              Use <span className="font-mono font-semibold">{guide.www}</span> in DriftHR. It is the easiest setup because every registrar supports a <span className="font-mono">www</span> CNAME record.
             </p>
             <button
               type="button"
@@ -1440,7 +1440,7 @@ function DnsSetupGuide({ domainInput, onUseWww }) {
           <span className="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-gray-900 text-xs font-bold text-white">2</span>
           <div className="min-w-0 flex-1">
             <p className="text-sm text-gray-700">
-              Add this record so <span className="font-mono">{guide.primary}</span> opens your Sitepresso site:
+              Add this record so <span className="font-mono">{guide.primary}</span> opens your DriftHR site:
             </p>
             <div className="mt-2 grid gap-3 rounded-xl border border-gray-200 bg-white p-3 sm:grid-cols-2 xl:grid-cols-[120px_180px_minmax(320px,1fr)_110px]">
               <CopyField label="Type" value="CNAME" />
@@ -1449,7 +1449,7 @@ function DnsSetupGuide({ domainInput, onUseWww }) {
               <CopyField label="TTL" value="Auto" />
             </div>
             <p className="mt-1 text-[11px] text-gray-400">
-              Do not add <span className="font-mono">https://</span> in the value. If your DNS provider has a proxy toggle, keep this record DNS-only until Sitepresso says it is connected.
+              Do not add <span className="font-mono">https://</span> in the value. If your DNS provider has a proxy toggle, keep this record DNS-only until DriftHR says it is connected.
             </p>
           </div>
         </div>
@@ -1508,7 +1508,7 @@ function DnsSetupGuide({ domainInput, onUseWww }) {
           <div className="flex gap-3">
             <span className="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-gray-900 text-xs font-bold text-white">3</span>
             <p className="text-sm text-gray-700">
-              Enter <span className="font-mono">{guide.primary}</span> above and press <strong>Connect</strong>. Sitepresso will verify DNS and issue HTTPS automatically.
+              Enter <span className="font-mono">{guide.primary}</span> above and press <strong>Connect</strong>. DriftHR will verify DNS and issue HTTPS automatically.
             </p>
           </div>
         )}
@@ -1516,7 +1516,7 @@ function DnsSetupGuide({ domainInput, onUseWww }) {
         {guide.hasWwwPair && (
           <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600">
             <p>
-              Last step in Sitepresso: enter <span className="font-mono font-semibold">{guide.primary}</span> above and press <strong>Connect</strong>. Sitepresso verifies DNS and issues HTTPS automatically.
+              Last step in DriftHR: enter <span className="font-mono font-semibold">{guide.primary}</span> above and press <strong>Connect</strong>. DriftHR verifies DNS and issues HTTPS automatically.
             </p>
             <p className="mt-1">
               Advanced fallback only if your provider does not have forwarding: add an <strong>ALIAS</strong>, <strong>ANAME</strong>, or flattened <strong>CNAME</strong> record with <span className="font-mono">Name @</span> and <span className="font-mono">Value {CUSTOM_DOMAIN_CNAME_TARGET}</span>.
@@ -1532,7 +1532,7 @@ function DnsSetupGuide({ domainInput, onUseWww }) {
             <p className="font-semibold text-gray-900">If the customer enters the root domain</p>
             <p className="mt-1 font-mono text-gray-950">{exampleApex}</p>
             <div className="mt-2 space-y-1">
-              <p>1. In Sitepresso, use <span className="font-mono">{exampleWww}</span>.</p>
+              <p>1. In DriftHR, use <span className="font-mono">{exampleWww}</span>.</p>
               <p>2. Add DNS: <span className="font-mono">CNAME</span> / <span className="font-mono">www</span> / <span className="font-mono">{CUSTOM_DOMAIN_CNAME_TARGET}</span>.</p>
               <p>3. Add redirect: <span className="font-mono">{exampleApex}</span> to <span className="font-mono">https://{exampleWww}</span>.</p>
             </div>
@@ -1542,7 +1542,7 @@ function DnsSetupGuide({ domainInput, onUseWww }) {
             <p className="font-semibold text-gray-900">If the customer enters the www domain</p>
             <p className="mt-1 font-mono text-gray-950">{exampleWww}</p>
             <div className="mt-2 space-y-1">
-              <p>1. Keep <span className="font-mono">{exampleWww}</span> in Sitepresso.</p>
+              <p>1. Keep <span className="font-mono">{exampleWww}</span> in DriftHR.</p>
               <p>2. Add DNS: <span className="font-mono">CNAME</span> / <span className="font-mono">www</span> / <span className="font-mono">{CUSTOM_DOMAIN_CNAME_TARGET}</span>.</p>
               <p>3. Add redirect from <span className="font-mono">{exampleApex}</span> to <span className="font-mono">https://{exampleWww}</span>.</p>
             </div>
@@ -1552,7 +1552,7 @@ function DnsSetupGuide({ domainInput, onUseWww }) {
             <p className="font-semibold text-gray-900">If the customer enters another subdomain</p>
             <p className="mt-1 font-mono text-gray-950">{exampleSubdomain}</p>
             <div className="mt-2 space-y-1">
-              <p>1. Keep <span className="font-mono">{exampleSubdomain}</span> in Sitepresso.</p>
+              <p>1. Keep <span className="font-mono">{exampleSubdomain}</span> in DriftHR.</p>
               <p>2. Add DNS: <span className="font-mono">CNAME</span> / <span className="font-mono">shop</span> / <span className="font-mono">{CUSTOM_DOMAIN_CNAME_TARGET}</span>.</p>
               <p>3. No root redirect is needed unless they also want <span className="font-mono">{exampleApex}</span> to open the site.</p>
             </div>
@@ -1827,12 +1827,12 @@ export default function DomainsTab({ business, vertical }) {
       } else if (bindingStatus === 'PENDING_SSL') {
         setNotice({
           tone: 'info',
-          message: `${savedName} is added. Status: Pending HTTPS. DNS is correct; Sitepresso is issuing the secure certificate, which usually takes a few minutes and can take up to 30 minutes.`,
+          message: `${savedName} is added. Status: Pending HTTPS. DNS is correct; DriftHR is issuing the secure certificate, which usually takes a few minutes and can take up to 30 minutes.`,
         });
       } else {
         setNotice({
           tone: 'info',
-          message: `${savedName} is added. Status: Pending DNS. Add the CNAME record shown below, then wait for DNS to update. This usually takes a few minutes, but some providers take up to 30 minutes. Your free Sitepresso URL stays live meanwhile.`,
+          message: `${savedName} is added. Status: Pending DNS. Add the CNAME record shown below, then wait for DNS to update. This usually takes a few minutes, but some providers take up to 30 minutes. Your free DriftHR URL stays live meanwhile.`,
         });
       }
       setByodDomain('');
@@ -1861,7 +1861,7 @@ export default function DomainsTab({ business, vertical }) {
     const path = pathByAction[action];
     if (!path) return;
     if (action === 'disconnect') {
-      const ok = window.confirm(`Disconnect ${domain.name} from this store?\n\nYour Sitepresso subdomain will keep working.`);
+      const ok = window.confirm(`Disconnect ${domain.name} from this store?\n\nYour DriftHR subdomain will keep working.`);
       if (!ok) return;
     }
     setBusyKey(`${action}:${domain.id}`);
@@ -1918,7 +1918,7 @@ export default function DomainsTab({ business, vertical }) {
   const transferPreflightReady = transferChecks.unlocked && transferChecks.olderThan60 && transferChecks.emailReady;
   const fullHeaderDescription = buyTransferPaused
     ? `Connect and manage custom domains for ${business?.name || 'this business'}.`
-    : `Buy, transfer, connect, and renew custom domains for ${business?.name || 'this business'} — without ever leaving Sitepresso.`;
+    : `Buy, transfer, connect, and renew custom domains for ${business?.name || 'this business'} — without ever leaving DriftHR.`;
 
   return (
     <div className="space-y-5">
@@ -2065,7 +2065,7 @@ export default function DomainsTab({ business, vertical }) {
 
           {mode === 'transfer' && (
             <div className="rounded-2xl border border-gray-200 bg-white p-4">
-              <h2 className="text-base font-semibold text-gray-950">Transfer your domain to Sitepresso</h2>
+              <h2 className="text-base font-semibold text-gray-950">Transfer your domain to DriftHR</h2>
               <p className="mt-1 text-sm text-gray-500">Adds one year to your registration. Your store stays live at its subdomain through the 5–7 day transfer.</p>
               <form onSubmit={startTransfer} className="mt-4 grid gap-4 md:grid-cols-2">
                 <label className="block">
@@ -2115,7 +2115,7 @@ export default function DomainsTab({ business, vertical }) {
           {mode === 'byod' && (
             <div className="rounded-2xl border border-gray-200 bg-white p-4">
               <h2 className="text-base font-semibold text-gray-950">Connect an existing domain</h2>
-              <p className="mt-1 text-sm text-gray-500">Keep your domain where it is. Add one DNS record, then Sitepresso verifies it and turns on HTTPS automatically.</p>
+              <p className="mt-1 text-sm text-gray-500">Keep your domain where it is. Add one DNS record, then DriftHR verifies it and turns on HTTPS automatically.</p>
               <form onSubmit={addByod} className="mt-4 space-y-2">
                 <label htmlFor="byod-domain" className="block text-sm font-medium text-gray-700">Your domain</label>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -2123,7 +2123,7 @@ export default function DomainsTab({ business, vertical }) {
                   <PrimaryButton type="submit" loading={busyKey === 'byod'} disabled={!byodDomain}>Connect</PrimaryButton>
                 </div>
                 <p className="text-xs text-gray-400">Recommended: use <span className="font-mono">www.yourdomain.com</span>. It works on every registrar; the guide below shows how to make <span className="font-mono">yourdomain.com</span> work too.</p>
-                <p className="text-xs text-gray-400">After you press Connect, Sitepresso starts verification right away. DNS usually updates within a few minutes, but some providers can take longer.</p>
+                <p className="text-xs text-gray-400">After you press Connect, DriftHR starts verification right away. DNS usually updates within a few minutes, but some providers can take longer.</p>
               </form>
               <DnsSetupGuide domainInput={byodDomain} onUseWww={(nextDomain) => setByodDomain(nextDomain)} />
             </div>

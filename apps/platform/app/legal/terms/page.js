@@ -1,6 +1,6 @@
 export const metadata = {
-  title: 'Terms of Service · Sitepresso',
-  description: 'Terms of Service for Sitepresso, operated by Loominfo Limited.',
+  title: 'Terms of Service · DriftHR',
+  description: 'Terms of Service for DriftHR, operated by Loominfo Limited.',
 };
 
 // IMPORTANT: This document is a comprehensive starter drafted from common
@@ -30,7 +30,7 @@ export default function TermsPage() {
         under company number 9429052682902 with its registered office at
         17A Prictor Street, Papakura, Auckland, New Zealand
         (&ldquo;<strong>Loominfo</strong>&rdquo;, &ldquo;<strong>we</strong>&rdquo;,
-        &ldquo;<strong>us</strong>&rdquo;). Loominfo operates the <strong>Sitepresso</strong>
+        &ldquo;<strong>us</strong>&rdquo;). Loominfo operates the <strong>DriftHR</strong>
         platform at sitepresso.com (the &ldquo;<strong>Service</strong>&rdquo;).
       </p>
 
@@ -43,9 +43,9 @@ export default function TermsPage() {
 
       <h2>1. The Service</h2>
       <p>
-        Sitepresso is a multi-tenant software-as-a-service platform that lets businesses
+        DriftHR is a multi-tenant software-as-a-service platform that lets businesses
         (&ldquo;<strong>Businesses</strong>&rdquo;) launch a hosted website on their own domain or
-        a Sitepresso subdomain. The Service supports three product verticals:
+        a DriftHR subdomain. The Service supports three product verticals:
       </p>
       <ul>
         <li><strong>Marketing site (Static)</strong> &mdash; informational pages, contact form, custom CMS pages.</li>
@@ -146,7 +146,7 @@ export default function TermsPage() {
 
       <h2>8. Fees, card-required trial, subscriptions, and renewals</h2>
       <p>
-        Public Sitepresso plans are paid subscriptions. We may keep an internal fallback state
+        Public DriftHR plans are paid subscriptions. We may keep an internal fallback state
         for expired, cancelled, or support-managed accounts.
       </p>
       <p>
@@ -177,7 +177,7 @@ export default function TermsPage() {
 
       <h2>9. Payment processing</h2>
       <p>
-        <strong>For Sitepresso subscription payments</strong> (what you pay us): we use a
+        <strong>For DriftHR subscription payments</strong> (what you pay us): we use a
         country-routed billing stack: <strong>Paddle</strong> for most countries,
         <strong> Razorpay</strong> for India, and <strong>Stripe</strong> for New Zealand.
         These providers handle checkout and payment-card data. Loominfo does not store full
@@ -220,7 +220,7 @@ export default function TermsPage() {
       <h2>12. Intellectual property</h2>
       <p>
         Loominfo and its licensors retain all right, title, and interest in the Service,
-        including all software, code, designs, trademarks, and the &ldquo;Sitepresso&rdquo;
+        including all software, code, designs, trademarks, and the &ldquo;DriftHR&rdquo;
         brand. We grant you a limited, non-exclusive, non-transferable licence to use the
         Service for your business during the term of these Terms. No other licence is granted.
       </p>

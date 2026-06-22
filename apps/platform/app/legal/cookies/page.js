@@ -15,7 +15,7 @@ export default function CookieNoticePage() {
 
       <p>
         This notice explains the cookies and similar technologies used on
-        sitepresso.com and on storefronts hosted by Sitepresso (the
+        sitepresso.com and on storefronts hosted by DriftHR (the
         &ldquo;<strong>Service</strong>&rdquo;), and how you can manage your choices.
         It complements our <a href="/legal/privacy">Privacy Policy</a>.
       </p>
@@ -24,7 +24,7 @@ export default function CookieNoticePage() {
       <p>
         A cookie is a small text file stored in your browser when you visit a website.
         It lets the site recognise you on subsequent visits, keep you signed in, and
-        remember basic preferences. Some cookies are set by Sitepresso directly
+        remember basic preferences. Some cookies are set by DriftHR directly
         (&ldquo;first-party&rdquo;); others are set by service providers we use
         (&ldquo;third-party&rdquo;).
       </p>
@@ -77,7 +77,7 @@ export default function CookieNoticePage() {
 
       <h3>Analytics (only with your consent)</h3>
       <p>
-        These help us understand how Sitepresso is used so we can improve it.
+        These help us understand how DriftHR is used so we can improve it.
         They&rsquo;re only set if you click &ldquo;Accept all&rdquo; on the cookie banner.
       </p>
       <div className="not-prose my-6 overflow-x-auto">

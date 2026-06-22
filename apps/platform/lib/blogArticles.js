@@ -1,36 +1,36 @@
 const articles = [
   {
     slug: 'sitepresso-vs-wix',
-    title: 'Sitepresso vs Wix: Which is Better for Small Businesses in 2025?',
-    excerpt: 'A head-to-head comparison of Sitepresso and Wix for service businesses, solo operators, and anyone who needs a professional website without the headache.',
+    title: 'DriftHR vs Wix: Which is Better for Small Businesses in 2025?',
+    excerpt: 'A head-to-head comparison of DriftHR and Wix for service businesses, solo operators, and anyone who needs a professional website without the headache.',
     category: 'Comparisons',
     readTime: 6,
     publishedAt: '2025-04-01',
     tags: ['comparison', 'wix', 'website-builder'],
     content: `<h2>The Short Answer</h2>
-<p>If you run a service business — yoga studio, dental clinic, consultancy, salon — Sitepresso wins. If you want a drag-and-drop hobby site with no booking needs, Wix is fine. But for anyone trying to run a real business online, Wix's generalist approach creates more problems than it solves.</p>
+<p>If you run a service business — yoga studio, dental clinic, consultancy, salon — DriftHR wins. If you want a drag-and-drop hobby site with no booking needs, Wix is fine. But for anyone trying to run a real business online, Wix's generalist approach creates more problems than it solves.</p>
 
 <h2>Setup Time</h2>
-<p>Wix's promise is freedom — drag anything anywhere. In practice, that freedom means decision fatigue. You spend hours choosing from 800+ templates, tweaking pixel by pixel, and still ending up with something that looks generic. Sitepresso takes the opposite approach: pick your industry (yoga, dental, consulting, etc.), and get a purpose-built website in under 5 minutes. The design decisions are already made for your vertical.</p>
+<p>Wix's promise is freedom — drag anything anywhere. In practice, that freedom means decision fatigue. You spend hours choosing from 800+ templates, tweaking pixel by pixel, and still ending up with something that looks generic. DriftHR takes the opposite approach: pick your industry (yoga, dental, consulting, etc.), and get a purpose-built website in under 5 minutes. The design decisions are already made for your vertical.</p>
 
 <h2>Booking & Appointments</h2>
-<p>Wix has a booking add-on called Wix Bookings. It works, but it's a bolt-on — not native. You pay extra, configure it separately, and it doesn't share data cleanly with your website. Sitepresso was built booking-first. Your calendar, services, availability, and customer portal are all part of the same system. No add-ons, no syncing headaches.</p>
+<p>Wix has a booking add-on called Wix Bookings. It works, but it's a bolt-on — not native. You pay extra, configure it separately, and it doesn't share data cleanly with your website. DriftHR was built booking-first. Your calendar, services, availability, and customer portal are all part of the same system. No add-ons, no syncing headaches.</p>
 
 <h2>Pricing</h2>
-<p>Wix's free plan puts Wix branding on your site. Their paid plans start at around $17/month and go up fast when you add Wix Bookings, Wix Stores, and remove ads. By the time a Wix site has what a service business actually needs, you're paying $40–$60/month. Sitepresso's plans include booking, ecommerce, and your own domain from the start.</p>
+<p>Wix's free plan puts Wix branding on your site. Their paid plans start at around $17/month and go up fast when you add Wix Bookings, Wix Stores, and remove ads. By the time a Wix site has what a service business actually needs, you're paying $40–$60/month. DriftHR's plans include booking, ecommerce, and your own domain from the start.</p>
 
 <h2>SEO</h2>
-<p>Wix has improved its SEO significantly since 2020, but it still generates bloated HTML and relies on JavaScript rendering that can slow down Google crawling. Sitepresso generates clean, fast pages optimised for each service vertical — which means better Core Web Vitals and faster indexing out of the box.</p>
+<p>Wix has improved its SEO significantly since 2020, but it still generates bloated HTML and relies on JavaScript rendering that can slow down Google crawling. DriftHR generates clean, fast pages optimised for each service vertical — which means better Core Web Vitals and faster indexing out of the box.</p>
 
 <h2>Support</h2>
-<p>Wix offers ticketed support. Sitepresso offers direct founder access for early customers — you're not ticket #84,721.</p>
+<p>Wix offers ticketed support. DriftHR offers direct founder access for early customers — you're not ticket #84,721.</p>
 
 <h2>Verdict</h2>
-<p>Wix is built for everyone. Sitepresso is built for service businesses specifically. If your livelihood depends on bookings and client relationships, choose the tool built for that job. <strong>Start a Sitepresso trial →</strong></p>`,
+<p>Wix is built for everyone. DriftHR is built for service businesses specifically. If your livelihood depends on bookings and client relationships, choose the tool built for that job. <strong>Start a DriftHR trial →</strong></p>`,
   },
   {
     slug: 'sitepresso-vs-squarespace',
-    title: 'Sitepresso vs Squarespace: The Honest Comparison',
+    title: 'DriftHR vs Squarespace: The Honest Comparison',
     excerpt: 'Squarespace looks beautiful. But does beautiful convert to booked appointments? We compare every dimension that matters for service businesses.',
     category: 'Comparisons',
     readTime: 5,
@@ -40,23 +40,23 @@ const articles = [
 <p>Squarespace is the gold standard for design. If you want a stunning portfolio or a magazine-style site, it's hard to beat. But for a plumber, therapist, or dog trainer whose goal is to get clients booked, beautiful templates are a starting point — not a solution.</p>
 
 <h2>The Booking Problem</h2>
-<p>Squarespace Scheduling (formerly Acuity) is a separate product that Squarespace acquired. It's good, but it's not native. The two systems share branding but not a seamless data layer. You'll find yourself jumping between Squarespace and Scheduling dashboards constantly. Sitepresso builds scheduling directly into the website — same dashboard, same customer records, same place.</p>
+<p>Squarespace Scheduling (formerly Acuity) is a separate product that Squarespace acquired. It's good, but it's not native. The two systems share branding but not a seamless data layer. You'll find yourself jumping between Squarespace and Scheduling dashboards constantly. DriftHR builds scheduling directly into the website — same dashboard, same customer records, same place.</p>
 
 <h2>Time to Launch</h2>
-<p>Squarespace has a learning curve. Templates require customisation, sections need reordering, and fonts need matching. A polished Squarespace site typically takes a weekend. Sitepresso's industry-specific templates require almost no customisation — your dental or yoga website looks right from minute one.</p>
+<p>Squarespace has a learning curve. Templates require customisation, sections need reordering, and fonts need matching. A polished Squarespace site typically takes a weekend. DriftHR's industry-specific templates require almost no customisation — your dental or yoga website looks right from minute one.</p>
 
 <h2>Cost Comparison</h2>
-<p>Squarespace starts at $16/month (basic, no ecommerce). Add Scheduling and you're at $23–$45/month depending on the plan. Add ecommerce and you're at $27–$49/month. Sitepresso includes booking and ecommerce in a single plan at a price that makes sense for solo operators.</p>
+<p>Squarespace starts at $16/month (basic, no ecommerce). Add Scheduling and you're at $23–$45/month depending on the plan. Add ecommerce and you're at $27–$49/month. DriftHR includes booking and ecommerce in a single plan at a price that makes sense for solo operators.</p>
 
 <h2>Industry Fit</h2>
-<p>Squarespace serves photographers, architects, chefs, restaurants — visually-driven businesses. Sitepresso serves service businesses where the product is expertise: therapists, consultants, trainers, lawyers, and tradespeople. The templates, features, and defaults are built for that world.</p>
+<p>Squarespace serves photographers, architects, chefs, restaurants — visually-driven businesses. DriftHR serves service businesses where the product is expertise: therapists, consultants, trainers, lawyers, and tradespeople. The templates, features, and defaults are built for that world.</p>
 
 <h2>Bottom Line</h2>
-<p>If you're a photographer building a portfolio, Squarespace is your tool. If you need clients to find you, trust you, and book you — Sitepresso is built exactly for that.</p>`,
+<p>If you're a photographer building a portfolio, Squarespace is your tool. If you need clients to find you, trust you, and book you — DriftHR is built exactly for that.</p>`,
   },
   {
     slug: 'sitepresso-vs-wordpress',
-    title: 'Sitepresso vs WordPress: Do You Actually Need a Developer?',
+    title: 'DriftHR vs WordPress: Do You Actually Need a Developer?',
     excerpt: 'WordPress powers 43% of the web. But for a small service business, it might be the most expensive free software you ever use.',
     category: 'Comparisons',
     readTime: 7,
@@ -66,10 +66,10 @@ const articles = [
 <p>WordPress is free to download. Hosting costs $5–$20/month. But then come the plugins: WooCommerce for ecommerce, Amelia or Bookly for bookings, Yoast for SEO, a page builder like Elementor for design. Each plugin costs money, requires updates, and can conflict with others. The "free" website ends up costing $100+/month in plugins, $500–$2,000 for a developer to set it up, and ongoing maintenance when things break.</p>
 
 <h2>Security</h2>
-<p>WordPress is the most hacked CMS on the planet — not because it's insecure by design, but because its popularity and plugin ecosystem create enormous attack surface. You need a security plugin, regular backups, and someone who knows what to do when something goes wrong. With Sitepresso, security is handled at the platform level. You never think about it.</p>
+<p>WordPress is the most hacked CMS on the planet — not because it's insecure by design, but because its popularity and plugin ecosystem create enormous attack surface. You need a security plugin, regular backups, and someone who knows what to do when something goes wrong. With DriftHR, security is handled at the platform level. You never think about it.</p>
 
 <h2>Speed</h2>
-<p>A typical WordPress site with a page builder and several plugins loads in 3–5 seconds. Google starts penalising sites that load in more than 2.5 seconds (Core Web Vitals). Sitepresso sites are built on Next.js with static generation — they load in under a second, which means better Google rankings and lower bounce rates.</p>
+<p>A typical WordPress site with a page builder and several plugins loads in 3–5 seconds. Google starts penalising sites that load in more than 2.5 seconds (Core Web Vitals). DriftHR sites are built on Next.js with static generation — they load in under a second, which means better Google rankings and lower bounce rates.</p>
 
 <h2>Who WordPress is Right For</h2>
 <p>WordPress makes sense if you have a developer on retainer, need very custom functionality, or are building a large content site. It's overkill for 90% of service businesses.</p>
@@ -84,14 +84,14 @@ const articles = [
 <li>Security plugin: $70/year</li>
 <li>Developer setup (one-time): $1,000–$3,000</li>
 </ul>
-<p>That's $374/year in recurring costs plus setup. Sitepresso is a single monthly fee with everything included.</p>
+<p>That's $374/year in recurring costs plus setup. DriftHR is a single monthly fee with everything included.</p>
 
 <h2>Verdict</h2>
-<p>WordPress is a platform for developers. Sitepresso is a platform for business owners. If you want to run your business, not manage software, the choice is clear.</p>`,
+<p>WordPress is a platform for developers. DriftHR is a platform for business owners. If you want to run your business, not manage software, the choice is clear.</p>`,
   },
   {
     slug: 'sitepresso-vs-calendly',
-    title: 'Sitepresso vs Calendly: Which Booking Tool Does More?',
+    title: 'DriftHR vs Calendly: Which Booking Tool Does More?',
     excerpt: "Calendly is great for scheduling meetings. But if you're running a service business, you need a lot more than a scheduling link.",
     category: 'Comparisons',
     readTime: 5,
@@ -112,19 +112,19 @@ const articles = [
 <h2>The Patchwork Problem</h2>
 <p>Most Calendly users end up with a Calendly link embedded in a separate website (built on Wix or WordPress), connected to a payment processor (Stripe), with confirmation emails coming from a third email tool. Every connection is a potential failure point, and the experience feels disjointed to customers.</p>
 
-<h2>Sitepresso's Approach</h2>
-<p>Sitepresso is your website AND your booking system in one. A customer lands on your page, sees your services and prices, books a slot, pays online, and gets a branded confirmation — all without leaving your site or hitting a third-party tool.</p>
+<h2>DriftHR's Approach</h2>
+<p>DriftHR is your website AND your booking system in one. A customer lands on your page, sees your services and prices, books a slot, pays online, and gets a branded confirmation — all without leaving your site or hitting a third-party tool.</p>
 
 <h2>Pricing</h2>
-<p>Calendly's paid plans start at $10/user/month. But you still need a website separately. With Sitepresso, your website and booking system are the same product, at one price.</p>
+<p>Calendly's paid plans start at $10/user/month. But you still need a website separately. With DriftHR, your website and booking system are the same product, at one price.</p>
 
 <h2>Best Use Case for Each</h2>
 <p><strong>Calendly:</strong> SaaS sales teams, recruiters, consultants scheduling discovery calls — any context where you're not charging for the meeting itself.</p>
-<p><strong>Sitepresso:</strong> Any service business where appointments = revenue. Clinics, studios, salons, trainers, therapists, dog groomers, tutors.</p>`,
+<p><strong>DriftHR:</strong> Any service business where appointments = revenue. Clinics, studios, salons, trainers, therapists, dog groomers, tutors.</p>`,
   },
   {
     slug: 'sitepresso-vs-shopify',
-    title: 'Sitepresso vs Shopify: Best Pick for Small Ecommerce?',
+    title: 'DriftHR vs Shopify: Best Pick for Small Ecommerce?',
     excerpt: "Shopify is the world's leading ecommerce platform. But for small businesses selling alongside services, it's overkill with a hefty price tag.",
     category: 'Comparisons',
     readTime: 6,
@@ -137,21 +137,21 @@ const articles = [
 <p>Most small businesses don't need Shopify's full stack. A yoga studio selling memberships and class packs, a nutritionist selling meal plans, a dog trainer selling training packages — these businesses need ecommerce as one feature among many, not a dedicated platform with dedicated overhead.</p>
 
 <h2>The Cost Problem</h2>
-<p>Shopify's Basic plan is $39/month. They also charge transaction fees (0.5–2%) on every sale unless you use Shopify Payments. Add a theme ($180+), essential apps ($20–$100/month each), and you're easily at $150–$200/month before you've made a sale. Sitepresso's ecommerce tier is built for businesses where selling products is one part of a bigger offering.</p>
+<p>Shopify's Basic plan is $39/month. They also charge transaction fees (0.5–2%) on every sale unless you use Shopify Payments. Add a theme ($180+), essential apps ($20–$100/month each), and you're easily at $150–$200/month before you've made a sale. DriftHR's ecommerce tier is built for businesses where selling products is one part of a bigger offering.</p>
 
 <h2>The Booking Gap</h2>
-<p>Shopify has no native booking or appointment system. You'd need an app like Sesami or BookThatApp ($20–$40/month extra) to add booking. Sitepresso's APPOINTMENT and ECOMMERCE verticals can coexist on the same site, under the same dashboard.</p>
+<p>Shopify has no native booking or appointment system. You'd need an app like Sesami or BookThatApp ($20–$40/month extra) to add booking. DriftHR's APPOINTMENT and ECOMMERCE verticals can coexist on the same site, under the same dashboard.</p>
 
 <h2>When to Choose Shopify</h2>
 <p>Choose Shopify if you're purely an online retailer with no service component, high order volume, and need advanced inventory management, multi-channel selling (Amazon, Instagram), or 3PL integrations.</p>
 
-<h2>When to Choose Sitepresso</h2>
-<p>Choose Sitepresso if you run a service business that also sells products or packages — or if you're starting an online store and want a simpler, more affordable platform to grow with.</p>`,
+<h2>When to Choose DriftHR</h2>
+<p>Choose DriftHR if you run a service business that also sells products or packages — or if you're starting an online store and want a simpler, more affordable platform to grow with.</p>`,
   },
   {
     slug: 'sitepresso-vs-acuity-scheduling',
-    title: 'Sitepresso vs Acuity Scheduling: Full Feature Comparison',
-    excerpt: 'Acuity Scheduling is a popular booking tool. Here is how it stacks up against Sitepresso for real service businesses.',
+    title: 'DriftHR vs Acuity Scheduling: Full Feature Comparison',
+    excerpt: 'Acuity Scheduling is a popular booking tool. Here is how it stacks up against DriftHR for real service businesses.',
     category: 'Comparisons',
     readTime: 5,
     publishedAt: '2025-04-11',
@@ -163,21 +163,21 @@ const articles = [
 <p>Acuity is a booking tool, not a website. You need a separate website to direct traffic to your Acuity booking link. That means two tools, two logins, two monthly fees, and a disjointed client experience.</p>
 
 <h2>Pricing Comparison</h2>
-<p>Acuity's paid plans run $16–$61/month. Add Squarespace for a website ($16–$49/month) and you're at $32–$110/month total. Sitepresso is a single bill that covers both.</p>
+<p>Acuity's paid plans run $16–$61/month. Add Squarespace for a website ($16–$49/month) and you're at $32–$110/month total. DriftHR is a single bill that covers both.</p>
 
 <h2>Client Experience</h2>
-<p>With Acuity, clients see your website, click a link, and get redirected to an Acuity-branded booking page. The handoff breaks trust — especially for premium service providers. With Sitepresso, the booking flow happens directly on your domain. The client never leaves your branded experience.</p>
+<p>With Acuity, clients see your website, click a link, and get redirected to an Acuity-branded booking page. The handoff breaks trust — especially for premium service providers. With DriftHR, the booking flow happens directly on your domain. The client never leaves your branded experience.</p>
 
 <h2>Multi-Staff</h2>
-<p>Both platforms handle multi-staff scheduling. Sitepresso's staff system is built into the same dashboard as your website, services, and customer data — no separate configuration needed.</p>
+<p>Both platforms handle multi-staff scheduling. DriftHR's staff system is built into the same dashboard as your website, services, and customer data — no separate configuration needed.</p>
 
 <h2>Verdict</h2>
-<p>Acuity is a booking tool looking for a website to attach to. Sitepresso is the website and booking system already joined. For new businesses, starting with Sitepresso avoids the complexity of integrating two separate products.</p>`,
+<p>Acuity is a booking tool looking for a website to attach to. DriftHR is the website and booking system already joined. For new businesses, starting with DriftHR avoids the complexity of integrating two separate products.</p>`,
   },
   {
     slug: 'how-to-get-website-in-5-minutes',
     title: 'How to Get a Professional Website in 5 Minutes (No Tech Skills Needed)',
-    excerpt: 'Building a professional website used to take weeks and cost thousands. Here is how service businesses can launch in under 5 minutes with Sitepresso.',
+    excerpt: 'Building a professional website used to take weeks and cost thousands. Here is how service businesses can launch in under 5 minutes with DriftHR.',
     category: 'How-To',
     readTime: 4,
     publishedAt: '2025-04-13',
@@ -186,13 +186,13 @@ const articles = [
 <p>The traditional path to a professional website: hire a designer ($2,000–$10,000), wait 6–8 weeks, review revisions, pay a developer to add booking ($500–$2,000 more), then manage it all yourself. Most small business owners either skip the website entirely or end up with something outdated and embarrassing.</p>
 
 <h2>The New Way</h2>
-<p>With Sitepresso, the process is:</p>
+<p>With DriftHR, the process is:</p>
 <ol>
 <li><strong>Start a trial</strong> — checkout captures your card before the first charge</li>
 <li><strong>Pick your vertical</strong> — Booking site, online shop, or marketing page</li>
 <li><strong>Choose your industry theme</strong> — dental, yoga, consulting, legal, and more</li>
 <li><strong>Add your business name, logo, and services</strong> — takes about 3 minutes</li>
-<li><strong>Go live</strong> — on your own domain or a free Sitepresso subdomain</li>
+<li><strong>Go live</strong> — on your own domain or a free DriftHR subdomain</li>
 </ol>
 
 <h2>What You Get Out of the Box</h2>
@@ -207,7 +207,7 @@ const articles = [
 </ul>
 
 <h2>What You Don't Need</h2>
-<p>You don't need to know HTML, CSS, or JavaScript. You don't need to hire a developer. You don't need to manage hosting or worry about security updates. Sitepresso handles all of that.</p>
+<p>You don't need to know HTML, CSS, or JavaScript. You don't need to hire a developer. You don't need to manage hosting or worry about security updates. DriftHR handles all of that.</p>
 
 <h2>The 5-Minute Caveat</h2>
 <p>The initial website takes 5 minutes. Adding photos, writing your bio, and customising service descriptions might take another hour. But the foundation is live in 5 minutes — and that's 5 minutes versus 8 weeks.</p>`,
@@ -230,7 +230,7 @@ const articles = [
 <p>Configure your working hours and any recurring time-off. If you have multiple staff members, set availability for each person separately. Include buffer time between appointments (10–15 minutes) to avoid running over.</p>
 
 <h2>Step 3: Configure Payments</h2>
-<p>Decide whether to record a deposit, mark payment at the visit, or invoice after the service. Sitepresso keeps the booking and payment status visible without pretending every booking flow has gateway checkout.</p>
+<p>Decide whether to record a deposit, mark payment at the visit, or invoice after the service. DriftHR keeps the booking and payment status visible without pretending every booking flow has gateway checkout.</p>
 
 <h2>Step 4: Set Up Confirmation & Reminders</h2>
 <p>Automated email confirmations and reminders are non-negotiable. A confirmation email immediately after booking, and a reminder 24 hours before, typically reduces no-shows by 30–50%.</p>
@@ -263,38 +263,38 @@ const articles = [
 <h2>How Stripe Works</h2>
 <p>Stripe charges 1.4% + 20p per transaction (UK) or 2.9% + 30¢ (US) for online card payments. There are no setup fees, no monthly fees, and no minimum volumes. Funds typically arrive in your bank account within 2 business days.</p>
 
-<h2>Setting Up Payments in Sitepresso</h2>
+<h2>Setting Up Payments in DriftHR</h2>
 <ol>
-<li>Go to Settings → Payments in your Sitepresso dashboard</li>
+<li>Go to Settings → Payments in your DriftHR dashboard</li>
 <li>Click "Connect Stripe" — this takes you to Stripe's setup flow</li>
 <li>Create a Stripe account (or log in to an existing one)</li>
 <li>Stripe verifies your identity and bank details (usually takes 10 minutes)</li>
-<li>Return to Sitepresso — payments are now live</li>
+<li>Return to DriftHR — payments are now live</li>
 </ol>
 
 <h2>Taking Deposits vs Full Payment</h2>
-<p>You can configure Sitepresso to take a full payment at booking, or a deposit (e.g., 25%) with the remainder paid in person. Deposits are a good middle ground — they reduce no-shows without requiring clients to pay the full amount upfront.</p>
+<p>You can configure DriftHR to take a full payment at booking, or a deposit (e.g., 25%) with the remainder paid in person. Deposits are a good middle ground — they reduce no-shows without requiring clients to pay the full amount upfront.</p>
 
 <h2>Refunds</h2>
-<p>Refunds can be processed from your Sitepresso dashboard or directly from Stripe. They typically return to the client's card within 5–10 business days.</p>`,
+<p>Refunds can be processed from your DriftHR dashboard or directly from Stripe. They typically return to the client's card within 5–10 business days.</p>`,
   },
   {
     slug: 'add-booking-button-existing-website',
     title: 'How to Add a "Book Now" Button to Your Existing Website',
-    excerpt: "Already have a website on Wix, Squarespace, or WordPress? You can add Sitepresso's booking widget without rebuilding your site.",
+    excerpt: "Already have a website on Wix, Squarespace, or WordPress? You can add DriftHR's booking widget without rebuilding your site.",
     category: 'How-To',
     readTime: 4,
     publishedAt: '2025-04-19',
     tags: ['how-to', 'embed', 'booking-widget'],
     content: `<h2>The Embed Approach</h2>
-<p>Not everyone wants to migrate their entire website. If you have an existing site you're happy with, Sitepresso's embed widget lets you add a fully functional "Book Now" button that opens your Sitepresso booking flow — without your clients ever leaving your site.</p>
+<p>Not everyone wants to migrate their entire website. If you have an existing site you're happy with, DriftHR's embed widget lets you add a fully functional "Book Now" button that opens your DriftHR booking flow — without your clients ever leaving your site.</p>
 
 <h2>How It Works</h2>
-<p>Sitepresso generates a small JavaScript snippet (two lines of code). You paste it into any page on your existing website. When a visitor clicks "Book Now," a booking panel slides in over your page. They pick a service, choose a time, pay — all without navigating away.</p>
+<p>DriftHR generates a small JavaScript snippet (two lines of code). You paste it into any page on your existing website. When a visitor clicks "Book Now," a booking panel slides in over your page. They pick a service, choose a time, pay — all without navigating away.</p>
 
 <h2>Step-by-Step</h2>
 <ol>
-<li>In your Sitepresso dashboard, go to Settings → Embed Widget</li>
+<li>In your DriftHR dashboard, go to Settings → Embed Widget</li>
 <li>Customise the button text and colour to match your site</li>
 <li>Copy the generated embed code snippet</li>
 <li>Paste it into your existing website before the closing &lt;/body&gt; tag</li>
@@ -311,7 +311,7 @@ const articles = [
 </ul>
 
 <h2>Why This Works for Your Business</h2>
-<p>Many clients have invested time and money into their current website and don't want to rebuild. The embed approach gives them Sitepresso's full booking engine — payments, reminders, customer portal — without disrupting what's already working.</p>`,
+<p>Many clients have invested time and money into their current website and don't want to rebuild. The embed approach gives them DriftHR's full booking engine — payments, reminders, customer portal — without disrupting what's already working.</p>`,
   },
   {
     slug: 'website-builder-for-yoga-studios',
@@ -336,11 +336,11 @@ const articles = [
 <h2>Why Generic Website Builders Fall Short</h2>
 <p>Wix and Squarespace can technically do all of this — but you're building it piece by piece with add-ons that don't talk to each other. The "Yoga Studio" templates on these platforms are aesthetic, not functional. They look like a yoga studio but don't have the booking logic a studio actually needs.</p>
 
-<h2>Sitepresso's Yoga Theme</h2>
-<p>Sitepresso's yoga industry theme is built on real yoga studio research. The design, the section order, the service types — all pre-configured for how yoga studios operate. Launch in minutes with a site that looks like it cost $5,000 to build.</p>
+<h2>DriftHR's Yoga Theme</h2>
+<p>DriftHR's yoga industry theme is built on real yoga studio research. The design, the section order, the service types — all pre-configured for how yoga studios operate. Launch in minutes with a site that looks like it cost $5,000 to build.</p>
 
 <h2>SEO for Yoga Studios</h2>
-<p>Rank for searches like "yoga studio [your city]" and "[style] yoga classes near me." Sitepresso's pages are pre-optimised with the right meta structure, fast load times, and local business markup that helps Google understand your location.</p>`,
+<p>Rank for searches like "yoga studio [your city]" and "[style] yoga classes near me." DriftHR's pages are pre-optimised with the right meta structure, fast load times, and local business markup that helps Google understand your location.</p>`,
   },
   {
     slug: 'website-for-dentists',
@@ -364,13 +364,13 @@ const articles = [
 </ul>
 
 <h2>The Trust Factor</h2>
-<p>Dental websites need to communicate safety, professionalism, and warmth simultaneously. The design should be clean and clinical enough to signal expertise, but warm enough to reduce anxiety. Sitepresso's dental theme strikes this balance with a tested design built specifically for dental practices.</p>
+<p>Dental websites need to communicate safety, professionalism, and warmth simultaneously. The design should be clean and clinical enough to signal expertise, but warm enough to reduce anxiety. DriftHR's dental theme strikes this balance with a tested design built specifically for dental practices.</p>
 
 <h2>Local SEO for Dentists</h2>
-<p>Most dental searches are local: "dentist near me," "family dentist [suburb]," "emergency dental [city]." Sitepresso's pages include local business structured data that helps you appear in Google's local pack — the map results at the top of the search page.</p>
+<p>Most dental searches are local: "dentist near me," "family dentist [suburb]," "emergency dental [city]." DriftHR's pages include local business structured data that helps you appear in Google's local pack — the map results at the top of the search page.</p>
 
 <h2>HIPAA and Privacy Considerations</h2>
-<p>While Sitepresso handles general website data securely, practices handling protected health information (PHI) should review their full compliance picture with a healthcare IT consultant. Sitepresso's intake forms should not be used for medical records — use dedicated practice management software for clinical data.</p>`,
+<p>While DriftHR handles general website data securely, practices handling protected health information (PHI) should review their full compliance picture with a healthcare IT consultant. DriftHR's intake forms should not be used for medical records — use dedicated practice management software for clinical data.</p>`,
   },
   {
     slug: 'website-for-therapists',
@@ -393,12 +393,12 @@ const articles = [
 </ul>
 
 <h2>Online Booking for Therapists</h2>
-<p>Many therapists are cautious about fully automated booking — they prefer an initial consultation before committing to a new client. Sitepresso supports this: you can configure "enquiry" mode where clients submit a request, and you confirm manually before a session is booked.</p>
+<p>Many therapists are cautious about fully automated booking — they prefer an initial consultation before committing to a new client. DriftHR supports this: you can configure "enquiry" mode where clients submit a request, and you confirm manually before a session is booked.</p>
 
 <h2>Telehealth / Online Sessions</h2>
 <p>If you offer video sessions, your website should make it obvious. Include your video platform (Zoom, Google Meet), time zones you cover, and how the technology side works — many clients are anxious about the tech, not just the therapy.</p>
 
-<h2>Sitepresso's Therapist Theme</h2>
+<h2>DriftHR's Therapist Theme</h2>
 <p>The therapist theme uses a calming colour palette, clear section structure, and copy prompts that help you write the right content. It's designed to convert curious visitors into brave first enquirers.</p>`,
   },
   {
@@ -453,8 +453,8 @@ const articles = [
 <h2>The Lead Magnet</h2>
 <p>Offer something free in exchange for an email address — a 7-day workout plan PDF, a macro calculator, a free 20-minute strategy call. This builds your list and gives you a chance to demonstrate value before asking for payment.</p>
 
-<h2>Sitepresso for Personal Trainers</h2>
-<p>Sitepresso's fitness theme includes sections for transformation stories, service packages, trainer bio, and a booking calendar. It's designed to convert fitness seekers into committed clients.</p>`,
+<h2>DriftHR for Personal Trainers</h2>
+<p>DriftHR's fitness theme includes sections for transformation stories, service packages, trainer bio, and a booking calendar. It's designed to convert fitness seekers into committed clients.</p>`,
   },
   {
     slug: 'website-for-nutritionists',
@@ -507,7 +507,7 @@ const articles = [
 <p>Offer online quote requests rather than waiting for phone calls. A form that captures job type, photos, location, and preferred dates turns website visitors into warm leads without you having to be available by phone during the day.</p>
 
 <h2>Local SEO</h2>
-<p>"Emergency electrician Bristol," "24-hour plumber Manchester," "Gas Safe engineer near me" — these are the searches that drive real business. Sitepresso's pages are structured to rank for these local intent searches.</p>
+<p>"Emergency electrician Bristol," "24-hour plumber Manchester," "Gas Safe engineer near me" — these are the searches that drive real business. DriftHR's pages are structured to rank for these local intent searches.</p>
 
 <h2>The Price Signalling Effect</h2>
 <p>A professional website lets you charge professional prices. Homeowners who find you through your website (rather than a price-comparison site) are less price-sensitive — they've already decided they want YOU, not the cheapest option.</p>`,
@@ -534,12 +534,12 @@ const articles = [
 </ol>
 
 <h2>The Discovery Call</h2>
-<p>Most consulting engagements start with a conversation. Make booking that conversation friction-free. A "Book a 30-minute call" button that goes directly to your calendar (with Sitepresso's booking integration) removes the back-and-forth of scheduling.</p>
+<p>Most consulting engagements start with a conversation. Make booking that conversation friction-free. A "Book a 30-minute call" button that goes directly to your calendar (with DriftHR's booking integration) removes the back-and-forth of scheduling.</p>
 
 <h2>Content Marketing for Consultants</h2>
 <p>Publishing articles about problems your clients face — the kind of articles you'd write for a top industry publication — builds domain authority and attracts decision-makers through search. A blog is the highest-ROI marketing channel for consultants.</p>
 
-<h2>Sitepresso for Consultants</h2>
+<h2>DriftHR for Consultants</h2>
 <p>The consultant theme is structured around lead conversion, not portfolio display. It includes the sections that matter, in the order that converts, with a booking integration that captures enquiries when prospects are most motivated.</p>`,
   },
   {
@@ -568,7 +568,7 @@ const articles = [
 <p>Monday morning for many service businesses brings a queue of weekend enquiries waiting to be answered. With online booking, those weekend enquiries convert to booked appointments automatically — revenue that previously required a phone call.</p>
 
 <h2>Why Some Businesses Resist It</h2>
-<p>The most common objection: "I like speaking to clients before they book." The solution: set up an initial enquiry flow where clients submit a request, you confirm, and then they book. Sitepresso supports this mode. You get the conversation without the calendar chaos.</p>`,
+<p>The most common objection: "I like speaking to clients before they book." The solution: set up an initial enquiry flow where clients submit a request, you confirm, and then they book. DriftHR supports this mode. You get the conversation without the calendar chaos.</p>`,
   },
   {
     slug: 'how-website-pays-for-itself',
@@ -579,7 +579,7 @@ const articles = [
     publishedAt: '2025-05-09',
     tags: ['roi', 'business', 'investment'],
     content: `<h2>The Maths Is Simple</h2>
-<p>A Sitepresso subscription costs less than $50/month. If your website generates even one additional client per month who wouldn't have found you otherwise, the website has paid for itself. For most service businesses, one client is worth $100–$1,000+ in revenue.</p>
+<p>A DriftHR subscription costs less than $50/month. If your website generates even one additional client per month who wouldn't have found you otherwise, the website has paid for itself. For most service businesses, one client is worth $100–$1,000+ in revenue.</p>
 
 <h2>How Additional Clients Come From Your Website</h2>
 <ul>
@@ -597,7 +597,7 @@ const articles = [
 <li>Online payments reduce chasing invoices</li>
 <li>FAQ page reduces repetitive enquiries</li>
 </ul>
-<p>At £25/hour of your time, saving 5 hours per week is worth £500/month — 10× the cost of a Sitepresso subscription.</p>
+<p>At £25/hour of your time, saving 5 hours per week is worth £500/month — 10× the cost of a DriftHR subscription.</p>
 
 <h2>The Calculation</h2>
 <p>Track where your new clients come from for 30 days. Even if only 10% cite your website as the reason they found you, calculate what those clients are worth. For most businesses, the ROI is 5–20× within the first month.</p>`,
@@ -650,13 +650,13 @@ const articles = [
 <p>When clients pay at the time of booking — even just a 25% deposit — no-show rates typically drop 30–40%. Money already spent creates commitment. The psychology of loss aversion works in your favour: people don't want to lose money they've already paid.</p>
 
 <h2>The Reminder Solution</h2>
-<p>Automated reminders sent 48 hours and 24 hours before an appointment address the "I forgot" category. Sitepresso sends these automatically — you don't need to remember to send them.</p>
+<p>Automated reminders sent 48 hours and 24 hours before an appointment address the "I forgot" category. DriftHR sends these automatically — you don't need to remember to send them.</p>
 
 <h2>The Cancellation Policy Solution</h2>
 <p>Clear cancellation policies with real consequences (e.g., deposit forfeited if cancelled within 24 hours) reduce last-minute cancellations. Display your policy clearly during the booking flow — no surprises, no arguments.</p>
 
 <h2>Implementing This</h2>
-<p>Sitepresso lets you configure deposit amounts, cancellation policies, and automated reminders from the same dashboard. The full no-show reduction stack is three configuration choices, not three separate tools.</p>`,
+<p>DriftHR lets you configure deposit amounts, cancellation policies, and automated reminders from the same dashboard. The full no-show reduction stack is three configuration choices, not three separate tools.</p>`,
   },
   {
     slug: 'local-seo-for-service-businesses',
@@ -726,7 +726,7 @@ const articles = [
 <h2>The Organic Search Path</h2>
 <p>For organic search rankings, the formula is:</p>
 <ul>
-<li>A fast, mobile-friendly website (Sitepresso handles this automatically)</li>
+<li>A fast, mobile-friendly website (DriftHR handles this automatically)</li>
 <li>Page titles and headings that include your service and location</li>
 <li>Regular blog content targeting questions your clients ask</li>
 <li>Backlinks from local organisations, directories, and press</li>
@@ -758,11 +758,11 @@ const articles = [
 <li>No content delivery network (CDN)</li>
 </ul>
 
-<h2>Why Sitepresso Sites are Fast</h2>
-<p>Sitepresso is built on Next.js with static generation for marketing pages. This means pages are pre-built at deploy time — when a visitor requests your page, they get a pre-rendered file rather than waiting for a server to build the page on demand. Result: sub-second load times on most pages.</p>
+<h2>Why DriftHR Sites are Fast</h2>
+<p>DriftHR is built on Next.js with static generation for marketing pages. This means pages are pre-built at deploy time — when a visitor requests your page, they get a pre-rendered file rather than waiting for a server to build the page on demand. Result: sub-second load times on most pages.</p>
 
 <h2>Testing Your Speed</h2>
-<p>Test your website at PageSpeed Insights (Google's free tool). A score of 90+ on mobile is the target. Most Sitepresso sites score above 90 without any additional configuration.</p>`,
+<p>Test your website at PageSpeed Insights (Google's free tool). A score of 90+ on mobile is the target. Most DriftHR sites score above 90 without any additional configuration.</p>`,
   },
   {
     slug: 'blogging-brings-clients',
@@ -821,12 +821,12 @@ const articles = [
 <ul>
 <li><strong>Posts</strong> — share updates, offers, events weekly</li>
 <li><strong>Q&A</strong> — answer common questions proactively</li>
-<li><strong>Booking button</strong> — connect your Sitepresso booking link to your GBP listing</li>
+<li><strong>Booking button</strong> — connect your DriftHR booking link to your GBP listing</li>
 <li><strong>Reviews</strong> — respond to every review, positive and negative</li>
 </ul>
 
 <h2>The Review Loop</h2>
-<p>After every positive client interaction, send a review request with a direct link to your Google review page. The easiest way: set up an automated email from Sitepresso that triggers after a completed appointment, with a "How did we do? Leave us a review" call to action.</p>`,
+<p>After every positive client interaction, send a review request with a direct link to your Google review page. The easiest way: set up an automated email from DriftHR that triggers after a completed appointment, with a "How did we do? Leave us a review" call to action.</p>`,
   },
   {
     slug: 'built-in-booking-beats-plugins',
@@ -845,15 +845,15 @@ const articles = [
 <h2>The Update Problem</h2>
 <p>Plugin updates frequently break compatibility with the parent website. A WordPress site with WooCommerce and a booking plugin might require manual compatibility checking every time any of the three systems updates. Update without checking and your booking system goes offline. Don't update and you accumulate security vulnerabilities.</p>
 
-<h2>The Sitepresso Approach</h2>
-<p>Sitepresso's booking system is not a plugin — it's the same codebase as the website. Your customer records, appointment history, and website profile are all one database. No synchronisation. No compatibility issues. When you update a client's email address in the booking system, it's updated everywhere.</p>
+<h2>The DriftHR Approach</h2>
+<p>DriftHR's booking system is not a plugin — it's the same codebase as the website. Your customer records, appointment history, and website profile are all one database. No synchronisation. No compatibility issues. When you update a client's email address in the booking system, it's updated everywhere.</p>
 
 <h2>The Experience Difference</h2>
-<p>A booking plugin is visually separate from your website — different fonts, different colours, a third-party URL in the address bar. Sitepresso's booking flow lives on your domain, uses your branding, and feels seamless. That coherence builds trust.</p>`,
+<p>A booking plugin is visually separate from your website — different fonts, different colours, a third-party URL in the address bar. DriftHR's booking flow lives on your domain, uses your branding, and feels seamless. That coherence builds trust.</p>`,
   },
   {
     slug: 'theme-system-saves-money',
-    title: 'How Sitepresso\'s Theme System Saves You Thousands in Design',
+    title: 'How DriftHR\'s Theme System Saves You Thousands in Design',
     excerpt: 'A custom website design costs £2,000–£10,000 and takes 6–8 weeks. Industry-specific themes deliver the same result in minutes for a fraction of the cost.',
     category: 'Features',
     readTime: 4,
@@ -866,10 +866,10 @@ const articles = [
 <p>A generic template gives you a blank canvas — nice looking, but generic. An industry-specific theme gives you a website built on the design conventions of your sector. The dental theme uses trust signals appropriate for healthcare. The yoga theme uses the visual language of wellness. The legal theme uses the formality and authority markers that law firm clients expect.</p>
 
 <h2>The Time Difference</h2>
-<p>Custom design: 6–8 weeks. Generic template customised: 2–4 weeks. Sitepresso industry theme: 30 minutes to look professional, 1–2 hours to look great with your own content.</p>
+<p>Custom design: 6–8 weeks. Generic template customised: 2–4 weeks. DriftHR industry theme: 30 minutes to look professional, 1–2 hours to look great with your own content.</p>
 
 <h2>The Money Difference</h2>
-<p>Custom design: £2,000–£10,000. Premium template + customisation: £500–£2,000. Sitepresso: included in your monthly subscription.</p>
+<p>Custom design: £2,000–£10,000. Premium template + customisation: £500–£2,000. DriftHR: included in your monthly subscription.</p>
 
 <h2>When Custom Design Makes Sense</h2>
 <p>Custom design makes sense when your brand is genuinely unusual, when you have very specific functionality needs, or when your business has scaled to the point where a few percentage points of conversion rate improvement justifies the investment. For most service businesses at launch and growth stage, industry themes are the smarter choice.</p>`,
@@ -926,7 +926,7 @@ const articles = [
 <h2>The Old Way</h2>
 <p>WooCommerce on WordPress (requires hosting, theme, plugin, and developer setup), or a fully custom build. Either way: £2,000–£10,000 to launch, ongoing maintenance costs, and technical decisions you shouldn't need to make.</p>
 
-<h2>The Sitepresso Way</h2>
+<h2>The DriftHR Way</h2>
 <ol>
 <li>Sign up and choose the Ecommerce vertical</li>
 <li>Pick your industry theme</li>
@@ -973,7 +973,7 @@ const articles = [
 <p>Businesses using separate booking systems per location typically spend 3–5 hours per week reconciling data, transferring client records, and manually combining reporting. That's 150–250 hours per year of administrative work that should be automated.</p>
 
 <h2>The Right Architecture</h2>
-<p>Multi-location scheduling should be built into a single platform — one database, one dashboard, with location as a filter. Sitepresso's booking system supports this: add multiple locations, assign staff to each, and see all bookings in one place.</p>
+<p>Multi-location scheduling should be built into a single platform — one database, one dashboard, with location as a filter. DriftHR's booking system supports this: add multiple locations, assign staff to each, and see all bookings in one place.</p>
 
 <h2>The Client Experience</h2>
 <p>From the client's perspective, multi-location should be invisible. They should be able to book at any location through the same website, see their complete history, and be recognised as the same customer regardless of which site they visit.</p>`,
@@ -987,7 +987,7 @@ const articles = [
     publishedAt: '2025-06-06',
     tags: ['embed', 'booking-widget', 'integration', 'features'],
     content: `<h2>The Embed Value Proposition</h2>
-<p>Many small businesses have an existing website — built years ago, working fine for their brand — but no online booking. Rebuilding the whole website to add booking is wasteful. The embed approach adds Sitepresso's full booking engine to any website with two lines of code.</p>
+<p>Many small businesses have an existing website — built years ago, working fine for their brand — but no online booking. Rebuilding the whole website to add booking is wasteful. The embed approach adds DriftHR's full booking engine to any website with two lines of code.</p>
 
 <h2>What the Embed Includes</h2>
 <ul>
@@ -1003,7 +1003,7 @@ const articles = [
 <p>You choose the button style — text, style, and colour — and it matches your existing website's aesthetic. When clicked, a full-screen booking panel slides in (on mobile) or appears as an overlay (on desktop). It's seamless enough that clients often don't realise it's powered by a separate system.</p>
 
 <h2>The Sales Angle</h2>
-<p>The embed is also Sitepresso's "Bring Your Own Website" offering — for businesses that already have a website and just need the booking layer. It's the lowest-friction entry point into the Sitepresso ecosystem, and it upgrades naturally: many embed users eventually migrate their whole site to Sitepresso once they see the booking system working.</p>`,
+<p>The embed is also DriftHR's "Bring Your Own Website" offering — for businesses that already have a website and just need the booking layer. It's the lowest-friction entry point into the DriftHR ecosystem, and it upgrades naturally: many embed users eventually migrate their whole site to DriftHR once they see the booking system working.</p>`,
   },
   {
     slug: 'true-cost-of-no-website',
@@ -1026,18 +1026,18 @@ const articles = [
 <p>Every client your competitor gets from their website is a client you could have had with yours. In markets with limited local demand, this is zero-sum: their gain is your loss.</p>
 
 <h2>The Maths</h2>
-<p>A Sitepresso subscription costs less per month than a single appointment in most service industries. If it generates even one additional appointment per month that you wouldn't otherwise have had, it has paid for itself. The realistic expectation for a well-set-up website in a competitive local market is 5–20+ additional clients per month.</p>`,
+<p>A DriftHR subscription costs less per month than a single appointment in most service industries. If it generates even one additional appointment per month that you wouldn't otherwise have had, it has paid for itself. The realistic expectation for a well-set-up website in a competitive local market is 5–20+ additional clients per month.</p>`,
   },
   {
     slug: 'websites-in-5-minutes-is-more-than-a-tagline',
     title: 'Why "Websites in 5 Minutes" is More Than Just a Tagline',
-    excerpt: 'Sitepresso\'s tagline makes a specific promise. Here is exactly what you get in 5 minutes and what it means for your business.',
+    excerpt: 'DriftHR\'s tagline makes a specific promise. Here is exactly what you get in 5 minutes and what it means for your business.',
     category: 'Business',
     readTime: 3,
     publishedAt: '2025-06-10',
     tags: ['sitepresso', 'product', 'getting-started'],
     content: `<h2>The Promise</h2>
-<p>"Websites in 5 Minutes" is not marketing hyperbole. It describes the literal time between signing up to Sitepresso and having a published, professional website live on the internet. We've timed it hundreds of times. Under ideal conditions, it's closer to 3 minutes.</p>
+<p>"Websites in 5 Minutes" is not marketing hyperbole. It describes the literal time between signing up to DriftHR and having a published, professional website live on the internet. We've timed it hundreds of times. Under ideal conditions, it's closer to 3 minutes.</p>
 
 <h2>What Those 5 Minutes Include</h2>
 <ol>
@@ -1045,7 +1045,7 @@ const articles = [
 <li><strong>Minute 2:</strong> Pick your vertical (Booking, Ecommerce, or Static) and industry theme</li>
 <li><strong>Minute 3:</strong> Enter your business name and tagline</li>
 <li><strong>Minute 4:</strong> Add your first service or product</li>
-<li><strong>Minute 5:</strong> Choose your Sitepresso subdomain and click Publish</li>
+<li><strong>Minute 5:</strong> Choose your DriftHR subdomain and click Publish</li>
 </ol>
 
 <h2>What Comes Next</h2>
@@ -1057,14 +1057,14 @@ const articles = [
   {
     slug: 'what-is-multi-tenant-website-builder',
     title: 'What Is a Multi-Tenant Website Builder and Why It Matters',
-    excerpt: 'Multi-tenant architecture is the technology behind why Sitepresso can offer so much for so little. Here is what it means for your business.',
+    excerpt: 'Multi-tenant architecture is the technology behind why DriftHR can offer so much for so little. Here is what it means for your business.',
     category: 'Features',
     readTime: 4,
     publishedAt: '2025-06-12',
     tags: ['technology', 'multi-tenant', 'saas', 'features'],
     content: `<h2>Single-Tenant vs Multi-Tenant</h2>
 <p>In single-tenant software, each customer gets their own dedicated infrastructure — their own server, their own database, their own codebase. This is how enterprise software used to work. It's expensive to build and expensive to run.</p>
-<p>In multi-tenant software, many customers share the same infrastructure. The code runs once; the data is isolated per customer. This is how Sitepresso works — and it's why we can offer enterprise-grade website and booking infrastructure at a small business price.</p>
+<p>In multi-tenant software, many customers share the same infrastructure. The code runs once; the data is isolated per customer. This is how DriftHR works — and it's why we can offer enterprise-grade website and booking infrastructure at a small business price.</p>
 
 <h2>What You Get from Multi-Tenancy</h2>
 <ul>
@@ -1075,10 +1075,10 @@ const articles = [
 </ul>
 
 <h2>Your Data is Still Yours</h2>
-<p>Multi-tenant doesn't mean your data is accessible to other businesses on the platform. Each business's data is isolated at the database level — Sitepresso employees can access it for support purposes, but other customers cannot.</p>
+<p>Multi-tenant doesn't mean your data is accessible to other businesses on the platform. Each business's data is isolated at the database level — DriftHR employees can access it for support purposes, but other customers cannot.</p>
 
 <h2>The Business Model Implication</h2>
-<p>Multi-tenancy is why Sitepresso can charge £30/month for infrastructure that would cost £500+/month to build and maintain independently. You get the benefit of a sophisticated engineering team's work without paying for the engineering team.</p>`,
+<p>Multi-tenancy is why DriftHR can charge £30/month for infrastructure that would cost £500+/month to build and maintain independently. You get the benefit of a sophisticated engineering team's work without paying for the engineering team.</p>`,
   },
   {
     slug: 'how-to-get-first-10-clients',
@@ -1089,7 +1089,7 @@ const articles = [
     publishedAt: '2025-06-14',
     tags: ['clients', 'business', 'marketing', 'launch'],
     content: `<h2>Week 1: Get Your Website Live</h2>
-<p>Before you can get clients from your website, you need a website. Sign up for Sitepresso, pick your vertical, and publish a basic version of your site. Don't wait for it to be perfect — a live imperfect website beats a perfect website that doesn't exist yet.</p>
+<p>Before you can get clients from your website, you need a website. Sign up for DriftHR, pick your vertical, and publish a basic version of your site. Don't wait for it to be perfect — a live imperfect website beats a perfect website that doesn't exist yet.</p>
 
 <h2>Week 2: Set Up Your Google Presence</h2>
 <p>Create your Google Business Profile and link it to your new website. Add photos, your service list, and opening hours. Verify the listing. This makes you findable in Google Maps for local searches — the fastest free traffic source for a new service business.</p>
@@ -1101,7 +1101,7 @@ const articles = [
 <p>After your first 3–5 clients, ask each one for a Google review. Offer to do the review yourself and they just approve it — that dramatically increases the conversion rate of review requests. Three authentic reviews put you ahead of most local competitors.</p>
 
 <h2>Week 5–6: Create Your First Content</h2>
-<p>Write one blog post targeting the most common question you get from potential clients. Publish it on your Sitepresso site. Share it on LinkedIn, in relevant Facebook groups, and in your email signature. This starts building SEO traction and positions you as the expert.</p>
+<p>Write one blog post targeting the most common question you get from potential clients. Publish it on your DriftHR site. Share it on LinkedIn, in relevant Facebook groups, and in your email signature. This starts building SEO traction and positions you as the expert.</p>
 
 <h2>The Flywheel</h2>
 <p>Getting the first 10 clients is hard because you have no social proof. Getting the next 10 is easier because you have 10 reviews and some word-of-mouth. Getting the next 100 is easier still because you have SEO traction and a reputation. The website is the foundation for all of this.</p>`,
@@ -1139,8 +1139,8 @@ const articles = [
 <h2>The Time Cost</h2>
 <p>Beyond money, DIY builders cost time. Configuring each add-on, troubleshooting integrations, learning separate interfaces for booking vs website vs email. For a business owner whose time is worth £50+/hour, 20 hours of configuration at launch costs £1,000 in opportunity cost alone.</p>
 
-<h2>The Sitepresso Difference</h2>
-<p>Sitepresso is priced as an all-inclusive service: website, booking, ecommerce, customer portal, and support in a single subscription. What you see is what you pay. No upsells for the features your business actually needs.</p>`,
+<h2>The DriftHR Difference</h2>
+<p>DriftHR is priced as an all-inclusive service: website, booking, ecommerce, customer portal, and support in a single subscription. What you see is what you pay. No upsells for the features your business actually needs.</p>`,
   },
   {
     slug: 'mobile-first-websites-local-business',
@@ -1162,8 +1162,8 @@ const articles = [
 <h2>The Click-to-Call Imperative</h2>
 <p>On mobile, your phone number should be a tap-to-call link. If someone has to manually copy a phone number from your website and paste it into their phone app, you'll lose them. Every friction point on mobile reduces conversions.</p>
 
-<h2>Sitepresso is Mobile-First by Default</h2>
-<p>Every Sitepresso theme is designed mobile-first. You don't need to create a separate mobile version or install a mobile optimisation plugin. The site works correctly on every screen size by default, and scores above 90 on Google's mobile usability test.</p>`,
+<h2>DriftHR is Mobile-First by Default</h2>
+<p>Every DriftHR theme is designed mobile-first. You don't need to create a separate mobile version or install a mobile optimisation plugin. The site works correctly on every screen size by default, and scores above 90 on Google's mobile usability test.</p>`,
   },
   {
     slug: 'website-for-immigration-lawyers',
@@ -1189,8 +1189,8 @@ const articles = [
 <h2>The Consultation Booking Flow</h2>
 <p>Most immigration enquiries start with a free or low-cost consultation. Make booking this consultation frictionless — a calendar-based booking system where clients pick a time, with an intake form that captures basic case information. This pre-qualifies leads before the consultation and saves time for both parties.</p>
 
-<h2>Sitepresso for Legal Services</h2>
-<p>Sitepresso's legal and immigration themes are built with the credibility signals and case-type structure that convert anxious enquirers into consultation bookings. The booking system handles the consultation scheduling so you focus on the case.</p>`,
+<h2>DriftHR for Legal Services</h2>
+<p>DriftHR's legal and immigration themes are built with the credibility signals and case-type structure that convert anxious enquirers into consultation bookings. The booking system handles the consultation scheduling so you focus on the case.</p>`,
   },
   {
     slug: 'website-for-hair-salons-barbers',
@@ -1215,10 +1215,10 @@ const articles = [
 
 <h2>The Website Connection</h2>
 <p>Many salons use standalone booking apps (Fresha, Treatwell, Booksy) that are entirely separate from their website. The result: the client journey is split across platforms, your branding is diluted by the booking app's interface, and you pay commission on every booking.</p>
-<p>Sitepresso integrates the salon website and booking system so the client experience stays on your domain, your brand, and your terms — no per-booking commission.</p>
+<p>DriftHR integrates the salon website and booking system so the client experience stays on your domain, your brand, and your terms — no per-booking commission.</p>
 
 <h2>Showcasing Your Work</h2>
-<p>A salon website needs before/after photos, colour lookbooks, and stylist portfolios. These are the content that converts social media followers into clients who actually book. Your Sitepresso site has a gallery section built for exactly this.</p>`,
+<p>A salon website needs before/after photos, colour lookbooks, and stylist portfolios. These are the content that converts social media followers into clients who actually book. Your DriftHR site has a gallery section built for exactly this.</p>`,
   },
   {
     slug: 'website-for-meditation-coaches',
@@ -1241,13 +1241,13 @@ const articles = [
 </ul>
 
 <h2>The Hybrid In-Person/Online Challenge</h2>
-<p>Most wellness coaches now offer both in-person and online sessions. Your booking system needs to handle both: different locations (or video link), different capacities, different pricing. Sitepresso supports this natively — no separate booking system for online vs in-person.</p>
+<p>Most wellness coaches now offer both in-person and online sessions. Your booking system needs to handle both: different locations (or video link), different capacities, different pricing. DriftHR supports this natively — no separate booking system for online vs in-person.</p>
 
 <h2>Subscriptions and Packages</h2>
 <p>Many wellness clients commit to programmes rather than one-off sessions. The ability to sell a "10-session package" or a "monthly membership" dramatically increases client lifetime value and reduces the administrative burden of rebooking individually.</p>
 
 <h2>The Aesthetic</h2>
-<p>Wellness website design needs to feel like the service: calm colours, generous white space, natural imagery, unhurried typography. Sitepresso's wellness and meditation theme is built to these standards — it communicates the experience visually before a client has read a single word.</p>`,
+<p>Wellness website design needs to feel like the service: calm colours, generous white space, natural imagery, unhurried typography. DriftHR's wellness and meditation theme is built to these standards — it communicates the experience visually before a client has read a single word.</p>`,
   },
   {
     slug: 'website-for-corporate-consultants',
@@ -1275,8 +1275,8 @@ const articles = [
 <h2>The Referral Validation Step</h2>
 <p>Many corporate consulting relationships start with a referral. The referred prospect then does due diligence online. A professional website validates the referral — without it, even a warm introduction can stall.</p>
 
-<h2>Sitepresso for B2B Consultants</h2>
-<p>Sitepresso's corporate consulting theme is structured for B2B credibility: case studies, team profiles, sector expertise, and a lead capture form that triggers a professional email response to enquirers.</p>`,
+<h2>DriftHR for B2B Consultants</h2>
+<p>DriftHR's corporate consulting theme is structured for B2B credibility: case studies, team profiles, sector expertise, and a lead capture form that triggers a professional email response to enquirers.</p>`,
   },
   {
     slug: 'how-website-makes-you-look-more-professional',
@@ -1337,12 +1337,12 @@ const articles = [
 <h2>What to Do with the List</h2>
 <p>Monthly email with useful content, occasional promotional offers, and announcements of new services. The ratio should be roughly 80% value, 20% promotion. An email list that consistently delivers value converts reliably when you do make an offer.</p>
 
-<h2>Sitepresso's Email Capture</h2>
-<p>Sitepresso sites include a newsletter sign-up section. Collected emails can be exported or integrated with email marketing tools like Mailchimp, ConvertKit, or Klaviyo for automated campaigns.</p>`,
+<h2>DriftHR's Email Capture</h2>
+<p>DriftHR sites include a newsletter sign-up section. Collected emails can be exported or integrated with email marketing tools like Mailchimp, ConvertKit, or Klaviyo for automated campaigns.</p>`,
   },
   {
     slug: 'complete-guide-getting-started-sitepresso',
-    title: 'The Complete Guide to Getting Started with Sitepresso',
+    title: 'The Complete Guide to Getting Started with DriftHR',
     excerpt: 'Everything you need to know to go from account creation to a fully live, client-ready website on your own domain.',
     category: 'How-To',
     readTime: 8,
@@ -1354,7 +1354,7 @@ const articles = [
 <li>Your business name and tagline</li>
 <li>A logo (PNG or SVG, or we'll use a text version until you have one)</li>
 <li>Your services with names, descriptions, durations, and prices</li>
-<li>A domain name (or use the included Sitepresso subdomain to start)</li>
+<li>A domain name (or use the included DriftHR subdomain to start)</li>
 </ul>
 
 <h2>Step 1: Create Your Account</h2>
@@ -1417,7 +1417,7 @@ const articles = [
   },
   {
     slug: 'sitepresso-vs-godaddy',
-    title: 'Sitepresso vs GoDaddy Website Builder: Which is Better?',
+    title: 'DriftHR vs GoDaddy Website Builder: Which is Better?',
     excerpt: 'GoDaddy is the world\'s largest domain registrar. But is their website builder the right choice for service businesses? We compare.',
     category: 'Comparisons',
     readTime: 5,
@@ -1427,7 +1427,7 @@ const articles = [
 <p>GoDaddy is excellent at one thing: selling and managing domain names. Their website builder is a secondary product — functional but not purpose-built. For businesses that want to buy a domain and quickly put up a basic site, GoDaddy is convenient. For businesses that need booking, ecommerce, or industry-specific design, it falls short.</p>
 
 <h2>The Template Problem</h2>
-<p>GoDaddy's templates are generic — they're designed to work for any business, which means they're not optimised for any specific business. A yoga studio website and a plumbing website look similar because they're built on the same template. Sitepresso's industry themes are built for specific sectors.</p>
+<p>GoDaddy's templates are generic — they're designed to work for any business, which means they're not optimised for any specific business. A yoga studio website and a plumbing website look similar because they're built on the same template. DriftHR's industry themes are built for specific sectors.</p>
 
 <h2>Booking and Appointments</h2>
 <p>GoDaddy has an appointments feature on higher-tier plans, but it's basic compared to purpose-built booking systems. Multi-staff, complex service menus, deposit requirements, and automated reminders either aren't available or require significant configuration.</p>
@@ -1436,10 +1436,10 @@ const articles = [
 <p>GoDaddy's Basic plan: $9.99/month (but renews at $19.99/month after the first year). Premium: $14.99/month renewing at $29.99/month. Commerce (for online selling): $20.99/month renewing at $39.99/month. The first-year promotional pricing is misleading — year two costs are significantly higher.</p>
 
 <h2>Performance</h2>
-<p>GoDaddy's website builder generates relatively slow sites by modern standards. Sitepresso's Next.js architecture delivers sub-second load times — which matters for both user experience and Google rankings.</p>
+<p>GoDaddy's website builder generates relatively slow sites by modern standards. DriftHR's Next.js architecture delivers sub-second load times — which matters for both user experience and Google rankings.</p>
 
 <h2>Verdict</h2>
-<p>GoDaddy is fine for a basic web presence. Sitepresso is better for any service business that needs to be found, trusted, and booked online.</p>`,
+<p>GoDaddy is fine for a basic web presence. DriftHR is better for any service business that needs to be found, trusted, and booked online.</p>`,
   },
   {
     slug: 'anatomy-high-converting-service-website',
@@ -1507,8 +1507,8 @@ const articles = [
 <h2>The Mobile Booking Experience</h2>
 <p>On mobile, the booking flow needs to be finger-friendly: large tap targets, no horizontal scrolling, calendar that works with a thumb. Test your booking flow on your own phone before going live — if anything feels clunky, it will cost you bookings.</p>
 
-<h2>Sitepresso's Booking Flow</h2>
-<p>Sitepresso's booking pages are designed with conversion research. Service selection, time picker, client details, and payment complete in 3 steps. The completion rate for Sitepresso booking flows is significantly above industry average for service business booking tools.</p>`,
+<h2>DriftHR's Booking Flow</h2>
+<p>DriftHR's booking pages are designed with conversion research. Service selection, time picker, client details, and payment complete in 3 steps. The completion rate for DriftHR booking flows is significantly above industry average for service business booking tools.</p>`,
   },
 ];
 

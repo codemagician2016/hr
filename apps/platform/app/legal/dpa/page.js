@@ -1,6 +1,6 @@
 export const metadata = {
-  title: 'Data Processing Agreement · Sitepresso',
-  description: 'GDPR Article 28 Data Processing Agreement for Sitepresso business customers.',
+  title: 'Data Processing Agreement · DriftHR',
+  description: 'GDPR Article 28 Data Processing Agreement for DriftHR business customers.',
 };
 
 // IMPORTANT: This is a template DPA covering GDPR Article 28 + UK GDPR
@@ -24,7 +24,7 @@ export default function DPAPage() {
         {' '}<a href="/legal/terms">Terms of Service</a> between you (the &ldquo;<strong>Business</strong>&rdquo;
         or &ldquo;<strong>Controller</strong>&rdquo;) and <strong>Loominfo Limited</strong>
         (NZBN 9429052682902, 17A Prictor Street, Papakura, Auckland, New Zealand —
-        the &ldquo;<strong>Processor</strong>&rdquo;) for use of the Sitepresso platform
+        the &ldquo;<strong>Processor</strong>&rdquo;) for use of the DriftHR platform
         (the &ldquo;<strong>Service</strong>&rdquo;). It governs the processing of personal
         data carried out by the Processor on behalf of the Controller.
       </p>
@@ -54,7 +54,7 @@ export default function DPAPage() {
 
       <h2>2. Subject matter, duration, nature and purpose</h2>
       <ul>
-        <li><strong>Subject matter:</strong> the provision of the Sitepresso platform to the Controller.</li>
+        <li><strong>Subject matter:</strong> the provision of the DriftHR platform to the Controller.</li>
         <li><strong>Duration:</strong> for as long as the Controller&rsquo;s account remains active, plus the retention periods set out in our <a href="/legal/privacy">Privacy Policy</a>.</li>
         <li><strong>Nature and purpose:</strong> hosting, storing, displaying, and otherwise processing personal data the Controller uploads or generates through the Service in order to provide the agreed Service to the Controller and its end users.</li>
         <li><strong>Categories of data subjects:</strong> the Controller&rsquo;s end customers, staff members invited to the Controller&rsquo;s account, and visitors to the Controller&rsquo;s storefront.</li>

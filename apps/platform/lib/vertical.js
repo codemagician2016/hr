@@ -1,4 +1,4 @@
-// Single source of truth for the default vertical. Sitepresso runs three
+// Single source of truth for the default vertical. DriftHR runs three
 // products on one platform — STATIC / APPOINTMENT / ECOMMERCE — and a lot
 // of code reads `business.vertical` with a fallback for legacy tenants
 // (created before the column existed). Centralising the constant + helper

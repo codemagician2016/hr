@@ -5,7 +5,7 @@ export default function LegalLayout({ children }) {
     <div className="min-h-screen bg-white text-gray-900">
       <header className="border-b border-gray-200">
         <div className="max-w-5xl mx-auto px-6 lg:px-8 py-5 flex items-center justify-between">
-          <Link href="/" className="text-lg font-bold tracking-tight">Sitepresso</Link>
+          <Link href="/" className="text-lg font-bold tracking-tight">DriftHR</Link>
           <nav className="flex items-center gap-5 text-sm text-gray-600">
             <Link href="/legal/terms" className="hover:text-gray-900">Terms</Link>
             <Link href="/legal/privacy" className="hover:text-gray-900">Privacy</Link>

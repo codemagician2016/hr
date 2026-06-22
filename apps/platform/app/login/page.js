@@ -269,7 +269,7 @@ function LoginForm() {
     <>
       <FloatingLanguagePicker />
       <AuthShell
-        eyebrow={isAdminHost ? 'Sitepresso Console' : t('eyebrow')}
+        eyebrow={isAdminHost ? 'DriftHR Console' : t('eyebrow')}
         title={isAdminHost
           ? <>Super admin <span className="italic text-indigo-600" style={{ fontFamily: 'Georgia, "Times New Roman", ui-serif, serif' }}>sign-in.</span></>
           : <>{t('titleStart')} <span className="italic text-indigo-600" style={{ fontFamily: 'Georgia, "Times New Roman", ui-serif, serif' }}>{t('titleItalic')}</span></>}

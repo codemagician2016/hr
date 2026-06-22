@@ -36,8 +36,10 @@ function LoginForm() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
       <div className="w-full max-w-sm bg-white rounded-2xl border border-gray-200 shadow-sm p-8">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/drifthr-logo.svg" alt="DriftHR" className="h-8 w-auto mb-5" />
         <h1 className="text-xl font-semibold text-gray-900 mb-1">Sign in</h1>
-        <p className="text-sm text-gray-500 mb-6">HR & Payroll console</p>
+        <p className="text-sm text-gray-500 mb-6">Effortless HR &amp; payroll.</p>
         <form onSubmit={onSubmit} className="space-y-4">
           <TextInput
             label="Email"

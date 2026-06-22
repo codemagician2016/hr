@@ -108,24 +108,25 @@ export default function AdminShell({ children }) {
   }
 
   const logoUrl = theme?.logoUrl || brand?.logoUrl;
-  const businessName = brand?.business?.name || brand?.name || 'HR Console';
+  const tenantName = brand?.business?.name || brand?.name || null;
 
   return (
     <div className="min-h-screen flex bg-gray-50">
       <aside className="w-60 shrink-0 bg-white border-r border-gray-200 flex flex-col">
         <div className="h-16 flex items-center gap-2 px-5 border-b border-gray-100">
           {logoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={logoUrl} alt={businessName} className="h-8 w-auto max-w-[140px] object-contain" />
+            <>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={logoUrl} alt={tenantName || 'DriftHR'} className="h-8 w-auto max-w-[140px] object-contain" />
+              {tenantName && (
+                <span className="text-sm font-semibold text-gray-900 truncate">{tenantName}</span>
+              )}
+            </>
           ) : (
-            <span
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-white text-sm font-bold"
-              style={{ backgroundColor: 'var(--theme-primary)' }}
-            >
-              {businessName.slice(0, 1).toUpperCase()}
-            </span>
+            // No tenant logo — fall back to the DriftHR product mark.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src="/drifthr-logo.svg" alt="DriftHR" className="h-7 w-auto" />
           )}
-          <span className="text-sm font-semibold text-gray-900 truncate">{businessName}</span>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           {navItems.map((item) => {

@@ -520,7 +520,7 @@ export default function DevelopersPanel({ embedded = false }) {
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <p className="text-xs font-bold text-amber-900">Copy this webhook signing secret now</p>
-                <p className="mt-1 text-xs text-amber-800">Your receiver uses this secret to verify that events really came from Sitepresso.</p>
+                <p className="mt-1 text-xs text-amber-800">Your receiver uses this secret to verify that events really came from DriftHR.</p>
               </div>
               <button type="button" onClick={() => setCreatedWebhookSecret(null)} className="rounded-lg border border-amber-300 px-3 py-1.5 text-xs font-bold text-amber-900 hover:bg-amber-100">I copied it</button>
             </div>

@@ -17,11 +17,11 @@ function EmbedTab({ business }) {
   const host = business?.slug ? `${business.slug}.${platformDomain}` : `YOUR-SLUG.${platformDomain}`;
   const origin = `https://${host}`;
 
-  const basicSnippet = `<!-- Sitepresso booking button — paste into any page -->
+  const basicSnippet = `<!-- DriftHR booking button — paste into any page -->
 <div data-sitepresso-book></div>
 <script src="${origin}/embed.js" async></script>`;
 
-  const customSnippet = `<!-- Sitepresso — customised button -->
+  const customSnippet = `<!-- DriftHR — customised button -->
 <div
   data-sitepresso-book
   data-sitepresso-label="Book appointment"
@@ -30,7 +30,7 @@ function EmbedTab({ business }) {
 </div>
 <script src="${origin}/embed.js" async></script>`;
 
-  const ownButtonSnippet = `<!-- Sitepresso — use your own button -->
+  const ownButtonSnippet = `<!-- DriftHR — use your own button -->
 <button data-sitepresso-book class="your-button-class">
   Schedule a visit
 </button>

@@ -14,7 +14,7 @@ export const answerPages = [
     status: 'published',
     categoryLabel: 'Hair salons',
     question: 'What should a hair salon website include?',
-    metaTitle: 'What Should a Hair Salon Website Include? | Sitepresso',
+    metaTitle: 'What Should a Hair Salon Website Include? | DriftHR',
     metaDescription:
       'A hair salon website needs online booking, a services-and-prices menu, stylist profiles, a work gallery, and your hours and location. Here is the full checklist.',
     targetKeyword: 'what should a hair salon website include',
@@ -29,7 +29,7 @@ export const answerPages = [
       { item: 'Reviews and a short about section (optional)', why: 'Social proof and a little of the salon’s story close the gap for first-timers.' },
     ],
     closing:
-      'Sitepresso’s Hair Salon template ships with all of this already built, so you fill in your details instead of starting from a blank page. It can be live the same day, with no code.',
+      'DriftHR’s Hair Salon template ships with all of this already built, so you fill in your details instead of starting from a blank page. It can be live the same day, with no code.',
     faq: [
       { q: 'Do I really need online booking, or is a phone number enough?', a: 'A phone number alone loses the bookings that happen at night and on weekends. Online booking captures those and sends reminders, which cuts no-shows.' },
       { q: 'Should I show my prices?', a: 'Yes. Clear pricing filters in the right clients and saves you fielding “how much is…” messages all day.' },
@@ -50,7 +50,7 @@ export const answerPages = [
     status: 'published',
     categoryLabel: 'Dental clinics',
     question: 'What should a dental clinic website include?',
-    metaTitle: 'What Should a Dental Clinic Website Include? | Sitepresso',
+    metaTitle: 'What Should a Dental Clinic Website Include? | DriftHR',
     metaDescription:
       'A dental clinic website should include online appointment booking, a treatments menu, dentist profiles, new-patient information, and your hours and location. Full checklist.',
     targetKeyword: 'what should a dental clinic website include',
@@ -65,7 +65,7 @@ export const answerPages = [
       { item: 'A few genuine patient reviews (optional)', why: 'Real reviews reassure a nervous first-timer more than any claim you make about yourself.' },
     ],
     closing:
-      'Sitepresso’s Dental Clinic template includes booking, a treatments menu and patient information out of the box, with a calm, clinical design — so you can be live in minutes without code.',
+      'DriftHR’s Dental Clinic template includes booking, a treatments menu and patient information out of the box, with a calm, clinical design — so you can be live in minutes without code.',
     faq: [
       { q: 'Does a clinic website need online booking?', a: 'It is the single highest-value feature: it captures after-hours requests and reduces no-shows through automatic confirmations and reminders.' },
       { q: 'Should treatment prices be on the site?', a: 'At least price ranges. Patients are more likely to book when they are not worried about an unknown bill.' },
@@ -86,7 +86,7 @@ export const answerPages = [
     status: 'published',
     categoryLabel: 'Law firms',
     question: 'What should a law firm website include?',
-    metaTitle: 'What Should a Law Firm Website Include? | Sitepresso',
+    metaTitle: 'What Should a Law Firm Website Include? | DriftHR',
     metaDescription:
       'A law firm website should include practice-area pages, solicitor profiles, online consultation booking, clear contact details and trust signals. The full checklist.',
     targetKeyword: 'what should a law firm website include',
@@ -101,7 +101,7 @@ export const answerPages = [
       { item: 'Outcomes or testimonials, handled carefully (optional)', why: 'Within what your jurisdiction’s rules allow, evidence of results reassures a hesitant client.' },
     ],
     closing:
-      'Sitepresso’s Law Firm template is built around practice areas, solicitor profiles and consultation booking, with a refined, authoritative design — live in minutes, no code or agency.',
+      'DriftHR’s Law Firm template is built around practice areas, solicitor profiles and consultation booking, with a refined, authoritative design — live in minutes, no code or agency.',
     faq: [
       { q: 'Why a page per practice area?', a: 'Because clients search for their specific issue. Separate pages let each rank for its own terms and speak directly to that client.' },
       { q: 'Can clients book a consultation online?', a: 'Yes — online consultation scheduling with confirmations is built into the template.' },

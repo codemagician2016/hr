@@ -16,9 +16,9 @@ export const themePages = [
     categoryLabel: 'Personal Care & Beauty',
     vertical: 'APPOINTMENT',
     targetKeyword: 'hair salon website template',
-    metaTitle: 'Hair Salon Website Template | Sitepresso',
+    metaTitle: 'Hair Salon Website Template | DriftHR',
     metaDescription:
-      "Launch a salon booking website with Sitepresso's Hair Salon template: online appointments, a services & pricing menu, stylist profiles and a gallery. No code.",
+      "Launch a salon booking website with DriftHR's Hair Salon template: online appointments, a services & pricing menu, stylist profiles and a gallery. No code.",
     h1: 'Hair Salon Website Template',
     // AEO direct-answer block — the 40–55 words AI engines lift to cite us.
     directAnswer:
@@ -71,9 +71,9 @@ export const themePages = [
     categoryLabel: 'Healthcare',
     vertical: 'APPOINTMENT',
     targetKeyword: 'dental clinic website template',
-    metaTitle: 'Dental Clinic Website Template | Sitepresso',
+    metaTitle: 'Dental Clinic Website Template | DriftHR',
     metaDescription:
-      "Build a dental clinic website with Sitepresso's Dental template: online appointment booking, treatments & pricing, dentist profiles and patient info. No code.",
+      "Build a dental clinic website with DriftHR's Dental template: online appointment booking, treatments & pricing, dentist profiles and patient info. No code.",
     h1: 'Dental Clinic Website Template',
     directAnswer:
       'The Dental Clinic template is a website for a dental practice with a clean, calm design — online appointment booking, a treatments menu with pricing, dentist profiles and patient information. You set it up in the browser and publish in minutes. No code required.',
@@ -125,9 +125,9 @@ export const themePages = [
     categoryLabel: 'Professional Services',
     vertical: 'APPOINTMENT',
     targetKeyword: 'law firm website template',
-    metaTitle: 'Law Firm Website Template | Sitepresso',
+    metaTitle: 'Law Firm Website Template | DriftHR',
     metaDescription:
-      "Launch a law firm website with Sitepresso's Law Firm template: practice areas, solicitor profiles and online consultation booking. Refined dark design, no code.",
+      "Launch a law firm website with DriftHR's Law Firm template: practice areas, solicitor profiles and online consultation booking. Refined dark design, no code.",
     h1: 'Law Firm Website Template',
     directAnswer:
       'The Law Firm template is a website for a legal practice with a refined, authoritative dark design — practice-area pages, solicitor profiles and online consultation scheduling. You build it in the browser and publish in minutes. No code, no agency.',

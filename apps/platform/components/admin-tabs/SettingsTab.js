@@ -240,7 +240,7 @@ function CustomDomainGuide({ slug, platformDomain, cnameTarget, apexIps, initial
         if (err?.status === 422 && err?.data?.code === 'APEX_DOMAIN_NEEDS_WWW' && err?.data?.suggestedDomain) {
           const suggestedDomain = err.data.suggestedDomain;
           const ok = await confirm(
-            `${clean} is a root domain, but this environment needs a registrar-supported ALIAS/ANAME record for root domains.\n\nYour one-record setup should use ${suggestedDomain}: add CNAME "www" to ${cnameTarget}, then connect ${suggestedDomain} in Sitepresso.\n\nUse ${suggestedDomain} now?`,
+            `${clean} is a root domain, but this environment needs a registrar-supported ALIAS/ANAME record for root domains.\n\nYour one-record setup should use ${suggestedDomain}: add CNAME "www" to ${cnameTarget}, then connect ${suggestedDomain} in DriftHR.\n\nUse ${suggestedDomain} now?`,
             { title: 'Use www domain?', confirmLabel: `Use ${suggestedDomain}`, cancelLabel: 'Cancel' }
           );
           setStatus(err.data);
@@ -272,7 +272,7 @@ function CustomDomainGuide({ slug, platformDomain, cnameTarget, apexIps, initial
     const current = status?.domain || cleanDomain;
     if (!current) return;
     const ok = await confirm(
-      `Disconnect ${current} from this ${siteLabel}?\n\nYour Sitepresso subdomain will continue to work. You can connect this domain again later if needed.`,
+      `Disconnect ${current} from this ${siteLabel}?\n\nYour DriftHR subdomain will continue to work. You can connect this domain again later if needed.`,
       { title: 'Disconnect custom domain?', confirmLabel: 'Disconnect domain', cancelLabel: 'Cancel' }
     );
     if (!ok) return;
@@ -323,7 +323,7 @@ function CustomDomainGuide({ slug, platformDomain, cnameTarget, apexIps, initial
           <h3 className="text-sm font-semibold text-gray-900">Use your own domain</h3>
           <p className="mt-1 text-xs text-gray-600">
             Your free {siteLabel} URL is <strong className="font-mono">{platformSubdomain}</strong>. To use your own domain,
-            add the DNS records below at your domain provider. Sitepresso checks DNS and activates HTTPS automatically once the records match.
+            add the DNS records below at your domain provider. DriftHR checks DNS and activates HTTPS automatically once the records match.
           </p>
         </div>
       </div>
@@ -400,7 +400,7 @@ function CustomDomainGuide({ slug, platformDomain, cnameTarget, apexIps, initial
               <div>
                 <p className="font-semibold">Verify ownership to move this domain</p>
                 <p className="mt-1">
-                  This domain is already connected to another Sitepresso website. Add this TXT record at your domain provider, then verify and move it here.
+                  This domain is already connected to another DriftHR website. Add this TXT record at your domain provider, then verify and move it here.
                 </p>
               </div>
               <button
@@ -446,7 +446,7 @@ function CustomDomainGuide({ slug, platformDomain, cnameTarget, apexIps, initial
             )}
             {secondsUntilAutoCheck !== null && (
               <p className="mt-1 text-gray-600">
-                Sitepresso will retry DNS activation in about {secondsUntilAutoCheck || 30} seconds. HTTPS usually activates in 5-30 minutes,
+                DriftHR will retry DNS activation in about {secondsUntilAutoCheck || 30} seconds. HTTPS usually activates in 5-30 minutes,
                 but certificate authorities can occasionally take up to 2 hours.
               </p>
             )}
@@ -507,7 +507,7 @@ function CustomDomainGuide({ slug, platformDomain, cnameTarget, apexIps, initial
         </div>
         <div className="mt-3 grid gap-2 text-xs text-gray-600 md:grid-cols-2">
           <div className="rounded-lg bg-emerald-50 px-3 py-2">
-            <strong className="block text-emerald-900">Enter in Sitepresso</strong>
+            <strong className="block text-emerald-900">Enter in DriftHR</strong>
             <span className="font-mono">{cleanDomain || suggestedWww || 'www.yourdomain.com'}</span>
           </div>
           <div className="rounded-lg bg-gray-50 px-3 py-2">
@@ -583,7 +583,7 @@ function CustomDomainGuide({ slug, platformDomain, cnameTarget, apexIps, initial
         </div>
         <div className="rounded-lg bg-white px-3 py-2">
           <strong className="block text-gray-900">3. Activate HTTPS</strong>
-          Sitepresso activates the domain automatically once DNS matches.
+          DriftHR activates the domain automatically once DNS matches.
         </div>
       </div>
     </div>
@@ -633,7 +633,7 @@ function DomainStudioSettingsCard({ slug, platformDomain, cnameTarget, apexIps =
           </p>
           <div className="mt-3 grid gap-2 text-xs text-gray-600 md:grid-cols-2">
             <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
-              <span className="block font-semibold text-gray-900">Free Sitepresso URL</span>
+              <span className="block font-semibold text-gray-900">Free DriftHR URL</span>
               <span className="font-mono">{platformSubdomain}</span>
             </div>
             <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
@@ -669,7 +669,7 @@ function DomainStudioSettingsCard({ slug, platformDomain, cnameTarget, apexIps =
               </div>
               <div className="rounded-lg bg-gray-50 px-3 py-2">
                 <strong className="block text-gray-900">3. Verify</strong>
-                Sitepresso checks DNS and activates HTTPS automatically.
+                DriftHR checks DNS and activates HTTPS automatically.
               </div>
             </div>
             <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">

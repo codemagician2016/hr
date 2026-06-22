@@ -59,7 +59,7 @@ export default function ProductsHelpPage() {
         {/* Step 4 */}
         <Step n={4} title="Set your shop's default currency">
           <p>
-            Sitepresso shops have <strong>one home currency</strong>. Every visitor — wherever they're browsing from — sees prices in that currency. Their card auto-converts at checkout.
+            DriftHR shops have <strong>one home currency</strong>. Every visitor — wherever they're browsing from — sees prices in that currency. Their card auto-converts at checkout.
           </p>
           <p className="text-sm text-gray-600 mt-2">
             Open <strong>Settings → Business</strong> and pick your currency once. Going forward, every new product form will auto-fill with that currency. Existing products keep their own currency until you edit them.
@@ -84,7 +84,7 @@ export default function ProductsHelpPage() {
               Coming soon — CSV import is on the roadmap for the next release. Until then, the "Load samples" button is the fastest way to populate a lot of products at once.
             </Faq>
             <Faq q="What image formats / sizes work best?">
-              Square photos around 600×600px in JPG or PNG render best. Anything under 1MB loads fast. Hosting your own (Imgur, Cloudinary, your S3) is fine — Sitepresso fetches the URL on each page load.
+              Square photos around 600×600px in JPG or PNG render best. Anything under 1MB loads fast. Hosting your own (Imgur, Cloudinary, your S3) is fine — DriftHR fetches the URL on each page load.
             </Faq>
             <Faq q="Can different products have different currencies?">
               Yes — each product stores its own currency. But customers can only check out one currency at a time (the cart locks to the first item added). Most shops keep one currency across the whole catalog for simplicity.
@@ -93,7 +93,7 @@ export default function ProductsHelpPage() {
               The product card shows an "Out of stock" overlay and the Add-to-cart button disables. Customers can still see the product (so it ranks in search engines); they just can't buy.
             </Faq>
             <Faq q="How do customers pay me?">
-              You connect Razorpay (India) or Stripe Connect (global) once, and orders flow through your gateway directly. Sitepresso never holds your money — the platform fee is the monthly subscription, period.
+              You connect Razorpay (India) or Stripe Connect (global) once, and orders flow through your gateway directly. DriftHR never holds your money — the platform fee is the monthly subscription, period.
             </Faq>
           </div>
         </section>

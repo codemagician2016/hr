@@ -14,9 +14,9 @@ export default function AuthShell({ eyebrow, title, subtitle, children, footerNo
         <div className="flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2">
             <img
-              src="/brand/sitepresso-logo.svg"
-              alt="Sitepresso"
-              className="h-12 w-auto sm:h-14"
+              src="/drifthr-logo.svg"
+              alt="DriftHR"
+              className="h-9 w-auto sm:h-10"
             />
           </Link>
           <Link

@@ -11,7 +11,7 @@ export async function generateMetadata({ params }) {
   const article = articles.find((a) => a.slug === params.slug);
   if (!article) return {};
   return buildMetadata({
-    title: `${article.title} — Sitepresso Blog`,
+    title: `${article.title} — DriftHR Blog`,
     description: article.excerpt,
     path: `/blog/${article.slug}`,
     type: 'article',
@@ -130,7 +130,7 @@ function Nav() {
     <nav className="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-gray-100">
       <div className="max-w-7xl mx-auto px-6 lg:px-8 h-20 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2">
-          <img src="/brand/sitepresso-logo.svg" alt="Sitepresso" className="h-16 w-auto" />
+          <img src="/drifthr-logo.svg" alt="DriftHR" className="h-16 w-auto" />
         </Link>
         <div className="hidden md:flex items-center gap-7 text-sm text-gray-600">
           <Link href="/#how-it-works" className="hover:text-gray-900">How it works</Link>
@@ -159,10 +159,10 @@ function Footer() {
     <footer className="border-t border-gray-100 bg-gray-50">
       <div className="max-w-7xl mx-auto px-6 lg:px-8 py-12 flex flex-col md:flex-row items-center justify-between gap-4">
         <Link href="/">
-          <img src="/brand/sitepresso-logo.svg" alt="Sitepresso" className="h-10 w-auto" />
+          <img src="/drifthr-logo.svg" alt="DriftHR" className="h-10 w-auto" />
         </Link>
         <p className="text-sm text-gray-400">
-          © {new Date().getFullYear()} Sitepresso. Websites in 5 Minutes.
+          © {new Date().getFullYear()} DriftHR. Effortless HR & payroll.
         </p>
         <div className="flex gap-6 text-sm text-gray-500">
           <Link href="/blog" className="hover:text-gray-900">Blog</Link>

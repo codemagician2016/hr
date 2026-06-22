@@ -5,7 +5,7 @@
 // sub-tab.
 //
 // Two states:
-//   1. Managed channels NOT yet enabled by Sitepresso — shows "Request access"
+//   1. Managed channels NOT yet enabled by DriftHR — shows "Request access"
 //      flow + the Email-only recap.
 //   2. Managed channels enabled — shows the dual-counter dashboard,
 //      per-event channel grid, quota policy, buy-pack widget, and

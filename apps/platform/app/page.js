@@ -143,7 +143,7 @@ const PLANS = [
       'Up to 50 bookings / month',
       '.sitepresso.com subdomain included',
       'Email reminders',
-      '"Powered by Sitepresso" branding',
+      '"Powered by DriftHR" branding',
       'Platform-managed online payments',
     ],
     cta: 'Start trial',
@@ -228,17 +228,17 @@ const TESTIMONIALS = [
 
 const FAQS = [
   { q: 'Do I really not need a designer or developer?',
-    a: 'Really. Pick a theme, drop in your logo and headline, set your services and hours. Publishing is one click. Sitepresso hosts, updates and scales the software — you never touch code or servers.' },
+    a: 'Really. Pick a theme, drop in your logo and headline, set your services and hours. Publishing is one click. DriftHR hosts, updates and scales the software — you never touch code or servers.' },
   { q: 'Do I own the software, or is it hosted by you?',
-    a: 'Sitepresso is a SaaS — like Shopify. Your storefront runs on our infrastructure and stays up-to-date automatically. You don\'t own the software, but you own your brand, content, domain, customers and bookings. If you ever leave, you keep the domain and export every record.' },
+    a: 'DriftHR is a SaaS — like Shopify. Your storefront runs on our infrastructure and stays up-to-date automatically. You don\'t own the software, but you own your brand, content, domain, customers and bookings. If you ever leave, you keep the domain and export every record.' },
   { q: 'Can my customers tell it\'s a SaaS?',
-    a: 'On paid plans — no. Point your own domain (appointments.yourfirm.com) at us and we strip every "Powered by" mark. Customers see your brand; they never see Sitepresso.' },
+    a: 'On paid plans — no. Point your own domain (appointments.yourfirm.com) at us and we strip every "Powered by" mark. Customers see your brand; they never see DriftHR.' },
   { q: 'What if my industry isn\'t in the theme list?',
     a: 'We ship a neutral "Service Pro" theme that works for any service business. And we add 2–3 new industry themes every month. Tell us what you need.' },
   { q: 'How do bookings actually reach me?',
     a: 'Email and SMS the instant a customer books. Syncs to Google/Apple calendar. You never miss a slot, even during sessions.' },
   { q: 'Can I take deposits or full payment?',
-    a: 'Yes. Use Sitepresso-managed checkout for deposits, full payments, and subscriptions where your plan supports it. No-shows drop fast, checkout stays consistent, and billing records stay inside your admin.' },
+    a: 'Yes. Use DriftHR-managed checkout for deposits, full payments, and subscriptions where your plan supports it. No-shows drop fast, checkout stays consistent, and billing records stay inside your admin.' },
   { q: 'What happens after the launch period?',
     a: 'You\'ll get a 30-day heads up. Pick any plan, or stay on Solo. Your site, domain, and bookings stay exactly as they are — nothing gets deleted.' },
   { q: 'Do I own my data and domain?',
@@ -246,7 +246,7 @@ const FAQS = [
   { q: 'Can I have multiple staff with their own calendars?',
     a: 'Yes, from the Team plan. Each staff member gets their own schedule, availability, services, and notifications. Customers pick who they want.' },
   { q: 'Can I use my own brand domain?',
-    a: 'Yes. Bring any domain you own — yourbrand.com or book.yourbrand.com — and point it at us. We handle the SSL and hosting. Customers see your brand in the address bar; Sitepresso stays invisible. Don\'t have a domain yet? You can start on a free sitepresso.com subdomain and switch to your own later.' },
+    a: 'Yes. Bring any domain you own — yourbrand.com or book.yourbrand.com — and point it at us. We handle the SSL and hosting. Customers see your brand in the address bar; DriftHR stays invisible. Don\'t have a domain yet? You can start on a free sitepresso.com subdomain and switch to your own later.' },
 ];
 
 export default function LandingPage() {
@@ -305,11 +305,11 @@ function Check({ color = 'text-violet-600' }) {
 function Logo({ size = 'nav' }) {
   // 'nav' = header logo, larger so the brand reads at a glance.
   // 'footer' = same scale; footer used to be smaller but now matches.
-  const heightClass = size === 'footer' ? 'h-14' : 'h-16';
+  const heightClass = size === 'footer' ? 'h-9' : 'h-10';
   return (
     <img
-      src="/brand/sitepresso-logo.svg"
-      alt="Sitepresso · Websites in 5 minutes"
+      src="/drifthr-logo.svg"
+      alt="DriftHR · Effortless HR & payroll"
       className={`${heightClass} w-auto`}
     />
   );
@@ -835,7 +835,7 @@ function DesignEngine() {
             <Italic>one clean builder.</Italic>
           </h2>
           <p className="mt-6 text-lg text-gray-600 leading-relaxed">
-            Sitepresso is no longer just a booking page. It is a vertical-aware website system:
+            DriftHR is no longer just a booking page. It is a vertical-aware website system:
             themes, layouts, visual treatments and brand colors combine into polished sites for
             appointments, ecommerce and static web businesses.
           </p>
@@ -876,7 +876,7 @@ function DesignEngine() {
             <p className="text-xs font-mono font-semibold uppercase tracking-[0.18em] text-violet-300">AI-powered next</p>
             <h3 className="mt-3 text-2xl md:text-3xl font-bold">AI assistance belongs inside the builder, not as a separate tool.</h3>
             <p className="mt-3 max-w-3xl text-sm leading-relaxed text-white/70">
-              The landing page now positions Sitepresso for the AI layer coming next: guided copy,
+              The landing page now positions DriftHR for the AI layer coming next: guided copy,
               SEO suggestions, page structure help and faster setup across all three verticals.
             </p>
           </div>

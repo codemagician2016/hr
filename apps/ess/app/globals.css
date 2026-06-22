@@ -24,6 +24,7 @@
 body {
   background: var(--theme-bg);
   color: var(--theme-text);
+  font-family: var(--font-manrope), ui-sans-serif, system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 

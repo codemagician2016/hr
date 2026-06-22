@@ -5,7 +5,7 @@
 //   2. Tenants — per-tenant gates (managedSmsEnabled / managedWhatsappEnabled),
 //      pending request queue, drawer with usage + recent deliveries
 //
-// Default state is "all gates OFF" — Sitepresso explicitly enables managed
+// Default state is "all gates OFF" — DriftHR explicitly enables managed
 // channels per tenant (anti-abuse + compliance scoping).
 
 import { useState, useEffect, useCallback } from 'react';

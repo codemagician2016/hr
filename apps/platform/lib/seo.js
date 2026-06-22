@@ -1,18 +1,16 @@
-// Centralised SEO config + helpers for the Sitepresso marketing site (apps/platform).
+// Centralised SEO config + helpers for the DriftHR marketing site (apps/platform).
 // One place for canonical/OpenGraph/Twitter/JSON-LD so every page is consistent and the
 // super-admin SEO panel (Phase C) can later feed overrides through these helpers.
 //
 // Keep the brand entity description IDENTICAL to content-seo/rules/RULES.md section G
-// (GEO consistency — AI engines should form one stable Sitepresso entity).
+// (GEO consistency — AI engines should form one stable DriftHR entity).
 
 export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://sitepresso.com';
-export const SITE_NAME = 'Sitepresso';
-export const DEFAULT_TITLE = 'Sitepresso · AI-powered websites in minutes';
+export const SITE_NAME = 'DriftHR';
+export const DEFAULT_TITLE = 'DriftHR · Effortless HR & payroll';
 export const DEFAULT_DESCRIPTION =
-  'Sitepresso is a website builder for small businesses to create marketing websites, booking websites and e-commerce websites — no code required.';
-// TODO(seo): replace with a real 1200×630 PNG/JPG for rich social cards. SVG is a stopgap
-// and is ignored by some platforms (Slack/iMessage/LinkedIn). Tracked in content-seo/STATE.md.
-export const DEFAULT_OG_IMAGE = '/brand/sitepresso-logo.svg';
+  'Effortless HR & payroll. DriftHR runs people, attendance, leave, payroll and self-service for growing teams — no spreadsheets required.';
+export const DEFAULT_OG_IMAGE = '/drifthr-social-1200x630.png';
 
 export function absoluteUrl(path = '/') {
   if (/^https?:\/\//.test(path)) return path;
@@ -62,7 +60,7 @@ export function brandJsonLd() {
       '@type': 'Organization',
       name: SITE_NAME,
       url: SITE_URL,
-      logo: absoluteUrl('/brand/sitepresso-icon.svg'),
+      logo: absoluteUrl('/drifthr-icon.svg'),
       description: DEFAULT_DESCRIPTION,
       sameAs: [],
     },
@@ -93,7 +91,7 @@ export function articleJsonLd({ title, description, path, publishedTime, image =
     publisher: {
       '@type': 'Organization',
       name: SITE_NAME,
-      logo: { '@type': 'ImageObject', url: absoluteUrl('/brand/sitepresso-icon.svg') },
+      logo: { '@type': 'ImageObject', url: absoluteUrl('/drifthr-icon.svg') },
     },
   };
 }

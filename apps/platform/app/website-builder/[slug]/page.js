@@ -68,7 +68,7 @@ export default function CategoryPage({ params }) {
         {/* HERO */}
         <section className="max-w-6xl mx-auto px-6 lg:px-8 pt-14 pb-10">
           <div className="flex items-center gap-2 text-xs text-gray-400 mb-5">
-            <Link href="/" className="hover:text-gray-700">Sitepresso</Link>
+            <Link href="/" className="hover:text-gray-700">DriftHR</Link>
             <span>/</span>
             <span className="text-gray-600">{page.categoryLabel}</span>
           </div>
@@ -178,7 +178,7 @@ function Nav() {
     <nav className="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-gray-100">
       <div className="max-w-7xl mx-auto px-6 lg:px-8 h-20 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2">
-          <img src="/brand/sitepresso-logo.svg" alt="Sitepresso" className="h-16 w-auto" />
+          <img src="/drifthr-logo.svg" alt="DriftHR" className="h-16 w-auto" />
         </Link>
         <div className="hidden md:flex items-center gap-7 text-sm text-gray-600">
           <Link href="/#how-it-works" className="hover:text-gray-900">How it works</Link>
@@ -204,9 +204,9 @@ function Footer() {
     <footer className="border-t border-gray-100 bg-gray-50">
       <div className="max-w-7xl mx-auto px-6 lg:px-8 py-12 flex flex-col md:flex-row items-center justify-between gap-4">
         <Link href="/">
-          <img src="/brand/sitepresso-logo.svg" alt="Sitepresso" className="h-10 w-auto" />
+          <img src="/drifthr-logo.svg" alt="DriftHR" className="h-10 w-auto" />
         </Link>
-        <p className="text-sm text-gray-400">© {new Date().getFullYear()} Sitepresso. Websites in 5 Minutes.</p>
+        <p className="text-sm text-gray-400">© {new Date().getFullYear()} DriftHR. Effortless HR & payroll.</p>
         <div className="flex gap-6 text-sm text-gray-500">
           <Link href="/blog" className="hover:text-gray-900">Blog</Link>
           <Link href="/#pricing" className="hover:text-gray-900">Pricing</Link>

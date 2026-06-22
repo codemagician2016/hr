@@ -3028,14 +3028,14 @@ function PaymentsTab() {
     <div className="space-y-6 max-w-4xl">
       <header>
         <h2 className="text-xl font-bold text-gray-900">Buyer payments</h2>
-        <p className="text-sm text-gray-500">How a tenant&apos;s customers pay: through Sitepresso&apos;s integrated rails (Stripe Connect / Razorpay Route — platform liability) or the seller&apos;s own gateway (BYO). To push your plan prices to the gateways, use <span className="font-semibold">⚡ Publish to gateways</span> on the Pricing tab.</p>
+        <p className="text-sm text-gray-500">How a tenant&apos;s customers pay: through DriftHR&apos;s integrated rails (Stripe Connect / Razorpay Route — platform liability) or the seller&apos;s own gateway (BYO). To push your plan prices to the gateways, use <span className="font-semibold">⚡ Publish to gateways</span> on the Pricing tab.</p>
       </header>
       {err && <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{err}</p>}
 
       <section className="rounded-2xl border border-gray-200 bg-white p-5">
         <h3 className="text-base font-semibold text-gray-900">Buyer-payment policy</h3>
         <p className="text-xs text-gray-500 mb-3">
-          <strong>BYO</strong> (the seller&apos;s own gateway) is <strong>always available</strong> — no platform liability. The toggle adds <strong>Integrated</strong> (Stripe Connect / Razorpay Route) on top, which puts Sitepresso in the money flow → fraud/KYC/chargeback liability. Default for every country: <span className="font-semibold">{defaultOn ? 'Integrated + BYO' : 'BYO only'}</span>. <span className="text-emerald-700 font-semibold">{integratedCount}</span> countr{integratedCount === 1 ? 'y' : 'ies'} allow integrated.
+          <strong>BYO</strong> (the seller&apos;s own gateway) is <strong>always available</strong> — no platform liability. The toggle adds <strong>Integrated</strong> (Stripe Connect / Razorpay Route) on top, which puts DriftHR in the money flow → fraud/KYC/chargeback liability. Default for every country: <span className="font-semibold">{defaultOn ? 'Integrated + BYO' : 'BYO only'}</span>. <span className="text-emerald-700 font-semibold">{integratedCount}</span> countr{integratedCount === 1 ? 'y' : 'ies'} allow integrated.
         </p>
 
         {loading ? <div className="py-6 flex justify-center"><Spinner /></div> : (
@@ -4007,7 +4007,7 @@ const TIER_PLACEHOLDERS = {
       'Platform-managed checkout',
       'Email reminders',
       'Google / Apple calendar sync',
-      '"Powered by Sitepresso" branding',
+      '"Powered by DriftHR" branding',
     ].join('\n'),
   },
   starter: {

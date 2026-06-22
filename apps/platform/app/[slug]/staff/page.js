@@ -385,7 +385,7 @@ function PremiumHeader({ businessName, userName, userEmail }) {
             {(businessName || '?').charAt(0).toUpperCase()}
           </span>
           <div>
-            <p className="text-[15px] font-semibold text-gray-900 leading-tight">{businessName || 'Sitepresso'}</p>
+            <p className="text-[15px] font-semibold text-gray-900 leading-tight">{businessName || 'DriftHR'}</p>
             <p className="text-[10px] font-mono tracking-[0.2em] uppercase text-gray-500 leading-tight mt-0.5">{t('workspace')}</p>
           </div>
         </div>
@@ -814,7 +814,7 @@ function TopBar({ businessName, label }) {
           </span>
           <div>
             <p className="text-sm font-semibold" style={{ color: 'var(--theme-text)' }}>
-              {businessName || 'Sitepresso'}
+              {businessName || 'DriftHR'}
             </p>
             <p className="text-xs text-gray-500">{label}</p>
           </div>

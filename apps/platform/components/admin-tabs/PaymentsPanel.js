@@ -391,7 +391,7 @@ function PaymentAccountsCard() {
   const routeCopy = requiresRazorpay
     ? {
       title: 'India checkout uses your own Razorpay account',
-      body: 'In India, buyers pay directly into your own Razorpay account — Razorpay handles your KYC and settles to your bank. Sitepresso never holds your money. Connect your account below.',
+      body: 'In India, buyers pay directly into your own Razorpay account — Razorpay handles your KYC and settles to your bank. DriftHR never holds your money. Connect your account below.',
     }
     : {
       title: 'Global checkout uses Stripe Connect',
@@ -449,7 +449,7 @@ function PaymentAccountsCard() {
           {/* Razorpay (India) — BYO */}
           <ProviderRow
             title="Razorpay (India)"
-            sub="Connect your own Razorpay account. Razorpay collects your KYC; Sitepresso stores only encrypted API keys and is never in the money flow."
+            sub="Connect your own Razorpay account. Razorpay collects your KYC; DriftHR stores only encrypted API keys and is never in the money flow."
             account={rzp}
             statusOf={rzp?.status}
             activeRoute={requiresRazorpay}
@@ -582,7 +582,7 @@ function PaymentAccountsCard() {
           </div>
 
           <p className="text-[11px] text-gray-500">
-            Sitepresso stores these keys encrypted at rest and uses them only to create your buyers' orders on your own account. We never see your KYC details.
+            DriftHR stores these keys encrypted at rest and uses them only to create your buyers' orders on your own account. We never see your KYC details.
           </p>
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => setShowRzpForm(false)}
@@ -619,7 +619,7 @@ function PaymentAccountsCard() {
             </div>
           </div>
           <p className="text-[11px] text-gray-500">
-            Sitepresso stores these keys encrypted at rest and uses them only to create your buyers&apos; payments on your own Stripe account. We never see your KYC details.
+            DriftHR stores these keys encrypted at rest and uses them only to create your buyers&apos; payments on your own Stripe account. We never see your KYC details.
           </p>
           <div className="flex items-center justify-end gap-2">
             <button type="button" onClick={() => setShowStripeForm(false)} className="px-3 py-1.5 text-xs text-gray-700">Cancel</button>

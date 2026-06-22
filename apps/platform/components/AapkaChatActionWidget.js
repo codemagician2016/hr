@@ -2,13 +2,13 @@
 
 import { useEffect, useMemo } from 'react';
 
-// The in-admin "Sitepresso assistant" bubble — now a plain CONSUMER of the
+// The in-admin "DriftHR assistant" bubble — now a plain CONSUMER of the
 // standalone AapkaChat product (chat-api.aapkatech.com), exactly like any
-// customer's site would be. No embedded gateway, no Sitepresso-side chat code:
+// customer's site would be. No embedded gateway, no DriftHR-side chat code:
 // the widget runs the 'sitepresso' workspace (internal plan, AI Assist service,
 // knowledge seeded on the chat box), the assistant answers from that knowledge
 // via AapkaChat's AI backend, and human handoffs land in the chat-app inbox
-// where the Sitepresso team replies like any other AapkaChat agent.
+// where the DriftHR team replies like any other AapkaChat agent.
 const CHAT_BASE = process.env.NEXT_PUBLIC_AAPKACHAT_URL || 'https://chat-api.aapkatech.com';
 const CHAT_WORKSPACE = process.env.NEXT_PUBLIC_AAPKACHAT_WORKSPACE || 'sitepresso';
 

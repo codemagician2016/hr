@@ -1,5 +1,5 @@
 // Single source of truth for the onboarding industry picker.
-// Every theme Sitepresso plans to ship lives here with its category, label,
+// Every theme DriftHR plans to ship lives here with its category, label,
 // icon, short description, and an `available` flag. The picker only renders
 // entries with `available: true`; everything else is hidden until the
 // matching apps/<vertical>/themes/<key>/ directory is built.

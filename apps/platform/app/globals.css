@@ -18,6 +18,14 @@
   animation: marquee-rtl 50s linear infinite;
 }
 :root {
+  /* DriftHR brand tokens — product chrome (marketing, admin, super-admin).
+     Per-tenant white-label palettes are resolved separately by @hr/theme-engine. */
+  --dh-teal:  #16B6A6; /* primary / accent */
+  --dh-blue:  #3B6FE3; /* gradient end */
+  --dh-ink:   #16243B; /* text / wordmark */
+  --dh-mist:  #EAF1F4; /* light surface */
+  --dh-gradient: linear-gradient(135deg, #16B6A6 0%, #3B6FE3 100%);
+
   /* Colors — editor UI */
   --ae-bg:          #FBFAF7; /* page bg */
   --ae-bg-2:        #F4F2EC; /* alt surface */

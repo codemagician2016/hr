@@ -1,9 +1,9 @@
 export const metadata = {
-  title: 'Refund Policy · Sitepresso',
-  description: 'Refund Policy for Sitepresso subscriptions, operated by Loominfo Limited.',
+  title: 'Refund Policy · DriftHR',
+  description: 'Refund Policy for DriftHR subscriptions, operated by Loominfo Limited.',
 };
 
-// IMPORTANT: This is a starter draft. Sitepresso uses card-required subscription
+// IMPORTANT: This is a starter draft. DriftHR uses card-required subscription
 // trials before the first charge. NZ Consumer Guarantees Act,
 // EU consumer-withdrawal rights for B2C, and equivalent mandatory statutes
 // still apply on top of this policy. Have a NZ commercial lawyer review
@@ -22,7 +22,7 @@ export default function RefundPage() {
 
       <p>
         This Refund Policy applies to subscription fees you pay to <strong>Loominfo Limited</strong>
-        {' '}(NZBN 9429052682902) for the Sitepresso platform at sitepresso.com (the
+        {' '}(NZBN 9429052682902) for the DriftHR platform at sitepresso.com (the
         &ldquo;<strong>Service</strong>&rdquo;). It does <em>not</em> apply to refunds you give
         your own end customers for products or services you sell through the Service &mdash; you
         are the seller of record for those (see <a href="/legal/terms#section-7">Terms section 7</a>).
@@ -30,7 +30,7 @@ export default function RefundPage() {
 
       <h2>1. Try before you buy &mdash; plan-configured trials</h2>
       <p>
-        Some paid Sitepresso plans include a <strong>card-required trial</strong>.
+        Some paid DriftHR plans include a <strong>card-required trial</strong>.
         Trial availability and duration are shown at checkout for the plan you select.
         Your payment method is captured at checkout, but the first subscription charge is
         not taken until the trial ends unless you cancel before then.
@@ -110,7 +110,7 @@ export default function RefundPage() {
         <li>A duplicate charge caused by a billing error on our side.</li>
         <li>A clear malfunction of the Service that we cannot remedy in a reasonable period and that materially affects your use of the paid plan.</li>
         <li>You were charged after we discontinued a feature we had advertised as included in your plan.</li>
-        <li>Sitepresso shuts down the Service while you have prepaid time remaining (in which case we will refund the unused portion pro rata).</li>
+        <li>DriftHR shuts down the Service while you have prepaid time remaining (in which case we will refund the unused portion pro rata).</li>
       </ul>
       <p>
         Discretionary refunds, if granted, are issued back to the original payment method within
@@ -135,7 +135,7 @@ export default function RefundPage() {
         <li>You are the seller of record. Your published store policy and applicable consumer-protection law govern whether a refund is owed.</li>
         <li>Refunds to buyers are issued through your connected payment processor (Razorpay Route, Stripe Connect, or whichever provider you have integrated). Loominfo never holds buyer funds.</li>
         <li>You can mark an order as REFUNDED in admin to keep your records consistent; this is a status change in our system, not a money movement.</li>
-        <li>Sitepresso&rsquo;s subscription fee to you is unaffected by refunds you give your buyers.</li>
+        <li>DriftHR&rsquo;s subscription fee to you is unaffected by refunds you give your buyers.</li>
       </ul>
 
       <h2>7. How to request a refund or raise a billing concern</h2>
@@ -143,7 +143,7 @@ export default function RefundPage() {
         Email <a href="mailto:support@sitepresso.com">support@sitepresso.com</a> with:
       </p>
       <ul>
-        <li>The email address on your Sitepresso account.</li>
+        <li>The email address on your DriftHR account.</li>
         <li>The charge date and amount.</li>
         <li>The reason for your request, including any statutory basis if relying on local consumer-protection law.</li>
       </ul>

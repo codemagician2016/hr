@@ -163,8 +163,8 @@ export default function ForgotPasswordPage() {
     <div className="min-h-screen flex items-center justify-center px-4 py-12">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-indigo-600">Sitepresso</h1>
-          <p className="text-gray-500 mt-1">Reset your password</p>
+          <img src="/drifthr-logo.svg" alt="DriftHR" className="h-9 w-auto mx-auto" />
+          <p className="text-gray-500 mt-3">Reset your password</p>
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">

@@ -17,7 +17,8 @@ function LoginInner() {
   const { tenant, theme } = useTenant();
   const business = tenant?.business || {};
   const logoUrl = theme?.logoUrl || business.logoUrl || null;
-  const name = business.name || business.displayName || 'Employee Portal';
+  const tenantName = business.name || business.displayName || null;
+  const name = tenantName || 'DriftHR';
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -46,17 +47,25 @@ function LoginInner() {
           {logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={logoUrl} alt={name} className="h-12 w-auto max-w-[180px] object-contain" />
-          ) : (
+          ) : tenantName ? (
             <div
               className="flex h-12 w-12 items-center justify-center rounded-xl text-lg font-bold"
               style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}
             >
-              {name.charAt(0).toUpperCase()}
+              {tenantName.charAt(0).toUpperCase()}
             </div>
+          ) : (
+            // No tenant brand — show the DriftHR product logo.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src="/drifthr-logo.svg" alt="DriftHR" className="h-10 w-auto" />
           )}
           <div>
-            <h1 className="text-lg font-semibold" style={{ color: 'var(--theme-text)' }}>{name}</h1>
-            <p className="text-sm" style={{ color: 'var(--theme-muted)' }}>Sign in to your account</p>
+            {tenantName && (
+              <h1 className="text-lg font-semibold" style={{ color: 'var(--theme-text)' }}>{tenantName}</h1>
+            )}
+            <p className="text-sm" style={{ color: 'var(--theme-muted)' }}>
+              {tenantName ? 'Sign in to your account' : 'Effortless HR & payroll.'}
+            </p>
           </div>
         </div>
 

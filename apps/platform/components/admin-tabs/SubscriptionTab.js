@@ -1333,7 +1333,7 @@ function BillingProfileCard({ business, subscription, value, onChange, onSaved }
         <div>
           <h3 className="text-lg font-semibold text-gray-900">Billing details</h3>
           <p className="text-xs text-gray-500 mt-0.5">
-            Used for Sitepresso subscription purchases, secure checkout, and invoice support.
+            Used for DriftHR subscription purchases, secure checkout, and invoice support.
           </p>
         </div>
         {saved && <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2.5 py-1">Saved</span>}

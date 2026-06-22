@@ -1342,7 +1342,7 @@ export default function DeliveriesPanel() {
           <div>
             <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-indigo-600">AapkaRider</p>
             <h2 className="mt-1 text-2xl font-black tracking-tight text-gray-950">Delivery requests</h2>
-            <p className="mt-1 text-sm text-gray-500">Manual, API, and Sitepresso delivery jobs in one queue.</p>
+            <p className="mt-1 text-sm text-gray-500">Manual, API, and DriftHR delivery jobs in one queue.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <input

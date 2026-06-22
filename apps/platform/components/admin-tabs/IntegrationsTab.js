@@ -13,7 +13,7 @@ const APPS = [
     key: 'aapkarider', name: 'AapkaRider', category: 'delivery', emoji: 'R', accent: '#22d3a6', recommended: true,
     tagline: 'Send fulfilled orders to rider dispatch and track delivery live.',
     baseUrl: 'https://rider-api.aapkatech.com', getKeyUrl: 'https://rider-api.aapkatech.com',
-    whatsNext: ['Hand a fulfilled order to dispatch from the order screen', 'Watch delivery status flow back into Sitepresso'],
+    whatsNext: ['Hand a fulfilled order to dispatch from the order screen', 'Watch delivery status flow back into DriftHR'],
     customerNote: 'Your customers get live delivery tracking on their order.',
   },
   {
@@ -120,7 +120,7 @@ export default function IntegrationsTab({ initialSection = 'apps' }) {
     setWebhookBusyId(conn.id); setError(''); setNotice('');
     try {
       const res = await api(`/api/integrations/${conn.id}/register-webhook`, { method: 'POST', body: '{}' });
-      if (res.ok) { setNotice('Events enabled — the app will now push updates to Sitepresso.'); await load(); }
+      if (res.ok) { setNotice('Events enabled — the app will now push updates to DriftHR.'); await load(); }
       else setError(res.message || 'Could not enable events.');
     } catch (err) { setError(err.data?.message || err.message || 'Could not enable events.'); }
     finally { setWebhookBusyId(null); }
@@ -175,7 +175,7 @@ export default function IntegrationsTab({ initialSection = 'apps' }) {
               <div>
                 <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-700">Recommended start</p>
                 <h3 className="mt-1 text-lg font-black text-gray-950">Connect the app first, then use API keys only when a custom system needs them.</h3>
-                <p className="mt-1 text-sm text-emerald-900">For rider flow, connect AapkaRider here. Fulfilled orders can then be handed to the rider app while Sitepresso keeps the order record.</p>
+                <p className="mt-1 text-sm text-emerald-900">For rider flow, connect AapkaRider here. Fulfilled orders can then be handed to the rider app while DriftHR keeps the order record.</p>
               </div>
               <button
                 type="button"
@@ -213,7 +213,7 @@ export default function IntegrationsTab({ initialSection = 'apps' }) {
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800">✓ Connected</span>
                     {conn.webhookActive ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700" title="The app pushes live updates back to Sitepresso">🟢 Events live</span>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700" title="The app pushes live updates back to DriftHR">🟢 Events live</span>
                     ) : (
                       <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800" title="The app isn't pushing updates back yet">
                         🟠 Events off

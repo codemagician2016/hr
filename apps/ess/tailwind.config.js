@@ -16,6 +16,17 @@ module.exports = {
           accent: 'var(--theme-accent)',
           fg: 'var(--theme-on-primary)',
         },
+        // DriftHR product brand (app chrome / fallbacks; distinct from the
+        // per-tenant white-label palette resolved at runtime).
+        drifthr: {
+          teal: '#16B6A6',
+          blue: '#3B6FE3',
+          ink: '#16243B',
+          mist: '#EAF1F4',
+        },
+      },
+      fontFamily: {
+        sans: ['var(--font-manrope)', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'],
       },
       keyframes: {
         shake: {
