@@ -2,293 +2,96 @@
 // Idempotent seed for the pricing admin module.
 // Safe to re-run: uses upsert on natural keys (slug / countryCode / (tierId, featureKey) / (tierId, countryCode)).
 // Runs via:  npx prisma db seed   (see backend/package.json prisma.seed)
+//
+// 2026-06-22 (billing-trim): re-seeded as an HR SaaS catalog. The website /
+// commerce (STATIC / APPOINTMENT / ECOMMERCE) tiers were replaced with three
+// HR plans — Starter / Growth / Enterprise — priced as a base monthly fee plus
+// a per-active-employee overage (TierPrice.overageStaffPriceMinor). The PPP
+// zone engine (PricingZone / CountryZoneAssignment / TierPrice / TierFeature)
+// is reused as-is; only the catalog content changed. The file keeps its
+// existing shape and the same `main()` entrypoint so `prisma db seed` still runs.
+//
+// !!! INDICATIVE PRICING !!!
+// All amounts below (base fee + per-active-employee) are INDICATIVE STARTING
+// POINTS for launch, not finalised commercial pricing. Super-admin can tune any
+// cell in Pricing → Tiers / Prices. The three billing currencies are fixed by
+// the gateway router: INR (Razorpay/India), NZD (Stripe/New Zealand), and USD
+// (Paddle / rest-of-world MoR).
 
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 // -----------------------------------------------------------------------------
-// Tiers  (base USD, monthly)
+// Tiers  (HR SaaS — base fee + per-active-employee, monthly)
 // -----------------------------------------------------------------------------
-
-// Vertical-aware tiers. Each row carries an explicit vertical so the
-// `(vertical × tier × zone)` matrix in pricing admin renders cleanly.
-// Slugs are vertical-prefixed for STATIC + ECOMMERCE (slug @unique on
-// PricingTier) — backend resolves by tierId once selected so the prefix
-// is just a stable lookup key.
-//
-// Pricing intent (USD base, multiplied by zone for non-USD countries):
-//   STATIC      → cheaper than APPOINTMENT (no booking engine)
-//   APPOINTMENT → existing booking ladder (unchanged)
-//   ECOMMERCE   → between APPOINTMENT and STATIC; transaction fees go
-//                 to Razorpay/Stripe Connect, so SaaS price stays small
-// 2026-06-03: `slug='free'` is an internal no-charge fallback because
-// backend entitlement, signup, cancellation, and trial-expiry code rely on
-// FREE_TIER_SLUG for safe downgrades. It is not part of the public paid
-// catalog. Paid appointment Solo lives at slug='solo'. Static/ecommerce
-// entry tiers keep their vertical-specific slugs and are paid products.
+// Three plans on the HR vertical:
+//   Starter    → core HR + time (attendance, leave) + employee self-service.
+//   Growth     → adds the payroll engine, IN/NZ statutory compliance,
+//                documents, and white-label custom domain.
+//   Enterprise → adds recruiting / performance / LMS talent suite and
+//                API access + webhooks.
 //
 // Marketing-card content (tagline, features[], ctaLabel, highlighted,
-// includedStaff) is seeded into PricingTier so the public landing page
-// renders without admin having to fill anything in.
+// includedStaff) is seeded into PricingTier so the public landing page renders
+// without admin having to fill anything in. `includedStaff` is the number of
+// active employees the base fee covers; employees beyond that are billed at the
+// per-active-employee overage on each TierPrice row.
 const TIERS = [
-  // ── APPOINTMENT — Appointments (platform-managed billing + payment rails) ─
   {
-    slug: 'free', vertical: 'APPOINTMENT', name: 'Free', sortOrder: 0, badge: null,
-    description: 'No-charge fallback tier for signup, cancellation and expired trials.',
-    tagline: 'Stay online while you choose a plan.',
-    ctaLabel: 'Internal fallback', highlighted: false, includedStaff: 1, trialDays: null,
+    slug: 'starter', vertical: 'HR', name: 'Starter', sortOrder: 1, badge: null,
+    description: 'Core HR for small teams — people, org, attendance and leave.',
+    tagline: 'Run your people ops without spreadsheets.',
+    ctaLabel: 'Start 30-day trial', highlighted: false, includedStaff: 25, trialDays: 30,
     features: [
-      '1 staff member',
-      '.sitepresso.com subdomain',
-      'Basic enquiry and booking presence',
-      '"Powered by Sitepresso" branding',
+      'Up to 25 active employees included',
+      'Core HR — employee records & org chart',
+      'Attendance tracking',
+      'Leave management',
+      'Employee self-service portal',
+      'Then per active employee / month',
     ],
   },
   {
-    slug: 'solo', vertical: 'APPOINTMENT', name: 'Solo', sortOrder: 1, badge: null,
-    description: 'Solo practitioner — paid entry tier.',
-    tagline: 'Take your first booking by tonight.',
-    ctaLabel: 'Start 30-day trial', highlighted: false, includedStaff: 1, trialDays: 30,
-    features: [
-      '1 staff member',
-      '.sitepresso.com subdomain',
-      'Stripe Connect / Razorpay ready',
-      'Email reminders',
-      'Google / Apple calendar sync',
-      '"Powered by Sitepresso" branding',
-    ],
-  },
-  {
-    slug: 'starter', vertical: 'APPOINTMENT', name: 'Starter', sortOrder: 2, badge: null,
-    description: 'Solo practitioner with a small practice.',
-    tagline: 'Look like you paid an agency.',
-    ctaLabel: 'Start 30-day trial', highlighted: false, includedStaff: 2, trialDays: 30,
-    features: [
-      'Everything in Solo',
-      'Up to 2 staff members',
-      'Custom domain (yours.com)',
-      'Branding watermark removed',
-      '200 SMS reminders / month',
-      'Basic CRM & client notes',
-    ],
-  },
-  {
-    slug: 'professional', vertical: 'APPOINTMENT', name: 'Professional', sortOrder: 3, badge: 'Most Popular',
-    description: 'Small clinic / team (2–10 staff).',
-    tagline: 'Built for teams that convert enquiries to revenue.',
-    ctaLabel: 'Start 30-day trial', highlighted: true, includedStaff: 10, trialDays: 30,
+    slug: 'growth', vertical: 'HR', name: 'Growth', sortOrder: 2, badge: 'Most Popular',
+    description: 'Adds payroll, IN/NZ statutory compliance, documents and white-label.',
+    tagline: 'Payroll and compliance, done correctly for India & New Zealand.',
+    ctaLabel: 'Start 30-day trial', highlighted: true, includedStaff: 50, trialDays: 30,
     features: [
       'Everything in Starter',
-      'Up to 10 staff members',
-      'Service & staff routing',
-      'Full CRM with tags & segments',
-      'Marketing automation',
-      'Unlimited SMS reminders',
-      'Advanced intake forms',
-      'Analytics & reports',
-      'AI content generation — SEO meta & blog copy',
+      'Up to 50 active employees included',
+      'Payroll engine',
+      'India & New Zealand statutory compliance',
+      'Document management',
+      'White-label custom domain',
+      'Then per active employee / month',
     ],
   },
   {
-    slug: 'business', vertical: 'APPOINTMENT', name: 'Business', sortOrder: 4, badge: null,
-    description: 'Multi-location / group practice.',
-    tagline: 'Multi-location, unlimited staff, priority support.',
-    ctaLabel: 'Talk to sales', ctaHref: 'mailto:sales@sitepresso.com', highlighted: false, trialDays: 30,
+    slug: 'enterprise', vertical: 'HR', name: 'Enterprise', sortOrder: 3, badge: null,
+    description: 'Full talent suite plus API access for larger, integrated teams.',
+    tagline: 'Recruiting, performance and an open API for the whole org.',
+    ctaLabel: 'Talk to sales', ctaHref: 'mailto:sales@example.com', highlighted: false,
+    includedStaff: 100, trialDays: 30,
     features: [
-      'Everything in Professional',
-      'Unlimited staff',
-      'Multi-location (coming Q3 2026)',
-      'Role-based access control (coming Q3 2026)',
-      'API access & webhooks (coming Q3 2026)',
+      'Everything in Growth',
+      'Up to 100 active employees included',
+      'Recruiting (ATS)',
+      'Performance management',
+      'Learning management (LMS)',
+      'API access & webhooks',
       'Priority support',
-      'Dedicated success manager',
-    ],
-  },
-  {
-    slug: 'custom', vertical: 'APPOINTMENT', name: 'Custom / Contact Sales', sortOrder: 5, badge: null,
-    description: 'Custom appointment operations with more staff, branches, integrations, and support.',
-    tagline: 'Custom limits for larger teams.',
-    ctaLabel: 'Contact sales', ctaHref: 'mailto:sales@sitepresso.com', highlighted: false, trialDays: null,
-    isCustomPriced: true,
-    features: [
-      'More staff and branches',
-      'Custom usage limits',
-      'Migration and onboarding support',
-      'Custom integrations',
-      'Priority success support',
-    ],
-  },
-
-  // ── STATIC — Marketing site (no payments) ────────────────────────────────
-  {
-    slug: 'static-free', vertical: 'STATIC', name: 'Solo', sortOrder: 1, badge: null,
-    description: 'Single-page marketing site — entry tier.',
-    tagline: 'One page. Online today. Done.',
-    ctaLabel: 'Start 30-day trial', highlighted: false, trialDays: 30,
-    features: [
-      '1 page',
-      '.sitepresso.com subdomain',
-      'Mobile-responsive',
-      'Basic SEO',
-      'Contact form',
-      '"Powered by Sitepresso" branding',
-    ],
-  },
-  {
-    slug: 'static-starter', vertical: 'STATIC', name: 'Starter', sortOrder: 2, badge: null,
-    description: 'Small marketing site with custom domain.',
-    tagline: 'Your brand on your own domain.',
-    ctaLabel: 'Start 30-day trial', highlighted: false, trialDays: 30,
-    features: [
-      'Up to 5 pages',
-      'Custom domain',
-      'Branding watermark removed',
-      'Contact form with file uploads',
-      'Basic SEO + sitemap',
-      'Mobile-responsive',
-    ],
-  },
-  {
-    slug: 'static-professional', vertical: 'STATIC', name: 'Professional', sortOrder: 3, badge: 'Most Popular',
-    description: 'Multi-page site with CMS + SEO tools.',
-    tagline: 'A real marketing site that ranks.',
-    ctaLabel: 'Start 30-day trial', highlighted: true, trialDays: 30,
-    features: [
-      'Everything in Starter',
-      'Unlimited pages',
-      'Built-in blog',
-      'Advanced SEO + schema markup',
-      'AI content generation — SEO meta & blog copy',
-      'Site analytics',
-      'Custom code blocks',
-    ],
-  },
-  {
-    slug: 'static-business', vertical: 'STATIC', name: 'Business', sortOrder: 4, badge: null,
-    description: 'Agencies with multiple client sites.',
-    tagline: 'Multi-site for agencies and growing teams.',
-    ctaLabel: 'Talk to sales', ctaHref: 'mailto:sales@sitepresso.com', highlighted: false, trialDays: 30,
-    features: [
-      'Everything in Professional',
-      'Up to 5 sites',
-      'Up to 5 team seats',
-      'Priority support',
-      'Dedicated success manager',
-    ],
-  },
-  {
-    slug: 'static-custom', vertical: 'STATIC', name: 'Custom / Contact Sales', sortOrder: 5, badge: null,
-    description: 'Custom website package for more pages, teams, sites, integrations, and support.',
-    tagline: 'Custom limits for content-heavy teams.',
-    ctaLabel: 'Contact sales', ctaHref: 'mailto:sales@sitepresso.com', highlighted: false, trialDays: null,
-    isCustomPriced: true,
-    features: [
-      'More pages, sites, and staff',
-      'Custom content and SEO limits',
-      'Migration and onboarding support',
-      'Custom integrations',
-      'Priority success support',
-    ],
-  },
-
-  // ── ECOMMERCE — Online shop (Razorpay Route / Stripe Connect) ────────────
-  {
-    slug: 'ecom-free', vertical: 'ECOMMERCE', name: 'Starter Commerce', sortOrder: 1, badge: null,
-    description: 'Single online shop with one store owner/admin.',
-    tagline: 'One store, one staff seat, online today.',
-    ctaLabel: 'Start 30-day trial', highlighted: false, trialDays: 30,
-    includedStaff: 1,
-    features: [
-      '1 storefront',
-      '1 staff seat included',
-      'Up to 10 fulfillment locations',
-      'Products, categories and brands',
-      'Cart, checkout and order dashboard',
-      'Basic inventory edits',
-      'Email order receipts',
-    ],
-  },
-  {
-    slug: 'ecom-starter', vertical: 'ECOMMERCE', name: 'Fulfillment Commerce', sortOrder: 2, badge: null,
-    description: 'Shopify-style: one storefront with warehouses behind it.',
-    tagline: 'One storefront, multiple fulfillment locations.',
-    ctaLabel: 'Start 30-day trial', highlighted: false, trialDays: 30,
-    includedStaff: 5,
-    features: [
-      'Everything in Starter Commerce',
-      '5 staff seats included',
-      'Up to 10 fulfillment locations',
-      'Per-location inventory',
-      'Purchase receiving',
-      'Delivery and pickup setup',
-      'Custom domain',
-    ],
-  },
-  {
-    slug: 'ecom-professional', vertical: 'ECOMMERCE', name: 'Commerce Pro', sortOrder: 3, badge: 'Most Popular',
-    description: 'Larger Shopify-style operation with advanced fulfilment controls.',
-    tagline: 'Built for serious warehouse operations.',
-    ctaLabel: 'Start 30-day trial', highlighted: true, trialDays: 30,
-    includedStaff: 10,
-    features: [
-      'Everything in Fulfillment Commerce',
-      '10 staff seats included',
-      'Up to 10 fulfillment locations',
-      'Picklist and scanner workflow',
-      'Stock transfers and adjustments',
-      'Advanced inventory reports',
-      'Roles and location permissions',
-      'AI content generation — product copy, SEO & blog',
-    ],
-  },
-  {
-    slug: 'ecom-business', vertical: 'ECOMMERCE', name: 'Grocery Chain', sortOrder: 4, badge: null,
-    description: 'Pak’nSave-style: online + offline branches with separate stock and pricing.',
-    tagline: 'Branch-level ecommerce for grocery chains.',
-    ctaLabel: 'Talk to sales', ctaHref: 'mailto:sales@sitepresso.com', highlighted: false, trialDays: 30,
-    includedStaff: 30,
-    features: [
-      '3 physical branches included',
-      '30 staff included',
-      'Branch-specific inventory and pricing',
-      'POS-ready branch workflows',
-      'Pickup, delivery slots and riders per branch',
-      'Store-scoped team permissions',
-      'Priority support',
-    ],
-  },
-  {
-    slug: 'ecom-custom', vertical: 'ECOMMERCE', name: 'Custom / Contact Sales', sortOrder: 5, badge: null,
-    description: 'More branches, more staff, custom limits, and migration support.',
-    tagline: 'Custom commerce limits for growing chains.',
-    ctaLabel: 'Contact sales', ctaHref: 'mailto:sales@sitepresso.com', highlighted: false, trialDays: null,
-    isCustomPriced: true,
-    features: [
-      'More branches and fulfillment locations',
-      'More staff, riders, and pickers',
-      'Custom product, order, and inventory limits',
-      'Migration and onboarding support',
-      'Priority success support',
+      'Then per active employee / month',
     ],
   },
 ];
 
-// Base USD monthly price per self-serve tier. Custom/contact-sales tiers are
-// intentionally omitted here; they are quoted and activated manually.
-// STATIC vertical    : $5  / $12 / $29 / $79
-// APPOINTMENT vertical: $9 / $19 / $49 / $129  (also drives BASE_USD below)
-// ECOMMERCE vertical  : $29 / $39 / $99 / $299  (the canonical all-paid prices —
-//   this seed is the single source of truth; apply-all-paid-pricing.js sets the
-//   same 39/99/299, so the displayed price is deterministic regardless of which
-//   ran. 2026-06-04: ecom-starter 79→39, ecom-professional 149→99.)
-// Annual is 9.6× monthly (~20% yearly discount).
+// Base USD monthly price per HR tier (the base fee before per-employee overage,
+// before PPP zones). INDICATIVE.
+//   Starter $49 / Growth $149 / Enterprise $399.
 const TIER_BASE_USD_MONTHLY = {
-  // APPOINTMENT
-  free: 0, solo: 9, starter: 19, professional: 49, business: 129,
-  // STATIC
-  'static-free': 5, 'static-starter': 12, 'static-professional': 29, 'static-business': 79,
-  // ECOMMERCE
-  'ecom-free': 29, 'ecom-starter': 39, 'ecom-professional': 99, 'ecom-business': 299,
+  starter: 49,
+  growth: 149,
+  enterprise: 399,
 };
 
 // -----------------------------------------------------------------------------
@@ -306,6 +109,9 @@ const ZONES = [
 // Countries  (ISO 3166-1 alpha-2 → zone + default currency)
 // -----------------------------------------------------------------------------
 // Format: [countryCode, countryName, region, currencyCode, currencySymbol, zoneSlug]
+// The full PPP country list is retained so the zone engine keeps working for
+// the Paddle (USD) rest-of-world group. India (INR/Razorpay) and New Zealand
+// (NZD/Stripe) carry explicit per-country overrides below.
 
 const COUNTRIES = [
   ['US', "United States", 'North America', 'USD', '$', 'zone-1'],
@@ -538,40 +344,44 @@ const COUNTRIES = [
 
 
 // -----------------------------------------------------------------------------
-// Feature matrix
+// Feature matrix  (HR feature catalog — gates entitlements per plan)
 // -----------------------------------------------------------------------------
-// Rows = feature keys, columns = tier slugs. Values per feature_type:
+// Rows = HR feature keys (§6.4 of docs/17-reuse-map.md), columns = the three HR
+// tier slugs. Plan gating:
+//   Starter    → coreHr, attendance, leaveManagement, essPortal
+//   Growth     → + payrollEngine, statutoryIN, statutoryNZ, documents, whiteLabelDomain
+//   Enterprise → + recruiting, performance, lms, apiAccess, webhooks
+// Values per feature_type:
 //   BOOLEAN   -> 'true' | 'false'
-//   NUMERIC   -> '<int>' (use '-1' for unlimited via UNLIMITED type instead)
+//   NUMERIC   -> '<int>'
 //   UNLIMITED -> 'unlimited'
 //
+// NOTE: statutoryIN / statutoryNZ are also COUNTRY-CONDITIONED at runtime
+// (resolved true only when business.country matches). They sit on Growth+ here
+// so the *plan* exposes the compliance module; the country gate is applied by
+// the feature resolver, not by this catalog.
 const FEATURE_MATRIX = [
-  // key,                        type,        display,                                free,        solo,       starter,     professional, business
-  ['staff_count',                'NUMERIC',   'Staff members',                        '1',         '1',        '2',         '10',         'unlimited'],
-  ['bookings_per_month',         'NUMERIC',   'Bookings per month',                   '10',        '50',       'unlimited', 'unlimited',  'unlimited'],
-  ['custom_domain',              'BOOLEAN',   'Custom domain',                        'false',     'false',    'true',      'true',       'true'],
-  ['remove_branding',            'BOOLEAN',   'Remove "Powered by" branding',         'false',     'false',    'true',      'true',       'true'],
-  ['calendar_sync',              'BOOLEAN',   'Google / Apple calendar sync',         'false',     'false',    'true',      'true',       'true'],
-  ['sms_reminders_monthly',      'NUMERIC',   'SMS reminders per month',              '0',         '0',        '200',       '1000',       '5000'],
-  ['email_reminders',            'BOOLEAN',   'Email reminders',                      'true',      'true',     'true',      'true',       'true'],
-  ['intake_forms_basic',         'BOOLEAN',   'Basic intake forms',                   'true',      'true',     'true',      'true',       'true'],
-  ['intake_forms_advanced',      'BOOLEAN',   'Advanced forms (conditional, files)',  'false',     'false',    'false',     'true',       'true'],
-  ['department_service_routing', 'BOOLEAN',   'Department / service routing',         'false',     'false',    'false',     'true',       'true'],
-  ['waiting_list',               'BOOLEAN',   'Waiting list',                         'false',     'false',    'false',     'true',       'true'],
-  ['basic_crm',                  'BOOLEAN',   'Basic CRM (clients, notes)',           'false',     'true',     'true',      'true',       'true'],
-  ['advanced_crm',               'BOOLEAN',   'Advanced CRM (tags, segments)',        'false',     'false',    'false',     'true',       'true'],
-  ['automated_marketing',        'BOOLEAN',   'Automated marketing',                  'false',     'false',    'false',     'true',       'true'],
-  ['reports_analytics',          'BOOLEAN',   'Reports & analytics',                  'false',     'false',    'false',     'true',       'true'],
-  ['multi_location',             'BOOLEAN',   'Multi-location',                       'false',     'false',    'false',     'false',      'true'],
-  ['rbac_permissions',           'BOOLEAN',   'Role-based permissions',               'false',     'false',    'false',     'false',      'true'],
-  ['api_access',                 'BOOLEAN',   'API access & webhooks',                'false',     'false',    'false',     'false',      'true'],
-  ['white_label',                'BOOLEAN',   'White label',                          'false',     'false',    'false',     'false',      'true'],
-  ['priority_support',           'BOOLEAN',   'Priority support',                     'false',     'false',    'false',     'false',      'true'],
-  ['multi_language_booking',     'BOOLEAN',   'Multi-language booking page',          'false',     'false',    'false',     'true',       'true'],
+  // key,                  type,        display,                              starter,     growth,      enterprise
+  ['active_employees',     'NUMERIC',   'Active employees included',          '25',        '50',        '100'],
+  ['coreHr',               'BOOLEAN',   'Core HR (people & org)',             'true',      'true',      'true'],
+  ['attendance',           'BOOLEAN',   'Attendance tracking',                'true',      'true',      'true'],
+  ['leaveManagement',      'BOOLEAN',   'Leave management',                   'true',      'true',      'true'],
+  ['essPortal',            'BOOLEAN',   'Employee self-service portal',       'true',      'true',      'true'],
+  ['payrollEngine',        'BOOLEAN',   'Payroll engine',                     'false',     'true',      'true'],
+  ['statutoryIN',          'BOOLEAN',   'India statutory compliance',         'false',     'true',      'true'],
+  ['statutoryNZ',          'BOOLEAN',   'New Zealand statutory compliance',   'false',     'true',      'true'],
+  ['documents',            'BOOLEAN',   'Document management',                'false',     'true',      'true'],
+  ['whiteLabelDomain',     'BOOLEAN',   'White-label custom domain',          'false',     'true',      'true'],
+  ['recruiting',           'BOOLEAN',   'Recruiting (ATS)',                   'false',     'false',     'true'],
+  ['performance',          'BOOLEAN',   'Performance management',             'false',     'false',     'true'],
+  ['lms',                  'BOOLEAN',   'Learning management (LMS)',          'false',     'false',     'true'],
+  ['apiAccess',            'BOOLEAN',   'API access',                         'false',     'false',     'true'],
+  ['webhooks',             'BOOLEAN',   'Webhooks',                           'false',     'false',     'true'],
+  ['priority_support',     'BOOLEAN',   'Priority support',                   'false',     'false',     'true'],
 ];
 
 // -----------------------------------------------------------------------------
-// Prices  (base USD + explicit local-currency overrides)
+// Prices  (base fee + per-active-employee, base USD + INR/NZD overrides)
 // -----------------------------------------------------------------------------
 // Currency decimal handling — ISO 4217 minor units.
 const ZERO_DECIMAL_CURRENCIES = new Set([
@@ -590,72 +400,54 @@ function annualFromMonthly(monthlyMinor) {
   return Math.round(monthlyMinor * 9.6);
 }
 
-// 2026-04-29 — base USD tier prices (the canonical per-tier price before zones).
-// APPOINTMENT vertical drives this map; STATIC + ECOMMERCE per-country
-// overrides are derived via STATIC_RATIO / ECOM_RATIO below. This stays
-// aligned with TIER_BASE_USD_MONTHLY['<slug>'] above for the APPOINTMENT
-// slugs (free → $0 fallback, solo → $9, starter $19, professional $49, business $129).
+// Base USD HR tier prices — the canonical base fee per tier before zones.
+// Stays aligned with TIER_BASE_USD_MONTHLY above. INDICATIVE.
 const BASE_USD = {
-  free:         0,
-  solo:         9,
-  starter:      19,
-  professional: 49,
-  business:     129,
+  starter:    49,
+  growth:     149,
+  enterprise: 399,
 };
 
-// Vertical price ratios used when mirroring per-country overrides from
-// APPOINTMENT to STATIC + ECOMMERCE. New (2026-04-29):
-//   STATIC      ≈ 60% of APPOINTMENT
-//   ECOMMERCE   uses each ecommerce facility tier's own base-vs-appointment
-//               ratio because Starter/Fulfillment/Pro/Chain do not scale
-//               evenly from the booking ladder.
-const STATIC_RATIO = 0.60;
-function ecommerceRatioFor(appointmentSlug) {
-  const ecomSlug = appointmentSlug === 'solo' ? 'ecom-free' : `ecom-${appointmentSlug}`;
-  const appointmentBase = BASE_USD[appointmentSlug] || 1;
-  const ecomBase = TIER_BASE_USD_MONTHLY[ecomSlug] || appointmentBase;
-  return ecomBase / appointmentBase;
-}
-
-// Country-specific overrides — APPOINTMENT prices in local currency, rounded
-// for marketing. STATIC + ECOMMERCE are mirrored automatically via the ratios
-// above. Numbers refreshed 2026-06-03 to match the $0/$9/$19/$49/$129 USD
-// ladder. Super-admin can fine-tune any cell in `Pricing → Prices`.
-const COUNTRY_OVERRIDES = {
-  US: { free: 0, solo: 9,      starter: 19,    professional: 49,    business: 129    },
-  GB: { free: 0, solo: 7,      starter: 15,    professional: 39,    business: 99     },
-  // EU is applied below to the 17 EUR countries in the zone lists
-  AU: { free: 0, solo: 14,     starter: 29,    professional: 75,    business: 199    },
-  CA: { free: 0, solo: 12,     starter: 25,    professional: 65,    business: 169    },
-  NZ: { free: 0, solo: 14,     starter: 29,    professional: 75,    business: 199    },
-  SG: { free: 0, solo: 12,     starter: 25,    professional: 65,    business: 169    },
-  JP: { free: 0, solo: 900,    starter: 1900,  professional: 4900,  business: 12900  },
-  KR: { free: 0, solo: 9000,   starter: 19000, professional: 49000, business: 129000 },
-  BR: { free: 0, solo: 25,     starter: 49,    professional: 129,   business: 339    },
-  MX: { free: 0, solo: 99,     starter: 199,   professional: 499,   business: 1299   },
-  TR: { free: 0, solo: 169,    starter: 349,   professional: 899,   business: 2299   },
-  ZA: { free: 0, solo: 89,     starter: 179,   professional: 449,   business: 1199   },
-  IN: { free: 0, solo: 299,    starter: 599,   professional: 1499,  business: 3999   },
-  PK: { free: 0, solo: 999,    starter: 1999,  professional: 4999,  business: 12999  },
-  NG: { free: 0, solo: 4900,   starter: 9500,  professional: 24000, business: 64000  },
-  BD: { free: 0, solo: 499,    starter: 999,   professional: 2499,  business: 6499   },
-  EG: { free: 0, solo: 149,    starter: 299,   professional: 749,   business: 1999   },
+// Per-active-employee USD overage (charged on each employee beyond the tier's
+// included headcount). INDICATIVE.
+const BASE_USD_PER_EMPLOYEE = {
+  starter:    3,
+  growth:     5,
+  enterprise: 7,
 };
 
-// EUR countries get zone-aware EUR pricing (base Zone 1 multiplied by zone).
-// Without this, every EUR country would show identical prices and the zone
-// multiplier would be ignored for them (see publicPricing.controller.js).
-const EUR_ZONE_OVERRIDES = {
-  'zone-1': { free: 0, solo: 8,  starter: 17, professional: 45, business: 119 },
-  'zone-2': { free: 0, solo: 7,  starter: 14, professional: 38, business: 99  },
-  'zone-3': { free: 0, solo: 5,  starter: 11, professional: 29, business: 76  },
-  'zone-4': { free: 0, solo: 4,  starter: 9,  professional: 22, business: 59  },
+// Explicit billing-currency overrides for our three gateway currencies. These
+// are the ONLY currencies the gateway router bills in:
+//   INR → Razorpay (India), NZD → Stripe (New Zealand), USD → Paddle (RoW).
+// Each entry: { base: monthly base fee, perEmployee: per-active-employee }.
+// All amounts INDICATIVE starting points — tune in Pricing → Prices.
+const CURRENCY_PRICING = {
+  // USD (Paddle / rest of world) — also the countryCode=null base rows.
+  USD: {
+    starter:    { base: 49,  perEmployee: 3 },
+    growth:     { base: 149, perEmployee: 5 },
+    enterprise: { base: 399, perEmployee: 7 },
+  },
+  // INR (Razorpay / India). ~₹83/USD, rounded to clean marketing numbers.
+  INR: {
+    starter:    { base: 3999,  perEmployee: 199 },
+    growth:     { base: 11999, perEmployee: 349 },
+    enterprise: { base: 29999, perEmployee: 499 },
+  },
+  // NZD (Stripe / New Zealand). ~NZ$1.65/USD, rounded.
+  NZD: {
+    starter:    { base: 79,  perEmployee: 5 },
+    growth:     { base: 249, perEmployee: 8 },
+    enterprise: { base: 649, perEmployee: 12 },
+  },
 };
-for (const [code, , , currency, , zoneSlug] of COUNTRIES) {
-  if (currency !== 'EUR' || COUNTRY_OVERRIDES[code]) continue;
-  const prices = EUR_ZONE_OVERRIDES[zoneSlug];
-  if (prices) COUNTRY_OVERRIDES[code] = prices;
-}
+
+// Which country each explicit billing currency maps to for per-country
+// override rows. (USD stays on the countryCode=null base row.)
+const CURRENCY_COUNTRY = {
+  INR: 'IN',
+  NZD: 'NZ',
+};
 
 // -----------------------------------------------------------------------------
 // Seed
@@ -680,13 +472,13 @@ async function seedTiers() {
       update: {
         name: t.name, description: t.description, badge: t.badge, sortOrder: t.sortOrder,
         isCustomPriced: !!t.isCustomPriced, isActive: true, trialDays: t.trialDays ?? null,
-        vertical: t.vertical || 'APPOINTMENT',
+        vertical: t.vertical || 'HR',
         ...cardContent,
       },
       create: {
         slug: t.slug, name: t.name, description: t.description, badge: t.badge,
         sortOrder: t.sortOrder, isCustomPriced: !!t.isCustomPriced, trialDays: t.trialDays ?? null,
-        vertical: t.vertical || 'APPOINTMENT',
+        vertical: t.vertical || 'HR',
         ...cardContent,
       },
     });
@@ -698,6 +490,7 @@ async function seedTiers() {
     if (typeof baseUsdMonthly === 'number') {
       const monthlyMinor = Math.round(baseUsdMonthly * 100);
       const annualMinor = Math.round(monthlyMinor * 9.6);
+      const overageMinor = toMinor(BASE_USD_PER_EMPLOYEE[t.slug] || 0, 'USD');
       const existingBase = await prisma.tierPrice.findFirst({
         where: { tierId: tier.id, countryCode: null },
       });
@@ -708,6 +501,7 @@ async function seedTiers() {
             currencyCode: 'USD',
             amountMonthlyMinor: monthlyMinor,
             amountAnnualMinor: annualMinor,
+            overageStaffPriceMinor: overageMinor,
           },
         });
       } else {
@@ -715,12 +509,13 @@ async function seedTiers() {
           data: {
             tierId: tier.id, countryCode: null, currencyCode: 'USD',
             amountMonthlyMinor: monthlyMinor, amountAnnualMinor: annualMinor,
+            overageStaffPriceMinor: overageMinor,
           },
         });
       }
     }
   }
-  console.log(`  ✓ ${TIERS.length} tiers upserted (appointment free+4 paid tiers, static/ecom paid tiers + base USD prices)`);
+  console.log(`  ✓ ${TIERS.length} HR tiers upserted (Starter / Growth / Enterprise + base USD prices)`);
 }
 
 async function seedZones() {
@@ -781,8 +576,8 @@ async function seedFeatures() {
   let n = 0;
   for (let i = 0; i < FEATURE_MATRIX.length; i++) {
     const row = FEATURE_MATRIX[i];
-    const [key, type, displayLabel, free, solo, starter, professional, business] = row;
-    const values = { free, solo, starter, professional, business };
+    const [key, type, displayLabel, starter, growth, enterprise] = row;
+    const values = { starter, growth, enterprise };
     for (const tierSlug of Object.keys(values)) {
       if (!tiersBySlug[tierSlug]) continue;
       const rawVal = values[tierSlug];
@@ -798,174 +593,92 @@ async function seedFeatures() {
       n++;
     }
   }
-  console.log(`  ✓ ${n} tier-feature rows upserted (${FEATURE_MATRIX.length} features × appointment tiers)`);
+  console.log(`  ✓ ${n} tier-feature rows upserted (${FEATURE_MATRIX.length} HR features × 3 tiers)`);
 }
 
 async function seedPrices() {
   const tiers = await prisma.pricingTier.findMany();
   const tiersBySlug = Object.fromEntries(tiers.map((t) => [t.slug, t.id]));
-  // 2026-06-03: `free` is the true zero-price fallback; paid appointment
-  // Solo is `solo`.
-  const allSlugs = ['free', 'solo', 'starter', 'professional', 'business'];
+  const allSlugs = ['starter', 'growth', 'enterprise'];
 
   let n = 0;
 
-  // 1) Base USD price per tier (countryCode = null).
+  // 1) Base USD price per tier (countryCode = null), with per-employee overage.
   //    Prisma doesn't allow null in compound-unique where-clauses, so do
   //    findFirst then update/create manually.
   for (const slug of allSlugs) {
     const tierId = tiersBySlug[slug];
-    const monthlyUsd = BASE_USD[slug];
-    const monthlyMinor = toMinor(monthlyUsd, 'USD');
+    if (!tierId) continue;
+    const usd = CURRENCY_PRICING.USD[slug];
+    const monthlyMinor = toMinor(usd.base, 'USD');
     const annualMinor = annualFromMonthly(monthlyMinor);
+    const overageMinor = toMinor(usd.perEmployee, 'USD');
     const existing = await prisma.tierPrice.findFirst({
       where: { tierId, countryCode: null },
     });
     if (existing) {
       await prisma.tierPrice.update({
         where: { id: existing.id },
-        data: { currencyCode: 'USD', amountMonthlyMinor: monthlyMinor, amountAnnualMinor: annualMinor },
+        data: {
+          currencyCode: 'USD',
+          amountMonthlyMinor: monthlyMinor,
+          amountAnnualMinor: annualMinor,
+          overageStaffPriceMinor: overageMinor,
+        },
       });
     } else {
       await prisma.tierPrice.create({
         data: {
           tierId, countryCode: null, currencyCode: 'USD',
           amountMonthlyMinor: monthlyMinor, amountAnnualMinor: annualMinor,
+          overageStaffPriceMinor: overageMinor,
         },
       });
     }
     n++;
   }
 
-  // 2) Country-specific overrides — APPOINTMENT first, then mirror to
-  //    STATIC (×0.5) and ECOMMERCE (×0.8). Mirroring keeps the per-country
-  //    catalogue complete for all 12 tiers without forcing the user to
-  //    enter every cell by hand. They can still override any value via
-  //    super-admin → Pricing → Prices subtab.
-  const countries = await prisma.countryZoneAssignment.findMany();
-  const countryCurrency = Object.fromEntries(countries.map((c) => [c.countryCode, c.currencyCode]));
-
-  // Helper — round to a "marketing-friendly" number ending in 9/99/999
-  // rather than the raw 0.5×/0.8× output (e.g., $14.5 → $15, ₹1439 → ₹1399).
-  // Step granularity is one order of magnitude smaller than the value,
-  // so 1439 snaps to 1399 (step 100), not 999 (step 1000). For float
-  // currencies under 100 we just round to integer — no charm needed.
-  function roundMarketing(value, currency) {
-    if (value <= 0) return 0;
-    const isFloatCurrency = !ZERO_DECIMAL_CURRENCIES.has(currency);
-    if (isFloatCurrency && value < 100) {
-      return Math.round(value);
-    }
-    let step;
-    if (value < 1000)        step = 10;   // 100-999      → 99, 199, 299, …
-    else if (value < 100000) step = 100;  // 1000-99999   → 1099, 1199, …, 1399, 1499, …
-    else                     step = 1000; // 100000+      → 99999, 199999, …
-    const rounded = Math.round(value / step) * step;
-    return Math.max(step - 1, rounded - 1);
-  }
-
-  // Helper — write one (tier, country) override row, idempotent.
-  async function upsertCountryPrice(tierId, countryCode, currency, monthlyAmount) {
-    const monthlyMinor = toMinor(monthlyAmount, currency);
-    const annualMinor = annualFromMonthly(monthlyMinor);
-    await prisma.tierPrice.upsert({
-      where: { tierId_countryCode: { tierId, countryCode } },
-      update: { currencyCode: currency, amountMonthlyMinor: monthlyMinor, amountAnnualMinor: annualMinor, isOverride: true },
-      create: { tierId, countryCode, currencyCode: currency, amountMonthlyMinor: monthlyMinor, amountAnnualMinor: annualMinor, isOverride: true },
-    });
-  }
-
-  for (const [countryCode, tierPrices] of Object.entries(COUNTRY_OVERRIDES)) {
-    const currency = countryCurrency[countryCode];
-    if (!currency) continue; // country not seeded — skip
+  // 2) Explicit billing-currency overrides — INR (India / Razorpay) and
+  //    NZD (New Zealand / Stripe). Each carries its own base fee + per-active-
+  //    employee overage. USD already covers the rest of the world via Paddle.
+  for (const [currency, country] of Object.entries(CURRENCY_COUNTRY)) {
+    const pricing = CURRENCY_PRICING[currency];
     for (const slug of allSlugs) {
-      const amount = tierPrices[slug];
-      if (amount == null) continue;
-
-      // APPOINTMENT (the source of truth for the per-country price)
-      await upsertCountryPrice(tiersBySlug[slug], countryCode, currency, amount);
+      const tierId = tiersBySlug[slug];
+      if (!tierId || !pricing[slug]) continue;
+      const { base, perEmployee } = pricing[slug];
+      const monthlyMinor = toMinor(base, currency);
+      const annualMinor = annualFromMonthly(monthlyMinor);
+      const overageMinor = toMinor(perEmployee, currency);
+      await prisma.tierPrice.upsert({
+        where: { tierId_countryCode: { tierId, countryCode: country } },
+        update: {
+          currencyCode: currency,
+          amountMonthlyMinor: monthlyMinor,
+          amountAnnualMinor: annualMinor,
+          overageStaffPriceMinor: overageMinor,
+          isOverride: true,
+        },
+        create: {
+          tierId, countryCode: country, currencyCode: currency,
+          amountMonthlyMinor: monthlyMinor, amountAnnualMinor: annualMinor,
+          overageStaffPriceMinor: overageMinor, isOverride: true,
+        },
+      });
       n++;
-
-      if (slug === 'free') continue;
-
-      // STATIC mirror — 60% of APPOINTMENT, marketing-rounded.
-      const staticSlug = slug === 'solo' ? 'static-free' : `static-${slug}`;
-      if (tiersBySlug[staticSlug]) {
-        const staticAmount = roundMarketing(amount * STATIC_RATIO, currency);
-        await upsertCountryPrice(tiersBySlug[staticSlug], countryCode, currency, staticAmount);
-        n++;
-      }
-
-      // ECOMMERCE mirror — facility-tier base ratio, marketing-rounded.
-      const ecomSlug = slug === 'solo' ? 'ecom-free' : `ecom-${slug}`;
-      if (tiersBySlug[ecomSlug]) {
-        const ecomAmount = roundMarketing(amount * ecommerceRatioFor(slug), currency);
-        await upsertCountryPrice(tiersBySlug[ecomSlug], countryCode, currency, ecomAmount);
-        n++;
-      }
     }
   }
 
-  console.log(`  ✓ ${n} tier-price rows upserted (3 verticals × per-country overrides + base USD)`);
-}
-
-async function moveLegacySoloPaddlePriceIds() {
-  const freeTier = await prisma.pricingTier.findUnique({ where: { slug: 'free' }, select: { id: true } });
-  const soloTier = await prisma.pricingTier.findUnique({ where: { slug: 'solo' }, select: { id: true } });
-  if (!freeTier || !soloTier) return;
-
-  const freePrices = await prisma.tierPrice.findMany({
-    where: {
-      tierId: freeTier.id,
-      OR: [
-        { paddlePriceIdMonthly: { not: null } },
-        { paddlePriceIdAnnual: { not: null } },
-      ],
-    },
-  });
-
-  let moved = 0;
-  for (const freePrice of freePrices) {
-    const soloPrice = await prisma.tierPrice.findFirst({
-      where: {
-        tierId: soloTier.id,
-        countryCode: freePrice.countryCode,
-      },
-    });
-    if (!soloPrice) continue;
-
-    await prisma.tierPrice.update({
-      where: { id: soloPrice.id },
-      data: {
-        paddlePriceIdMonthly: soloPrice.paddlePriceIdMonthly || freePrice.paddlePriceIdMonthly,
-        paddlePriceIdAnnual: soloPrice.paddlePriceIdAnnual || freePrice.paddlePriceIdAnnual,
-        lastSyncedToPaddleAt: soloPrice.lastSyncedToPaddleAt || freePrice.lastSyncedToPaddleAt,
-      },
-    });
-    await prisma.tierPrice.update({
-      where: { id: freePrice.id },
-      data: {
-        paddlePriceIdMonthly: null,
-        paddlePriceIdAnnual: null,
-        lastSyncedToPaddleAt: null,
-      },
-    });
-    moved += 1;
-  }
-
-  if (moved > 0) {
-    console.log(`  ✓ moved ${moved} legacy Solo Paddle price row(s) from free → solo`);
-  }
+  console.log(`  ✓ ${n} tier-price rows upserted (USD base + INR/NZD overrides, base fee + per-employee)`);
 }
 
 async function main() {
-  console.log('Seeding pricing admin…');
+  console.log('Seeding pricing admin (HR plans)…');
   await seedTiers();
   await seedZones();
   await seedCountries();
   await seedFeatures();
   await seedPrices();
-  await moveLegacySoloPaddlePriceIds();
   console.log('Done.');
 }
 

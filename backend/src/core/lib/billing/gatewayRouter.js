@@ -1,14 +1,17 @@
 //
-// gatewayRouter.js — single source of truth for payment-gateway routing.
+// gatewayRouter.js — single source of truth for SaaS-subscription gateway routing.
 //
 // SaaS subscriptions:
 //   India (IN)        → Razorpay subscriptions            → INR
 //   New Zealand (NZ)  → Stripe Billing                    → NZD
-//   Rest of world     → Paddle Merchant of Record          → GBP (UK) / EUR (eurozone) / USD
+//   Rest of world     → Paddle Merchant of Record          → GBP (UK) / EUR (eurozone) / USD / AUD
 //
-// Tenant/store order payments:
-//   India tenants     → Razorpay Partner/Route
-//   Non-India tenants → Stripe Connect direct charges
+// NOTE (2026-06-22, billing-trim): the buyer-side tenant/store order payment
+// routing (Razorpay Route / Stripe Connect) has been removed from this module.
+// This HRMS has no buyer checkout — employees never pay the tenant — so the
+// only routing that survives here is the SaaS-subscription half above. The one
+// remaining ecommerce consumer (storefront payment readiness) carries its own
+// self-contained routing in `tenantPaymentReadiness.js`.
 //
 // The amount within a currency is still set by the existing PPP *zone* system
 // (TierPrice rows + zone multipliers) — this module only answers gateway +
@@ -104,71 +107,6 @@ function resolveBilling(countryCode) {
   };
 }
 
-function resolveTenantPaymentGateway({ countryCode, currency } = {}) {
-  const country = normalizeCountry(countryCode);
-  const normalizedCurrency = String(currency || '').trim().toUpperCase();
-  if (country) return country === 'IN' ? GATEWAYS.RAZORPAY : GATEWAYS.STRIPE;
-  if (normalizedCurrency === 'INR') return GATEWAYS.RAZORPAY;
-  return GATEWAYS.STRIPE;
-}
-
-function tenantPaymentModel(provider) {
-  return provider === GATEWAYS.RAZORPAY ? 'RAZORPAY_PARTNER' : 'STRIPE_CONNECT';
-}
-
-function tenantPaymentModelLabel(provider) {
-  return provider === GATEWAYS.RAZORPAY ? 'Razorpay Route linked account' : 'Stripe Connect account';
-}
-
-function resolveTenantPaymentRoute({ countryCode, currency } = {}) {
-  const country = normalizeCountry(countryCode);
-  const normalizedCurrency = String(currency || '').trim().toUpperCase() || null;
-  const provider = resolveTenantPaymentGateway({ countryCode, currency });
-  return {
-    provider,
-    gateway: provider,
-    providerLabel: gatewayLabel(provider),
-    model: tenantPaymentModel(provider),
-    modelLabel: tenantPaymentModelLabel(provider),
-    country,
-    currency: normalizedCurrency,
-    expectedCurrency: provider === GATEWAYS.RAZORPAY ? 'INR' : null,
-    countryRequired: !country,
-  };
-}
-
-function tenantGatewayMismatch({ provider, countryCode, currency } = {}) {
-  const requested = String(provider || '').trim().toUpperCase();
-  if (!requested) return null;
-  const route = resolveTenantPaymentRoute({ countryCode, currency });
-  if (requested === route.provider) return null;
-  return {
-    code: 'TENANT_GATEWAY_COUNTRY_MISMATCH',
-    message: `${route.providerLabel} is the required online payment provider for this store country. ${gatewayLabel(requested)} is not used for buyer checkout here.`,
-    requestedProvider: requested,
-    requiredProvider: route.provider,
-    requiredProviderLabel: route.providerLabel,
-    country: route.country,
-    currency: route.currency,
-    model: route.model,
-  };
-}
-
-function tenantGatewayCurrencyBlock({ provider, currency } = {}) {
-  const gateway = String(provider || '').trim().toUpperCase();
-  const code = String(currency || '').trim().toUpperCase();
-  if (gateway === GATEWAYS.RAZORPAY && code && code !== 'INR') {
-    return {
-      code: 'TENANT_GATEWAY_CURRENCY_MISMATCH',
-      message: 'Razorpay Route checkout for India stores must use INR. Change the store currency to INR before accepting online payments for this location.',
-      provider: GATEWAYS.RAZORPAY,
-      requiredCurrency: 'INR',
-      currency: code,
-    };
-  }
-  return null;
-}
-
 function activeGatewayFromSubscription(subscription) {
   if (!subscription) return null;
   // Prefer the persisted `gateway` column — it's the authoritative record of
@@ -230,8 +168,4 @@ module.exports = {
   resolveGatewayForChange,
   resolvePresentmentCurrency,
   resolveBilling,
-  resolveTenantPaymentGateway,
-  resolveTenantPaymentRoute,
-  tenantGatewayCurrencyBlock,
-  tenantGatewayMismatch,
 };

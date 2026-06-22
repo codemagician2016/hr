@@ -1,12 +1,68 @@
+// Buyer-side (storefront / ecommerce) payment readiness. This is intentionally
+// SELF-CONTAINED: the SaaS-subscription gatewayRouter no longer carries any
+// buyer/tenant payment routing (billing-trim, 2026-06-22), so the small amount
+// of buyer routing this module still needs lives here. HR has no buyer
+// checkout; the only consumer is the legacy ecommerce storefront payment-mode
+// guard in business.controller.js.
 const {
   GATEWAYS,
   gatewayLabel,
-  resolveTenantPaymentRoute,
-  tenantGatewayCurrencyBlock,
+  normalizeCountry,
 } = require('./gatewayRouter');
 
 function normalizeStatus(value) {
   return String(value || '').trim().toUpperCase();
+}
+
+// Which provider runs buyer checkout for a store: India → Razorpay Route,
+// everywhere else → Stripe Connect. (Moved out of gatewayRouter in the
+// billing-trim so the SaaS gateway router stays subscription-only.)
+function resolveTenantPaymentGateway({ countryCode, currency } = {}) {
+  const country = normalizeCountry(countryCode);
+  const normalizedCurrency = String(currency || '').trim().toUpperCase();
+  if (country) return country === 'IN' ? GATEWAYS.RAZORPAY : GATEWAYS.STRIPE;
+  if (normalizedCurrency === 'INR') return GATEWAYS.RAZORPAY;
+  return GATEWAYS.STRIPE;
+}
+
+function tenantPaymentModel(provider) {
+  return provider === GATEWAYS.RAZORPAY ? 'RAZORPAY_PARTNER' : 'STRIPE_CONNECT';
+}
+
+function tenantPaymentModelLabel(provider) {
+  return provider === GATEWAYS.RAZORPAY ? 'Razorpay Route linked account' : 'Stripe Connect account';
+}
+
+function resolveTenantPaymentRoute({ countryCode, currency } = {}) {
+  const country = normalizeCountry(countryCode);
+  const normalizedCurrency = String(currency || '').trim().toUpperCase() || null;
+  const provider = resolveTenantPaymentGateway({ countryCode, currency });
+  return {
+    provider,
+    gateway: provider,
+    providerLabel: gatewayLabel(provider),
+    model: tenantPaymentModel(provider),
+    modelLabel: tenantPaymentModelLabel(provider),
+    country,
+    currency: normalizedCurrency,
+    expectedCurrency: provider === GATEWAYS.RAZORPAY ? 'INR' : null,
+    countryRequired: !country,
+  };
+}
+
+function tenantGatewayCurrencyBlock({ provider, currency } = {}) {
+  const gateway = String(provider || '').trim().toUpperCase();
+  const code = String(currency || '').trim().toUpperCase();
+  if (gateway === GATEWAYS.RAZORPAY && code && code !== 'INR') {
+    return {
+      code: 'TENANT_GATEWAY_CURRENCY_MISMATCH',
+      message: 'Razorpay Route checkout for India stores must use INR. Change the store currency to INR before accepting online payments for this location.',
+      provider: GATEWAYS.RAZORPAY,
+      requiredCurrency: 'INR',
+      currency: code,
+    };
+  }
+  return null;
 }
 
 function providerSetupCopy(provider) {
