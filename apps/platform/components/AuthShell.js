@@ -86,17 +86,17 @@ export default function AuthShell({ eyebrow, title, subtitle, children, footerNo
               <div className="mt-4 grid gap-3 xl:grid-cols-[0.8fr_1.2fr]">
                 <div className="space-y-3">
                   {[
-                    ['Website', 'bg-sky-400'],
-                    ['Bookings', 'bg-emerald-400'],
-                    ['Shop', 'bg-amber-400'],
-                  ].map(([label, color]) => (
+                    ['People', 'bg-sky-400', '84%'],
+                    ['Payroll', 'bg-emerald-400', '72%'],
+                    ['Leave', 'bg-amber-400', '56%'],
+                  ].map(([label, color, width]) => (
                     <div key={label} className="rounded-lg border border-white/10 bg-white/[0.06] p-3">
                       <div className="flex items-center gap-2">
                         <span className={`h-2.5 w-2.5 rounded-full ${color}`} />
                         <span className="text-xs font-semibold text-white">{label}</span>
                       </div>
                       <div className="mt-3 h-1.5 rounded-full bg-white/10">
-                        <div className={`h-1.5 rounded-full ${color}`} style={{ width: label === 'Website' ? '84%' : label === 'Bookings' ? '68%' : '76%' }} />
+                        <div className={`h-1.5 rounded-full ${color}`} style={{ width }} />
                       </div>
                     </div>
                   ))}
@@ -112,9 +112,9 @@ export default function AuthShell({ eyebrow, title, subtitle, children, footerNo
                   </div>
                   <div className="mt-4 grid grid-cols-3 gap-2">
                     {[
-                      [t('metricSites'), '24'],
-                      [t('metricLeads'), '138'],
-                      [t('metricSales'), '$4.8k'],
+                      [t('metricSites'), '128'],
+                      [t('metricLeads'), '6'],
+                      [t('metricSales'), '₹38L'],
                     ].map(([label, value]) => (
                       <div key={label} className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
                         <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-500">{label}</p>

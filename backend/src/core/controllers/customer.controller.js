@@ -52,9 +52,19 @@ async function resolveBusinessId(req) {
     return biz?.id || directId;
   }
 
-  // BYO custom-domain lookup retired 2026-05-10. Fall back to directId
-  // (X-Tenant-Host header alone is no longer sufficient if it's not a
-  // platform subdomain).
+  // White-label custom-domain (the tenant's branded ESS host, e.g. demo.drifthr.com):
+  // resolve the tenant by its bound custom domain — the same routable check the
+  // edge router uses for /domain-route. DriftHR's ESS is custom-domain-first, so
+  // this lookup is required (it was retired in the Sitepresso storefront flow).
+  const { routableCustomDomainWhere } = require('../lib/customDomainRouting');
+  const where = routableCustomDomainWhere(host);
+  if (where) {
+    const biz = await prisma.business.findFirst({
+      where: { subscription: { is: where } },
+      select: { id: true },
+    });
+    if (biz?.id) return (directId && directId !== biz.id) ? null : biz.id;
+  }
   return directId;
 }
 

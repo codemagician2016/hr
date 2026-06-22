@@ -41,11 +41,11 @@ const crypto = require('crypto');
 
 const prisma = new PrismaClient();
 
-// A bcryptjs hash is required by User.password. We avoid importing bcrypt (and a
-// slow hash) in a seed by shipping a precomputed hash of the demo password.
 // All demo logins share the password:  Demo@12345
-//   (bcryptjs, cost 10 — drop-in if you want to re-hash: bcrypt.hashSync(pw,10))
-const DEMO_PASSWORD_HASH = '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy';
+// Hash at runtime so it ALWAYS matches the password (the old precomputed hash
+// did not, which silently broke every demo login).
+const bcrypt = require('bcryptjs');
+const DEMO_PASSWORD_HASH = bcrypt.hashSync('Demo@12345', 10);
 
 // Deterministic UUID v5-ish helper so repeated runs produce stable ids for rows
 // that have NO natural @@unique key we can upsert on (e.g. component lines). We
@@ -580,16 +580,25 @@ async function main() {
 
   let portalUserCount = 0;
 
-  // Create a portal (ESS) User and return its id, or null.
+  // Create a portal (ESS) User and return its id, or null. Also create the
+  // matching Customer record — the ESS employee login authenticates against the
+  // per-tenant Customer (email+password), and resolveSelfEmployee maps that email
+  // back to the Employee. Without this, employees can't sign in to self-service.
   async function portalUser(emp) {
     if (!emp.portal) return null;
+    const name = `${emp.first} ${emp.last}`;
     const u = await prisma.user.upsert({
       where: { email: emp.email },
       update: { businessId, role: 'USER' },
       create: {
-        email: emp.email, password: DEMO_PASSWORD_HASH, name: `${emp.first} ${emp.last}`,
+        email: emp.email, password: DEMO_PASSWORD_HASH, name,
         role: 'USER', businessId, emailVerified: true, isActive: true,
       },
+    });
+    await prisma.customer.upsert({
+      where: { businessId_email: { businessId, email: emp.email } },
+      update: { password: DEMO_PASSWORD_HASH, emailVerified: true, isActive: true, anonymisedAt: null },
+      create: { businessId, email: emp.email, password: DEMO_PASSWORD_HASH, name, emailVerified: true, isActive: true },
     });
     portalUserCount += 1;
     return u.id;

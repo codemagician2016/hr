@@ -102,6 +102,15 @@ export function middleware(request) {
     }
   }
 
+  // DriftHR's tenant admin is the SEPARATE hr-admin app (app.<domain>), not the
+  // legacy Sitepresso /<slug>/admin|staff|rider routes on the marketing host.
+  // Redirect those away so the old Sitepresso tenant admin is unreachable.
+  if (!isUnifiedAdminHost(host) && !isAdminHost(host)
+      && /^\/[^/]+\/(admin|staff|rider)(?=($|[/?#]))/.test(request.nextUrl.pathname)) {
+    const hrAdmin = process.env.NEXT_PUBLIC_HR_ADMIN_URL || 'https://app.drifthr.com';
+    return NextResponse.redirect(new URL('/', hrAdmin));
+  }
+
   if (isProtectedPlatformPath(request.nextUrl.pathname) && !hasOperatorCookie(request)) {
     return redirectToLogin(request);
   }

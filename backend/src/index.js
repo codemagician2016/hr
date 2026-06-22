@@ -85,6 +85,14 @@ const configuredChatOrigins = (process.env.CHAT_ALLOWED_ORIGINS || '')
   .filter(Boolean);
 
 // Explicit allow-list (exact string match)
+// Explicit extra origins (comma-separated). Needed when the live hosts are NOT
+// subdomains of PLATFORM_DOMAIN — e.g. hyphenated staging hosts
+// app-staging.drifthr.com while PLATFORM_DOMAIN=staging.drifthr.com.
+const configuredCorsOrigins = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 const allowedOrigins = new Set([
   'http://localhost:3000',
   'http://localhost:3001',
@@ -95,6 +103,7 @@ const allowedOrigins = new Set([
   `https://m.ecom.${PLATFORM_DOMAIN}`,
   ...configuredMobileOrigins,
   ...configuredChatOrigins,
+  ...configuredCorsOrigins,
 ]);
 
 // Regex matches any subdomain of the platform.
