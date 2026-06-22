@@ -3452,6 +3452,20 @@ CREATE TABLE "AccountAuditLog" (
 );
 
 -- CreateTable
+CREATE TABLE "AuditLog" (
+    "id" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "businessId" TEXT,
+    "actorId" TEXT,
+    "action" TEXT NOT NULL,
+    "entityType" TEXT NOT NULL,
+    "entityId" TEXT,
+    "meta" JSONB,
+
+    CONSTRAINT "AuditLog_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "Redirect" (
     "id" TEXT NOT NULL,
     "businessId" TEXT NOT NULL,
@@ -6512,6 +6526,15 @@ CREATE INDEX "AccountAuditLog_targetType_targetId_idx" ON "AccountAuditLog"("tar
 
 -- CreateIndex
 CREATE INDEX "AccountAuditLog_originalEmailHash_idx" ON "AccountAuditLog"("originalEmailHash");
+
+-- CreateIndex
+CREATE INDEX "AuditLog_businessId_createdAt_idx" ON "AuditLog"("businessId", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "AuditLog_businessId_entityType_entityId_idx" ON "AuditLog"("businessId", "entityType", "entityId");
+
+-- CreateIndex
+CREATE INDEX "AuditLog_action_createdAt_idx" ON "AuditLog"("action", "createdAt");
 
 -- CreateIndex
 CREATE INDEX "Redirect_businessId_idx" ON "Redirect"("businessId");

@@ -3,6 +3,13 @@ const crypto = require('crypto');
 const { Prisma } = require('@prisma/client');
 const prisma = require('../lib/prisma');
 const { ROLES } = require('../lib/roles');
+const { writeAudit } = require('../lib/audit');
+
+// Branding-relevant keys within BusinessContent — a change to any of these is
+// audited as a 'branding.change' sensitive action.
+const BRANDING_KEYS = new Set([
+  'logoUrl', 'logoSourceUrl', 'logoAspect', 'faviconUrl', 'tagline', 'heroBannerUrl',
+]);
 const { generateUniqueBusinessShortId } = require('../lib/businessShortId');
 const { effectivePermissions, hasPermission } = require('../lib/rbac');
 const { sendTrackedEmail, sendStaffInviteEmail } = require('../utils/email');
@@ -1112,6 +1119,21 @@ async function updateContent(req, res) {
     update: data,
     create: { businessId: req.user.businessId, ...data },
   });
+
+  // Sensitive action — audit when branding (logo/favicon/tagline/banner) changed
+  // (best-effort, tenant-scoped). Plain content edits aren't security-sensitive.
+  const changedBranding = Object.keys(data).filter((k) => BRANDING_KEYS.has(k));
+  if (changedBranding.length) {
+    await writeAudit({
+      businessId: req.user.businessId,
+      actorId: req.user.id,
+      action: 'branding.change',
+      entityType: 'BusinessContent',
+      entityId: req.user.businessId,
+      meta: { changed: changedBranding },
+    });
+  }
+
   res.json({ content });
 }
 

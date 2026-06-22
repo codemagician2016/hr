@@ -13,6 +13,7 @@ const PUBLIC_API_SCOPE_RESOURCES = Object.freeze([
   'services',
   'deliveries',
   'riders',
+  'employees', // HR read-only public API (GET /api/hr/v1/employees)
 ]);
 
 // Generate a fresh API key (raw + hash). Raw is shown to admin once.

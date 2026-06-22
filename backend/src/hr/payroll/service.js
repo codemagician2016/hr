@@ -21,6 +21,7 @@
  */
 
 const prisma = require('../../core/lib/prisma');
+const { writeAudit } = require('../../core/lib/audit');
 const money = require('./money');
 const engine = require('./engine');
 const payrun = require('./payrun');
@@ -836,6 +837,23 @@ async function approveRun({ businessId, actorId, payRunId, fourEyes = true }) {
     data: { status: 'APPROVED', approvedAt: new Date(), approvedBy: actorId || null, version: { increment: 1 } },
   });
   if (res.count === 0) throw badRequest('STALE_TRANSITION', 'Pay run is no longer in COMPUTED state');
+
+  // Sensitive action — audit the approval (best-effort, tenant-scoped).
+  await writeAudit({
+    businessId,
+    actorId,
+    action: 'payrun.approve',
+    entityType: 'PayRun',
+    entityId: payRunId,
+    meta: {
+      code: payRun.code,
+      entityId: payRun.entityId,
+      periodStart: isoDate(payRun.periodStart),
+      periodEnd: isoDate(payRun.periodEnd),
+      fourEyes,
+      preparerId: payRun.computedBy || payRun.lockedBy || null,
+    },
+  });
 
   return getRun({ businessId, payRunId });
 }

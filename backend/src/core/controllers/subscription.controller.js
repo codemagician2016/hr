@@ -2,6 +2,7 @@ const prisma = require('../lib/prisma');
 const dnsNative = require('dns');
 const crypto = require('crypto');
 const dns = dnsNative.promises;
+const { writeAudit } = require('../lib/audit');
 const {
   cancelPaddleSubscription,
   createPaddleCustomerPortalSession,
@@ -3475,6 +3476,22 @@ async function updateCustomDomain(req, res) {
     },
   });
 
+  // Sensitive action — audit the domain (re)connect (best-effort, tenant-scoped).
+  await writeAudit({
+    businessId: req.user.businessId,
+    actorId: req.user.id,
+    action: 'domain.change',
+    entityType: 'Subscription',
+    entityId: req.user.businessId,
+    meta: {
+      op: 'connect',
+      domain: subscription.customDomain,
+      status: subscription.customDomainStatus,
+      verified: subscription.customDomainVerified,
+      transferredFrom: existing ? existing.businessId : null,
+    },
+  });
+
   return res.json({
     domain: subscription.customDomain,
     verified: subscription.customDomainVerified,
@@ -3559,6 +3576,16 @@ async function disconnectCustomDomain(req, res) {
       customDomainStatusMessage: 'Custom domain was disconnected.',
       customDomainCheckedAt: new Date(),
     },
+  });
+
+  // Sensitive action — audit the domain disconnect (best-effort, tenant-scoped).
+  await writeAudit({
+    businessId: req.user.businessId,
+    actorId: req.user.id,
+    action: 'domain.change',
+    entityType: 'Subscription',
+    entityId: req.user.businessId,
+    meta: { op: 'disconnect' },
   });
 
   return res.json({

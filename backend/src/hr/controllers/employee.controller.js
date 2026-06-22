@@ -4,6 +4,7 @@
 // Lifecycle transitions (terminate) set denormalized status fields — the
 // effective-dated history lives in EmploymentRecord (added by the service layer).
 const prisma = require('../../core/lib/prisma');
+const { writeAudit } = require('../../core/lib/audit');
 
 const LIST_SELECT = {
   id: true, code: true, firstName: true, lastName: true, preferredName: true,
@@ -110,6 +111,19 @@ async function terminate(req, res, next) {
     const emp = await prisma.employee.update({
       where: { id: req.params.id },
       data: { status: 'TERMINATED', terminationDate, isActive: false },
+    });
+    // Sensitive action — audit the termination (best-effort, tenant-scoped).
+    await writeAudit({
+      businessId,
+      actorId: req.user.id,
+      action: 'employee.terminate',
+      entityType: 'Employee',
+      entityId: emp.id,
+      meta: {
+        code: emp.code,
+        previousStatus: existing.status,
+        terminationDate: terminationDate.toISOString().slice(0, 10),
+      },
     });
     res.json(emp);
   } catch (e) { next(e); }

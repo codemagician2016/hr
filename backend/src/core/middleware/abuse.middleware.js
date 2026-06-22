@@ -73,6 +73,24 @@ const bookingLimiter = makeRateLimiter({ windowMs: 15 * 60 * 1000, max: 20, name
 // Public buyer-payment endpoints (order create + Razorpay success callback):
 // real shoppers may retry, but unauthenticated, so cap abuse — 30 per 15 min.
 const paymentLimiter = makeRateLimiter({ windowMs: 15 * 60 * 1000, max: 30, name: 'payment' });
+// Sensitive payroll mutations (compute / approve). These are authenticated
+// operator actions, so we key per-IP AND per-tenant: a single tenant can't
+// hammer compute/approve in a tight loop (each is a heavy, money-moving op),
+// and one noisy tenant on a shared NAT can't exhaust the limit for another.
+// 20 mutations per 5 minutes per (tenant, IP). Falls back to IP-only before
+// auth resolves req.user (the route's `protect` runs first, so businessId is
+// normally present here).
+const payrollMutationLimiter = makeRateLimiter({
+  windowMs: 5 * 60 * 1000,
+  max: 20,
+  name: 'payroll-mutation',
+  keyGenerator: (req) => {
+    const ipKey = ipKeyGenerator(extractClientIp(req));
+    const tenant = req.user?.businessId;
+    return tenant ? `pay:${tenant}:${ipKey}` : `pay:ip:${ipKey}`;
+  },
+});
+
 // Public API (/api/v1, /api/public-api): key on the API-key id, not the IP, so
 // a single leaked key can't be hammered unthrottled and shared-NAT callers
 // aren't lumped together. 120 req/min/key; falls back to IP before the key
@@ -144,6 +162,7 @@ module.exports = {
   bookingLimiter,
   paymentLimiter,
   apiKeyLimiter,
+  payrollMutationLimiter,
   honeypot,
   verifyTurnstile,
 };

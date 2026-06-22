@@ -5796,6 +5796,41 @@ model AccountAuditLog {
   @@index([originalEmailHash])
 }
 
+// AuditLog — append-only trail of SENSITIVE operator actions (pay-run approve,
+// compensation change, employee terminate, branding/domain change, role change).
+// Written best-effort by core/lib/audit.js#writeAudit; a write failure NEVER
+// breaks the request path.
+//
+// Tenant scope: `businessId` is NULLABLE with NO FK back to Business — platform
+// (super-admin) actions have no tenant, and the trail must SURVIVE tenant
+// offboarding/purge for forensic + compliance reasons (see §1.2 invariant note).
+// Every product read is still filtered by businessId, so the nullable column
+// does not weaken tenant isolation for in-product queries.
+model AuditLog {
+  id         String   @id @default(uuid())
+  createdAt  DateTime @default(now())
+
+  // Owning tenant (null for platform-level actions). No FK on purpose.
+  businessId String?
+  // The operator/user who performed the action (User.id). Plain string, no FK.
+  actorId    String?
+
+  // Verb of the sensitive action, e.g. 'payrun.approve', 'compensation.change',
+  // 'employee.terminate', 'branding.change', 'domain.change', 'role.change'.
+  action     String
+  // Domain object the action targeted, e.g. 'PayRun', 'Employee', 'BusinessRole'.
+  entityType String
+  // Primary key of the targeted row (plain string; row may later be deleted).
+  entityId   String?
+
+  // Structured, non-sensitive context (ids, before/after status, amounts).
+  meta       Json?
+
+  @@index([businessId, createdAt])
+  @@index([businessId, entityType, entityId])
+  @@index([action, createdAt])
+}
+
 // Per-tenant URL redirects (301/302). Managed in the SEO Center and
 // auto-created when a CMS page's slug/section changes, so renamed pages
 // never 404 and keep their search equity.

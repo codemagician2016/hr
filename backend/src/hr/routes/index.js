@@ -29,4 +29,13 @@ router.use('/performance', talent.performance);
 router.use('/payroll', require('../payroll/payroll.routes'));
 router.use('/me/payslips', require('../payroll/mePayslips.routes'));
 
+// Integrations — accounting GL export (operator) + public read-only HR API.
+//   /api/hr/integrations  → operator API (session auth + RBAC)
+//   /api/hr/v1            → public read-only API (ApiKey auth, no session)
+// HR notification templates (integrations/notifications.js) and webhook
+// emitters (integrations/webhooks.js) are libraries invoked from domain code,
+// not HTTP routers, so they are not mounted here.
+router.use('/integrations', require('../integrations/integrations.routes'));
+router.use('/v1', require('../integrations/publicV1.routes'));
+
 module.exports = router;

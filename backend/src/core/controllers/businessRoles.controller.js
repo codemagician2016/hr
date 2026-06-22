@@ -2,6 +2,7 @@
 const { PrismaClient } = require('@prisma/client');
 const { z } = require('zod');
 const { PERMISSIONS, SYSTEM_ROLES, validatePermissions } = require('../lib/rbac');
+const { writeAudit } = require('../lib/audit');
 
 const prisma = new PrismaClient();
 async function bizId(req) { return req.user?.businessId || null; }
@@ -33,6 +34,14 @@ async function createRole(req, res) {
   if (!v.ok) return res.status(400).json({ message: v.error });
   try {
     const role = await prisma.businessRole.create({ data: { businessId, ...parsed.data } });
+    await writeAudit({
+      businessId,
+      actorId: req.user?.id,
+      action: 'role.change',
+      entityType: 'BusinessRole',
+      entityId: role.id,
+      meta: { op: 'create', name: role.name, permissions: parsed.data.permissions },
+    });
     res.status(201).json(role);
   } catch (err) {
     if (err.code === 'P2002') return res.status(409).json({ message: 'Role name already exists' });
@@ -55,6 +64,19 @@ async function updateRole(req, res) {
     return res.status(400).json({ message: 'Cannot rename system role' });
   }
   const role = await prisma.businessRole.update({ where: { id: req.params.id }, data: parsed.data });
+  await writeAudit({
+    businessId,
+    actorId: req.user?.id,
+    action: 'role.change',
+    entityType: 'BusinessRole',
+    entityId: role.id,
+    meta: {
+      op: 'update',
+      name: role.name,
+      before: { name: existing.name, permissions: existing.permissions },
+      after: parsed.data,
+    },
+  });
   res.json(role);
 }
 
@@ -65,6 +87,14 @@ async function deleteRole(req, res) {
   if (!existing || existing.businessId !== businessId) return res.status(404).json({ message: 'Not found' });
   if (existing.isSystem) return res.status(400).json({ message: 'Cannot delete system role' });
   await prisma.businessRole.delete({ where: { id: req.params.id } });
+  await writeAudit({
+    businessId,
+    actorId: req.user?.id,
+    action: 'role.change',
+    entityType: 'BusinessRole',
+    entityId: existing.id,
+    meta: { op: 'delete', name: existing.name },
+  });
   res.json({ ok: true });
 }
 

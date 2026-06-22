@@ -11,6 +11,7 @@
 // Money fields (calcValue, amountMonthly, ctcAnnual, ...) are Prisma Decimal —
 // we pass numbers/strings straight through and NEVER parseInt them.
 const prisma = require('../../core/lib/prisma');
+const { writeAudit } = require('../../core/lib/audit');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // helpers
@@ -345,6 +346,23 @@ const revisions = {
           data,
           include: { lines: { orderBy: { sortOrder: 'asc' }, include: { component: true } } },
         });
+      });
+
+      // Sensitive action — audit the compensation change (best-effort).
+      await writeAudit({
+        businessId,
+        actorId: req.user.id,
+        action: 'compensation.change',
+        entityType: 'CompensationRevision',
+        entityId: created.id,
+        meta: {
+          employeeId,
+          entityId,
+          effectiveFrom,
+          revisionReason,
+          ctcAnnual: req.body.ctcAnnual ?? null,
+          grossMonthly: req.body.grossMonthly ?? null,
+        },
       });
 
       res.status(201).json(created);
