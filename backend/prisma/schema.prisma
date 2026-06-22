@@ -100,6 +100,9 @@ model User {
   amcContractsResponsible AmcContract[] @relation("TechnicianAmcContracts")
   serviceVisitsAssigned   ServiceVisit[] @relation("TechnicianServiceVisits")
   doctorReviews     Review[]            @relation("DoctorReviews")
+  // HR fork — optional ESS portal identity link. An Employee.userId points
+  // here only when the person has portal login (not every employee logs in).
+  hrEmployee        Employee?
 
   @@index([businessRoleId])
   @@index([specialtyId])
@@ -121,6 +124,13 @@ model Business {
   postalCode        String? // storefront postal/PIN/ZIP code
   state             String?
   country           String? // ISO-3166-1 alpha-2 (e.g. "IN", "US")
+  // HR fork — founder decision #6. The deployment region / market this
+  // tenant root belongs to. Drives statutory-module loading defaults,
+  // data-residency, and which compliance rule sets seed by default.
+  // Distinct from per-Entity `countryCode` (a tenant may hold IN + NZ
+  // entities). Values: "IN" | "NZ" (extensible). NULL = inherit from
+  // `country` / first Entity. See docs/03-data-model.md.
+  region            String?
   timezone          String? // IANA zone (e.g. "Pacific/Auckland")
   phone             String?
   email             String?
@@ -411,6 +421,92 @@ model Business {
   amcContracts             AmcContract[]
   serviceVisits            ServiceVisit[]
   amcInvoices              AmcInvoice[]
+
+  // ════════════════════════════════════════════════════════════════════
+  // HR DOMAIN back-relations (see "===== HR DOMAIN =====" section below).
+  // Every HR aggregate is tenant-scoped via businessId → Business; these
+  // are the inverse sides of those relations. Grouped by subsystem.
+  // ════════════════════════════════════════════════════════════════════
+  // Org
+  hrEntities               Entity[]
+  hrLocations              Location[]
+  hrDepartments            Department[]
+  hrDesignations           Designation[]
+  hrGrades                 Grade[]
+  hrBands                  Band[]
+  // People
+  employees                Employee[]
+  employmentRecords        EmploymentRecord[]
+  bankAccounts             BankAccount[]
+  emergencyContacts        EmergencyContact[]
+  dependants               Dependant[]
+  statutoryProfiles        StatutoryProfile[]
+  statutoryRegistrations   StatutoryRegistration[]
+  // Compensation
+  salaryComponents         SalaryComponent[]
+  salaryStructures         SalaryStructure[]
+  salaryComponentLines     SalaryComponentLine[]
+  compensationRevisions    CompensationRevision[]
+  // Payroll
+  payCalendars             PayCalendar[]
+  payRuns                  PayRun[]
+  payRunLines              PayRunLine[]
+  payRunLineComponents     PayRunLineComponent[]
+  attendancePayInputs      AttendancePayInput[]
+  payslips                 Payslip[]
+  statutoryRemittances     StatutoryRemittance[]
+  // Leave
+  leaveTypes               LeaveType[]
+  leavePolicies            LeavePolicy[]
+  leavePolicyAssignments   LeavePolicyAssignment[]
+  leaveBalances            LeaveBalance[]
+  leaveTransactions        LeaveTransaction[]
+  // Attendance / time
+  shiftPatterns            ShiftPattern[]
+  shiftAssignments         ShiftAssignment[]
+  hrHolidays               Holiday[]
+  attendancePunches        AttendancePunch[]
+  attendances             Attendance[]
+  timesheets               Timesheet[]
+  // Expense / loan
+  expenseCategories        ExpenseCategory[]
+  expensePolicies          ExpensePolicy[]
+  expenseClaims            ExpenseClaim[]
+  loanSchemes              LoanScheme[]
+  loans                    Loan[]
+  loanInstallments         LoanInstallment[]
+  // Separation
+  separationCases          SeparationCase[]
+  // Documents / assets
+  employeeDocuments        EmployeeDocument[]
+  documentTemplates        DocumentTemplate[]
+  assets                   Asset[]
+  assetAssignments         AssetAssignment[]
+  // ESS requests
+  profileChangeRequests    ProfileChangeRequest[]
+  documentRequests         DocumentRequest[]
+  regularizationRequests   AttendanceRegularizationRequest[]
+  // Performance
+  reviewCycles             ReviewCycle[]
+  performanceReviews       PerformanceReview[]
+  goals                    Goal[]
+  // Recruitment
+  jobs                     Job[]
+  candidates               Candidate[]
+  applications             Application[]
+  // Helpdesk
+  helpdeskCategories       HelpdeskCategory[]
+  helpdeskTickets          HelpdeskTicket[]
+  // Workflow / approval
+  workflowDefinitions      WorkflowDefinition[]
+  approvalRequests         ApprovalRequest[]
+  approvalActions          ApprovalAction[]
+  // Audit / notify / sequence  (AuditLog.businessId is nullable, no FK)
+  hrNotifications          Notification[]
+  numberSequences          NumberSequence[]
+  // Tenant brand + HR RBAC
+  tenantBrands             TenantBrand[]
+  hrRolePermissionGrants   HrRolePermissionGrant[]
 }
 
 // BusinessPage — multi-page CMS. Each row is a single sub-page under one
@@ -6232,4 +6328,1317 @@ model QaIssueComment {
 
   @@index([issueId, createdAt])
   @@index([authorUserId, createdAt])
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ═════════════════════════════  HR DOMAIN  ═════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
+//
+// HR & Payroll data model for the multi-tenant white-label HRMS (IN + NZ).
+// Authoritative design: docs/03-data-model.md. Sitepresso shapes mined per
+// docs/17-reuse-map.md §2.4 / §5 (StaffLeave, BusinessHoliday, StaffSchedule,
+// BusinessHours, EcomRolePermissionGrant, BusinessLocation, StoreBrand).
+//
+// INVARIANTS enforced on every model below:
+//   • Tenant-scoped: `businessId` + mandatory `business Business @relation(...)`
+//     + leading `@@index([businessId, ...])`; composite uniques include scope.
+//     (Sole exception: AuditLog.businessId is nullable with NO FK — platform
+//      actions have no tenant and audit must survive tenant offboarding.)
+//   • Money: Decimal @db.Decimal(...) — NEVER Int/Float. Amounts (15,2);
+//     org-level totals (18,2); rates (9,6); hours (8,2); leave days (8,4)/(10,4).
+//   • Effective-dating via append-only revisions (effectiveFrom/effectiveTo,
+//     isCurrent) or effectiveDate, per docs/03 §1.4.
+//   • Status/state machines are DB-enforced Prisma enums; tenant-extensible
+//     vocabularies (leave type, expense category, salary component) are rows
+//     that pick behavior from a fixed `kind` enum ("configure, not build").
+// ════════════════════════════════════════════════════════════════════════════
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §3  ORGANIZATION  — Entity, Location, Department, Designation, Grade, Band
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Legal payroll entity — the unit of statutory registration and the
+/// pay-currency boundary. Founder #4: one tenant → many entities/pay-groups.
+/// `countryCode` selects the compliance module (IN vs NZ).
+model Entity {
+  id                String   @id @default(uuid())
+  businessId        String
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  code              String // human: "IN-HQ", "NZ-AKL"
+  legalName         String // @pii:identity — registered legal name
+  tradeName         String?
+  countryCode       String   @db.Char(2) // "IN" | "NZ"
+  payCurrency       String   @db.Char(3) // "INR" | "NZD"
+  timezone          String // IANA, e.g. "Asia/Kolkata", "Pacific/Auckland"
+  taxYearStartMonth Int      @default(4) // Apr in both markets
+  // Registered (statutory) address — distinct from work-site Location
+  addressLine1      String?
+  addressLine2      String?
+  city              String?
+  stateCode         String? // IN state (drives PT slab) / NZ region
+  postalCode        String?
+  // IN extensions (NULL for NZ) — @pii:identity, @retain:statutory
+  pan               String?  @db.Char(10)
+  tan               String?  @db.Char(10) // TDS account no. (Form 24Q)
+  gstin             String?  @db.VarChar(15)
+  cin               String? // company identification no.
+  // NZ extensions (NULL for IN)
+  nzbn              String? // NZ Business Number
+  irdEntityNumber   String?  @db.VarChar(11) // employer IRD number @pii:identity
+  // Lifecycle
+  status            EntityStatus @default(ACTIVE)
+  activeFrom        DateTime
+  activeTo          DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  deletedAt         DateTime?
+  version           Int      @default(0)
+
+  locations          Location[]
+  registrations      StatutoryRegistration[]
+  payCalendars       PayCalendar[]
+  employments        EmploymentRecord[]
+  payRuns            PayRun[]
+  remittances        StatutoryRemittance[]
+  compensations      CompensationRevision[]
+
+  @@unique([businessId, code])
+  @@index([businessId, countryCode, status])
+}
+
+enum EntityStatus { ACTIVE SUSPENDED CLOSED }
+
+/// Physical work-site. Generalizes Sitepresso BusinessLocation, bound to an
+/// Entity and carrying HR fields (PT state, ACC class unit, geofence).
+model Location {
+  id               String   @id @default(uuid())
+  businessId       String
+  business         Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId         String
+  entity           Entity   @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  code             String
+  name             String
+  addressLine1     String?
+  city             String?
+  stateCode        String? // IN: drives Professional Tax slab selection
+  postalCode       String?
+  countryCode      String   @db.Char(2)
+  timezone         String
+  // Attendance support
+  geoLat           Decimal? @db.Decimal(9, 6)
+  geoLng           Decimal? @db.Decimal(9, 6)
+  geofenceM        Int? // allowed punch radius, metres
+  ptRegistrationId String? // IN: PT registration is per state
+  accClassUnit     String? // NZ: ACC classification unit (CU) code
+  isPrimary        Boolean  @default(false)
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  deletedAt        DateTime?
+  version          Int      @default(0)
+
+  employments      EmploymentRecord[]
+
+  @@unique([businessId, entityId, code])
+  @@index([businessId, entityId, isActive])
+}
+
+/// Department tree (self-referential, like Sitepresso ProductCategory).
+model Department {
+  id             String      @id @default(uuid())
+  businessId     String
+  business       Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  code           String
+  name           String
+  parentId       String?
+  parent         Department? @relation("DeptTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children       Department[] @relation("DeptTree")
+  headEmployeeId String? // department head (manager-of-record fallback)
+  costCenter     String?
+  isActive       Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  deletedAt      DateTime?
+  version        Int         @default(0)
+
+  employments    EmploymentRecord[]
+
+  @@unique([businessId, code])
+  @@index([businessId, parentId])
+}
+
+/// Job title. Optionally anchored to a Grade.
+model Designation {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  code        String
+  title       String // "Senior Engineer"
+  gradeId     String?
+  grade       Grade?   @relation(fields: [gradeId], references: [id], onDelete: SetNull)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(0)
+  employments EmploymentRecord[]
+
+  @@unique([businessId, code])
+  @@index([businessId, gradeId])
+}
+
+/// Seniority grade (L1..L8) — pay-band anchor.
+model Grade {
+  id           String   @id @default(uuid())
+  businessId   String
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  code         String
+  name         String
+  rank         Int // ordering for comparisons / approvals
+  bandId       String?
+  band         Band?    @relation(fields: [bandId], references: [id], onDelete: SetNull)
+  minSalary    Decimal? @db.Decimal(15, 2)
+  maxSalary    Decimal? @db.Decimal(15, 2)
+  currencyCode String?  @db.Char(3)
+  designations Designation[]
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  deletedAt    DateTime?
+  version      Int      @default(0)
+
+  @@unique([businessId, code])
+  @@index([businessId, rank])
+}
+
+/// Broad compensation band grouping grades.
+model Band {
+  id         String   @id @default(uuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  code       String
+  name       String
+  grades     Grade[]
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  deletedAt  DateTime?
+  version    Int      @default(0)
+
+  @@unique([businessId, code])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §4  EMPLOYEE & EMPLOYMENT
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// HR master record (≠ login). Founder #5: NEW model; only auth columns are
+/// borrowed conceptually from Customer (passwordChangedAt lives on User;
+/// here we keep preferredLanguage, isActive, anonymisedAt). Portal login is
+/// optional via `userId` → User. Tenant-scoped.
+model Employee {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  code          String // human EMP-000142, tenant-unique
+  // Optional portal identity (reused User model)
+  userId        String?  @unique
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  // Person — @pii:identity
+  firstName     String
+  middleName    String?
+  lastName      String
+  preferredName String?
+  dateOfBirth   DateTime? @db.Date
+  gender        Gender?
+  maritalStatus MaritalStatus?
+  nationality   String?
+  // Contact — @pii:contact
+  personalEmail String?
+  workEmail     String?
+  phone         String?
+  addressLine1  String?
+  addressLine2  String?
+  city          String?
+  stateCode     String?
+  postalCode    String?
+  countryCode   String?  @db.Char(2)
+  photoUrl      String?  @db.Text
+  // Sensitive — @pii:sensitive (consent-gated, country-config driven)
+  disabilityStatus String?
+  bloodGroup    String?
+  // Reused-auth columns (conceptually from Customer, per reuse-map §12.2)
+  preferredLanguage String? // BCP-47; payslip/letter locale
+  isActive      Boolean  @default(true)
+  // Lifecycle (denormalized current values; history in EmploymentRecord)
+  status        EmployeeStatus @default(PRE_HIRE)
+  hireDate      DateTime? @db.Date // first joining date (tenure anchor)
+  probationEndDate DateTime? @db.Date
+  terminationDate  DateTime? @db.Date
+  // Pointers to current records (maintained by service layer per revision)
+  currentEmploymentRecordId String? @unique
+  currentCompensationId     String? @unique
+  managerEmployeeId String?
+  manager       Employee?  @relation("EmpManager", fields: [managerEmployeeId], references: [id], onDelete: SetNull)
+  reports       Employee[] @relation("EmpManager")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime? // soft; anonymise PII but keep statutory
+  anonymisedAt  DateTime? // mirrors User.anonymisedAt pattern
+  version       Int      @default(0)
+
+  employmentRecords EmploymentRecord[]
+  statutoryProfile  StatutoryProfile?
+  compensations     CompensationRevision[]
+  bankAccounts      BankAccount[]
+  emergencyContacts EmergencyContact[]
+  dependants        Dependant[]
+  leaveBalances     LeaveBalance[]
+  leaveTxns         LeaveTransaction[]
+  punches           AttendancePunch[]
+  shiftAssignments  ShiftAssignment[]
+  timesheets        Timesheet[]
+  attendancePayInputs AttendancePayInput[]
+  expenseClaims     ExpenseClaim[]
+  loans             Loan[]
+  documents         EmployeeDocument[]
+  assets            AssetAssignment[]
+  reviews           PerformanceReview[]   @relation("RevieweeReviews")
+  reviewsGiven      PerformanceReview[]   @relation("ReviewerReviews")
+  goals             Goal[]
+  skills            EmployeeSkill[]
+  payRunLines       PayRunLine[]
+  payslips          Payslip[]
+  helpdeskTickets   HelpdeskTicket[]
+  approvalRequests  ApprovalRequest[]     @relation("RequesterApprovals")
+  separations       SeparationCase[]
+  profileChangeRequests ProfileChangeRequest[]
+  documentRequests  DocumentRequest[]
+  regularizationRequests AttendanceRegularizationRequest[]
+
+  @@unique([businessId, code])
+  @@index([businessId, status])
+  @@index([businessId, managerEmployeeId])
+  @@index([businessId, workEmail])
+}
+
+enum Gender        { MALE FEMALE NON_BINARY UNDISCLOSED OTHER }
+enum MaritalStatus { SINGLE MARRIED DIVORCED WIDOWED SEPARATED CIVIL_UNION UNDISCLOSED }
+enum EmployeeStatus {
+  PRE_HIRE      // offer accepted, not joined
+  PROBATION
+  ACTIVE
+  ON_LEAVE      // long leave (maternity, sabbatical) — still employed
+  NOTICE_PERIOD // resigned/terminated, serving notice
+  SUSPENDED     // disciplinary; payroll may be held
+  TERMINATED    // separated; FNF pending or done
+  RETIRED
+}
+
+/// Append-only employment history. Rehire/transfer creates a new record.
+/// Effective-dated; Employee keeps a denormalized pointer for fast reads.
+model EmploymentRecord {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId    String
+  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  entityId      String
+  entity        Entity   @relation(fields: [entityId], references: [id], onDelete: Restrict)
+  locationId    String?
+  location      Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  departmentId  String?
+  department    Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  designationId String?
+  designation   Designation? @relation(fields: [designationId], references: [id], onDelete: SetNull)
+  gradeId       String?
+  managerEmployeeId String?
+  // Employment terms
+  employmentType EmploymentType
+  workerCategory WorkerCategory // staff/worker — IR Code applicability
+  payCalendarId String?
+  noticeDays    Int?
+  fteRatio      Decimal  @db.Decimal(5, 4) @default(1.0000) // part-time proration
+  // Temporal validity (effective-dated, append-only)
+  effectiveFrom DateTime @db.Date
+  effectiveTo   DateTime? @db.Date // NULL = current segment
+  changeReason  EmploymentChangeReason
+  isCurrent     Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  version       Int      @default(0)
+
+  @@unique([employeeId, effectiveFrom])
+  @@index([businessId, entityId, isCurrent])
+  @@index([businessId, employeeId, effectiveFrom])
+  @@index([businessId, departmentId])
+}
+
+enum EmploymentType { FULL_TIME PART_TIME FIXED_TERM CONTRACT INTERN APPRENTICE CASUAL CONSULTANT }
+enum WorkerCategory { STAFF WORKER } // IN Industrial Relations Code distinction
+enum EmploymentChangeReason {
+  HIRE PROMOTION TRANSFER_LOCATION TRANSFER_DEPARTMENT
+  REORG MANAGER_CHANGE TYPE_CHANGE FTE_CHANGE PROBATION_CONFIRM REHIRE
+}
+
+/// Salary disbursement bank account. @pii:identity.
+model BankAccount {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId    String
+  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  accountName   String
+  accountNumber String
+  ifsc          String?  @db.Char(11) // IN
+  nzBankAccount String? // NZ — BB-bbbb-AAAAAAA-SS
+  bankName      String?
+  currencyCode  String   @db.Char(3)
+  isPrimary     Boolean  @default(true) // primary = salary credit target
+  splitPercent  Decimal? @db.Decimal(5, 2) // optional multi-account split
+  verifiedAt    DateTime?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+  version       Int      @default(0)
+
+  @@index([businessId, employeeId, isPrimary])
+}
+
+model EmergencyContact {
+  id           String   @id @default(uuid())
+  businessId   String
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId   String
+  employee     Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  name         String
+  relationship String
+  phone        String
+  email        String?
+  isPrimary    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([businessId, employeeId])
+}
+
+/// ESI/insurance/nominee dependant. @pii:identity.
+model Dependant {
+  id             String   @id @default(uuid())
+  businessId     String
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId     String
+  employee       Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  name           String
+  relationship   DependantRelation
+  dateOfBirth    DateTime? @db.Date
+  isNominee      Boolean  @default(false) // PF/gratuity nominee
+  nomineePercent Decimal? @db.Decimal(5, 2)
+  isInsured      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([businessId, employeeId])
+}
+
+enum DependantRelation { SPOUSE CHILD PARENT SIBLING OTHER }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §5  COMPENSATION & SALARY STRUCTURES
+//   IN Code-on-Wages "Basic + DA ≥ 50%" primitive lives here: enforced by the
+//   service layer + payroll engine reading SalaryComponent.kind ∈ {BASIC,
+//   DEARNESS_ALLOWANCE} against total, with ComponentKind=SPECIAL_ALLOWANCE +
+//   ComponentCalcMethod=BALANCING as the balancing line. See docs/03 §5.4.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Configurable component; behavior comes from the fixed `kind` enum.
+model SalaryComponent {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId      String? // NULL = available to all entities
+  code          String // "BASIC","HRA","DA","SPECIAL","PF_EE"...
+  name          String
+  kind          ComponentKind // FIXED behavior selector
+  category      ComponentCategory // EARNING | DEDUCTION | EMPLOYER_COST | REIMBURSEMENT
+  // Calculation
+  calcMethod    ComponentCalcMethod
+  calcValue     Decimal? @db.Decimal(15, 4) // flat amount OR percentage OR factor
+  calcBaseCode  String? // for PERCENT_OF: which component(s)
+  calcBaseScope ComponentBaseScope @default(SINGLE)
+  // Statutory flags — drive the compliance engine
+  isWageForPF       Boolean @default(false) // counts toward EPF "wages"
+  isWageForESI      Boolean @default(false)
+  isWageForPT       Boolean @default(false)
+  isWageForGratuity Boolean @default(false)
+  isTaxable         Boolean @default(true)
+  taxSection        String? // IN exemption section e.g. "10(13A)" HRA
+  isKiwiSaverable   Boolean @default(false) // NZ: part of gross for KS calc
+  isPayeable        Boolean @default(true) // NZ: subject to PAYE
+  // Behavior
+  isRecurring     Boolean @default(true)
+  prorationMethod ProrationMethod @default(CALENDAR_DAYS)
+  glCode          String?
+  sortOrder       Int     @default(0)
+  isActive        Boolean @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  deletedAt       DateTime?
+  version         Int     @default(0)
+
+  structureLines  SalaryComponentLine[]
+
+  @@unique([businessId, code])
+  @@index([businessId, entityId, category])
+}
+
+enum ComponentKind {
+  BASIC DEARNESS_ALLOWANCE HRA SPECIAL_ALLOWANCE CONVEYANCE
+  MEDICAL LTA BONUS COMMISSION OVERTIME_PAY ARREAR
+  // statutory deductions
+  PF_EMPLOYEE ESI_EMPLOYEE PT TDS KIWISAVER_EMPLOYEE PAYE STUDENT_LOAN
+  // employer cost (shown on cost-to-company, not deducted from employee)
+  PF_EMPLOYER ESI_EMPLOYER EPS EDLI PF_ADMIN GRATUITY_PROVISION
+  KIWISAVER_EMPLOYER ESCT ACC_EMPLOYER
+  // recoveries / others
+  LOAN_REPAYMENT ADVANCE_RECOVERY LEAVE_ENCASHMENT NOTICE_RECOVERY
+  REIMBURSEMENT_FUEL REIMBURSEMENT_PHONE CUSTOM
+}
+enum ComponentCategory  { EARNING DEDUCTION EMPLOYER_COST REIMBURSEMENT }
+enum ComponentCalcMethod { FLAT PERCENT_OF FORMULA SLAB STATUTORY BALANCING }
+enum ComponentBaseScope  { SINGLE MULTIPLE GROSS CTC }
+enum ProrationMethod     { CALENDAR_DAYS WORKING_DAYS THIRTY_DAY_STANDARD NONE }
+
+/// Reusable salary template per grade/entity.
+model SalaryStructure {
+  id           String   @id @default(uuid())
+  businessId   String
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId     String
+  code         String
+  name         String // "IN Staff CTC 2026", "NZ Salaried"
+  countryCode  String   @db.Char(2)
+  currencyCode String   @db.Char(3)
+  basis        StructureBasis // CTC (IN) | GROSS (NZ) | NET
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  deletedAt    DateTime?
+  version      Int      @default(0)
+  lines        SalaryComponentLine[]
+
+  @@unique([businessId, entityId, code])
+  @@index([businessId, entityId, isActive])
+}
+
+enum StructureBasis { CTC GROSS NET }
+
+/// A component within a structure OR an assigned compensation revision.
+model SalaryComponentLine {
+  id             String   @id @default(uuid())
+  businessId     String
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  structureId    String?
+  structure      SalaryStructure? @relation(fields: [structureId], references: [id], onDelete: Cascade)
+  compensationId String?
+  compensation   CompensationRevision? @relation(fields: [compensationId], references: [id], onDelete: Cascade)
+  componentId    String
+  component      SalaryComponent @relation(fields: [componentId], references: [id], onDelete: Restrict)
+  calcMethod     ComponentCalcMethod // can override component default
+  calcValue      Decimal? @db.Decimal(15, 4)
+  amountMonthly  Decimal? @db.Decimal(15, 2) // resolved monthly snapshot
+  amountAnnual   Decimal? @db.Decimal(15, 2)
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  version        Int      @default(0)
+
+  @@index([businessId, structureId])
+  @@index([businessId, compensationId])
+}
+
+/// Append-only assigned pay. Each hike/restructure creates a new revision.
+/// Payroll reads the revision whose [effectiveFrom, effectiveTo] covers the
+/// period. Never edited in place.
+model CompensationRevision {
+  id             String   @id @default(uuid())
+  businessId     String
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId     String
+  employee       Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  entityId       String
+  entity         Entity   @relation(fields: [entityId], references: [id], onDelete: Restrict)
+  structureId    String?
+  currencyCode   String   @db.Char(3)
+  basis          StructureBasis
+  ctcAnnual      Decimal? @db.Decimal(15, 2)
+  grossMonthly   Decimal? @db.Decimal(15, 2)
+  // Effective dating
+  effectiveFrom  DateTime @db.Date
+  effectiveTo    DateTime? @db.Date // NULL = current
+  isCurrent      Boolean  @default(true)
+  revisionReason CompRevisionReason
+  approvalRequestId String?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  version        Int      @default(0)
+
+  lines          SalaryComponentLine[]
+
+  @@unique([employeeId, effectiveFrom])
+  @@index([businessId, employeeId, isCurrent])
+  @@index([businessId, entityId, effectiveFrom])
+}
+
+enum CompRevisionReason { HIRE ANNUAL_REVISION PROMOTION CORRECTION RESTRUCTURE STATUTORY_ADJUSTMENT }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §6  STATUTORY PROFILES  (per-employee identity/elections + per-entity regs)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// 1:1 with Employee. Sparse country-specific extensions on one row (avoids a
+/// join on the hot payroll path). @pii:identity, @retain:statutory.
+model StatutoryProfile {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId    String   @unique
+  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  countryCode   String   @db.Char(2)
+
+  // ── INDIA ──
+  pan                 String?  @db.Char(10) // income tax PAN
+  uan                 String?  @db.VarChar(12) // EPFO Universal Account Number
+  pfMemberId          String?
+  pfOptIn             Boolean? // >₹15k wage: contribute on actual vs ceiling
+  pfJoinDate          DateTime? @db.Date
+  esicIp              String? // ESI Insurance Person number
+  esiApplicable       Boolean? @default(false)
+  ptStateCode         String? // overrides location if employee remote
+  aadhaarVerified     Boolean? @default(false) // store flag, NOT the number
+  taxRegime           INTaxRegime? @default(NEW) // NEW is statutory default
+  section80CDeclared  Decimal? @db.Decimal(15, 2) // old-regime declarations
+  hraExemptionClaimed Boolean? @default(false)
+  abryEligible        Boolean? @default(false)
+  // ── NEW ZEALAND ──
+  irdNumber                  String?  @db.VarChar(11)
+  taxCode                    String?  @db.VarChar(8) // "M","ME","M SL","S","WT","ND"...
+  kiwiSaverStatus            KiwiSaverStatus? @default(NOT_ENROLLED)
+  kiwiSaverEmployeeRate      Decimal? @db.Decimal(5, 4) // 0.035 default from 1 Apr 2026
+  kiwiSaverOptOutDate        DateTime? @db.Date
+  kiwiSaverSavingsSuspension Boolean? @default(false)
+  esctRate                   Decimal? @db.Decimal(5, 4) // resolved annually
+  studentLoan                Boolean? @default(false) // tax code ends in SL
+  studentLoanExtraDeduction  Decimal? @db.Decimal(5, 2)
+  hasSpecialTaxCode          Boolean? @default(false)
+  specialTaxRate             Decimal? @db.Decimal(5, 4)
+  accExempt                  Boolean? @default(false)
+
+  electionHistory StatutoryElectionHistory[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  version         Int      @default(0)
+
+  @@index([businessId, countryCode])
+  @@index([businessId, uan])
+  @@index([businessId, irdNumber])
+}
+
+enum INTaxRegime     { NEW OLD }
+enum KiwiSaverStatus { NOT_ENROLLED ACTIVE OPTED_OUT SAVINGS_SUSPENSION CASUAL_AGRICULTURAL }
+
+/// Append-only audit of regime/rate elections (effective-dated).
+model StatutoryElectionHistory {
+  id                 String   @id @default(uuid())
+  businessId         String
+  business           Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  statutoryProfileId String
+  statutoryProfile   StatutoryProfile @relation(fields: [statutoryProfileId], references: [id], onDelete: Cascade)
+  field              String // "taxRegime","kiwiSaverEmployeeRate","taxCode"
+  oldValue           String?
+  newValue           String
+  effectiveFrom      DateTime @db.Date
+  changedBy          String
+  createdAt          DateTime @default(now())
+
+  @@index([businessId, statutoryProfileId, field])
+}
+
+/// Per-entity employer statutory registrations (EPF/ESI/PT/TAN/IRD/ACC...).
+model StatutoryRegistration {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId      String
+  entity        Entity   @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  kind          RegistrationKind
+  number        String // EPFO estab code, ESIC code, PT reg, TAN…
+  stateCode     String? // for PT (per state)
+  effectiveFrom DateTime @db.Date
+  effectiveTo   DateTime? @db.Date
+  isActive      Boolean  @default(true)
+  meta          Json? // scheme-specific (e.g. PT periodicity)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  version       Int      @default(0)
+
+  @@unique([businessId, entityId, kind, stateCode])
+  @@index([businessId, entityId, kind])
+}
+
+enum RegistrationKind { EPF ESI PT_STATE TAN LWF SHOPS_ESTABLISHMENT IRD_PAYE ACC }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §7  PAY CALENDAR · PAY RUN · PAY RUN LINE · PAYSLIP · REMITTANCE
+//   Exactly-once regular run per (entity, calendar, period) is enforced by a
+//   raw partial unique index in the migration (docs/03 §7.2):
+//     CREATE UNIQUE INDEX payrun_one_regular ON "PayRun"
+//       (business_id, entity_id, pay_calendar_id, period_start)
+//       WHERE type = 'REGULAR' AND deleted_at IS NULL;
+//   The schema-expressible exactly-once key is @@unique([businessId, code]).
+// ─────────────────────────────────────────────────────────────────────────────
+
+model PayCalendar {
+  id              String   @id @default(uuid())
+  businessId      String
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId        String
+  entity          Entity   @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  code            String
+  name            String
+  frequency       PayFrequency // MONTHLY (IN) | FORTNIGHTLY/WEEKLY (NZ)
+  payDayRule      PayDayRule
+  payDayValue     Int?
+  cutoffDayRule   PayDayRule
+  cutoffDayValue  Int?
+  prorationMethod ProrationMethod @default(CALENDAR_DAYS)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  version         Int      @default(0)
+  payRuns         PayRun[]
+
+  @@unique([businessId, entityId, code])
+  @@index([businessId, entityId, isActive])
+}
+
+enum PayFrequency { WEEKLY FORTNIGHTLY SEMI_MONTHLY MONTHLY }
+enum PayDayRule   { LAST_WORKING_DAY FIRST_WORKING_DAY FIXED_DOM N_DAYS_AFTER_PERIOD_END }
+
+/// Period batch (per entity, per cycle). LOCKED ⇒ child lines/payslips
+/// read-only; corrections spawn a CORRECTION child run.
+model PayRun {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId      String
+  entity        Entity   @relation(fields: [entityId], references: [id], onDelete: Restrict)
+  payCalendarId String
+  payCalendar   PayCalendar @relation(fields: [payCalendarId], references: [id], onDelete: Restrict)
+  code          String // PR-2026-04-IN
+  periodStart   DateTime @db.Date
+  periodEnd     DateTime @db.Date
+  payDate       DateTime @db.Date
+  sequenceInYear Int // 1..12 (monthly) / 1..26 (fortnightly)
+  taxYear       String // "2026-27"
+  type          PayRunType @default(REGULAR)
+  status        PayRunStatus @default(DRAFT)
+  currencyCode  String   @db.Char(3)
+  // Compliance snapshot — which rule version this run computed against
+  complianceVersionId String?
+  // Totals (filled at compute; immutable once LOCKED)
+  headcount         Int     @default(0)
+  totalGross        Decimal @db.Decimal(18, 2) @default(0)
+  totalDeductions   Decimal @db.Decimal(18, 2) @default(0)
+  totalNet          Decimal @db.Decimal(18, 2) @default(0)
+  totalEmployerCost Decimal @db.Decimal(18, 2) @default(0)
+  // Lifecycle actors
+  computedAt    DateTime?
+  computedBy    String?
+  lockedAt      DateTime?
+  lockedBy      String?
+  approvedAt    DateTime?
+  approvedBy    String?
+  paidAt        DateTime?
+  approvalRequestId String?
+  parentPayRunId String? // OFF_CYCLE/CORRECTION linked to a regular run
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+  version       Int      @default(0)
+
+  lines         PayRunLine[]
+  payslips      Payslip[]
+  remittances   StatutoryRemittance[]
+  attendanceInputs AttendancePayInput[]
+
+  @@unique([businessId, code])
+  @@index([businessId, entityId, payCalendarId, periodStart, type])
+  @@index([businessId, entityId, status])
+  @@index([businessId, taxYear])
+}
+
+enum PayRunType   { REGULAR OFF_CYCLE BONUS ARREAR FNF CORRECTION SUPPLEMENTARY }
+enum PayRunStatus {
+  DRAFT INPUTS_LOCKED COMPUTING COMPUTED REVIEW
+  LOCKED APPROVED PAID FILED CANCELLED
+}
+
+/// Frozen attendance/leave feed for a (payRun, employee). The "AttendancePayInput"
+/// from the build brief — payable/LOP/OT days are snapshotted here when the
+/// pay-run inputs lock, so the engine computes against an immutable input set
+/// even if Attendance/LeaveTransaction rows change afterward.
+model AttendancePayInput {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  payRunId      String
+  payRun        PayRun   @relation(fields: [payRunId], references: [id], onDelete: Cascade)
+  employeeId    String
+  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  periodStart   DateTime @db.Date
+  periodEnd     DateTime @db.Date
+  // Frozen inputs (days/hours, never money — Decimal not Int)
+  calendarDays  Decimal  @db.Decimal(8, 4) @default(0)
+  payableDays   Decimal  @db.Decimal(8, 4) @default(0)
+  lopDays       Decimal  @db.Decimal(8, 4) @default(0)
+  paidLeaveDays Decimal  @db.Decimal(8, 4) @default(0)
+  weeklyOffDays Decimal  @db.Decimal(8, 4) @default(0)
+  holidayDays   Decimal  @db.Decimal(8, 4) @default(0)
+  overtimeHours Decimal  @db.Decimal(8, 2) @default(0)
+  frozenAt      DateTime @default(now())
+  sourceJson    Json? // provenance: attendance/leave txn ids rolled up
+  createdAt     DateTime @default(now())
+
+  @@unique([payRunId, employeeId])
+  @@index([businessId, payRunId])
+  @@index([businessId, employeeId])
+}
+
+/// Per-employee computation row inside a PayRun.
+model PayRunLine {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  payRunId      String
+  payRun        PayRun   @relation(fields: [payRunId], references: [id], onDelete: Cascade)
+  employeeId    String
+  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  compensationId String // revision used
+  // Period attendance inputs (snapshot)
+  payableDays   Decimal  @db.Decimal(8, 4)
+  lopDays       Decimal  @db.Decimal(8, 4) @default(0)
+  overtimeHours Decimal  @db.Decimal(8, 2) @default(0)
+  // Totals
+  grossEarnings   Decimal @db.Decimal(15, 2) @default(0)
+  totalDeductions Decimal @db.Decimal(15, 2) @default(0)
+  netPay          Decimal @db.Decimal(15, 2) @default(0)
+  employerCost    Decimal @db.Decimal(15, 2) @default(0)
+  currencyCode    String  @db.Char(3)
+  // Country statutory rollups (snapshot for fast reporting + filing)
+  pfEmployee        Decimal? @db.Decimal(15, 2)
+  pfEmployer        Decimal? @db.Decimal(15, 2)
+  esiEmployee       Decimal? @db.Decimal(15, 2)
+  esiEmployer       Decimal? @db.Decimal(15, 2)
+  pt                Decimal? @db.Decimal(15, 2)
+  tds               Decimal? @db.Decimal(15, 2)
+  paye              Decimal? @db.Decimal(15, 2)
+  kiwiSaverEmployee Decimal? @db.Decimal(15, 2)
+  kiwiSaverEmployer Decimal? @db.Decimal(15, 2)
+  esct              Decimal? @db.Decimal(15, 2)
+  accLevy           Decimal? @db.Decimal(15, 2)
+  studentLoan       Decimal? @db.Decimal(15, 2)
+  // Status
+  status        PayRunLineStatus @default(PENDING)
+  errorJson     Json? // validation/compute errors for this employee
+  computeTrace  Json? // optional engine trace (debug)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  version       Int      @default(0)
+
+  components    PayRunLineComponent[]
+  payslip       Payslip?
+
+  @@unique([payRunId, employeeId])
+  @@index([businessId, employeeId])
+  @@index([businessId, payRunId, status])
+}
+
+enum PayRunLineStatus { PENDING COMPUTED ON_HOLD ERROR EXCLUDED FINALIZED }
+
+/// Every component amount on a line (audit-grade, append-only).
+model PayRunLineComponent {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  payRunLineId  String
+  payRunLine    PayRunLine @relation(fields: [payRunLineId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+  componentId   String
+  componentCode String
+  componentName String
+  category      ComponentCategory
+  amount        Decimal  @db.Decimal(15, 2)
+  baseAmount    Decimal? @db.Decimal(15, 2) // base the calc ran on
+  rateApplied   Decimal? @db.Decimal(9, 6)
+  isStatutory   Boolean  @default(false)
+  sortOrder     Int      @default(0)
+
+  @@index([businessId, payRunLineId])
+  @@index([businessId, componentCode])
+}
+
+/// Immutable employee-facing artifact. Reissues use status=SUPERSEDED, never
+/// delete; @retain:statutory (soft-delete only).
+model Payslip {
+  id              String   @id @default(uuid())
+  businessId      String
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  payRunId        String
+  payRun          PayRun   @relation(fields: [payRunId], references: [id], onDelete: Restrict)
+  payRunLineId    String   @unique
+  payRunLine      PayRunLine @relation(fields: [payRunLineId], references: [id], onDelete: Restrict)
+  employeeId      String
+  employee        Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  code            String // PS-2026-04-EMP000142
+  periodStart     DateTime @db.Date
+  periodEnd       DateTime @db.Date
+  payDate         DateTime @db.Date
+  currencyCode    String   @db.Char(3)
+  grossEarnings   Decimal  @db.Decimal(15, 2)
+  totalDeductions Decimal  @db.Decimal(15, 2)
+  netPay          Decimal  @db.Decimal(15, 2)
+  // Immutability + delivery
+  snapshotJson    Json // full rendered payslip data, frozen
+  pdfUrl          String?  @db.Text
+  pdfHash         String? // SHA-256 of generated PDF (tamper evidence)
+  yptdJson        Json? // year-to-date figures snapshot
+  publishedAt     DateTime?
+  viewedAt        DateTime?
+  emailedAt       DateTime?
+  status          PayslipStatus @default(GENERATED)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  deletedAt       DateTime? // soft only; @retain:statutory
+  version         Int      @default(0)
+
+  @@unique([businessId, payRunId, employeeId])
+  @@index([businessId, employeeId, payDate])
+}
+
+enum PayslipStatus { GENERATED PUBLISHED VIEWED SUPERSEDED }
+
+/// Employer filing/payment obligations generated from a pay run.
+model StatutoryRemittance {
+  id           String   @id @default(uuid())
+  businessId   String
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId     String
+  entity       Entity   @relation(fields: [entityId], references: [id], onDelete: Restrict)
+  payRunId     String?
+  payRun       PayRun?  @relation(fields: [payRunId], references: [id], onDelete: SetNull)
+  kind         RemittanceKind
+  taxPeriod    String // "2026-04" or "2026-Q1"
+  amount       Decimal  @db.Decimal(18, 2)
+  currencyCode String   @db.Char(3)
+  dueDate      DateTime @db.Date
+  filedDate    DateTime?
+  paidDate     DateTime?
+  challanRef   String? // CRN/challan/IRD ref
+  status       RemittanceStatus @default(PENDING)
+  fileUrl      String?  @db.Text // ECR txt / Form 24Q / payday CSV
+  meta         Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  version      Int      @default(0)
+
+  @@index([businessId, entityId, kind, taxPeriod])
+  @@index([businessId, status, dueDate])
+}
+
+enum RemittanceKind {
+  IN_TDS IN_PF IN_ESI IN_PT IN_LWF IN_FORM24Q IN_FORM16
+  NZ_PAYE NZ_PAYDAY_FILING NZ_KIWISAVER NZ_ESCT NZ_STUDENT_LOAN NZ_ACC
+}
+enum RemittanceStatus { PENDING DUE FILED PAID OVERDUE WAIVED }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §8  LEAVE  (type → policy → assignment → balance → transaction)
+//   NZ Holidays Act 2003 carried via LeaveType.unit=WEEKS, nzPayBasis,
+//   LeaveBalance.nzAccruedGrossEarnings (8%/AWE). Mined from booking StaffLeave.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model LeaveType {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  countryCode String?  @db.Char(2) // NULL = both
+  code        String // "EL","SL","CL","ANNUAL","SICK","BEREAVEMENT","PUBLIC","ALT"
+  name        String
+  category    LeaveCategory
+  unit        LeaveUnit @default(DAYS) // NZ ANNUAL = WEEKS
+  isPaid      Boolean  @default(true)
+  isStatutory Boolean  @default(false)
+  nzPayBasis  NZLeavePayBasis? // RDP | ADP | AWE_8PCT | OWP
+  requiresReason Boolean @default(false)
+  affectsLOP  Boolean  @default(false) // unpaid → loss of pay on payroll
+  isEncashable Boolean @default(false)
+  color       String? // ESS calendar chip
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(0)
+  policies    LeavePolicy[]
+  balances    LeaveBalance[]
+  txns        LeaveTransaction[]
+
+  @@unique([businessId, code])
+  @@index([businessId, countryCode, category])
+}
+
+enum LeaveCategory {
+  ANNUAL CASUAL SICK MATERNITY PATERNITY BEREAVEMENT
+  PUBLIC_HOLIDAY ALTERNATIVE_DAY COMP_OFF UNPAID SABBATICAL
+  MARRIAGE ADOPTION FAMILY_VIOLENCE OTHER
+}
+enum LeaveUnit { DAYS HOURS WEEKS }
+enum NZLeavePayBasis {
+  RDP      // Relevant Daily Pay (Holidays Act s9)
+  ADP      // Average Daily Pay (s9A)
+  AWE_8PCT // Annual holiday pay: greater of OWP & Avg Weekly Earnings
+  OWP      // Ordinary Weekly Pay
+}
+
+model LeavePolicy {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  leaveTypeId String
+  leaveType   LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
+  entityId    String?
+  code        String
+  name        String
+  // Entitlement
+  accrualMethod         AccrualMethod
+  entitlementPerYear    Decimal? @db.Decimal(8, 4) // 18 EL days, or 4 weeks (NZ)
+  accrualFrequency      AccrualFrequency @default(MONTHLY)
+  accrualProrateOnJoin  Boolean @default(true)
+  // Carry-forward & expiry
+  carryForwardCap          Decimal? @db.Decimal(8, 4)
+  carryForwardExpiryMonths Int?
+  // Limits
+  maxBalanceCap  Decimal? @db.Decimal(8, 4)
+  maxConsecutive Int?
+  minNoticeDays  Int?
+  allowNegative  Boolean @default(false) // advance leave
+  negativeCap    Decimal? @db.Decimal(8, 4)
+  // Eligibility gates
+  minTenureMonths          Int @default(0) // NZ annual leave vests at 12 months
+  appliesToEmploymentTypes String? // CSV of EmploymentType
+  genderRestriction        Gender? // maternity/paternity
+  // Encashment
+  encashOnExit  Boolean @default(false)
+  encashFormula String?
+  workflowDefinitionId String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(0)
+  assignments  LeavePolicyAssignment[]
+  accrualRules AccrualRule[]
+
+  @@unique([businessId, code])
+  @@index([businessId, leaveTypeId, entityId])
+}
+
+enum AccrualMethod    { UPFRONT_ANNUAL MONTHLY_ACCRUAL ANNIVERSARY_GRANT WORKED_HOURS_RATIO CONTINUOUS_NZ }
+enum AccrualFrequency { MONTHLY QUARTERLY ANNUAL PER_PAY_PERIOD }
+
+/// Tenure-tiered accrual (more EL after N years). Append-only config row.
+model AccrualRule {
+  id              String   @id @default(uuid())
+  businessId      String
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  leavePolicyId   String
+  leavePolicy     LeavePolicy @relation(fields: [leavePolicyId], references: [id], onDelete: Cascade)
+  minTenureMonths Int
+  maxTenureMonths Int?
+  ratePerPeriod   Decimal  @db.Decimal(8, 4)
+  createdAt       DateTime @default(now())
+
+  @@index([businessId, leavePolicyId, minTenureMonths])
+}
+
+model LeavePolicyAssignment {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  leavePolicyId String
+  leavePolicy   LeavePolicy @relation(fields: [leavePolicyId], references: [id], onDelete: Cascade)
+  scope         AssignmentScope
+  scopeRefId    String? // entity/dept/grade/employee id
+  effectiveFrom DateTime @db.Date
+  effectiveTo   DateTime? @db.Date
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([businessId, leavePolicyId, scope, scopeRefId])
+}
+
+enum AssignmentScope { ENTITY DEPARTMENT GRADE EMPLOYMENT_TYPE EMPLOYEE }
+
+/// Running balance per (employee, leaveType, period). Derived `closing` is
+/// persisted for fast reads; reconstructable from LeaveTransaction ledger.
+model LeaveBalance {
+  id              String   @id @default(uuid())
+  businessId      String
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId      String
+  employee        Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveTypeId     String
+  leaveType       LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+  periodCode      String // "2026-27" or NZ anniversary "2026-ANNIV"
+  unit            LeaveUnit
+  opening         Decimal  @db.Decimal(10, 4) @default(0)
+  accrued         Decimal  @db.Decimal(10, 4) @default(0)
+  taken           Decimal  @db.Decimal(10, 4) @default(0)
+  pendingApproval Decimal  @db.Decimal(10, 4) @default(0) // soft-hold
+  encashed        Decimal  @db.Decimal(10, 4) @default(0)
+  lapsed          Decimal  @db.Decimal(10, 4) @default(0)
+  adjusted        Decimal  @db.Decimal(10, 4) @default(0)
+  closing         Decimal  @db.Decimal(10, 4) @default(0) // derived; persisted
+  // NZ annual leave money valuation (weeks → $ via 8% / AWE)
+  nzAccruedGrossEarnings Decimal? @db.Decimal(15, 2)
+  lastAccrualAt   DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  version         Int      @default(0)
+
+  @@unique([businessId, employeeId, leaveTypeId, periodCode])
+  @@index([businessId, employeeId])
+}
+
+/// Append-only ledger: every accrual/application/cancellation/encashment/
+/// lapse/adjustment is a row, so the balance is always reconstructable.
+model LeaveTransaction {
+  id             String   @id @default(uuid())
+  businessId     String
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId     String
+  employee       Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveTypeId    String
+  leaveType      LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+  leaveBalanceId String?
+  txnType        LeaveTxnType
+  unit           LeaveUnit
+  quantity       Decimal  @db.Decimal(10, 4) // +accrual / -taken (signed)
+  // Application-specific (NULL for accrual/lapse rows)
+  startDate      DateTime? @db.Date
+  endDate        DateTime? @db.Date
+  startHalf      DayHalf? // FIRST_HALF/SECOND_HALF for half-days
+  endHalf        DayHalf?
+  reason         String? // @pii:sensitive for sick/bereavement
+  // NZ pay valuation snapshot at approval
+  nzPayBasisUsed NZLeavePayBasis?
+  paidAmount     Decimal? @db.Decimal(15, 2)
+  // Workflow
+  status         LeaveTxnStatus @default(DRAFT)
+  approvalRequestId String?
+  appliedAt      DateTime?
+  decidedAt      DateTime?
+  decidedBy      String?
+  payRunId       String? // when consumed by payroll (LOP/paid)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  version        Int      @default(0)
+
+  @@index([businessId, employeeId, leaveTypeId])
+  @@index([businessId, status])
+  @@index([businessId, startDate, endDate])
+}
+
+enum LeaveTxnType   { ACCRUAL APPLICATION CANCELLATION ENCASHMENT LAPSE ADJUSTMENT OPENING_BALANCE }
+enum LeaveTxnStatus { DRAFT PENDING APPROVED REJECTED CANCELLED WITHDRAWN AVAILED }
+enum DayHalf        { FIRST_HALF SECOND_HALF }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §9  ATTENDANCE · SHIFTS · TIMESHEETS  (mined from booking StaffSchedule,
+//     BusinessHours, BusinessHoliday)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Shift pattern incl. weekly-off CSV (replaces a WeekOffPattern table).
+model ShiftPattern {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId      String?
+  code          String
+  name          String // "General 9-6", "Night A"
+  startTime     String // "09:00" local
+  endTime       String // "18:00"
+  breakMinutes  Int     @default(60)
+  graceInMinutes Int    @default(10)
+  halfDayThresholdMinutes Int?
+  fullDayMinutes Int    @default(480)
+  isNightShift  Boolean @default(false)
+  crossesMidnight Boolean @default(false)
+  weeklyOffDays String  @default("0") // CSV ISO weekday (0=Sun)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+  version       Int      @default(0)
+  assignments   ShiftAssignment[]
+
+  @@unique([businessId, code])
+}
+
+model ShiftAssignment {
+  id             String   @id @default(uuid())
+  businessId     String
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId     String
+  employee       Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  shiftPatternId String
+  shiftPattern   ShiftPattern @relation(fields: [shiftPatternId], references: [id], onDelete: Restrict)
+  effectiveFrom  DateTime @db.Date
+  effectiveTo    DateTime? @db.Date
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([businessId, employeeId, effectiveFrom])
+}
+
+/// Public/company holiday calendar. NZ regional anniversary days + mondayisation
+/// (observed-Monday rows seeded by the NZ compliance module). `scopeKey`
+/// collapses the two nullable scope columns into a NOT-NULL key so the unique
+/// fires for global holidays (Postgres treats NULL as distinct). Mined from
+/// booking BusinessHoliday.
+model Holiday {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId    String?
+  locationId  String? // region-specific (NZ provincial anniversary)
+  date        DateTime @db.Date
+  name        String
+  type        HolidayType
+  countryCode String   @db.Char(2)
+  isPaid      Boolean  @default(true)
+  isRestricted Boolean @default(false) // IN optional/restricted holiday
+  scopeKey    String // = coalesce(entityId,'*') || ':' || coalesce(locationId,'*')
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([businessId, scopeKey, date, name])
+  @@index([businessId, countryCode, date])
+  @@index([businessId, entityId, locationId, date])
+}
+
+enum HolidayType { PUBLIC NATIONAL REGIONAL COMPANY RESTRICTED_OPTIONAL }
+
+model AttendancePunch {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  locationId  String?
+  punchType   PunchType
+  punchAt     DateTime // stored UTC; rendered in location TZ
+  source      PunchSource
+  geoLat      Decimal? @db.Decimal(9, 6)
+  geoLng      Decimal? @db.Decimal(9, 6)
+  ipAddress   String?
+  deviceId    String?
+  selfieUrl   String?  @db.Text // @pii:sensitive (optional)
+  isManual    Boolean  @default(false) // regularization
+  regularizationRequestId String?
+  createdAt   DateTime @default(now())
+
+  @@index([businessId, employeeId, punchAt])
+  @@index([businessId, locationId, punchAt])
+}
+
+enum PunchType   { IN OUT BREAK_START BREAK_END }
+enum PunchSource { WEB MOBILE_APP BIOMETRIC KIOSK GEO_FENCE API IMPORT MANUAL }
+
+/// Derived daily summary (one per emp/day).
+model Attendance {
+  id             String   @id @default(uuid())
+  businessId     String
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId     String
+  date           DateTime @db.Date
+  shiftPatternId String?
+  firstIn        DateTime?
+  lastOut        DateTime?
+  workedMinutes  Int      @default(0)
+  breakMinutes   Int      @default(0)
+  overtimeMinutes Int     @default(0)
+  status         AttendanceStatus
+  lopFraction    Decimal  @db.Decimal(5, 4) @default(0) // 0/0.5/1 LOP for payroll
+  isLocked       Boolean  @default(false) // frozen once period inputs lock
+  exceptionsJson Json? // late, early-out, missing-punch flags
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  version        Int      @default(0)
+
+  @@unique([businessId, employeeId, date])
+  @@index([businessId, date, status])
+}
+
+enum AttendanceStatus {
+  PRESENT ABSENT HALF_DAY ON_LEAVE WEEKLY_OFF HOLIDAY
+  WORK_FROM_HOME ON_DUTY HOLIDAY_WORKED MISSING_PUNCH
+}
+
+model Timesheet {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId    String
+  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  periodStart   DateTime @db.Date
+  periodEnd     DateTime @db.Date
+  totalHours    Decimal  @db.Decimal(8, 2) @default(0)
+  billableHours Decimal  @db.Decimal(8, 2) @default(0)
+  overtimeHours Decimal  @db.Decimal(8, 2) @default(0)
+  status        TimesheetStatus @default(DRAFT)
+  approvalRequestId String?
+  submittedAt   DateTime?
+  decidedAt     DateTime?
+  decidedBy     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  version       Int      @default(0)
+  entries       TimesheetEntry[]
+
+  @@unique([businessId, employeeId, periodStart])
+  @@index([businessId, status])
+}
+
+enum TimesheetStatus { DRAFT SUBMITTED APPROVED REJECTED LOCKED }
+
+model TimesheetEntry {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  timesheetId String
+  timesheet   Timesheet @relation(fields: [timesheetId], references: [id], onDelete: Cascade)
+  date        DateTime @db.Date
+  projectCode String?
+  taskCode    String?
+  hours       Decimal  @db.Decimal(6, 2)
+  isBillable  Boolean  @default(false)
+  isOvertime  Boolean  @default(false)
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  @@index([businessId, timesheetId, date])
 }
