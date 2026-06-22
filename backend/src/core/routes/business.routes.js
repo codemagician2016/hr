@@ -6,6 +6,8 @@ const { requireVertical } = require('../../core/middleware/requireVertical');
 const {
   checkSlug,
   setup,
+  changeSlug,
+  getDomainConfig,
   getMyBusiness,
   getMyBusinessContext,
   listBusinessUsers,
@@ -32,7 +34,7 @@ const { getChecklist, launch, unpublish } = require('../controllers/launch.contr
 const { exportBusinessData } = require('../controllers/dataExport.controller');
 const { getReport, exportAppointments } = require('../controllers/reports.controller');
 const { validateBody, validateQuery } = require('../../core/lib/validate');
-const { setupBusinessSchema, updateBusinessSettingsSchema } = require('../../core/lib/schemas/business.schema');
+const { setupBusinessSchema, updateBusinessSettingsSchema, changeSlugSchema } = require('../../core/lib/schemas/business.schema');
 const { reportRangeSchema, exportRangeSchema } = require('../../core/lib/schemas/reports.schema');
 const {
   listForBusiness: listIntegrations,
@@ -67,6 +69,12 @@ router.get('/me', protect, requireRole(ROLES.BUSINESS_ADMIN), getMyBusiness);
 router.get('/users', protect, requireRole(ROLES.BUSINESS_ADMIN), listBusinessUsers);
 router.patch('/users/:id/role', protect, requireRole(ROLES.BUSINESS_ADMIN), assignUserRole);
 router.patch('/settings', protect, requireRole(ROLES.BUSINESS_ADMIN), validateBody(updateBusinessSettingsSchema), updateSettings);
+
+// Feature 3 — self-service subdomain (URL) change + domain readiness/config.
+// Owner-only (BUSINESS_ADMIN). PATCH /settings silently drops slug, so this is
+// the dedicated, audited slug-change path.
+router.patch('/slug', protect, requireRole(ROLES.BUSINESS_ADMIN), validateBody(changeSlugSchema), changeSlug);
+router.get('/domain-config', protect, requireRole(ROLES.BUSINESS_ADMIN), getDomainConfig);
 // Read the feature catalog + current admin overrides + resolved effective
 // state. Drives the admin Features Settings panel. Patch happens via the
 // existing /settings endpoint (featureFlags is one of the accepted fields).

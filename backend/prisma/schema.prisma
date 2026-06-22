@@ -1672,7 +1672,7 @@ model Subscription {
   pendingBillingCycle       BillingCycle?
   pendingChangeEffectiveAt  DateTime?
   pendingVertical           String?
-  customDomain              String?
+  customDomain              String?            @unique
   customDomainVerified      Boolean            @default(false)
   // Cloudflare for SaaS — Custom Hostname object ID, returned by their
   // POST /custom_hostnames API at registration time. We hold it so we

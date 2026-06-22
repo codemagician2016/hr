@@ -18,6 +18,13 @@ const { validateSignupEmail, validatePhone } = require('../lib/inputValidation')
 const { slugify: rawSlugify } = require('../lib/slugify');
 const { assertNumericLimit, billableStaffSeatCount, numericEntitlement } = require('../lib/entitlements');
 const { ensureDefaultHrRole } = require('../middleware/auth.middleware');
+const {
+  hostForSlug,
+  isStaging,
+  provisionSubdomain,
+  deprovisionSubdomain,
+} = require('../lib/subdomainProvision');
+const { isCloudflareCustomHostnameConfigured } = require('./subscription.controller');
 
 // HR operator console login URL for a tenant. Replaces the deleted vertical
 // staffPortalUrlForBusiness helper.
@@ -35,7 +42,7 @@ const {
 } = require('../lib/billing/tenantPaymentReadiness');
 
 // Business slugs are kept tight (60 chars) so they compose into clean
-// subdomains (<slug>.sitepresso.com) and admin URLs.
+// subdomains (<slug>.drifthr.com) and admin URLs.
 function slugify(name) {
   return rawSlugify(name, 60);
 }
@@ -50,13 +57,17 @@ function tenantProviderConfigured(provider) {
   return provider === 'RAZORPAY' ? razorpayRoute.isConfigured() : stripeConnect.isConfigured();
 }
 
-// Ensure slug is unique — if taken, append a short random suffix
+// Ensure slug is unique AND not a reserved infra slug — if taken or reserved,
+// append a short random suffix. Reserved-word enforcement here covers the
+// name-derived path (where no explicit slug is validated upstream), so a
+// business merely NAMED "Demo"/"Admin"/"App" cannot claim an infra host.
 async function uniqueSlug(base, ignoreId = null) {
   let candidate = base || 'business';
   let attempts = 0;
   while (attempts < 10) {
-    const existing = await prisma.business.findUnique({ where: { slug: candidate } });
-    if (!existing || existing.id === ignoreId) return candidate;
+    const reserved = RESERVED_SLUGS.has(candidate);
+    const existing = reserved ? true : await prisma.business.findUnique({ where: { slug: candidate } });
+    if (!reserved && (!existing || existing.id === ignoreId)) return candidate;
     const suffix = crypto.randomBytes(2).toString('hex');
     candidate = `${base}-${suffix}`;
     attempts++;
@@ -69,6 +80,9 @@ async function uniqueSlug(base, ignoreId = null) {
 const RESERVED_SLUGS = new Set([
   'api', 'www', 'admin', 'app', 'mail', 'platform', 'status', 'docs',
   'help', 'support', 'staging', 'dev', 'test', 'blog', 'shop',
+  // Staging-host prefixes that must never be claimable as a tenant slug
+  // (would collide with infra hosts e.g. demo-staging / saas-origin).
+  'demo', 'saas-origin',
 ]);
 
 function parsePageSize(value, fallback = 25, max = 100) {
@@ -93,7 +107,7 @@ async function checkSlug(req, res) {
     slug: normalized,
     available: !existing,
     reason: existing ? 'Already in use' : null,
-    url: `https://${normalized}.${process.env.PLATFORM_DOMAIN || 'sitepresso.com'}`,
+    url: `https://${normalized}.${process.env.PLATFORM_DOMAIN || 'drifthr.com'}`,
   });
 }
 
@@ -247,6 +261,11 @@ async function setup(req, res) {
         ...(resolvedVertical !== undefined ? { vertical: resolvedVertical } : {}),
       },
     });
+    // Provision the DriftHR subdomain on first set / on change (best-effort —
+    // never throws; the slug write above already succeeded).
+    if (slugChanging || !current.slugLastChangedAt) {
+      await provisionSubdomain({ businessId: existingBusinessId, slug: finalSlug, staging: isStaging() });
+    }
     return res.json({ business });
   }
 
@@ -412,7 +431,135 @@ async function setup(req, res) {
     console.error('Auto-subscription provisioning failed:', e.message);
   }
 
+  // Provision the DriftHR subdomain for the freshly-created tenant (best-effort).
+  // Runs after the auto-subscription so the host can bind onto it.
+  await provisionSubdomain({ businessId: business.id, slug: finalSlug, staging: isStaging() });
+
   res.status(201).json({ business });
+}
+
+// PATCH /api/business/slug  { slug }
+// Self-service URL change for a LIVE tenant (Feature 3, Mode A). Unlike the
+// onboarding setup() path, this is the dedicated, audited slug-change endpoint:
+//   slugify → reserved (409) → no-op if same (200) → uniqueness, NO auto-suffix
+//   (409 taken) → 30-day cooldown via slugLastChangedAt (429) → provision the
+//   NEW subdomain FIRST (best-effort) → update slug + stamp → deprovision the
+//   OLD subdomain (tag-gated, best-effort) → audit → { slug, url }.
+// The existing PATCH /settings silently drops slug — this is the only way to
+// change it post-onboarding.
+async function changeSlug(req, res) {
+  const businessId = req.user.businessId;
+  if (!businessId) {
+    return res.status(400).json({ message: 'You must set up your business first' });
+  }
+
+  const newSlug = slugify(req.body.slug);
+  if (!newSlug) {
+    return res.status(400).json({ message: 'slug is required' });
+  }
+  if (RESERVED_SLUGS.has(newSlug)) {
+    return res.status(409).json({ reason: 'reserved', message: `"${newSlug}" is a reserved name. Please choose another.` });
+  }
+
+  // Load the business WITH its subscription so we can deprovision the ACTUAL
+  // stored host on cutover (not a host re-derived from the old slug + the
+  // ambient staging flag, which orphans the real record if the env flag flips).
+  const current = await prisma.business.findUnique({
+    where: { id: businessId },
+    include: { subscription: { select: { customDomain: true } } },
+  });
+  if (!current) {
+    return res.status(404).json({ message: 'Business not found' });
+  }
+
+  // No-op: same slug → succeed without touching DNS, the cooldown, or audit.
+  if (newSlug === current.slug) {
+    return res.json({ slug: newSlug, url: `https://${hostForSlug(newSlug)}`, unchanged: true });
+  }
+
+  // Uniqueness — NO auto-suffix (the admin chose this exact name).
+  const conflict = await prisma.business.findUnique({ where: { slug: newSlug } });
+  if (conflict && conflict.id !== businessId) {
+    return res.status(409).json({ reason: 'taken', message: `"${newSlug}" is already taken. Please choose another.` });
+  }
+
+  // 30-day cooldown — a published URL lives in bookmarks/share links/SEO, so it
+  // can change at most once every 30 days (mirrors the setup() cooldown block).
+  const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+  if (current.slugLastChangedAt) {
+    const elapsed = Date.now() - new Date(current.slugLastChangedAt).getTime();
+    if (elapsed < THIRTY_DAYS_MS) {
+      const daysLeft = Math.ceil((THIRTY_DAYS_MS - elapsed) / (24 * 60 * 60 * 1000));
+      const nextAvailableAt = new Date(new Date(current.slugLastChangedAt).getTime() + THIRTY_DAYS_MS);
+      return res.status(429).json({
+        reason: 'cooldown',
+        message: `You can change your URL once every 30 days. Next change available in ${daysLeft} day${daysLeft === 1 ? '' : 's'}.`,
+        nextAvailableAt: nextAvailableAt.toISOString(),
+        slugLastChangedAt: current.slugLastChangedAt,
+      });
+    }
+  }
+
+  // Deprovision the ACTUAL provisioned host stored on the subscription (not a
+  // host re-derived from the old slug). Only deprovision *.drifthr.com hosts —
+  // never tear down a real custom domain a tenant connected by hand.
+  const platformZone = String(process.env.PLATFORM_DOMAIN || 'drifthr.com').toLowerCase();
+  const storedHost = String(current.subscription?.customDomain || '').trim().toLowerCase();
+  const oldHost = (storedHost && (storedHost === platformZone || storedHost.endsWith(`.${platformZone}`)))
+    ? storedHost
+    : null;
+  const newHost = hostForSlug(newSlug);
+
+  // Provision the NEW host FIRST so the new URL is live before we cut over
+  // (QA §5 case 2 — new live before old removed). Best-effort: never throws.
+  const provision = await provisionSubdomain({ businessId, slug: newSlug, staging: isStaging() });
+
+  // WRITE tag-gate / unique-constraint refusal — the new host is owned by infra
+  // or another tenant. Do NOT write the slug; surface 409 {host-unavailable|taken}.
+  if (provision?.refused) {
+    const reason = provision.reason === 'taken' ? 'taken' : 'host-unavailable';
+    return res.status(409).json({
+      reason,
+      message: reason === 'taken'
+        ? `"${newSlug}" maps to a domain that is already taken. Please choose another.`
+        : `"${newSlug}" maps to an unavailable host. Please choose another.`,
+    });
+  }
+
+  await prisma.business.update({
+    where: { id: businessId },
+    data: { slug: newSlug, slugLastChangedAt: new Date() },
+  });
+
+  // Tear down the OLD host (tag-gated, best-effort) only after the cutover.
+  if (oldHost && oldHost !== newHost) {
+    await deprovisionSubdomain({ businessId, host: oldHost });
+  }
+
+  await writeAudit({
+    businessId,
+    actorId: req.user.id,
+    action: 'business.slug.change',
+    entityType: 'Business',
+    entityId: businessId,
+    meta: { from: current.slug || null, to: newSlug, host: newHost },
+  });
+
+  return res.json({ slug: newSlug, url: `https://${newHost}` });
+}
+
+// GET /api/business/domain-config
+// Readiness + shape for the admin Domain settings UI. customDomainEnabled
+// reflects whether Cloudflare-for-SaaS custom hostnames are configured (Mode B
+// gate); subdomain self-service (Mode A) is always available.
+async function getDomainConfig(req, res) {
+  const staging = isStaging();
+  return res.json({
+    customDomainEnabled: isCloudflareCustomHostnameConfigured(),
+    platformDomain: process.env.PLATFORM_DOMAIN || 'drifthr.com',
+    subdomainSuffix: staging ? '-staging.drifthr.com' : '.drifthr.com',
+    targetCname: process.env.CUSTOM_DOMAIN_TARGET_CNAME || null,
+  });
 }
 
 // GET /api/business/me
@@ -653,7 +800,7 @@ async function inviteStaff(req, res) {
   }
 
   // Canonical staff entry point now lives on the platform path-based portal.
-  const platformDomain = process.env.PLATFORM_DOMAIN || 'sitepresso.com';
+  const platformDomain = process.env.PLATFORM_DOMAIN || 'drifthr.com';
   const platformBaseUrl = (process.env.NEXT_PUBLIC_PLATFORM_URL || process.env.FRONTEND_URL || `https://${platformDomain}`).replace(/\/$/, '');
   const loginUrl = staffPortalUrlForBusiness(business, platformBaseUrl);
 
@@ -706,7 +853,7 @@ async function quickAddStaff(req, res) {
   // Synthetic, guaranteed-unique email so the User row is valid. We use a
   // .invalid TLD (reserved by RFC 2606) so it can never collide with a
   // real address and no email will ever be delivered to it.
-  const placeholderEmail = `team-${crypto.randomBytes(8).toString('hex')}@sitepresso.invalid`;
+  const placeholderEmail = `team-${crypto.randomBytes(8).toString('hex')}@drifthr.invalid`;
   const randomPassword = crypto.randomBytes(24).toString('hex');
   const hashed = await bcrypt.hash(randomPassword, 12);
 
@@ -1773,6 +1920,8 @@ async function assignUserRole(req, res) {
 module.exports = {
   checkSlug,
   setup,
+  changeSlug,
+  getDomainConfig,
   getMyBusiness,
   getMyBusinessContext,
   listBusinessUsers,

@@ -566,17 +566,21 @@ async function processTrialReminders() {
 
 async function processCustomDomainProvisioning() {
   try {
-    const provider = customDomainProvider();
+    const platformDomain = (process.env.PLATFORM_DOMAIN || 'drifthr.com').toLowerCase();
     const pending = await prisma.subscription.findMany({
       where: {
         customDomain: { not: null },
+        // Platform subdomains ({slug}.drifthr.com) are provisioned ACTIVE by
+        // subdomainProvision; they are NOT tenant-owned custom domains and must
+        // never be re-run through the custom-domain TXT challenge (which would
+        // downgrade them to PENDING_DNS and take the subdomain offline).
+        NOT: { customDomain: { endsWith: `.${platformDomain}` } },
         OR: [
           { customDomainVerified: false },
           // Keep ACTIVE domains in the sweep too. If DNS expires or breaks
           // after launch, the next check marks it as an issue so SEO stops
           // publishing that custom domain instead of serving dead canonicals.
           { customDomainStatus: { in: ['PENDING_DNS', 'PENDING_SSL', 'FAILED', 'ACTIVE'] } },
-          ...(provider === 'vercel' ? [{ customHostnameId: { not: null } }] : []),
         ],
       },
       orderBy: { customDomainCheckedAt: 'asc' },

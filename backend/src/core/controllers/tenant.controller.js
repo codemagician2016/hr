@@ -13,7 +13,7 @@ const {
 const { needsRenewal, billingAccessState } = require('../lib/billingAccess');
 const { subscriptionGrantsAccess, numericEntitlement } = require('../lib/entitlements');
 
-const PLATFORM_DOMAIN = (process.env.PLATFORM_DOMAIN || 'sitepresso.com').toLowerCase();
+const PLATFORM_DOMAIN = (process.env.PLATFORM_DOMAIN || 'drifthr.com').toLowerCase();
 
 const RESTAURANT_RESERVATIONS_THEME = 'restaurant_reservations';
 
@@ -174,7 +174,7 @@ async function resolve(req, res) {
   } else if (host === PLATFORM_DOMAIN) {
     return res.status(404).json({ message: 'Platform domain is not a tenant' });
   } else if (host.endsWith(platformSuffix)) {
-    // Subdomain tenant, e.g. "acme-barber-shop.sitepresso.com"
+    // Subdomain tenant, e.g. "acme-barber-shop.drifthr.com"
     const sub = host.slice(0, -platformSuffix.length);
     if (!sub || sub.includes('.') || RESERVED_SUBDOMAINS.has(sub)) {
       return res.status(404).json({ message: 'Not a tenant' });
@@ -295,7 +295,10 @@ async function resolve(req, res) {
   const hrTheme = resolveTenantTheme({
     styleKey: sub?.themeStyle || theme,
     primary: storedPrimary,
-    logoUrl: sub?.logoUrl || business.logoUrl,
+    // Logo lives on BusinessContent (loaded via the `content` include). The
+    // old `sub?.logoUrl || business.logoUrl` read two fields that don't exist
+    // on Subscription/Business, so logoUrl was always null.
+    logoUrl: business.content?.logoUrl || null,
   });
   // Backward-compat payload keys retained for existing storefront/admin
   // readers. HR is a single GENERIC theme, so both surface the same resolved
@@ -553,7 +556,7 @@ async function resolve(req, res) {
 // Returns the same payload as /resolve, but the tenant is identified by the
 // caller's JWT (req.user.businessId) rather than URL slug or hostname.
 //
-// Used by the unified-admin domain (app.aapkatech.com / app.sitepresso.com)
+// Used by the unified-admin domain (app.aapkatech.com / app.drifthr.com)
 // where the URL has no slug — the logged-in user IS the tenant context.
 //
 // Auth-required (BUSINESS_ADMIN, STAFF, or SUPER_ADMIN). Without a session,

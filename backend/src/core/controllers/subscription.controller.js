@@ -122,23 +122,18 @@ const { VALID_LAYOUT_PRESETS, resolvePreset, sanitizeSectionVariants } = require
 // The tenant picks one of these + one brand color + a logo; nothing else is designable.
 const VALID_STYLES = new Set(['slate', 'indigo', 'emerald', 'rose', 'mono']);
 
-// Sellers can use one of two custom-domain providers:
-//   - cloudflare: Cloudflare for SaaS custom hostnames + Worker routing.
-//   - vercel: add the domain directly to the correct public Vercel project.
-// Cloudflare remains the default so existing deployments do not silently
-// change behavior until CUSTOM_DOMAIN_PROVIDER=vercel is set.
-// Cloudflare anycast IPs for the apex (root) A records. Cloudflare-for-SaaS
-// routes custom hostnames by SNI, so any Cloudflare anycast IP delivers traffic
-// to the correct zone — these are the IPs `custom.<platform>` resolves to, one
-// per distinct Cloudflare range for redundancy. Override per-env with
-// CUSTOM_DOMAIN_TARGET_IPS if Cloudflare ever rotates them.
+// Custom domains are served by Cloudflare for SaaS (custom hostnames + Worker
+// routing). The legacy Vercel provider branch was removed — Cloudflare is the
+// only path. Cloudflare anycast IPs for the apex (root) A records: Cloudflare-
+// for-SaaS routes custom hostnames by SNI, so any Cloudflare anycast IP
+// delivers traffic to the correct zone — these are the IPs `custom.<platform>`
+// resolves to, one per distinct Cloudflare range for redundancy. Override
+// per-env with CUSTOM_DOMAIN_TARGET_IPS if Cloudflare ever rotates them.
 const DEFAULT_CUSTOM_DOMAIN_IPS = ['172.67.157.143', '104.21.40.227'];
-const DEFAULT_VERCEL_CNAME_TARGET = 'cname.vercel-dns-0.com';
-const DEFAULT_VERCEL_APEX_IP = '76.76.21.21';
 
 function customDomainProvider() {
-  const provider = String(process.env.CUSTOM_DOMAIN_PROVIDER || 'cloudflare').trim().toLowerCase();
-  return provider === 'vercel' ? 'vercel' : 'cloudflare';
+  // Cloudflare-for-SaaS is the only supported provider now.
+  return 'cloudflare';
 }
 
 function expectedCustomDomainIps() {
@@ -245,7 +240,7 @@ function customDomainTransferSecret() {
     process.env.JWT_SECRET ||
     process.env.SESSION_SECRET ||
     process.env.COOKIE_SECRET ||
-    (process.env.NODE_ENV === 'production' ? '' : 'sitepresso-local-domain-transfer')
+    (process.env.NODE_ENV === 'production' ? '' : 'drifthr-local-domain-transfer')
   );
 }
 
@@ -261,9 +256,9 @@ function customDomainOwnershipChallenge({ domain, businessId }) {
     .slice(0, 40);
   return {
     type: 'TXT',
-    name: `_sitepresso-verify.${baseDomain}`,
-    host: '_sitepresso-verify',
-    value: `sitepresso-verify=${token}`,
+    name: `_drifthr-verify.${baseDomain}`,
+    host: '_drifthr-verify',
+    value: `drifthr-verify=${token}`,
     baseDomain,
     ttl: 'Auto or 1 hour',
   };
@@ -309,7 +304,7 @@ function customDomainTransferRequiredResponse({ domain, businessId, message }) {
     return {
       code: 'CUSTOM_DOMAIN_TRANSFER_UNAVAILABLE',
       domain,
-      message: 'This domain is already connected to another Sitepresso website. Automatic ownership verification is not configured, so contact support to move it.',
+      message: 'This domain is already connected to another DriftHR website. Automatic ownership verification is not configured, so contact support to move it.',
       canTransfer: false,
       ownershipVerification: null,
     };
@@ -317,7 +312,7 @@ function customDomainTransferRequiredResponse({ domain, businessId, message }) {
   return {
     code: 'CUSTOM_DOMAIN_TRANSFER_VERIFICATION_REQUIRED',
     domain,
-    message: message || 'This domain is already connected to another Sitepresso website. Add the TXT record below to prove domain ownership, then verify and move it here.',
+    message: message || 'This domain is already connected to another DriftHR website. Add the TXT record below to prove domain ownership, then verify and move it here.',
     canTransfer: true,
     ownershipVerification: challenge,
   };
@@ -468,7 +463,7 @@ async function buildApexWwwSuggestion(domain, dnsState = null) {
     suggestedDomain,
     suggestedDns,
     instructions: dnsInstructionsForDomain(suggestedDomain),
-    message: `Root domain ${domain} is not pointed at Sitepresso. For GoDaddy-style DNS, connect ${suggestedDomain} and add CNAME "www" to ${expectedCustomDomainCname()}.`,
+    message: `Root domain ${domain} is not pointed at DriftHR. For GoDaddy-style DNS, connect ${suggestedDomain} and add CNAME "www" to ${expectedCustomDomainCname()}.`,
   };
 }
 
@@ -672,342 +667,12 @@ async function deleteCloudflareCustomHostname(customHostnameId, options = {}) {
   }
 }
 
-function vercelToken() {
-  return String(process.env.VERCEL_TOKEN || process.env.VERCEL_API_TOKEN || '').trim();
-}
-
-function vercelTeamQuery() {
-  const params = new URLSearchParams();
-  const teamId = String(process.env.VERCEL_TEAM_ID || '').trim();
-  const slug = String(process.env.VERCEL_TEAM_SLUG || '').trim();
-  if (teamId) params.set('teamId', teamId);
-  else if (slug) params.set('slug', slug);
-  const query = params.toString();
-  return query ? `?${query}` : '';
-}
-
-function defaultVercelProjectForVertical(vertical) {
-  const platformDomain = String(process.env.PLATFORM_DOMAIN || '').toLowerCase();
-  const prod = platformDomain === 'sitepresso.com';
-  if (vertical === 'ECOMMERCE') return prod ? 'sitepresso-prod-shop-public' : 'sitepresso-shop-public';
-  if (vertical === 'STATIC') return prod ? 'sitepresso-prod-web-public' : 'sitepresso-web-public';
-  return prod ? 'sitepresso-prod-booking-public' : 'sitepresso-business';
-}
-
-function vercelProjectForBusiness(business = {}) {
-  const vertical = resolveVertical(business?.vertical);
-  if (vertical === 'ECOMMERCE') {
-    return String(process.env.VERCEL_PROJECT_SHOP_PUBLIC || process.env.VERCEL_PROJECT_ECOMMERCE_PUBLIC || '').trim()
-      || defaultVercelProjectForVertical(vertical);
-  }
-  if (vertical === 'STATIC') {
-    return String(process.env.VERCEL_PROJECT_WEB_PUBLIC || process.env.VERCEL_PROJECT_STATIC_PUBLIC || '').trim()
-      || defaultVercelProjectForVertical(vertical);
-  }
-  return String(process.env.VERCEL_PROJECT_BOOKING_PUBLIC || process.env.VERCEL_PROJECT_APPOINTMENT_PUBLIC || '').trim()
-    || defaultVercelProjectForVertical(vertical);
-}
-
-function isVercelCustomDomainConfigured(business = {}) {
-  return Boolean(vercelToken() && vercelProjectForBusiness(business));
-}
-
-async function vercelApi(path, options = {}) {
-  const teamQuery = vercelTeamQuery();
-  const query = teamQuery ? `${path.includes('?') ? '&' : '?'}${teamQuery.slice(1)}` : '';
-  const response = await fetch(`https://api.vercel.com${path}${query}`, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${vercelToken()}`,
-      'Content-Type': 'application/json',
-      ...(options.headers || {}),
-    },
-  });
-  const json = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const err = new Error(json.error?.message || json.message || `Vercel API failed with ${response.status}`);
-    err.status = response.status;
-    err.vercel = json;
-    throw err;
-  }
-  return json;
-}
-
-async function getVercelProjectDomain({ domain, project }) {
-  return vercelApi(`/v9/projects/${encodeURIComponent(project)}/domains/${encodeURIComponent(domain)}`);
-}
-
-async function addVercelProjectDomain({ domain, project }) {
-  return vercelApi(`/v10/projects/${encodeURIComponent(project)}/domains`, {
-    method: 'POST',
-    body: JSON.stringify({ name: domain }),
-  });
-}
-
-async function verifyVercelProjectDomain({ domain, project }) {
-  return vercelApi(`/v9/projects/${encodeURIComponent(project)}/domains/${encodeURIComponent(domain)}/verify`, {
-    method: 'POST',
-  });
-}
-
-async function deleteVercelProjectDomain({ domain, project }) {
-  return vercelApi(`/v9/projects/${encodeURIComponent(project)}/domains/${encodeURIComponent(domain)}`, {
-    method: 'DELETE',
-  });
-}
-
-async function getVercelDomainConfig({ domain, project }) {
-  const params = new URLSearchParams();
-  params.set('projectIdOrName', project);
-  return vercelApi(`/v6/domains/${encodeURIComponent(domain)}/config?${params.toString()}`);
-}
-
-function vercelDomainPair(domain) {
-  const clean = normalizeCustomDomain(domain);
-  if (!clean) return [];
-  if (clean.startsWith('www.')) {
-    const apex = clean.slice(4);
-    return [clean, apex].filter(Boolean);
-  }
-  if (isLikelyApexDomain(clean)) return [clean, `www.${clean}`];
-  return [clean];
-}
-
-async function ensureSingleVercelCustomDomain({ domain, project }) {
-  let projectDomain = null;
-  try {
-    projectDomain = await addVercelProjectDomain({ domain, project });
-  } catch (err) {
-    try {
-      if (![400, 409].includes(err.status)) throw err;
-      projectDomain = await getVercelProjectDomain({ domain, project });
-    } catch {
-      throw err;
-    }
-  }
-
-  if (projectDomain && projectDomain.verified === false) {
-    try {
-      projectDomain = await verifyVercelProjectDomain({ domain, project });
-    } catch (err) {
-      if (![400, 403].includes(err.status)) throw err;
-    }
-  }
-
-  const domainConfig = await getVercelDomainConfig({ domain, project }).catch((err) => ({
-    error: err.message,
-    status: err.status || null,
-  }));
-
-  return { result: projectDomain, config: domainConfig };
-}
-
-async function ensureVercelCustomDomain({ domain, business }) {
-  const project = vercelProjectForBusiness(business);
-  if (!isVercelCustomDomainConfigured(business)) {
-    return { configured: false, project, error: 'Vercel custom-domain automation is not configured.' };
-  }
-
-  const domains = vercelDomainPair(domain);
-  const primaryDomain = domains[0] || domain;
-  const domainResults = [];
-  for (const nextDomain of domains) {
-    try {
-      const ensured = await ensureSingleVercelCustomDomain({ domain: nextDomain, project });
-      domainResults.push({
-        domain: nextDomain,
-        configured: true,
-        ...ensured,
-      });
-    } catch (err) {
-      domainResults.push({
-        domain: nextDomain,
-        configured: false,
-        error: err?.message || 'unknown error',
-        status: err?.status || null,
-      });
-    }
-  }
-
-  const primary = domainResults.find((item) => item.domain === primaryDomain) || domainResults[0];
-  const hardFailure = domainResults.find((item) => !item.configured && item.domain === primaryDomain);
-  if (hardFailure) {
-    const err = new Error(hardFailure.error || `Vercel API failed for ${primaryDomain}`);
-    err.status = hardFailure.status;
-    throw err;
-  }
-
-  return {
-    configured: true,
-    project,
-    domains,
-    domainResults,
-    result: primary?.result || null,
-    config: primary?.config || null,
-  };
-}
-
-function bestVercelCname(config) {
-  const ranked = Array.isArray(config?.recommendedCNAME) ? [...config.recommendedCNAME] : [];
-  ranked.sort((a, b) => (a.rank || 999) - (b.rank || 999));
-  return ranked[0]?.value || process.env.VERCEL_CNAME_TARGET || DEFAULT_VERCEL_CNAME_TARGET;
-}
-
-function bestVercelApexIp(config) {
-  const ranked = Array.isArray(config?.recommendedIPv4) ? [...config.recommendedIPv4] : [];
-  ranked.sort((a, b) => (a.rank || 999) - (b.rank || 999));
-  const value = ranked[0]?.value;
-  if (Array.isArray(value) && value[0]) return value[0];
-  if (typeof value === 'string' && value) return value;
-  return process.env.VERCEL_APEX_IP || DEFAULT_VERCEL_APEX_IP;
-}
-
-function vercelVerificationRecords(vercelState = {}) {
-  return (vercelState.domainResults || [{ domain: vercelState.result?.name, result: vercelState.result }])
-    .flatMap((item) => Array.isArray(item.result?.verification)
-      ? item.result.verification
-      .filter((record) => record?.type && record?.domain && record?.value)
-      .map((record) => ({
-        type: String(record.type).toUpperCase(),
-        name: record.domain,
-        value: record.value,
-        domain: item.domain,
-        status: 'Required',
-      }))
-      : []);
-}
-
-function vercelDnsInstructionsForDomain(domain, vercelState = {}) {
-  const config = vercelState.config || {};
-  const apexDomain = domain.startsWith('www.') ? domain.slice(4) : domain;
-  const cnameDomain = apexDomain ? `www.${apexDomain}` : domain;
-  const apexResult = (vercelState.domainResults || []).find((item) => item.domain === apexDomain);
-  const cnameResult = (vercelState.domainResults || []).find((item) => item.domain === cnameDomain);
-  const verificationRecords = vercelVerificationRecords(vercelState);
-  const records = [
-    {
-      type: 'A',
-      name: '@',
-      value: bestVercelApexIp(apexResult?.config || config),
-      domain: apexDomain,
-      status: vercelSingleDomainIsActive(apexResult) ? 'Verified' : 'Required',
-    },
-    {
-      type: 'CNAME',
-      name: 'www',
-      value: bestVercelCname(cnameResult?.config || config),
-      domain: cnameDomain,
-      status: vercelSingleDomainIsActive(cnameResult) ? 'Verified' : 'Required',
-    },
-    ...verificationRecords,
-  ];
-
-  return {
-    type: domain.startsWith('www.') ? 'CNAME' : 'A',
-    name: domain.startsWith('www.') ? 'www' : '@',
-    value: domain.startsWith('www.') ? records[1].value : records[0].value,
-    values: domain.startsWith('www.') ? [records[1].value] : [records[0].value],
-    records,
-    proxy: 'Use DNS only until verification completes. If your DNS screen has a proxy toggle, keep it off for this record.',
-  };
-}
-
-function serializeVercelDomain(vercelState = {}) {
-  if (!vercelState?.configured) return { configured: false, error: vercelState?.error || null };
-  return {
-    configured: true,
-    project: vercelState.project || null,
-    domains: vercelState.domains || [],
-    name: vercelState.result?.name || null,
-    verified: vercelState.result?.verified ?? null,
-    verification: vercelState.result?.verification || [],
-    domainResults: (vercelState.domainResults || []).map((item) => ({
-      domain: item.domain,
-      configured: item.configured !== false,
-      verified: item.result?.verified ?? null,
-      configuredBy: item.config?.configuredBy ?? null,
-      misconfigured: item.config?.misconfigured ?? null,
-      error: item.error || item.config?.error || null,
-    })),
-    configuredBy: vercelState.config?.configuredBy ?? null,
-    misconfigured: vercelState.config?.misconfigured ?? null,
-    acceptedChallenges: vercelState.config?.acceptedChallenges || [],
-    error: vercelState.config?.error || null,
-  };
-}
-
-function vercelSingleDomainIsActive(item = {}) {
-  return Boolean(
-    item?.configured !== false &&
-    item?.result?.verified === true &&
-    item?.config?.misconfigured === false &&
-    item?.config?.configuredBy &&
-    item?.config?.configuredBy !== 'http'
-  );
-}
-
-function vercelDomainIsActive(vercelState = {}) {
-  if (Array.isArray(vercelState.domainResults) && vercelState.domainResults.length > 0) {
-    return vercelState.domainResults.every((item) => vercelSingleDomainIsActive(item));
-  }
-  return Boolean(
-    vercelState.configured &&
-    vercelState.result?.verified === true &&
-    vercelState.config?.misconfigured === false &&
-    vercelState.config?.configuredBy &&
-    vercelState.config?.configuredBy !== 'http'
-  );
-}
-
 function publicCustomDomainMessage(message) {
   return String(message || '')
     .replace(/Vercel/gi, 'domain')
     .replace(/Cloudflare/gi, 'DNS provider')
     .replace(/custom-hostname/gi, 'domain')
     .replace(/custom hostname/gi, 'domain');
-}
-
-function customDomainStatusFromVercel({ vercelState, vercelError }) {
-  if (vercelError) {
-    return {
-      verified: false,
-      status: 'FAILED',
-      message: `Custom-domain setup failed: ${publicCustomDomainMessage(vercelError)}`,
-    };
-  }
-  if (!vercelState?.configured) {
-    return {
-      verified: false,
-      status: 'PENDING_SSL',
-      message: vercelState?.error ? publicCustomDomainMessage(vercelState.error) : 'Custom-domain automation is not configured yet.',
-    };
-  }
-  if (vercelDomainIsActive(vercelState)) {
-    return {
-      verified: true,
-      status: 'ACTIVE',
-      message: 'DNS and HTTPS are active for both root and www domains.',
-    };
-  }
-  if (vercelState.config?.configuredBy === 'http') {
-    return {
-      verified: false,
-      status: 'PENDING_DNS',
-      message: 'This domain appears to be behind a DNS proxy. Keep the record as DNS only, then check again.',
-    };
-  }
-  if (vercelState.config?.misconfigured || !vercelState.config?.configuredBy) {
-    return {
-      verified: false,
-      status: 'PENDING_DNS',
-      message: 'Waiting for DNS to point to the required target.',
-    };
-  }
-  return {
-    verified: false,
-    status: 'PENDING_SSL',
-    message: 'DNS is correct. Waiting for domain verification and HTTPS activation.',
-  };
 }
 
 function stabilizeCustomDomainStatus(domainStatus, priorSubscription = null) {
@@ -1026,49 +691,6 @@ function stabilizeCustomDomainStatus(domainStatus, priorSubscription = null) {
 
 async function provisionCustomDomain({ domain, business, priorSubscription = null, allowApexPending = false } = {}) {
   const provider = customDomainProvider();
-  if (provider === 'vercel') {
-    let vercelState = { configured: false };
-    let vercelError = null;
-    try {
-      vercelState = await ensureVercelCustomDomain({ domain, business });
-    } catch (err) {
-      console.error('[custom-domain/vercel] Vercel custom domain failed:', err?.message || err);
-      vercelError = err?.message || 'unknown error';
-    }
-    const domainStatus = stabilizeCustomDomainStatus(
-      customDomainStatusFromVercel({ vercelState, vercelError }),
-      priorSubscription
-    );
-    let cloudflareCleanup = null;
-    let nextCustomHostnameId = priorSubscription?.customHostnameId || undefined;
-    if (domainStatus.status === 'ACTIVE' && priorSubscription?.customHostnameId) {
-      try {
-        cloudflareCleanup = await deleteCloudflareCustomHostname(priorSubscription.customHostnameId, {
-          domain: priorSubscription.customDomain,
-        });
-        if (cloudflareCleanup.deleted) nextCustomHostnameId = null;
-      } catch (err) {
-        cloudflareCleanup = { deleted: false, error: err?.message || 'unknown error' };
-        console.error('[custom-domain/vercel] Cloudflare custom hostname cleanup failed:', cloudflareCleanup.error);
-      }
-    }
-    return {
-      provider,
-      domainStatus,
-      customHostnameId: nextCustomHostnameId,
-      dnsState: {
-        provider,
-        matches: vercelDomainIsActive(vercelState),
-        configuredBy: vercelState.config?.configuredBy ?? null,
-        misconfigured: vercelState.config?.misconfigured ?? null,
-      },
-      instructions: vercelDnsInstructionsForDomain(domain, vercelState),
-      vercelState,
-      vercelError,
-      cloudflareCleanup,
-      suggestion: null,
-    };
-  }
 
   const dnsState = await inspectDomainDns(domain);
   const apexWwwSuggestion = await buildApexWwwSuggestion(domain, dnsState);
@@ -1078,19 +700,44 @@ async function provisionCustomDomain({ domain, business, priorSubscription = nul
 
   let cloudflareState = { configured: false };
   let cloudflareError = null;
-  // Cloudflare-for-SaaS needs the custom hostname REGISTERED before it will
-  // serve/validate it — register up-front (at connect time) rather than waiting
-  // for DNS to already match. CF then auto-validates + issues the cert as soon
-  // as the tenant's CNAME points at the fallback target. (Previously gated on
-  // dnsState.matches, which left the hostname unregistered → CF error 1014
-  // for the tenant until a scheduler cycle caught up.)
-  {
+  // Ownership gate (v1.1 correctness): only REGISTER the CF custom hostname once
+  // the tenant has proven ownership via the TXT challenge. Registering before
+  // verification lets the first caller squat any unregistered domain AND burns
+  // CF custom-hostname quota on unverified attempts. When ownership is NOT yet
+  // proven we persist PENDING_DNS WITHOUT touching CF — the ACTIVE-promotion
+  // path (getCustomDomainStatus, gated on CF's own DV verdict) is unchanged.
+  const ownership = business?.id
+    ? await customDomainOwnershipVerified({ domain, businessId: business.id }).catch(() => ({ verified: false }))
+    : { verified: false };
+  if (ownership.verified) {
+    // Cloudflare-for-SaaS needs the custom hostname REGISTERED before it will
+    // serve/validate it — register up-front (at connect time) rather than
+    // waiting for DNS to already match. CF then auto-validates + issues the
+    // cert as soon as the tenant's CNAME points at the fallback target.
     try {
       cloudflareState = await ensureCloudflareCustomHostname({ domain, business });
     } catch (err) {
       console.error('[custom-domain] Cloudflare custom hostname failed:', err?.message || err);
       cloudflareError = err?.message || 'unknown error';
     }
+  } else {
+    // Not yet verified — DO NOT register the CF hostname. Persist PENDING_DNS so
+    // the tenant adds DNS + the TXT record; a later recheck registers CF once
+    // ownership is proven.
+    return {
+      provider,
+      domainStatus: {
+        verified: false,
+        status: 'PENDING_DNS',
+        message: 'Waiting for DNS to point at DriftHR.',
+      },
+      customHostnameId: undefined,
+      dnsState,
+      instructions: dnsInstructionsForDomain(domain),
+      cloudflareState,
+      cloudflareError: null,
+      suggestion: apexWwwSuggestion,
+    };
   }
   return {
     provider,
@@ -1130,7 +777,7 @@ function customDomainStatusFrom({ dnsState, cloudflareState, cloudflareError, pr
     return {
       verified: false,
       status: 'PENDING_DNS',
-      message: 'Waiting for DNS to point at Sitepresso.',
+      message: 'Waiting for DNS to point at DriftHR.',
     };
   }
   if (cloudflareError) {
@@ -1326,7 +973,7 @@ function billingNameForPaddle(business) {
 }
 
 function getPlatformBaseUrl(req = null) {
-  const platformDomain = process.env.PLATFORM_DOMAIN || 'sitepresso.com';
+  const platformDomain = process.env.PLATFORM_DOMAIN || 'drifthr.com';
   const explicit = String(process.env.NEXT_PUBLIC_PLATFORM_URL || '').trim();
   if (explicit) return explicit;
 
@@ -1346,7 +993,7 @@ function buildCheckoutLauncherUrl(req, business, cancelRedirect) {
   if (process.env.PADDLE_CHECKOUT_URL) return process.env.PADDLE_CHECKOUT_URL;
 
   // Post-B2 the launcher page lives on the platform itself at
-  // sitepresso.com/billing/checkout. Always build from the platform base
+  // drifthr.com/billing/checkout. Always build from the platform base
   // URL so the redirect is same-origin to the admin that opened it —
   // avoids cross-origin top-navigation and stale-subdomain pitfalls
   // we hit during the first Paddle attempt.
@@ -1982,7 +1629,7 @@ async function openBillingPortal(req, res) {
       return res.status(500).json({ message: 'Stripe is not configured on the backend.' });
     }
     try {
-      const returnUrl = `${req.headers.origin || process.env.PLATFORM_ORIGIN || 'https://app.sitepresso.com'}/dashboard?tab=subscription`;
+      const returnUrl = `${req.headers.origin || process.env.PLATFORM_ORIGIN || 'https://app.drifthr.com'}/dashboard?tab=subscription`;
       const session = await stripeGw.createBillingPortalSession({
         customerRef: subscription.stripeCustomerId,
         returnUrl,
@@ -2003,7 +1650,7 @@ async function openBillingPortal(req, res) {
     return res.status(409).json({
       code: 'RAZORPAY_PORTAL_MANAGED',
       gateway: 'RAZORPAY',
-      message: 'Razorpay subscription billing does not have a self-serve customer portal in Sitepresso yet. Use support for cancellation, invoice, or mandate changes.',
+      message: 'Razorpay subscription billing does not have a self-serve customer portal in DriftHR yet. Use support for cancellation, invoice, or mandate changes.',
     });
   }
 
@@ -2150,7 +1797,7 @@ async function viewSubscriptionInvoice(req, res) {
     return res.status(409).send('An invoice is available once the payment has completed.');
   }
   if (String(payment.provider || '').toLowerCase() !== 'razorpay') {
-    return res.status(409).send('This payment is invoiced by the payment provider, not Sitepresso.');
+    return res.status(409).send('This payment is invoiced by the payment provider, not DriftHR.');
   }
 
   try {
@@ -2159,7 +1806,7 @@ async function viewSubscriptionInvoice(req, res) {
     const cycle = business.subscription?.billingCycle ? ` (${String(business.subscription.billingCycle).toLowerCase()})` : '';
     const planName = business.subscription?.tier?.name
       ? `${business.subscription.tier.name}${cycle} subscription`
-      : 'Sitepresso subscription';
+      : 'DriftHR subscription';
     const data = buildInvoiceData({ business, paymentAttempt: payment, planName, invoiceNumber });
     res.set('Content-Type', 'text/html; charset=utf-8');
     return res.send(renderInvoiceHtml(data));
@@ -3349,6 +2996,17 @@ async function updateTheme(req, res) {
 }
 
 async function updateCustomDomain(req, res) {
+  // v1 safety: custom-domain CONNECT is OFF until Cloudflare-for-SaaS is wired
+  // up. This disables the entire connect attack surface (squat/quota-burn/
+  // first-bind) in v1; it lights up automatically once the CF-for-SaaS env is
+  // set in v1.1. Subdomains use provisionSubdomain (NOT this handler), and the
+  // disconnect/status read+cleanup paths stay live.
+  if (!isCloudflareCustomHostnameConfigured()) {
+    return res.status(503).json({
+      error: 'CUSTOM_DOMAIN_NOT_AVAILABLE',
+      message: 'Custom domains are not enabled yet.',
+    });
+  }
   if (!req.user.businessId) {
     return res.status(400).json({ message: 'You must set up your business first' });
   }
@@ -3356,9 +3014,9 @@ async function updateCustomDomain(req, res) {
   if (!domain) {
     return res.status(400).json({ message: 'Enter a valid domain, for example shop.example.com' });
   }
-  const platformDomain = String(process.env.PLATFORM_DOMAIN || 'sitepresso.com').toLowerCase();
+  const platformDomain = String(process.env.PLATFORM_DOMAIN || 'drifthr.com').toLowerCase();
   if (domain === platformDomain || domain.endsWith(`.${platformDomain}`)) {
-    return res.status(400).json({ message: 'Use the website URL field for Sitepresso subdomains. Custom domain must be your own domain.' });
+    return res.status(400).json({ message: 'Use the website URL field for DriftHR subdomains. Custom domain must be your own domain.' });
   }
   const forceTransfer = req.body?.forceTransfer === true || req.body?.confirmDomainTransfer === true;
   const claimDomains = customDomainClaimDomains(domain);
@@ -3421,13 +3079,6 @@ async function updateCustomDomain(req, res) {
     });
   }
   if (existing && forceTransfer) {
-    if (provisioning.provider === 'vercel' && provisioning.domainStatus.status === 'ACTIVE' && existing.customHostnameId) {
-      try {
-        await deleteCloudflareCustomHostname(existing.customHostnameId, { domain: existing.customDomain });
-      } catch (err) {
-        console.error('[custom-domain/vercel] Previous owner Cloudflare custom hostname cleanup failed:', err?.message || err);
-      }
-    }
     await prisma.subscription.updateMany({
       where: {
         customDomain: { in: claimDomains },
@@ -3438,7 +3089,7 @@ async function updateCustomDomain(req, res) {
         customHostnameId: null,
         customDomainVerified: false,
         customDomainStatus: 'NONE',
-        customDomainStatusMessage: 'Domain was moved to another Sitepresso business.',
+        customDomainStatusMessage: 'Domain was moved to another DriftHR business.',
         customDomainCheckedAt: new Date(),
       },
     });
@@ -3448,33 +3099,42 @@ async function updateCustomDomain(req, res) {
         `Custom domain moved: ${domain}`,
         `
           <p>Hello ${customDomainEmailSafe(admin.name || 'there')},</p>
-          <p>The custom domain <strong>${customDomainEmailSafe(domain)}</strong> was moved away from your Sitepresso website after DNS ownership verification.</p>
-          <p>Your Sitepresso subdomain still works. If you did not expect this change, please contact support.</p>
+          <p>The custom domain <strong>${customDomainEmailSafe(domain)}</strong> was moved away from your DriftHR website after DNS ownership verification.</p>
+          <p>Your DriftHR subdomain still works. If you did not expect this change, please contact support.</p>
         `
       ))).catch((err) => {
         console.error('[custom-domain] previous owner notification failed:', err?.message || err);
       });
     }
   }
-  const subscription = await prisma.subscription.update({
-    where: { businessId: req.user.businessId },
-    data: {
-      customDomain: domain,
-      customHostnameId: provisioning.customHostnameId,
-      customDomainVerified: provisioning.domainStatus.verified,
-      customDomainStatus: provisioning.domainStatus.status,
-      customDomainStatusMessage: provisioning.domainStatus.message,
-      customDomainCheckedAt: new Date(),
-    },
-    select: {
-      customDomain: true,
-      customHostnameId: true,
-      customDomainVerified: true,
-      customDomainStatus: true,
-      customDomainStatusMessage: true,
-      customDomainCheckedAt: true,
-    },
-  });
+  let subscription;
+  try {
+    subscription = await prisma.subscription.update({
+      where: { businessId: req.user.businessId },
+      data: {
+        customDomain: domain,
+        customHostnameId: provisioning.customHostnameId,
+        customDomainVerified: provisioning.domainStatus.verified,
+        customDomainStatus: provisioning.domainStatus.status,
+        customDomainStatusMessage: provisioning.domainStatus.message,
+        customDomainCheckedAt: new Date(),
+      },
+      select: {
+        customDomain: true,
+        customHostnameId: true,
+        customDomainVerified: true,
+        customDomainStatus: true,
+        customDomainStatusMessage: true,
+        customDomainCheckedAt: true,
+      },
+    });
+  } catch (err) {
+    // Unique-constraint collision on customDomain — another tenant owns it.
+    if (err?.code === 'P2002') {
+      return res.status(409).json({ reason: 'taken', message: 'That domain is already connected to another DriftHR website.' });
+    }
+    throw err;
+  }
 
   // Sensitive action — audit the domain (re)connect (best-effort, tenant-scoped).
   await writeAudit({
@@ -3512,7 +3172,6 @@ async function updateCustomDomain(req, res) {
       error: provisioning.cloudflareError,
       cleanup: provisioning.cloudflareCleanup || null,
     },
-    vercel: serializeVercelDomain(provisioning.vercelState),
     instructions: provisioning.instructions,
     suggestion: provisioning.suggestion,
   });
@@ -3541,28 +3200,13 @@ async function disconnectCustomDomain(req, res) {
     });
   }
 
-  const cleanup = { cloudflare: null, vercel: [] };
+  const cleanup = { cloudflare: null };
   if (current.customHostnameId) {
     try {
       cleanup.cloudflare = await deleteCloudflareCustomHostname(current.customHostnameId, { domain: current.customDomain });
     } catch (err) {
       cleanup.cloudflare = { deleted: false, error: err?.message || 'unknown error' };
       console.error('[custom-domain] Cloudflare custom hostname cleanup failed:', cleanup.cloudflare.error);
-    }
-  }
-
-  if (customDomainProvider() === 'vercel' && isVercelCustomDomainConfigured(current.business)) {
-    const project = vercelProjectForBusiness(current.business);
-    for (const nextDomain of vercelDomainPair(current.customDomain)) {
-      try {
-        await deleteVercelProjectDomain({ domain: nextDomain, project });
-        cleanup.vercel.push({ domain: nextDomain, deleted: true });
-      } catch (err) {
-        cleanup.vercel.push({ domain: nextDomain, deleted: false, error: err?.message || 'unknown error' });
-        if (err?.status !== 404) {
-          console.error('[custom-domain/vercel] Project domain cleanup failed:', err?.message || err);
-        }
-      }
     }
   }
 
@@ -3592,7 +3236,7 @@ async function disconnectCustomDomain(req, res) {
     domain: null,
     verified: false,
     status: 'NONE',
-    message: 'Custom domain disconnected. Your Sitepresso subdomain remains active.',
+    message: 'Custom domain disconnected. Your DriftHR subdomain remains active.',
     provider: customDomainProvider(),
     instructions: null,
     cleanup,
@@ -3966,6 +3610,21 @@ async function getCustomDomainStatus(req, res) {
       instructions: null,
     });
   }
+  // Platform subdomains ({slug}.drifthr.com) are provisioned ACTIVE by
+  // subdomainProvision and are NOT tenant-owned custom domains. Never run them
+  // through the custom-domain TXT recheck (which would downgrade + de-route
+  // them) — return the stored status as-is.
+  const pd = String(process.env.PLATFORM_DOMAIN || 'drifthr.com').toLowerCase();
+  if (current.customDomain === pd || current.customDomain.endsWith(`.${pd}`)) {
+    return res.json({
+      domain: current.customDomain,
+      verified: current.customDomainVerified !== false,
+      status: current.customDomainStatus || 'ACTIVE',
+      message: current.customDomainStatusMessage || 'Active.',
+      provider: customDomainProvider(),
+      instructions: null,
+    });
+  }
   const provisioning = await provisionCustomDomain({
     domain: current.customDomain,
     business: current.business,
@@ -4015,7 +3674,6 @@ async function getCustomDomainStatus(req, res) {
       error: provisioning.cloudflareError,
       cleanup: provisioning.cloudflareCleanup || null,
     },
-    vercel: serializeVercelDomain(provisioning.vercelState),
     instructions: provisioning.instructions || provisioning.suggestion?.instructions || null,
     suggestion: provisioning.suggestion,
   });
@@ -4151,6 +3809,7 @@ module.exports = {
   customDomainOwnershipVerified,
   ensureCloudflareCustomHostname,
   deleteCloudflareCustomHostname,
+  isCloudflareCustomHostnameConfigured,
   customDomainStatusFrom,
   FOREVER,
   VALID_THEMES,

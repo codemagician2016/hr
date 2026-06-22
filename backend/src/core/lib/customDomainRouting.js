@@ -1,4 +1,8 @@
-const ROUTABLE_CUSTOM_DOMAIN_STATUSES = ['ACTIVE', 'PENDING_DNS', 'PENDING_SSL', 'FAILED'];
+// Only ACTIVE (verified) rows resolve to a tenant. Subdomains are bound
+// ACTIVE+verified so they still route; an unverified custom domain sitting in
+// PENDING_* (or FAILED) no longer resolves — closes the squat-routes-immediately
+// hole where merely saving a domain would route it before ownership/cert proof.
+const ROUTABLE_CUSTOM_DOMAIN_STATUSES = ['ACTIVE'];
 const COMMON_SECOND_LEVEL_PUBLIC_SUFFIXES = new Set([
   'co.uk', 'org.uk', 'ac.uk', 'gov.uk',
   'co.in', 'firm.in', 'net.in', 'org.in', 'gen.in',

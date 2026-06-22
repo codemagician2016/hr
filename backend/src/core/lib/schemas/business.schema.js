@@ -150,4 +150,11 @@ const updateBusinessSettingsSchema = z.object({
     .optional(),
 });
 
-module.exports = { setupBusinessSchema, updateBusinessSettingsSchema };
+// Feature 3 — dedicated self-service slug (subdomain) change. Just the raw
+// slug string; the controller slugifies, reserves, checks uniqueness, and
+// enforces the 30-day cooldown.
+const changeSlugSchema = z.object({
+  slug: z.string().trim().min(1, 'slug is required').max(80),
+});
+
+module.exports = { setupBusinessSchema, updateBusinessSettingsSchema, changeSlugSchema };
