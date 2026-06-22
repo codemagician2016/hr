@@ -67,7 +67,9 @@ const CALC_MAP = Object.freeze({
   FLAT: CALC.FIXED,
   PERCENT_OF: CALC.PERCENT_OF_BASE,
   FORMULA: CALC.ATTENDANCE_DRIVEN, // overtime / hours-driven earnings
-  BALANCING: CALC.BALANCE_RECOVERY,
+  // DB BALANCING (a special-allowance EARNING that fills to a target gross) maps
+  // to the engine's BALANCING earning — NOT the deduction-side BALANCE_RECOVERY.
+  BALANCING: CALC.BALANCING,
   // SLAB / STATUTORY -> handled by the compliance module, skipped here.
 });
 
@@ -113,8 +115,12 @@ function isoDate(value) {
  * Map one resolved comp line (SalaryComponentLine joined to its SalaryComponent)
  * to an engine component def. Returns null for STATUTORY/SLAB lines (the
  * compliance module owns those) so they are excluded from the engine's set.
+ *
+ * `targetGrossMinor` is the period gross/CTC target the structure must reconcile
+ * to; it is threaded onto BALANCING (special-allowance) earnings so the engine
+ * can compute the residual. Falls back to the seeded line amount if absent.
  */
-function mapComponentLine(line, order) {
+function mapComponentLine(line, order, targetGrossMinor = null) {
   const comp = line.component || {};
   const calcMethod = line.calcMethod || comp.calcMethod;
   // Statutory + slab components are computed by the compliance module, not the
@@ -157,6 +163,13 @@ function mapComponentLine(line, order) {
   // Wire calc-method-specific fields.
   if (engineCalc === CALC.FIXED || engineCalc === CALC.BALANCE_RECOVERY) {
     def.amountMinor = decimalToMinor(line.amountMonthly != null ? line.amountMonthly : line.calcValue);
+  } else if (engineCalc === CALC.BALANCING) {
+    // BALANCING earning fills the gap to the structure's period gross/CTC target.
+    // Prefer the explicit target; fall back to the seeded line amount so a
+    // structure without a target still yields a sensible (flat) value.
+    const seeded = decimalToMinor(line.amountMonthly != null ? line.amountMonthly : line.calcValue);
+    def.targetGrossMinor =
+      targetGrossMinor != null && targetGrossMinor > 0 ? targetGrossMinor : seeded;
   } else if (engineCalc === CALC.PERCENT_OF_BASE) {
     def.percent = toNum(line.calcValue);
     def.baseCode = comp.calcBaseCode || 'GROSS';
@@ -167,6 +180,31 @@ function mapComponentLine(line, order) {
   }
 
   return def;
+}
+
+/**
+ * Resolve the per-period GROSS target a BALANCING earning fills to, in integer
+ * minor units. Source precedence:
+ *   1. compensation.grossMonthly — the structure's resolved monthly gross
+ *      (this is the gross the package must reconcile to; for IN it already
+ *      equals Σ Basic+HRA+Special at full attendance).
+ *   2. compensation.ctcAnnual / 12 — weak fallback when grossMonthly is unset.
+ *      (CTC includes employer cost, so this only approximates a gross target;
+ *      the balancing line clamps at 0 if it would go negative.)
+ * Returns 0 when neither is available (engine then uses the seeded flat amount).
+ * PURE: no DB, no I/O.
+ */
+function resolveBalancingTarget(compensation, _period) {
+  if (!compensation) return 0;
+  if (compensation.grossMonthly != null && compensation.grossMonthly !== '') {
+    return decimalToMinor(compensation.grossMonthly);
+  }
+  if (compensation.ctcAnnual != null && compensation.ctcAnnual !== '') {
+    const annualMinor = decimalToMinor(compensation.ctcAnnual);
+    // Monthly share of the annual figure (exact integer paise via roundRational).
+    return money.roundRational(annualMinor, 12, money.RoundingMode.HALF_UP);
+  }
+  return 0;
 }
 
 /**
@@ -199,11 +237,18 @@ function buildEmployeePayInput(rows) {
   } = rows || {};
 
   // ── Components (engine-evaluated only) ──
+  // The per-period gross target a BALANCING (special-allowance) earning must
+  // reconcile to: the structure's monthly gross, else a CTC-derived monthly
+  // figure (annual CTC / 12 — best-effort; the package is then balanced down to
+  // it). All in integer minor units. 0/null means "no target" (engine falls back
+  // to the seeded flat amount for the balancing line).
+  const targetGrossMinor = resolveBalancingTarget(compensation, period);
+
   const compLines = Array.isArray(compensation.lines) ? compensation.lines : [];
   const componentsForEngine = [];
   let order = 0;
   for (const line of compLines) {
-    const def = mapComponentLine(line, order);
+    const def = mapComponentLine(line, order, targetGrossMinor);
     if (def) {
       componentsForEngine.push(def);
       order += 1;
@@ -1068,5 +1113,5 @@ module.exports = {
   getMyPayslip,
   generateFile,
   // internals exposed for tests
-  _internal: { taxYearFor, buildFilingAggregate, statutoryRollups, buildPayslipSnapshot, resolveCurrentCompensation },
+  _internal: { taxYearFor, buildFilingAggregate, statutoryRollups, buildPayslipSnapshot, resolveCurrentCompensation, resolveBalancingTarget },
 };

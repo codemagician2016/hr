@@ -56,7 +56,11 @@ const CALC = Object.freeze({
   FIXED: 'FIXED',
   PERCENT_OF_BASE: 'PERCENT_OF_BASE',
   ATTENDANCE_DRIVEN: 'ATTENDANCE_DRIVEN', // e.g. OT = otHours * ratePerHourMinor
-  BALANCE_RECOVERY: 'BALANCE_RECOVERY',
+  // BALANCING earning: a special-allowance that fills the gap so total earnings
+  // reconcile to a target gross/CTC (standard in Indian salary structures).
+  // amount = prorated(targetGrossMinor) − Σ(other resolved earnings), floored at 0.
+  BALANCING: 'BALANCING',
+  BALANCE_RECOVERY: 'BALANCE_RECOVERY', // a DEDUCTION recovery method (evalSimple)
 });
 
 /**
@@ -163,7 +167,7 @@ function computePayslip(args) {
 
   // First pass: FIXED + ATTENDANCE_DRIVEN (no dependency on other components).
   for (const def of earningDefs) {
-    if (def.calcMethod === CALC.PERCENT_OF_BASE) continue;
+    if (def.calcMethod === CALC.PERCENT_OF_BASE || def.calcMethod === CALC.BALANCING) continue;
     const r = evalEarning(def, { proration, inputs, earningByCode }, trace);
     earningByCode.set(def.code, r.amountMinor);
     earnings.push(r);
@@ -172,6 +176,13 @@ function computePayslip(args) {
   for (const def of earningDefs) {
     if (def.calcMethod !== CALC.PERCENT_OF_BASE) continue;
     const r = evalEarning(def, { proration, inputs, earningByCode }, trace);
+    earningByCode.set(def.code, r.amountMinor);
+    earnings.push(r);
+  }
+  // Third pass: BALANCING (the residual to a target; depends on ALL prior earnings).
+  for (const def of earningDefs) {
+    if (def.calcMethod !== CALC.BALANCING) continue;
+    const r = evalBalancing(def, { proration, earningByCode }, trace);
     earningByCode.set(def.code, r.amountMinor);
     earnings.push(r);
   }
@@ -517,6 +528,57 @@ function evalEarning(def, ctx, trace) {
   return finishComponent(def, full, baseMinor, false, proration, trace);
 }
 
+/**
+ * Evaluate a BALANCING earning: a special allowance that fills the gap so that
+ * total earnings reconcile to a target gross (the salary structure's monthly
+ * gross / CTC-derived target). The target is prorated with the SAME policy as
+ * the other earnings so LOP reduces the whole package consistently, then the
+ * already-resolved earnings (also prorated) are subtracted. Floored at 0.
+ */
+function evalBalancing(def, ctx, trace) {
+  const { proration, earningByCode } = ctx;
+  money.assertMinor(def.targetGrossMinor, `${def.code}.targetGrossMinor`);
+
+  // Prorate the target the same way a FIXED earning of that amount would be.
+  const proratedTarget = applyProration(def.targetGrossMinor, def, proration, trace).prorated;
+
+  // Sum of all earnings resolved BEFORE this balancing line (already prorated).
+  const otherEarningsMinor = money.sumMinor(Array.from(earningByCode.values()));
+
+  let amountMinor = money.subMinor(proratedTarget, otherEarningsMinor);
+  if (amountMinor < 0) amountMinor = 0; // never a negative earning
+
+  // Honour an explicit floor/cap if the component declares one.
+  if (def.floorMinor != null || def.capMinor != null) {
+    amountMinor = money.clampMinor(amountMinor, {
+      floorMinor: def.floorMinor ?? null,
+      capMinor: def.capMinor ?? null,
+    });
+  }
+
+  trace({
+    op: 'BALANCING',
+    componentCode: def.code,
+    inputs: [
+      { ref: def.code + ':target', amountMinor: proratedTarget },
+      { ref: 'OTHER_EARNINGS', amountMinor: otherEarningsMinor },
+    ],
+    params: { targetGrossMinor: def.targetGrossMinor, proratedTarget },
+    outputMinor: amountMinor,
+    note: `${def.code} = balancing residual ${money.fromMinor(proratedTarget)} − ${money.fromMinor(otherEarningsMinor)} (floored at 0)`,
+  });
+
+  return {
+    code: def.code,
+    label: def.name || def.code,
+    amountMinor,
+    baseMinor: proratedTarget,
+    showOnPayslip: def.showOnPayslip !== false,
+    explain: def.explain || null,
+    _order: def._order ?? Number.MAX_SAFE_INTEGER,
+  };
+}
+
 /** Apply proration then floor/cap then attach trace metadata. */
 function finishComponent(def, full, baseMinor, skipProration, proration, trace) {
   let amountMinor = full;
@@ -658,5 +720,5 @@ module.exports = {
   LOP_BEHAVIOR,
   CALC,
   // exported for tests
-  _internal: { applyProration, resolveProration, sumFlagged, daysBetweenInclusive },
+  _internal: { applyProration, resolveProration, sumFlagged, daysBetweenInclusive, evalBalancing },
 };
