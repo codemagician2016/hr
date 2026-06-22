@@ -69,8 +69,9 @@ async function deleteRole(req, res) {
 }
 
 // POST /seed-system-roles — idempotent seeding for a tenant. Called once
-// when admin first opens the RBAC tab; tenants on Business tier auto-get
-// Owner / Manager / FrontDesk presets.
+// when admin first opens the RBAC tab; tenants auto-get the HR system-role
+// presets (Owner / HR-Admin / Finance / Manager). Same upsert as
+// ensureDefaultHrRole, exposed as an explicit admin action.
 async function seedSystemRoles(req, res) {
   const businessId = await bizId(req);
   if (!businessId) return res.status(403).json({ message: 'No business in scope' });

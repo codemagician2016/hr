@@ -10,10 +10,8 @@ const {
   setCustomerTokenCookie,
   resolveOperatorCookieHost,
 } = require('../utils/generateToken');
-const { effectivePermissions } = require('../lib/rbac');
+const { effectivePermissions, SYSTEM_ROLES } = require('../lib/rbac');
 const { ROLES } = require('../lib/roles');
-const { ensureDefaultEcomStaffRole } = require('../lib/ecomStaffPortal');
-const { ensureAppointmentSystemRole, ensureDefaultAppointmentStaffRole } = require('../lib/appointmentStaffPortal');
 const { resolveVertical } = require('../lib/vertical');
 
 const USER_SELECT = {
@@ -122,6 +120,38 @@ async function resolveTenantBusinessId(req) {
   return null;
 }
 
+// Seed the HR system roles (Owner / HR-Admin / Finance / Manager) for a
+// business on first operator login. Modelled on the removed booking/shop
+// vertical role auto-provisioners: it upserts one BusinessRole row per
+// SYSTEM_ROLES preset, keeping the permissions JSON in sync with the catalog
+// so a permission added to rbac.js propagates to existing tenants on their
+// next operator login.
+//
+// Idempotent — safe to call on every login. Returns the upserted system
+// roles; null businessId is a no-op.
+async function ensureDefaultHrRole({ businessId }) {
+  if (!businessId) return null;
+  const roles = [];
+  for (const [roleName, preset] of Object.entries(SYSTEM_ROLES)) {
+    const role = await prisma.businessRole.upsert({
+      where: { businessId_name: { businessId, name: roleName } },
+      update: {
+        isSystem: true,
+        permissions: preset,
+      },
+      create: {
+        businessId,
+        name: roleName,
+        isSystem: true,
+        permissions: preset,
+      },
+      select: { id: true, name: true, permissions: true, isSystem: true },
+    });
+    roles.push(role);
+  }
+  return roles;
+}
+
 async function authenticateOperator(req, res) {
   let decoded = null;
   const accessToken = readOperatorToken(req);
@@ -153,52 +183,30 @@ async function authenticateOperator(req, res) {
   if (tokenPredatesPasswordChange(decoded, user.passwordChangedAt)) {
     throw tokenError('Please sign in again — your password was changed.');
   }
-  if (user.role === ROLES.STAFF && user.businessId && user.businessRole?.isSystem && user.businessRole?.name) {
-    const refreshedAppointmentRole = await ensureAppointmentSystemRole({
-      prisma,
-      businessId: user.businessId,
-      roleName: user.businessRole.name,
-    });
-    if (refreshedAppointmentRole) {
-      user.businessRole = {
-        id: refreshedAppointmentRole.id,
-        name: refreshedAppointmentRole.name,
-        permissions: refreshedAppointmentRole.permissions || {},
-        isSystem: refreshedAppointmentRole.isSystem,
-      };
-    }
-  }
-  if (user.role === ROLES.STAFF && user.businessId && !user.businessRoleId) {
-    const appointmentRole = await ensureDefaultAppointmentStaffRole({
-      prisma,
-      businessId: user.businessId,
-      userId: user.id,
-    });
-    if (appointmentRole) {
-      user.businessRoleId = appointmentRole.id;
-      user.businessRole = {
-        id: appointmentRole.id,
-        name: appointmentRole.name,
-        permissions: appointmentRole.permissions || {},
-        isSystem: appointmentRole.isSystem,
-      };
-      user.isServiceProvider = true;
-      return user;
-    }
-
-    const ecomRole = await ensureDefaultEcomStaffRole({
-      prisma,
-      businessId: user.businessId,
-      userId: user.id,
-    });
-    if (ecomRole) {
-      user.businessRoleId = ecomRole.id;
-      user.businessRole = {
-        id: ecomRole.id,
-        name: ecomRole.name,
-        permissions: {},
-        isSystem: ecomRole.isSystem,
-      };
+  // Seed the HR system roles for this tenant on first operator login.
+  // Idempotent; keeps existing tenants' system-role permissions in sync
+  // with the rbac.js catalog. Role *assignment* to a user is an explicit
+  // admin action — we no longer auto-assign a vertical role here.
+  if (user.businessId) {
+    try {
+      const systemRoles = await ensureDefaultHrRole({ businessId: user.businessId });
+      // If this operator already carries a system role, refresh its
+      // permissions from the freshly-seeded catalog so an updated preset
+      // takes effect without a re-login round-trip.
+      if (systemRoles && user.businessRole?.isSystem && user.businessRole?.name) {
+        const refreshed = systemRoles.find((r) => r.name === user.businessRole.name);
+        if (refreshed) {
+          user.businessRole = {
+            id: refreshed.id,
+            name: refreshed.name,
+            permissions: refreshed.permissions || {},
+            isSystem: refreshed.isSystem,
+          };
+        }
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[authenticateOperator] ensureDefaultHrRole failed', err?.message || err);
     }
   }
   return user;
@@ -460,4 +468,5 @@ module.exports = {
   authenticateOperator,
   authenticateCustomer,
   resolveTenantBusinessId,
+  ensureDefaultHrRole,
 };

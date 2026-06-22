@@ -10,15 +10,15 @@ const { EMAIL_EVENTS } = require('../lib/emailEvents');
 const { validateSignupEmail, validatePhone } = require('../lib/inputValidation');
 const { slugify: rawSlugify } = require('../lib/slugify');
 const { assertNumericLimit, billableStaffSeatCount, numericEntitlement } = require('../lib/entitlements');
-const {
-  ensureDefaultEcomStaffRole,
-  staffPortalUrlForBusiness,
-} = require('../lib/ecomStaffPortal');
-const {
-  ensureAppointmentSystemRoles,
-  ensureDefaultAppointmentStaffRole,
-  roleImpliesServiceProvider,
-} = require('../lib/appointmentStaffPortal');
+const { ensureDefaultHrRole } = require('../middleware/auth.middleware');
+
+// HR operator console login URL for a tenant. Replaces the deleted vertical
+// staffPortalUrlForBusiness helper.
+function staffPortalUrlForBusiness(business, platformBaseUrl) {
+  const base = String(platformBaseUrl || '').replace(/\/$/, '');
+  const slug = business?.slug;
+  return slug ? `${base}/${slug}/staff` : `${base}/business`;
+}
 const { getDefaultCurrency } = require('../lib/currency');
 const razorpayRoute = require('../lib/razorpayRoute');
 const stripeConnect = require('../lib/stripeConnect');
@@ -316,13 +316,13 @@ async function setup(req, res) {
     }
   }
 
-  if (createdVertical === 'APPOINTMENT') {
-    try {
-      await ensureAppointmentSystemRoles({ prisma, businessId: business.id });
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error('[setupBusiness] appointment roles seed failed:', err?.message || err);
-    }
+  // Seed the HR system roles (Owner / HR-Admin / Finance / Manager) for the
+  // new tenant. Idempotent; also re-runs on first operator login.
+  try {
+    await ensureDefaultHrRole({ businessId: business.id });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[setupBusiness] HR roles seed failed:', err?.message || err);
   }
 
   await prisma.user.update({
@@ -617,25 +617,25 @@ async function inviteStaff(req, res) {
     });
   }
 
+  // Ensure the tenant's HR system roles exist, then assign the requested
+  // role if one was supplied. Role assignment is explicit — no vertical
+  // auto-provisioning. Without a businessRoleId the user falls back to the
+  // legacy STAFF enum permission set (see rbac.js LEGACY_ROLE_PERMS).
   try {
-    const appointmentRole = await ensureDefaultAppointmentStaffRole({
-      prisma,
-      businessId,
-      userId: staffUser.id,
-      roleId: businessRoleId || null,
-    });
-    if (appointmentRole) {
-      staffUser = { ...staffUser, businessRoleId: appointmentRole.id, businessRole: appointmentRole };
-    }
-
-    const ecomRole = await ensureDefaultEcomStaffRole({
-      prisma,
-      businessId,
-      userId: staffUser.id,
-      roleId: businessRoleId || null,
-    });
-    if (ecomRole) {
-      staffUser = { ...staffUser, businessRoleId: ecomRole.id, businessRole: ecomRole };
+    await ensureDefaultHrRole({ businessId });
+    if (businessRoleId) {
+      const role = await prisma.businessRole.findFirst({
+        where: { id: businessRoleId, businessId },
+        select: { id: true, name: true, permissions: true, isSystem: true },
+      });
+      if (!role) {
+        return res.status(400).json({ message: 'Role not found in this business' });
+      }
+      await prisma.user.update({
+        where: { id: staffUser.id },
+        data: { businessRoleId: role.id },
+      });
+      staffUser = { ...staffUser, businessRoleId: role.id, businessRole: role };
     }
   } catch (roleErr) {
     if (roleErr.statusCode) return res.status(roleErr.statusCode).json({ message: roleErr.message });
@@ -713,23 +713,9 @@ async function quickAddStaff(req, res) {
     },
     select: { id: true, email: true, name: true, role: true, avatarUrl: true, subtitle: true, bio: true, isActive: true, isServiceProvider: true, createdAt: true },
   });
-  const appointmentRole = await ensureDefaultAppointmentStaffRole({
-    prisma,
-    businessId,
-    userId: staff.id,
-  });
-  if (appointmentRole) {
-    staff = {
-      ...staff,
-      businessRoleId: appointmentRole.id,
-      businessRole: {
-        id: appointmentRole.id,
-        name: appointmentRole.name,
-        isSystem: appointmentRole.isSystem,
-      },
-      isServiceProvider: roleImpliesServiceProvider(appointmentRole),
-    };
-  }
+  // Display-only team card — no vertical role auto-assignment. The admin
+  // promotes it to a permissioned operator later from the Team tab by
+  // assigning an HR BusinessRole (Owner/HR-Admin/Finance/Manager).
   res.status(201).json({ staff });
 }
 
@@ -861,8 +847,8 @@ async function updateStaff(req, res) {
     data.isServiceProvider = !!req.body.isServiceProvider;
   }
 
-  // Assign / clear a custom BusinessRole. Drives ECOM Path B permission
-  // checks (requireEcomPermission). null = use legacy enum fallback.
+  // Assign / clear a custom BusinessRole. Drives JSON-permission checks
+  // (requirePermission via effectivePermissions). null = legacy enum fallback.
   if (req.body.businessRoleId !== undefined) {
     const v = req.body.businessRoleId;
     if (v === null || v === '') {
@@ -876,9 +862,6 @@ async function updateStaff(req, res) {
         return res.status(400).json({ message: 'Role not found in this business' });
       }
       data.businessRoleId = v;
-      if (req.body.isServiceProvider === undefined) {
-        data.isServiceProvider = roleImpliesServiceProvider(role);
-      }
     }
   }
 
@@ -1208,7 +1191,7 @@ async function getCustomerHistory(req, res) {
 
   // Staff authorization: must have served this customer at least once.
   if (req.user.role === ROLES.STAFF) {
-    const canViewAcrossDesk = userCan(req.user, 'canManageCustomers') || userCan(req.user, 'canViewAllAppointments');
+    const canViewAcrossDesk = userCan(req.user, 'canViewEmployees');
     if (!canViewAcrossDesk) {
       const anyShared = await prisma.appointment.findFirst({
         where: { customerId: customer.id, staffId: req.user.id },

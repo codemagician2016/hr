@@ -9,77 +9,60 @@ const { ROLES } = require('./roles');
 // schema migration — the BusinessRole.permissions JSON just acquires
 // new keys.
 const PERMISSIONS = Object.freeze({
-  // Customer management
-  canManageCustomers:     'View, edit, delete customers',
-  canExportCustomers:     'Download CSV of customer list',
-  // Appointments
-  canReceiveAppointments: 'Receive bookings as an assignable provider',
-  canViewOwnAppointments: 'See appointments assigned to self',
-  canViewAllAppointments: 'See appointments across all staff (not just own)',
-  canManageOwnAppointments: 'Confirm, reschedule, complete, and note own appointments',
-  canManageAllAppointments: 'Confirm, reschedule, complete, and note appointments across staff',
-  canManageWalkIns:       'Create walk-in appointments for the front desk',
-  canRecordPayments:      'Record and update appointment payments',
-  canWriteClinicalDocuments: 'Write prescriptions and appointment documents',
-  canCancelAppointments:  'Cancel any appointment',
-  canRefundAppointments:  'Process refunds on bookings',
-  // Services / pricing
-  canEditServices:        'Add/edit/delete services + prices',
-  canEditCoupons:         'Manage coupon codes',
-  // Staff management
-  canManageStaff:         'Add/edit staff + permissions',
-  canEditOwnSchedule:     'Update own weekly availability',
-  canEditSchedules:       'Modify staff working hours',
-  // Reports
-  canViewReports:         'See revenue and analytics',
-  canExportReports:       'Download reports as CSV/PDF',
-  // E-commerce
-  canManageProducts:      'Add/edit/delete products',
-  canManageOrders:        'Update order status, mark paid',
-  canRefundOrders:        'Process e-commerce refunds',
-  // Marketing
-  canManageMarketing:     'Edit + toggle marketing automation campaigns',
-  canSendBulkSms:         'Send bulk SMS / WhatsApp blasts',
+  // People
+  canViewEmployees:     'View employee directory + profiles',
+  canManageEmployees:   'Create/edit/terminate employees',
+  canViewCompensation:  'View salary/CTC of others',
+  canManageCompensation:'Edit pay structures + revisions',
+  // Time & leave
+  canApproveLeave:      'Approve/decline leave requests',
+  canManageAttendance:  'Edit attendance + regularisations',
+  // Payroll
+  canRunPayroll:        'Initiate + lock a pay run',
+  canApprovePayroll:    'Approve a locked run for disbursement',
+  canViewPayrollReports:'View payroll registers + cost reports',
+  // Statutory / filing
+  canManageStatutory:   'Edit PF/ESI/PT/KiwiSaver/PAYE config',
+  canFileReturns:       'Generate + mark statutory filings (24Q, payday-filing)',
   // Settings
-  canEditBusinessProfile: 'Update business name, address, hours',
-  canEditBilling:         'Manage subscription + payment method',
-  canEditDomain:          'Connect / change custom domain',
-  canEditWebsite:         'Edit storefront content + theme',
+  canManageOrg:         'Edit org structure, departments, locations',
+  canEditBilling:       'Manage subscription + payment method',
+  canEditDomain:        'Connect/change white-label domain',
+  canEditBranding:      'Logo, brand color, style, domain binding',
 });
 
 const PERMISSION_KEYS = Object.freeze(Object.keys(PERMISSIONS));
 
-// System role presets — seeded into BusinessRole on Business creation.
-// Tenants can customize or add new roles.
+// System role presets — seeded into BusinessRole on Business creation
+// (and on first operator login, see ensureDefaultHrRole). Tenants can
+// customize or add new roles.
 const SYSTEM_ROLES = Object.freeze({
-  Owner: Object.fromEntries(PERMISSION_KEYS.map((k) => [k, true])), // all
+  // Owner — all true.
+  Owner: Object.fromEntries(PERMISSION_KEYS.map((k) => [k, true])),
+  // HR-Admin — everything except billing, domain, and payroll approval.
+  'HR-Admin': {
+    canViewEmployees: true, canManageEmployees: true,
+    canViewCompensation: true, canManageCompensation: true,
+    canApproveLeave: true, canManageAttendance: true,
+    canRunPayroll: true, canViewPayrollReports: true,
+    canManageStatutory: true, canFileReturns: true,
+    canManageOrg: true, canEditBranding: true,
+    // No canEditBilling / canEditDomain / canApprovePayroll — Owner/Finance only
+  },
+  // Finance — payroll + compensation + statutory + billing.
+  Finance: {
+    canRunPayroll: true, canApprovePayroll: true, canViewPayrollReports: true,
+    canViewCompensation: true,
+    canManageStatutory: true, canFileReturns: true,
+    canEditBilling: true,
+  },
+  // Manager — view directory + approve leave + manage attendance
+  // (scoped to direct reports — see §6.3 for the location/team-scoped
+  // grant pattern lifted from EcomRolePermissionGrant).
   Manager: {
-    canManageCustomers: true, canExportCustomers: true,
-    canViewAllAppointments: true, canCancelAppointments: true, canRefundAppointments: true,
-    canManageAllAppointments: true,
-    canManageWalkIns: true, canRecordPayments: true,
-    canEditServices: true, canEditCoupons: true,
-    canManageStaff: true, canEditSchedules: true,
-    canViewReports: true, canExportReports: true,
-    canManageProducts: true, canManageOrders: true, canRefundOrders: true,
-    canManageMarketing: true,
-    canEditBusinessProfile: true, canEditWebsite: true,
-    // No billing or domain — owner only
-  },
-  Doctor: {
-    canReceiveAppointments: true,
-    canViewOwnAppointments: true,
-    canManageOwnAppointments: true,
-    canWriteClinicalDocuments: true,
-    canEditOwnSchedule: true,
-  },
-  FrontDesk: {
-    canManageCustomers: true,
-    canViewAllAppointments: true, canCancelAppointments: true,
-    canManageAllAppointments: true,
-    canManageWalkIns: true,
-    canRecordPayments: true,
-    // Read-only on services/pricing/reports/staff/marketing/clinical docs
+    canViewEmployees: true,
+    canApproveLeave: true,
+    canManageAttendance: true,
   },
 });
 
@@ -100,14 +83,15 @@ function hasPermission(perms, key) {
 
 // Default permission set for the legacy `User.role` enum, used when a user
 // has no `businessRoleId` assigned. SUPER_ADMIN + BUSINESS_ADMIN get the
-// full Owner preset; STAFF inherits the Doctor/provider preset so legacy
-// booking staff keep the old "own appointments only" behaviour; USER is a
-// customer-facing fallback with nothing.
+// full Owner preset; STAFF inherits the Manager preset so legacy operator
+// staff keep a sensible "view + approve own team" baseline; USER is an
+// ESS/customer-facing fallback with nothing (employee permissions are
+// implicit on the customer session, not a BusinessRole).
 const ALL_TRUE = Object.fromEntries(PERMISSION_KEYS.map((k) => [k, true]));
 const LEGACY_ROLE_PERMS = Object.freeze({
   [ROLES.SUPER_ADMIN]: ALL_TRUE,
   [ROLES.BUSINESS_ADMIN]: ALL_TRUE,
-  [ROLES.STAFF]: SYSTEM_ROLES.Doctor,
+  [ROLES.STAFF]: SYSTEM_ROLES.Manager,
   [ROLES.USER]: {},
 });
 

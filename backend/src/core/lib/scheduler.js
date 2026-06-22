@@ -6,7 +6,15 @@ const { ROLES } = require('./roles');
 const { sendBookingReminderEmail, sendStaffInviteReminderEmail, sendTrialExpiringEmail, sendAppointmentAutoCancelledEmail, sendAppointmentReviewRequestEmail, sendOrderReviewRequestEmail } = require('../utils/email');
 const { EMAIL_EVENTS } = require('./emailEvents');
 const { resolveRecipientLocale } = require('./locale');
-const { staffPortalUrlForBusiness } = require('./ecomStaffPortal');
+
+// HR operator console login URL for a tenant. Replaces the deleted vertical
+// staffPortalUrlForBusiness helper (booking/shop staff portals). All operator
+// users (HR/Finance/Manager) sign in at the platform path-based portal.
+function staffPortalUrlForBusiness(business, platformBaseUrl) {
+  const base = String(platformBaseUrl || '').replace(/\/$/, '');
+  const slug = business?.slug;
+  return slug ? `${base}/${slug}/staff` : `${base}/business`;
+}
 const {
   customDomainProvider,
   deleteCloudflareCustomHostname,
