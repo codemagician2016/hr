@@ -16,4 +16,10 @@ router.use('/assets', require('./assets.routes'));
 router.use('/expenses', require('./expenses.routes'));
 router.use('/loans', require('./loans.routes'));
 
+// Payroll orchestration — operator API (RBAC: canRunPayroll / canApprovePayroll
+// / canViewPayrollReports) and the ESS payslip API (customer session). The
+// /me/payslips router uses the customer-auth middleware internally.
+router.use('/payroll', require('../payroll/payroll.routes'));
+router.use('/me/payslips', require('../payroll/mePayslips.routes'));
+
 module.exports = router;
