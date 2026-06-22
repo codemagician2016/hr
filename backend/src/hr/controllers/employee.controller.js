@@ -5,6 +5,7 @@
 // effective-dated history lives in EmploymentRecord (added by the service layer).
 const prisma = require('../../core/lib/prisma');
 const { writeAudit } = require('../../core/lib/audit');
+const { scopeWhere } = require('../lib/scopeResolver');
 
 const LIST_SELECT = {
   id: true, code: true, firstName: true, lastName: true, preferredName: true,
@@ -35,7 +36,8 @@ async function list(req, res, next) {
     const take = Math.min(Math.max(parseInt(pageSize, 10) || 25, 1), 100);
     const skip = (Math.max(parseInt(page, 10) || 1, 1) - 1) * take;
 
-    const where = { businessId, deletedAt: null };
+    // Feature 1: AND the hierarchical scope (Manager → their reporting sub-tree only).
+    const where = { businessId, deletedAt: null, ...scopeWhere(req.scope) };
     // Normalise the status filter to the EmployeeStatus enum (UI sends e.g. ?status=active).
     if (status) {
       const s = String(status).toUpperCase().replace(/[-\s]+/g, '_');

@@ -66,6 +66,33 @@ const SYSTEM_ROLES = Object.freeze({
   },
 });
 
+// ── Feature 1: hierarchical data-scope bands ──
+// Default scope per system role. Manager = TEAM (their reporting sub-tree) — the
+// owner's "a manager manages only their own employees" requirement.
+const SYSTEM_ROLE_SCOPES = Object.freeze({
+  Owner: 'ALL',
+  'HR-Admin': 'ALL',
+  Finance: 'ALL',
+  Manager: 'TEAM',
+});
+
+// Legacy User.role → scope when no custom BusinessRole.defaultScope is present.
+const LEGACY_ROLE_SCOPE = Object.freeze({
+  [ROLES.SUPER_ADMIN]: 'ALL',
+  [ROLES.BUSINESS_ADMIN]: 'ALL',
+  [ROLES.STAFF]: 'TEAM',
+  [ROLES.USER]: 'SELF',
+});
+
+// Resolve a user's effective data-scope band: assigned BusinessRole.defaultScope
+// wins; otherwise the legacy enum default (ESS USER floors at SELF).
+function effectiveScope(user) {
+  if (!user) return 'NONE';
+  const band = user.businessRole && user.businessRole.defaultScope;
+  if (band) return band;
+  return LEGACY_ROLE_SCOPE[user.role] || 'SELF';
+}
+
 // Validate a permissions JSON object — only known keys with boolean values.
 function validatePermissions(perms) {
   if (!perms || typeof perms !== 'object') return { ok: false, error: 'permissions must be an object' };
@@ -109,8 +136,11 @@ module.exports = {
   PERMISSIONS,
   PERMISSION_KEYS,
   SYSTEM_ROLES,
+  SYSTEM_ROLE_SCOPES,
+  LEGACY_ROLE_SCOPE,
   LEGACY_ROLE_PERMS,
   validatePermissions,
   hasPermission,
   effectivePermissions,
+  effectiveScope,
 };

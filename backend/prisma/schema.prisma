@@ -3609,6 +3609,17 @@ model WebhookDelivery {
 // surface. Storage is JSONB so adding a new permission key never requires
 // a migration.
 // =============================================================================
+// Hierarchical data-scope band: WHO a role may act on, ANDed with action permissions.
+// none ⊂ self ⊂ team(reporting sub-tree) ⊂ department ⊂ all. Default ALL keeps
+// existing tenants behaving exactly as before (no regression).
+enum ScopeBand {
+  NONE
+  SELF
+  TEAM
+  DEPARTMENT
+  ALL
+}
+
 model BusinessRole {
   id          String   @id @default(uuid())
   businessId  String
@@ -3620,6 +3631,9 @@ model BusinessRole {
   // (2026-05-01) uses the relational `permissionGrants` below — JSON stays
   // for tenants who haven't been migrated yet.
   permissions Json     @default("{}")
+  // HR hierarchical data scope (Feature 1). Resolves WHO this role acts on:
+  // Manager=TEAM (their reporting sub-tree), Owner/HR-Admin/Finance=ALL.
+  defaultScope ScopeBand @default(ALL)
   isSystem    Boolean  @default(false) // pre-seeded "Owner / Manager / Front Desk"
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
