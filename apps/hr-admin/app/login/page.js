@@ -3,14 +3,15 @@
 // Operator login (tenant-admin / HR users). POSTs to /api/auth/login which
 // sets the ae_operator session cookie; on success we send the operator to
 // the requested redirect (or the dashboard). Renders bare — ShellGate keeps
-// this route outside the AdminShell.
+// this route outside the AdminShell. useSearchParams is read inside a child
+// wrapped in <Suspense> (Next.js app-router CSR-bailout requirement).
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { PrimaryButton, TextInput, ErrorBanner } from '@hr/ui';
 import { post } from '@/lib/api';
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const redirect = params.get('redirect') || '/';
@@ -60,5 +61,13 @@ export default function LoginPage() {
         </form>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
+      <LoginForm />
+    </Suspense>
   );
 }
