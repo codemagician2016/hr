@@ -20,6 +20,7 @@
 // pending-state is tracked by `isManual = true` + a grouping requestId.
 const crypto = require('crypto');
 const prisma = require('../../core/lib/prisma');
+const { scopeWhere, scopeAllows } = require('../lib/scopeResolver');
 
 const PUNCH_TYPES = ['IN', 'OUT', 'BREAK_START', 'BREAK_END'];
 const PUNCH_SOURCES = ['WEB', 'MOBILE_APP', 'BIOMETRIC', 'KIOSK', 'GEO_FENCE', 'API', 'IMPORT', 'MANUAL'];
@@ -93,8 +94,15 @@ async function listPunches(req, res, next) {
     const { employeeId, from, to } = req.query;
     const { take, skip, page } = clampPage(req.query);
 
-    const where = { businessId };
-    if (employeeId) where.employeeId = employeeId;
+    // Feature 1: filter to the actor's reporting sub-tree (employeeId-keyed).
+    const where = { businessId, ...scopeWhere(req.scope, 'employeeId') };
+    // A client-supplied employeeId is only honored when it is in scope.
+    if (employeeId) {
+      if (!scopeAllows(req.scope, employeeId)) {
+        return res.json({ items: [], total: 0, page, pageSize: take });
+      }
+      where.employeeId = employeeId;
+    }
     if (from || to) {
       where.punchAt = {};
       if (from) where.punchAt.gte = new Date(from);
@@ -221,8 +229,12 @@ async function listAssignments(req, res, next) {
   try {
     const { businessId } = req.user;
     const { employeeId } = req.query;
-    const where = { businessId };
-    if (employeeId) where.employeeId = employeeId;
+    // Feature 1: filter to the actor's reporting sub-tree (employeeId-keyed).
+    const where = { businessId, ...scopeWhere(req.scope, 'employeeId') };
+    if (employeeId) {
+      if (!scopeAllows(req.scope, employeeId)) return res.json({ items: [] });
+      where.employeeId = employeeId;
+    }
     const items = await prisma.shiftAssignment.findMany({
       where,
       orderBy: { effectiveFrom: 'desc' },
@@ -252,8 +264,14 @@ async function listTimesheets(req, res, next) {
     const { employeeId, status } = req.query;
     const { take, skip, page } = clampPage(req.query);
 
-    const where = { businessId };
-    if (employeeId) where.employeeId = employeeId;
+    // Feature 1: filter to the actor's reporting sub-tree (employeeId-keyed).
+    const where = { businessId, ...scopeWhere(req.scope, 'employeeId') };
+    if (employeeId) {
+      if (!scopeAllows(req.scope, employeeId)) {
+        return res.json({ items: [], total: 0, page, pageSize: take });
+      }
+      where.employeeId = employeeId;
+    }
     if (status) where.status = status;
 
     const [items, total] = await Promise.all([
@@ -272,6 +290,10 @@ async function getTimesheet(req, res, next) {
       include: { entries: { orderBy: { date: 'asc' } } },
     });
     if (!item) return res.status(404).json({ message: 'Timesheet not found' });
+    // Feature 1: out-of-scope employee → 404 (IDOR-safe).
+    if (!scopeAllows(req.scope, item.employeeId)) {
+      return res.status(404).json({ message: 'Timesheet not found' });
+    }
     res.json(item);
   } catch (e) { next(e); }
 }
@@ -368,6 +390,10 @@ async function createRegularization(req, res, next) {
 
     const emp = await findEmployee(businessId, employeeId);
     if (!emp) return res.status(404).json({ message: 'Employee not found' });
+    // Feature 1: cannot raise a regularization for an out-of-scope employee → 404.
+    if (!scopeAllows(req.scope, employeeId)) {
+      return res.status(404).json({ message: 'Employee not found' });
+    }
 
     const requestId = crypto.randomUUID();
     const rows = punches.map((p) => ({
@@ -391,8 +417,12 @@ async function listRegularizations(req, res, next) {
   try {
     const { businessId } = req.user;
     const { employeeId } = req.query;
-    const where = { businessId, regularizationRequestId: { not: null } };
-    if (employeeId) where.employeeId = employeeId;
+    // Feature 1: filter to the actor's reporting sub-tree (employeeId-keyed).
+    const where = { businessId, regularizationRequestId: { not: null }, ...scopeWhere(req.scope, 'employeeId') };
+    if (employeeId) {
+      if (!scopeAllows(req.scope, employeeId)) return res.json({ items: [] });
+      where.employeeId = employeeId;
+    }
     const items = await prisma.attendancePunch.findMany({
       where,
       orderBy: { punchAt: 'desc' },
@@ -413,6 +443,11 @@ async function decideRegularization(req, res, next, decision) {
       where: { businessId, regularizationRequestId: requestId },
     });
     if (group.length === 0) return res.status(404).json({ message: 'Regularization request not found' });
+    // Feature 1: out-of-scope target employee → 404 (the :requestId is a group id,
+    // so the per-target check is here rather than the middleware's idParam guard).
+    if (!scopeAllows(req.scope, group[0].employeeId)) {
+      return res.status(404).json({ message: 'Regularization request not found' });
+    }
 
     if (decision === 'REJECTED') {
       await prisma.attendancePunch.deleteMany({ where: { businessId, regularizationRequestId: requestId } });

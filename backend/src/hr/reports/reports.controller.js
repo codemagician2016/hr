@@ -12,6 +12,7 @@
 
 const prisma = require('../../core/lib/prisma');
 const agg = require('./aggregations');
+const { scopeWhere } = require('../lib/scopeResolver');
 
 function handleError(res, err) {
   const status = err && err.statusCode ? err.statusCode : (err && err.code === 'NOT_FOUND' ? 404 : 500);
@@ -76,8 +77,9 @@ async function payrollRegister(req, res) {
   try {
     const { businessId } = req.user;
     const run = await loadRun(businessId, req.params.id);
+    // Feature 1: scope the register to the actor's reporting sub-tree.
     const lines = await prisma.payRunLine.findMany({
-      where: { businessId, payRunId: run.id },
+      where: { businessId, payRunId: run.id, ...scopeWhere(req.scope, 'employeeId') },
       include: {
         employee: { select: { id: true, code: true, firstName: true, lastName: true } },
         payslip: { select: { id: true, code: true, netPay: true } },
@@ -96,8 +98,9 @@ async function statutorySummary(req, res) {
   try {
     const { businessId } = req.user;
     const run = await loadRun(businessId, req.params.id);
+    // Feature 1: scope the statutory roll-up to the actor's reporting sub-tree.
     const lines = await prisma.payRunLine.findMany({
-      where: { businessId, payRunId: run.id },
+      where: { businessId, payRunId: run.id, ...scopeWhere(req.scope, 'employeeId') },
       select: {
         currencyCode: true,
         pfEmployee: true, pfEmployer: true, esiEmployee: true, esiEmployer: true, pt: true, tds: true,
@@ -120,9 +123,11 @@ async function headcount(req, res) {
   try {
     const { businessId } = req.user;
     const { from, to, groupBy } = req.query || {};
+    // Feature 1: scope headcount/attrition to the actor's reporting sub-tree
+    // (employee table is keyed on `id`).
     // Pull active employment segments to attach department/entity to each employee.
     const employees = await prisma.employee.findMany({
-      where: { businessId, deletedAt: null },
+      where: { businessId, deletedAt: null, ...scopeWhere(req.scope, 'id') },
       select: {
         id: true, status: true, isActive: true, hireDate: true, terminationDate: true,
         employmentRecords: {
@@ -162,7 +167,8 @@ async function leaveLiability(req, res) {
   try {
     const { businessId } = req.user;
     const { periodCode } = req.query || {};
-    const where = { businessId };
+    // Feature 1: scope leave liability to the actor's reporting sub-tree.
+    const where = { businessId, ...scopeWhere(req.scope, 'employeeId') };
     if (periodCode) where.periodCode = periodCode;
     const balances = await prisma.leaveBalance.findMany({
       where,

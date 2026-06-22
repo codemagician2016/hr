@@ -17,10 +17,17 @@
 const express = require('express');
 const router = express.Router();
 const { protect, requirePermission } = require('../../core/middleware/auth.middleware');
+const { attachSelfEmployee, withEmployeeScope } = require('../middleware/scope.middleware');
 const c = require('./reports.controller');
 
+// Feature 1: reports honour the actor's data scope by construction — a Manager's
+// reports cover only their reporting sub-tree. attachSelfEmployee resolves the
+// anchor; withEmployeeScope attaches req.scope which the controller ANDs into
+// every aggregate query.
 router.use(protect);
 router.use(requirePermission('canViewPayrollReports'));
+router.use(attachSelfEmployee);
+router.use(withEmployeeScope('canViewPayrollReports'));
 
 router.get('/runs', c.listRuns);
 router.get('/runs/:id/register', c.payrollRegister);

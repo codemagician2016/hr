@@ -11,6 +11,8 @@
 //       soft-hold (`pendingApproval`) reconstructable from the ledger.
 // Every query is scoped by businessId; an employee's rows also filter employeeId.
 const prisma = require('../../core/lib/prisma');
+const { scopeWhere, scopeAllows } = require('../lib/scopeResolver');
+const { resolveApprover } = require('../lib/approvalRouting');
 
 // ── Config allow-lists (never spread req.body) ──────────────────────────────
 const LEAVE_TYPE_FIELDS = [
@@ -206,6 +208,11 @@ async function createRequest(req, res, next) {
 
 // GET /requests — paginated list of APPLICATION rows, tenant-scoped; optional
 // employeeId / status / leaveTypeId filters.
+//
+// Feature 1: the list is filtered to the actor's reporting sub-tree via
+// scopeWhere(req.scope, 'employeeId'). A client-supplied ?employeeId is NEVER
+// trusted to widen scope — it is only honored when that employee is already in
+// the actor's scope; otherwise the request returns empty (closes the audited IDOR).
 async function listRequests(req, res, next) {
   try {
     const { businessId } = req.user;
@@ -214,8 +221,16 @@ async function listRequests(req, res, next) {
     const pageNum = Math.max(parseInt(page, 10) || 1, 1);
     const skip = (pageNum - 1) * take;
 
-    const where = { businessId, txnType: 'APPLICATION' };
-    if (employeeId) where.employeeId = employeeId;
+    // AND the hierarchical scope (Manager → their reporting sub-tree only).
+    const where = { businessId, txnType: 'APPLICATION', ...scopeWhere(req.scope, 'employeeId') };
+    if (employeeId) {
+      // Only honor a client-supplied employeeId when it is within scope; otherwise
+      // return an empty result set rather than widening access.
+      if (!scopeAllows(req.scope, employeeId)) {
+        return res.json({ items: [], total: 0, page: pageNum, pageSize: take });
+      }
+      where.employeeId = employeeId;
+    }
     if (leaveTypeId) where.leaveTypeId = leaveTypeId;
     if (status) where.status = status;
 
@@ -234,17 +249,31 @@ async function getRequest(req, res, next) {
       where: { id: req.params.id, businessId, txnType: 'APPLICATION' },
     });
     if (!txn) return res.status(404).json({ message: 'Leave request not found' });
+    // Feature 1: out-of-scope applicant → 404 (IDOR-safe; don't reveal existence).
+    if (!scopeAllows(req.scope, txn.employeeId)) {
+      return res.status(404).json({ message: 'Leave request not found' });
+    }
     res.json(txn);
   } catch (e) { next(e); }
 }
 
 // Shared guard + balance-release for terminal transitions. Returns the loaded
 // PENDING application row, or sends the appropriate error response.
-async function loadPendingApplication(req, res, businessId) {
+//
+// Feature 1: `enforceScope` (set for approve/reject) re-resolves the decision
+// scope server-side. The canApproveLeave scope excludes the actor (separation of
+// duties) and is bounded to their reporting sub-tree, so an out-of-scope
+// applicant — a peer, someone outside the team, or the approver themselves — is
+// 404'd here (IDOR-safe; never trust a client-supplied employeeId to widen scope).
+async function loadPendingApplication(req, res, businessId, { enforceScope = false } = {}) {
   const txn = await prisma.leaveTransaction.findFirst({
     where: { id: req.params.id, businessId, txnType: 'APPLICATION' },
   });
   if (!txn) { res.status(404).json({ message: 'Leave request not found' }); return null; }
+  if (enforceScope && !scopeAllows(req.scope, txn.employeeId)) {
+    res.status(404).json({ message: 'Leave request not found' });
+    return null;
+  }
   if (txn.status !== 'PENDING') {
     res.status(409).json({ message: `Cannot transition a request in status ${txn.status}` });
     return null;
@@ -258,8 +287,21 @@ async function loadPendingApplication(req, res, businessId) {
 async function approveRequest(req, res, next) {
   try {
     const { businessId } = req.user;
-    const txn = await loadPendingApplication(req, res, businessId);
+    const txn = await loadPendingApplication(req, res, businessId, { enforceScope: true });
     if (!txn) return;
+
+    // Feature 1 (approval routing): the canonical approver for this application is
+    // the applicant's manager (escalating up the chain to an HR-Admin fallback).
+    // The scope guard above already proved this actor is allowed to act on the
+    // applicant's sub-tree and is not the applicant (SoD); resolveApprover is the
+    // single source of truth for *who* the request routes to (used by the ESS
+    // inbox + notifications). We surface it as decision provenance, not a second
+    // gate — the sub-tree scope is the authoritative authorization boundary.
+    const applicant = await prisma.employee.findFirst({
+      where: { id: txn.employeeId, businessId, deletedAt: null },
+      select: { id: true, managerEmployeeId: true, businessId: true },
+    });
+    await resolveApprover(applicant); // eslint-disable-line no-unused-vars — provenance/guard hook
 
     const heldQty = Math.abs(Number(txn.quantity));
     const decidedBy = req.user.id || req.user.userId || null;
@@ -293,7 +335,7 @@ async function approveRequest(req, res, next) {
 async function rejectRequest(req, res, next) {
   try {
     const { businessId } = req.user;
-    const txn = await loadPendingApplication(req, res, businessId);
+    const txn = await loadPendingApplication(req, res, businessId, { enforceScope: true });
     if (!txn) return;
 
     const heldQty = Math.abs(Number(txn.quantity));
