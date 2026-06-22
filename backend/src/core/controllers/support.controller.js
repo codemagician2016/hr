@@ -8,7 +8,7 @@ const {
   normalizeChannel,
   normalizeProjectKey,
 } = require('../../lib/chat-core');
-const chatBus = require('../../chat/eventBus');
+const chatBus = require('../lib/supportEventBus');
 
 const KIND_PLATFORM = 'PLATFORM_SUPPORT';
 const KIND_CUSTOMER = 'WEBSITE_CUSTOMER';

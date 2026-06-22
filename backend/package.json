@@ -18,7 +18,8 @@
     "seed:it-services": "node scripts/seed-it-services-websites.js",
     "smoke:billing-local": "node scripts/smoke-billing-local.js",
     "smoke:inbox-local": "node scripts/smoke-inbox-calendar-local.js",
-    "lint": "eslint src/routes/appointment/ src/routes/shop/ src/web/routes/"
+    "lint": "eslint src/routes/appointment/ src/routes/shop/ src/web/routes/",
+    "test:boot": "node test/boot.test.js"
   },
   "prisma": {
     "seed": "node prisma/seeds/pricing.seed.js && node prisma/seed-hr.js"

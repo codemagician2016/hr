@@ -38,7 +38,7 @@ const tenantRoutes = require('./core/routes/tenant.routes');
 const customerRoutes = require('./core/routes/customer.routes');
 const notificationRoutes = require('./core/routes/notification.routes');
 const inboxRoutes = require('./core/routes/inbox.routes');
-const chatRoutes = require('./core/routes/chat.routes');
+// /api/chat (aapkachat widget/AI) removed — deleted chat product, not part of DriftHR.
 const uploadRoutes = require('./core/routes/upload.routes');
 const localeRoutes = require('./core/routes/locale.routes');
 const { handlePaddleWebhook } = require('./core/controllers/paddle.controller');
@@ -328,7 +328,7 @@ app.use('/api/public-api', require('./core/routes/publicApi.routes'));
 app.use('/api/v1', require('./core/routes/publicV1.routes'));
 app.use('/api/ai', require('./core/routes/ai.routes'));
 app.use('/api/inbox', inboxRoutes);
-app.use('/api/chat', chatRoutes);
+// /api/chat removed (aapkachat product deleted).
 app.use('/api/upload', uploadRoutes);
 app.use('/api/locale', localeRoutes);
 app.use('/api/internal', require('./core/routes/internal.routes'));
@@ -350,8 +350,10 @@ app.use((err, _req, res, _next) => {
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-  console.log(`HR platform backend running on port ${PORT}`);
+// Export the app so a boot smoke-test can require() the full route graph without
+// binding a port; only listen when run directly.
+if (require.main === module) app.listen(PORT, () => {
+  console.log(`DriftHR backend running on port ${PORT}`);
   // Surface social-login readiness loudly at boot — a missing provider
   // credential otherwise fails silently as a confusing 401 at sign-in time.
   try {
@@ -377,3 +379,5 @@ app.listen(PORT, () => {
     console.log('[startup-tasks] disabled for API worker');
   }
 });
+
+module.exports = app;
