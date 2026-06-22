@@ -76,7 +76,86 @@ function crud(model, { fields = [], required = [], dates = [], defaultsFn = null
   };
 }
 
+// GET /api/hr/org/tree (optional ?root=me) — the manager→reports hierarchy as
+// nested nodes, built from Employee.managerEmployeeId. Tenant-scoped, current
+// employees only. Designation/department come from the current EmploymentRecord
+// segment (effective-dated). ?root=me roots the tree at the caller's own
+// Employee (attachSelfEmployee has set req.user.employeeId). Without root=me the
+// tree is the full forest: every employee with no (in-scope) manager is a root.
+async function tree(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const rootMe = req.query.root === 'me';
+    const selfId = req.user.employeeId || null;
+
+    if (rootMe && !selfId) {
+      // Caller is not linked to an Employee — nothing to root at.
+      return res.json({ items: [], root: null });
+    }
+
+    const employees = await prisma.employee.findMany({
+      where: { businessId, deletedAt: null },
+      select: {
+        id: true,
+        code: true,
+        firstName: true,
+        lastName: true,
+        managerEmployeeId: true,
+        employmentRecords: {
+          where: { isCurrent: true },
+          take: 1,
+          orderBy: { effectiveFrom: 'desc' },
+          select: {
+            designation: { select: { title: true } },
+            department: { select: { name: true } },
+          },
+        },
+      },
+      orderBy: [{ firstName: 'asc' }, { code: 'asc' }],
+    });
+
+    // Build bare nodes keyed by id.
+    const nodeById = new Map();
+    for (const e of employees) {
+      const rec = e.employmentRecords && e.employmentRecords[0];
+      const name = [e.firstName, e.lastName].filter(Boolean).join(' ') || e.code;
+      nodeById.set(e.id, {
+        id: e.id,
+        code: e.code,
+        name,
+        designation: rec && rec.designation ? rec.designation.title : null,
+        departmentName: rec && rec.department ? rec.department.name : null,
+        managerEmployeeId: e.managerEmployeeId,
+        reportsCount: 0,
+        children: [],
+      });
+    }
+
+    // Link children to parents. A node whose manager is missing from the set
+    // (terminated/out-of-tenant) is treated as a root.
+    const roots = [];
+    for (const node of nodeById.values()) {
+      const parent = node.managerEmployeeId ? nodeById.get(node.managerEmployeeId) : null;
+      if (parent) {
+        parent.children.push(node);
+        parent.reportsCount += 1;
+      } else {
+        roots.push(node);
+      }
+    }
+
+    if (rootMe) {
+      const me = nodeById.get(selfId) || null;
+      return res.json({ items: me ? [me] : [], root: selfId });
+    }
+    res.json({ items: roots, root: null });
+  } catch (e) {
+    next(e);
+  }
+}
+
 module.exports = {
+  tree,
   entities: crud('entity', {
     fields: ['code', 'legalName', 'tradeName', 'countryCode', 'payCurrency', 'timezone', 'taxYearStartMonth',
       'addressLine1', 'addressLine2', 'city', 'stateCode', 'postalCode',

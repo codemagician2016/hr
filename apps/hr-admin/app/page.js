@@ -29,6 +29,14 @@ async function countFor(status) {
   return res?.total ?? (Array.isArray(res?.items) ? res.items.length : 0);
 }
 
+// Count every descendant of a node (excludes the node itself).
+function subtreeSize(node) {
+  const kids = node?.children || [];
+  let n = kids.length;
+  for (const k of kids) n += subtreeSize(k);
+  return n;
+}
+
 // Best-effort: resolve to null on any failure so one missing module doesn't
 // blank the whole dashboard.
 function safe(promise) {
@@ -44,7 +52,7 @@ export default function DashboardPage() {
     let alive = true;
     (async () => {
       try {
-        const [total, active, onLeave, departments, pendingLeave, lastRun] = await Promise.all([
+        const [total, active, onLeave, departments, pendingLeave, lastRun, myTeam] = await Promise.all([
           countFor(undefined),
           countFor('active'),
           countFor('on_leave'),
@@ -57,8 +65,16 @@ export default function DashboardPage() {
           safe(get('/api/hr/payroll/runs', { page: 1, pageSize: 1 })).then((r) =>
             r == null ? null : Array.isArray(r?.items) ? r.items[0] : r?.items?.[0] || null
           ),
+          // "My team" — the caller's own reporting sub-tree. root=me roots at the
+          // operator's Employee; meaningful only when they manage anyone.
+          safe(get('/api/hr/org/tree', { root: 'me' })).then((r) => {
+            if (r == null) return null;
+            const me = Array.isArray(r?.items) ? r.items[0] : null;
+            if (!r?.root || !me) return null; // not linked to an Employee → no team widget
+            return { headcount: subtreeSize(me), name: me.name };
+          }),
         ]);
-        if (alive) setStats({ total, active, onLeave, departments, pendingLeave, lastRun });
+        if (alive) setStats({ total, active, onLeave, departments, pendingLeave, lastRun, myTeam });
       } catch (err) {
         if (alive) setError(err.message || 'Failed to load dashboard.');
       } finally {
@@ -97,6 +113,25 @@ export default function DashboardPage() {
               href={lastRun ? `/payroll?run=${lastRun.id}` : '/payroll'}
             />
           </div>
+
+          {stats.myTeam && (
+            <div className="mt-6">
+              <h2 className="text-sm font-semibold text-gray-900 mb-3">My team</h2>
+              {stats.myTeam.headcount > 0 ? (
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  <Tile label="People in my team" value={stats.myTeam.headcount} sub="Direct + indirect reports" href="/org/chart" />
+                  <Tile label="Pending approvals" value={stats.pendingLeave} sub="Leave awaiting my decision" href="/leave" />
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-6 text-center">
+                  <p className="text-sm font-medium text-gray-900">You don&apos;t manage anyone yet.</p>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Ask HR to set your team&apos;s reporting lines and your team will appear here.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>

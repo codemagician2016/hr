@@ -1,26 +1,50 @@
-// Sidebar navigation + a simple feature/permission gate stub.
+// Sidebar navigation + a permission gate keyed to the backend RBAC catalog.
 //
-// Each nav item declares an optional `feature` (tenant subscription module)
-// and `permission` (operator role capability). `visibleNavItems` filters
-// the list against the resolved session/business. Real enforcement lives
-// in the backend; this is presentation gating so HR users only see what
-// their plan + role allow. The stub treats a missing features/permissions
-// set as "allow all" so the console is usable before those wire up.
+// Each nav item declares an optional `feature` (tenant subscription module) and
+// `permission` (one of the 15 rbac.js permission keys, e.g. canViewCompensation).
+// `visibleNavItems` resolves the operator's effective permissions from the
+// session (the assigned BusinessRole's permissions JSON, or the legacy-role
+// fallback) and hides items they lack. The server is the real enforcement
+// boundary — this is UX so a Manager doesn't see Compensation/Payroll/Reports,
+// and a non-Owner doesn't see Settings→Roles. A missing session degrades to
+// "allow all" so the console stays usable before the session resolves.
 
 export const NAV_ITEMS = [
   { key: 'dashboard', label: 'Dashboard', href: '/' },
-  { key: 'people', label: 'People', href: '/people', feature: 'hr', permission: 'people.read' },
-  { key: 'org', label: 'Org', href: '/org', feature: 'hr', permission: 'org.read' },
-  { key: 'leave', label: 'Leave', href: '/leave', feature: 'leave', permission: 'leave.read' },
-  { key: 'attendance', label: 'Attendance', href: '/attendance', feature: 'attendance', permission: 'attendance.read' },
-  { key: 'compensation', label: 'Compensation', href: '/compensation', feature: 'hr', permission: 'compensation.read' },
-  { key: 'expenses', label: 'Expenses', href: '/expenses', feature: 'hr', permission: 'expenses.read' },
-  { key: 'loans', label: 'Loans', href: '/loans', feature: 'hr', permission: 'loans.read' },
-  { key: 'documents', label: 'Documents', href: '/documents', feature: 'hr', permission: 'documents.read' },
-  { key: 'payroll', label: 'Payroll', href: '/payroll', feature: 'payroll', permission: 'payroll.read' },
-  { key: 'reports', label: 'Reports', href: '/reports', feature: 'payroll', permission: 'payroll.read' },
-  { key: 'settings', label: 'Settings', href: '/settings', permission: 'settings.read' },
+  { key: 'people', label: 'People', href: '/people', feature: 'hr', permission: 'canViewEmployees' },
+  { key: 'org', label: 'Org', href: '/org', feature: 'hr', permission: 'canViewEmployees' },
+  { key: 'leave', label: 'Leave', href: '/leave', feature: 'leave', permission: 'canApproveLeave' },
+  { key: 'attendance', label: 'Attendance', href: '/attendance', feature: 'attendance', permission: 'canManageAttendance' },
+  { key: 'compensation', label: 'Compensation', href: '/compensation', feature: 'hr', permission: 'canViewCompensation' },
+  { key: 'expenses', label: 'Expenses', href: '/expenses', feature: 'hr', permission: 'canViewEmployees' },
+  { key: 'loans', label: 'Loans', href: '/loans', feature: 'hr', permission: 'canViewEmployees' },
+  { key: 'documents', label: 'Documents', href: '/documents', feature: 'hr', permission: 'canViewEmployees' },
+  { key: 'payroll', label: 'Payroll', href: '/payroll', feature: 'payroll', permission: 'canRunPayroll' },
+  { key: 'reports', label: 'Reports', href: '/reports', feature: 'payroll', permission: 'canViewPayrollReports' },
+  { key: 'settings', label: 'Settings', href: '/settings', permission: 'canEditBranding' },
 ];
+
+// Full-access permission map for the legacy operator enum (mirrors
+// backend rbac.js LEGACY_ROLE_PERMS: SUPER_ADMIN/BUSINESS_ADMIN → all true).
+const PERMISSION_KEYS = [
+  'canViewEmployees', 'canManageEmployees', 'canViewCompensation', 'canManageCompensation',
+  'canApproveLeave', 'canManageAttendance', 'canRunPayroll', 'canApprovePayroll',
+  'canViewPayrollReports', 'canManageStatutory', 'canFileReturns', 'canManageOrg',
+  'canEditBilling', 'canEditDomain', 'canEditBranding',
+];
+const ALL_TRUE = Object.fromEntries(PERMISSION_KEYS.map((k) => [k, true]));
+
+// Resolve the operator's effective permission map from the /api/auth/me session.
+// Mirrors backend effectivePermissions(): an assigned BusinessRole's permissions
+// JSON wins; otherwise SUPER_ADMIN/BUSINESS_ADMIN get everything, others nothing.
+export function permissionsFromSession(session) {
+  if (!session) return null; // unknown → allow-all (handled by hasPermission)
+  const rolePerms = session.businessRole?.permissions;
+  if (rolePerms && typeof rolePerms === 'object') return rolePerms;
+  if (session.role === 'SUPER_ADMIN' || session.role === 'BUSINESS_ADMIN') return ALL_TRUE;
+  if (session.permissions && typeof session.permissions === 'object') return session.permissions;
+  return {}; // authenticated but no permissions resolved → hide gated items
+}
 
 export function hasFeature(features, feature) {
   if (!feature) return true;
@@ -33,15 +57,18 @@ export function hasFeature(features, feature) {
 
 export function hasPermission(permissions, permission) {
   if (!permission) return true;
-  if (!permissions) return true; // stub: undefined → allow
+  if (!permissions) return true; // null/undefined → allow (session not yet resolved)
   if (Array.isArray(permissions)) return permissions.includes('*') || permissions.includes(permission);
   if (permissions instanceof Set) return permissions.has('*') || permissions.has(permission);
   if (typeof permissions === 'object') return Boolean(permissions['*'] || permissions[permission]);
   return true;
 }
 
-export function visibleNavItems({ features, permissions } = {}) {
+// `permissions` may be a resolved rbac permission map (preferred), or undefined
+// (allow-all). Pass `session` to have it resolved here from the raw /me payload.
+export function visibleNavItems({ features, permissions, session } = {}) {
+  const perms = permissions !== undefined ? permissions : permissionsFromSession(session);
   return NAV_ITEMS.filter(
-    (item) => hasFeature(features, item.feature) && hasPermission(permissions, item.permission)
+    (item) => hasFeature(features, item.feature) && hasPermission(perms, item.permission)
   );
 }

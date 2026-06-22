@@ -14,10 +14,12 @@
 // Roles: read-only overview from GET /api/rbac/roles + /api/rbac/permissions.
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { COLORS, FIXED_STYLE_KEYS, FIXED_STYLE_SEEDS, resolveColor } from '@hr/theme-engine';
 import { ErrorBanner, PrimaryButton, TextInput, Spinner } from '@hr/ui';
 import { get, request } from '@/lib/api';
 import { asList, PageHeader, Tabs, DataTable } from '@/lib/ui';
+import { permissionsFromSession, hasPermission } from '@/lib/nav';
 
 const STYLE_OPTIONS = FIXED_STYLE_KEYS.map((key) => ({
   key,
@@ -160,6 +162,7 @@ function BrandingTab() {
 function RolesTab() {
   const [roles, setRoles] = useState(null);
   const [permMeta, setPermMeta] = useState(null);
+  const [canManage, setCanManage] = useState(true);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -168,10 +171,15 @@ function RolesTab() {
     Promise.all([
       get('/api/rbac/roles').catch(() => ({ roles: [] })),
       get('/api/rbac/permissions').catch(() => ({ permissions: [], systemRoles: [] })),
+      get('/api/auth/me').catch(() => null),
     ])
-      .then(([r, p]) => {
+      .then(([r, p, me]) => {
         setRoles(asList(r?.roles ? { items: r.roles } : r));
         setPermMeta(p);
+        // Hide the management link from operators who can't administer roles
+        // (the server also enforces BUSINESS_ADMIN on /settings/roles).
+        const session = me?.user || me;
+        setCanManage(hasPermission(permissionsFromSession(session), 'canManageEmployees'));
       })
       .catch((e) => setError(e.message || 'Failed to load roles.'))
       .finally(() => setLoading(false));
@@ -191,15 +199,32 @@ function RolesTab() {
     { key: 'members', header: 'Members', render: (r) => r.memberCount ?? r.userCount ?? '—' },
   ];
 
+  const catalogPermCount =
+    permMeta?.permissions && typeof permMeta.permissions === 'object'
+      ? Object.keys(permMeta.permissions).length
+      : permMeta?.permissions?.length;
+
   return (
     <div className="max-w-3xl">
       {error && <ErrorBanner message={error} />}
-      <p className="text-sm text-gray-500 mb-4">
-        Read-only overview of the tenant&apos;s roles. Role editing lives in account administration.
-      </p>
+      <div className="flex items-center justify-between mb-4 gap-4">
+        <p className="text-sm text-gray-500">
+          Overview of the tenant&apos;s roles. Edit permissions, data scope, and per-user assignments on the roles &amp;
+          access screen.
+        </p>
+        {canManage && (
+          <Link
+            href="/settings/roles"
+            className="shrink-0 px-3 py-2 text-sm font-medium text-white rounded-lg inline-flex items-center"
+            style={{ backgroundColor: 'var(--theme-primary)' }}
+          >
+            Manage roles &amp; access
+          </Link>
+        )}
+      </div>
       <DataTable columns={columns} rows={roles} loading={loading} emptyText="No roles defined." />
-      {permMeta?.permissions?.length ? (
-        <p className="text-xs text-gray-400 mt-3">{permMeta.permissions.length} permissions available across the catalog.</p>
+      {catalogPermCount ? (
+        <p className="text-xs text-gray-400 mt-3">{catalogPermCount} permissions available across the catalog.</p>
       ) : null}
     </div>
   );

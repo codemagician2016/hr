@@ -13,6 +13,10 @@ const org = require('../controllers/org.controller');
 router.use(protect);
 router.use(attachSelfEmployee); // Feature 1: hierarchy anchor (consistent stack)
 
+// Feature 1: read-only manager→reports hierarchy for the org-chart UI. Inherits
+// protect + attachSelfEmployee above, so ?root=me can root at req.user.employeeId.
+router.get('/tree', requirePermission('canViewEmployees'), org.tree);
+
 function mountResource(path, ctrl) {
   router.get(`/${path}`, requirePermission('canViewEmployees'), ctrl.list);
   router.get(`/${path}/:id`, requirePermission('canViewEmployees'), ctrl.get);

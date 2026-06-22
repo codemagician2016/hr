@@ -7,8 +7,9 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { Spinner, ErrorBanner, formatAdminDate } from '@hr/ui';
-import { get } from '@/lib/api';
+import { Spinner, ErrorBanner, PrimaryButton, formatAdminDate } from '@hr/ui';
+import { get, patch } from '@/lib/api';
+import ManagerPicker from '@/components/ManagerPicker';
 
 function Field({ label, value }) {
   return (
@@ -24,6 +25,75 @@ function Section({ title, children }) {
     <div className="rounded-2xl border border-gray-200 bg-white p-5">
       <h2 className="text-sm font-semibold text-gray-900 mb-4">{title}</h2>
       <dl className="grid grid-cols-2 sm:grid-cols-3 gap-4">{children}</dl>
+    </div>
+  );
+}
+
+// Editable "reports to" section. PATCHes managerEmployeeId via the existing
+// update endpoint. The backend cycle-guard 400 ("reporting loop") surfaces here.
+function ManagerSection({ employee }) {
+  const [managerId, setManagerId] = useState(employee.managerEmployeeId || '');
+  const [managerLabel, setManagerLabel] = useState('');
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
+
+  // Resolve the current manager's display name for the picker's pre-selection.
+  useEffect(() => {
+    let alive = true;
+    if (employee.managerEmployeeId) {
+      get(`/api/hr/employees/${employee.managerEmployeeId}`)
+        .then((m) => {
+          if (!alive) return;
+          const mm = m?.employee || m;
+          setManagerLabel([mm.firstName, mm.lastName].filter(Boolean).join(' ') || mm.code || '');
+        })
+        .catch(() => {});
+    }
+    return () => {
+      alive = false;
+    };
+  }, [employee.managerEmployeeId]);
+
+  async function save() {
+    setSaving(true);
+    setError('');
+    setSaved(false);
+    try {
+      await patch(`/api/hr/employees/${employee.id}`, { managerEmployeeId: managerId || null });
+      setSaved(true);
+      setDirty(false);
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Failed to update manager.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-5">
+      <h2 className="text-sm font-semibold text-gray-900 mb-4">Reporting</h2>
+      <div className="max-w-md space-y-3">
+        <ManagerPicker
+          value={managerId}
+          selectedLabel={managerLabel}
+          excludeId={employee.id}
+          onChange={(v) => {
+            setManagerId(v);
+            setDirty(true);
+            setSaved(false);
+          }}
+          hint="Who this employee reports to. Leave empty for the top of the chain."
+        />
+        {error && <ErrorBanner message={error} />}
+        {saved && <p className="text-sm text-emerald-700">Manager updated.</p>}
+        {dirty && (
+          <PrimaryButton loading={saving} onClick={save}>
+            Save manager
+          </PrimaryButton>
+        )}
+      </div>
     </div>
   );
 }
@@ -100,6 +170,8 @@ export default function EmployeeDetailPage() {
           value={emp.joinedAt || emp.dateOfJoining ? formatAdminDate(emp.joinedAt || emp.dateOfJoining) : null}
         />
       </Section>
+
+      <ManagerSection employee={emp} />
     </div>
   );
 }

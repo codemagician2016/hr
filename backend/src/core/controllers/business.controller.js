@@ -1659,11 +1659,124 @@ async function updateReminderConfig(req, res) {
   res.json({ config });
 }
 
+// ── Feature 1: tenant users + role assignment ──────────────────────────────
+// Vertical-agnostic list of the tenant's operator users (BUSINESS_ADMIN / STAFF)
+// with their assigned BusinessRole. Powers the People→role-assignment table in
+// settings/roles. listStaff is gated to appointment/ecommerce verticals, so HR
+// tenants need this plain, tenant-scoped read.
+async function listBusinessUsers(req, res) {
+  const businessId = req.user?.businessId;
+  if (!businessId) return res.status(403).json({ message: 'No business in scope' });
+  const users = await prisma.user.findMany({
+    where: { businessId, role: { in: [ROLES.BUSINESS_ADMIN, ROLES.STAFF] } },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      role: true,
+      isActive: true,
+      businessRoleId: true,
+      businessRole: { select: { id: true, name: true, isSystem: true } },
+    },
+    orderBy: [{ role: 'asc' }, { createdAt: 'asc' }],
+  });
+  res.json({ users });
+}
+
+// PATCH /api/business/users/:id/role { businessRoleId } — assign a BusinessRole
+// to a tenant User. The role must belong to the same business. "Last Owner"
+// guard (AC-HR7): refuse (409) if this change would leave the tenant with no
+// user holding the Owner role / BUSINESS_ADMIN admin authority.
+async function assignUserRole(req, res) {
+  const businessId = req.user?.businessId;
+  if (!businessId) return res.status(403).json({ message: 'No business in scope' });
+
+  const targetId = req.params.id;
+  // Allow null/empty to clear the custom role (fall back to legacy enum perms).
+  const raw = req.body?.businessRoleId;
+  const businessRoleId = raw === '' || raw === undefined ? null : raw;
+
+  const target = await prisma.user.findFirst({
+    where: { id: targetId, businessId },
+    select: {
+      id: true,
+      role: true,
+      businessRoleId: true,
+      businessRole: { select: { id: true, name: true } },
+    },
+  });
+  if (!target) return res.status(404).json({ message: 'Not found' });
+
+  let nextRole = null;
+  if (businessRoleId) {
+    nextRole = await prisma.businessRole.findFirst({
+      where: { id: businessRoleId, businessId },
+      select: { id: true, name: true },
+    });
+    // Role missing or belongs to another tenant — never leak existence.
+    if (!nextRole) return res.status(404).json({ message: 'Not found' });
+  }
+
+  // "Last Owner" guard. A user has Owner authority if they hold the system
+  // "Owner" BusinessRole OR carry the legacy BUSINESS_ADMIN enum. If this user
+  // is currently an Owner and the change removes that authority, ensure at least
+  // one other Owner remains.
+  const wasOwner =
+    target.role === ROLES.BUSINESS_ADMIN || target.businessRole?.name === 'Owner';
+  const willBeOwner =
+    target.role === ROLES.BUSINESS_ADMIN || nextRole?.name === 'Owner';
+  if (wasOwner && !willBeOwner) {
+    const otherOwners = await prisma.user.count({
+      where: {
+        businessId,
+        id: { not: targetId },
+        OR: [{ role: ROLES.BUSINESS_ADMIN }, { businessRole: { name: 'Owner' } }],
+      },
+    });
+    if (otherOwners === 0) {
+      return res
+        .status(409)
+        .json({ message: 'Cannot remove the last Owner. Assign another Owner first.' });
+    }
+  }
+
+  const updated = await prisma.user.update({
+    where: { id: targetId },
+    data: { businessRoleId },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      role: true,
+      isActive: true,
+      businessRoleId: true,
+      businessRole: { select: { id: true, name: true, isSystem: true } },
+    },
+  });
+
+  await writeAudit({
+    businessId,
+    actorId: req.user?.id,
+    action: 'role.change',
+    entityType: 'User',
+    entityId: targetId,
+    meta: {
+      op: 'assign',
+      before: { businessRoleId: target.businessRoleId, name: target.businessRole?.name || null },
+      after: { businessRoleId: updated.businessRoleId, name: updated.businessRole?.name || null },
+    },
+  });
+
+  res.json({ user: updated });
+}
+
 module.exports = {
   checkSlug,
   setup,
   getMyBusiness,
   getMyBusinessContext,
+  listBusinessUsers,
+  assignUserRole,
   inviteStaff,
   quickAddStaff,
   listStaff,

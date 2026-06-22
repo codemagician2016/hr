@@ -85,7 +85,10 @@ export default function AdminShell({ children }) {
     () =>
       visibleNavItems({
         features: session?.features || brand?.features,
-        permissions: session?.permissions,
+        // Pass the raw session so nav.js can resolve the operator's effective
+        // permissions from their assigned BusinessRole (or legacy-role fallback)
+        // and hide Compensation/Payroll/Reports they lack. Server still enforces.
+        session,
       }),
     [session, brand]
   );

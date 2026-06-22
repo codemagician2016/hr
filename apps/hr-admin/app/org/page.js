@@ -7,6 +7,7 @@
 // bands) later is a one-line addition.
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { Spinner, ErrorBanner, Empty, PrimaryButton, TextInput } from '@hr/ui';
 import { get, post } from '@/lib/api';
 
@@ -101,8 +102,18 @@ function OrgSection({ title, resource, fields }) {
 export default function OrgPage() {
   return (
     <div>
-      <h1 className="text-2xl font-semibold text-gray-900 mb-1">Org structure</h1>
-      <p className="text-sm text-gray-500 mb-6">Legal entities and departments</p>
+      <div className="flex items-start justify-between mb-6 gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold text-gray-900 mb-1">Org structure</h1>
+          <p className="text-sm text-gray-500">Legal entities and departments</p>
+        </div>
+        <Link
+          href="/org/chart"
+          className="shrink-0 px-3 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 inline-flex items-center"
+        >
+          View org chart
+        </Link>
+      </div>
 
       <div className="grid md:grid-cols-2 gap-4">
         <OrgSection

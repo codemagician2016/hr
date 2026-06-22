@@ -8,6 +8,8 @@ const {
   setup,
   getMyBusiness,
   getMyBusinessContext,
+  listBusinessUsers,
+  assignUserRole,
   inviteStaff,
   quickAddStaff,
   listStaff,
@@ -59,6 +61,11 @@ router.get('/context', protect, getMyBusinessContext);
 
 // Read/write business + manage staff — BUSINESS_ADMIN only
 router.get('/me', protect, requireRole(ROLES.BUSINESS_ADMIN), getMyBusiness);
+
+// Feature 1: tenant users + per-user role assignment (RBAC self-serve).
+// Vertical-agnostic (HR tenants have no APPOINTMENT/ECOMMERCE staff list).
+router.get('/users', protect, requireRole(ROLES.BUSINESS_ADMIN), listBusinessUsers);
+router.patch('/users/:id/role', protect, requireRole(ROLES.BUSINESS_ADMIN), assignUserRole);
 router.patch('/settings', protect, requireRole(ROLES.BUSINESS_ADMIN), validateBody(updateBusinessSettingsSchema), updateSettings);
 // Read the feature catalog + current admin overrides + resolved effective
 // state. Drives the admin Features Settings panel. Patch happens via the

@@ -20,9 +20,13 @@ async function listRoles(req, res) {
   res.json({ roles });
 }
 
+// Feature 1: roles also carry a default data-scope band (ALL/DEPARTMENT/TEAM/
+// SELF/NONE) consumed by the hierarchical scope resolver.
+const SCOPE_BANDS = ['ALL', 'DEPARTMENT', 'TEAM', 'SELF', 'NONE'];
 const schema = z.object({
   name: z.string().min(1).max(60),
   permissions: z.record(z.string(), z.boolean()).default({}),
+  defaultScope: z.enum(SCOPE_BANDS).optional(),
 });
 
 async function createRole(req, res) {

@@ -10,6 +10,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { TextInput, PrimaryButton, ErrorBanner } from '@hr/ui';
 import { get, post } from '@/lib/api';
+import ManagerPicker from '@/components/ManagerPicker';
 
 function asList(res) {
   if (Array.isArray(res)) return res;
@@ -48,6 +49,7 @@ export default function NewEmployeePage() {
     departmentId: '',
     designationId: '',
     locationId: '',
+    managerEmployeeId: '',
     dateOfJoining: '',
   });
   const [orgs, setOrgs] = useState({ departments: [], designations: [], locations: [] });
@@ -128,6 +130,11 @@ export default function NewEmployeePage() {
             value={form.locationId}
             onChange={(v) => set('locationId', v)}
             options={orgs.locations}
+          />
+          <ManagerPicker
+            value={form.managerEmployeeId}
+            onChange={(v) => set('managerEmployeeId', v)}
+            hint="Who this employee reports to. Leave empty for the top of the chain."
           />
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Date of joining</label>
