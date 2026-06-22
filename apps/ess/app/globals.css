@@ -1,0 +1,34 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================================
+   White-label theme variables.
+   These are seeded with neutral defaults so the app renders sensibly before
+   the tenant resolves; TenantProvider overwrites them on <html> with the
+   tenant's resolved brand (5 styles x 12 colors) via @hr/theme-engine.
+   ============================================================================ */
+:root {
+  --theme-primary: #4F46E5;
+  --theme-primary-dark: #3730A3;
+  --theme-accent: #4F46E5;
+  --theme-bg: #F8FAFC;
+  --theme-surface: #FFFFFF;
+  --theme-text: #0F172A;
+  --theme-muted: #0F172A99;
+  --theme-border: #0F172A22;
+  --theme-on-primary: #FFFFFF;
+  --theme-on-accent: #FFFFFF;
+}
+
+body {
+  background: var(--theme-bg);
+  color: var(--theme-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Thin branded scrollbar to match the portal look. */
+.ess-scroll { scrollbar-width: thin; scrollbar-color: #E2E8F0 transparent; }
+.ess-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+.ess-scroll::-webkit-scrollbar-thumb { background: #E2E8F0; border-radius: 8px; }
+.ess-scroll::-webkit-scrollbar-track { background: transparent; }

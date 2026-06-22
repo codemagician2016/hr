@@ -1,0 +1,28 @@
+{
+  "name": "@hr/ess",
+  "version": "0.1.0",
+  "private": true,
+  "//": "White-label Employee Self-Service (ESS) — served on tenant.com / <slug>.hr.com via the router on ESS_PORT=3020. Employee (customer) session.",
+  "scripts": {
+    "dev": "next dev -p 3020",
+    "build": "next build",
+    "start": "next start -p 3020",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@hr/theme-engine": "file:../../packages/theme-engine",
+    "@hr/types": "file:../../packages/types",
+    "@hr/ui": "file:../../packages/ui",
+    "next": "14.2.20",
+    "react": "^18",
+    "react-dom": "^18"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.19",
+    "eslint": "^8",
+    "eslint-config-next": "14.2.4",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.4"
+  },
+  "packageManager": "npm@10.8.2"
+}

@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Tenant theme tokens — set at runtime by AdminShell from the
+     resolved tenant theme. @hr/ui primitives (PrimaryButton, Spinner)
+     read --theme-primary, so these defaults keep them usable before a
+     tenant brand is resolved. */
+  --theme-primary: #4f46e5;
+  --theme-primary-fg: #ffffff;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+}
