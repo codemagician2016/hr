@@ -65,7 +65,7 @@ function DocumentsInner() {
                   )}
                 </div>
                 {href && (
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--theme-primary)"
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--theme-primary)" aria-hidden="true" focusable="false"
                        strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
                     <path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16" />
                   </svg>
@@ -75,7 +75,13 @@ function DocumentsInner() {
             return (
               <li key={d.id || i}>
                 {href ? (
-                  <a href={href} target="_blank" rel="noopener noreferrer" className="block active:scale-[0.99]">
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`${title} (opens in a new tab)`}
+                    className="block active:scale-[0.99]"
+                  >
                     {Inner}
                   </a>
                 ) : Inner}

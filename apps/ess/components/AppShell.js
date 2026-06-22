@@ -46,11 +46,16 @@ export default function AppShell({ children }) {
   return (
     <SessionContext.Provider value={me}>
       <div className="flex min-h-screen flex-col">
+        <a href="#main-content" className="skip-link">
+          Skip to main content
+        </a>
         <BrandHeader />
-        <main className="ess-scroll mx-auto w-full max-w-3xl flex-1 px-4 py-5">
+        <main id="main-content" className="ess-scroll mx-auto w-full max-w-3xl flex-1 px-4 py-5">
           {children}
         </main>
         <BottomNav />
+        {/* Polite live region for async toasts/errors raised by pages. */}
+        <div aria-live="polite" aria-atomic="true" className="sr-only" id="a11y-status" />
       </div>
     </SessionContext.Provider>
   );

@@ -112,12 +112,15 @@ export default function AdminShell({ children }) {
 
   return (
     <div className="min-h-screen flex bg-gray-50">
+      <a href="#main-content" className="skip-link">
+        Skip to main content
+      </a>
       <aside className="w-60 shrink-0 bg-white border-r border-gray-200 flex flex-col">
-        <div className="h-16 flex items-center gap-2 px-5 border-b border-gray-100">
+        <header className="h-16 flex items-center gap-2 px-5 border-b border-gray-100">
           {logoUrl ? (
             <>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={logoUrl} alt={tenantName || 'DriftHR'} className="h-8 w-auto max-w-[140px] object-contain" />
+              <img src={logoUrl} alt={tenantName ? `${tenantName} logo` : 'DriftHR'} className="h-8 w-auto max-w-[140px] object-contain" />
               {tenantName && (
                 <span className="text-sm font-semibold text-gray-900 truncate">{tenantName}</span>
               )}
@@ -127,14 +130,15 @@ export default function AdminShell({ children }) {
             // eslint-disable-next-line @next/next/no-img-element
             <img src="/drifthr-logo.svg" alt="DriftHR" className="h-7 w-auto" />
           )}
-        </div>
-        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+        </header>
+        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto" aria-label="Primary">
           {navItems.map((item) => {
             const active = isActive(pathname, item.href);
             return (
               <Link
                 key={item.key}
                 href={item.href}
+                aria-current={active ? 'page' : undefined}
                 className={`block rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
                   active ? 'text-white' : 'text-gray-700 hover:bg-gray-100'
                 }`}
@@ -159,8 +163,10 @@ export default function AdminShell({ children }) {
         </div>
       </aside>
       <div className="flex-1 min-w-0 flex flex-col">
-        <main className="flex-1 min-w-0 px-6 py-6">{children}</main>
+        <main id="main-content" className="flex-1 min-w-0 px-6 py-6">{children}</main>
       </div>
+      {/* Polite live region for async toasts/errors raised by pages. */}
+      <div aria-live="polite" aria-atomic="true" className="sr-only" id="a11y-status" />
     </div>
   );
 }

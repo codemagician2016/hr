@@ -50,7 +50,7 @@ export function Tabs({ tabs, active, onChange }) {
 
 // Generic styled table card. `columns` = [{ key, header, render?, className? }].
 // `rowKey` resolves a stable key per row. Renders Spinner / Empty states.
-export function DataTable({ columns, rows, loading, emptyText = 'Nothing here yet.', rowKey }) {
+export function DataTable({ columns, rows, loading, emptyText = 'Nothing here yet.', rowKey, caption }) {
   return (
     <div className="rounded-2xl border border-gray-200 bg-white overflow-x-auto">
       {loading ? (
@@ -61,10 +61,11 @@ export function DataTable({ columns, rows, loading, emptyText = 'Nothing here ye
         <Empty text={emptyText} />
       ) : (
         <table className="w-full text-sm">
+          {caption && <caption className="sr-only">{caption}</caption>}
           <thead>
             <tr className="text-left text-xs uppercase tracking-wide text-gray-500 border-b border-gray-100">
               {columns.map((c) => (
-                <th key={c.key} className={`px-4 py-3 font-medium ${c.className || ''}`}>
+                <th key={c.key} scope="col" className={`px-4 py-3 font-medium ${c.className || ''}`}>
                   {c.header}
                 </th>
               ))}

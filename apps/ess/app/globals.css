@@ -23,9 +23,49 @@
 
 body {
   background: var(--theme-bg);
+  /* --theme-text resolves to a dark ink per tenant; DriftHR default ink keeps
+     body copy at WCAG AA contrast on the light surface. */
   color: var(--theme-text);
   font-family: var(--font-manrope), ui-sans-serif, system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Visible keyboard focus (WCAG 2.4.7 / 2.4.11). Mouse users don't see it. */
+:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Screen-reader-only utility (visually hidden, still in the a11y tree). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Skip-to-content link: off-screen until focused, then pinned top-left. */
+.skip-link {
+  position: absolute;
+  left: 0.5rem;
+  top: -3rem;
+  z-index: 100;
+  padding: 0.5rem 0.875rem;
+  border-radius: 0.5rem;
+  background: var(--theme-primary);
+  color: var(--theme-on-primary);
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition: top 0.15s ease;
+}
+.skip-link:focus {
+  top: 0.5rem;
 }
 
 /* Thin branded scrollbar to match the portal look. */

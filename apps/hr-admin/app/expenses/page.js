@@ -98,7 +98,7 @@ export default function ExpensesPage() {
             setPage(1);
             setStatus(e.target.value);
           }}
-          className="px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none"
+          className="px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--theme-primary)]"
         >
           {STATUSES.map((s) => (
             <option key={s} value={s}>

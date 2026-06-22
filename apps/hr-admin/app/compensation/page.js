@@ -141,7 +141,7 @@ function RevisionsTab() {
           value={employeeId}
           onChange={(e) => setEmployeeId(e.target.value)}
           placeholder="Employee ID"
-          className="px-4 py-2.5 border border-gray-300 rounded-lg text-sm w-80 focus:outline-none"
+          className="px-4 py-2.5 border border-gray-300 rounded-lg text-sm w-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--theme-primary)]"
         />
         <button type="submit" className="px-4 py-2.5 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50">
           Load revisions

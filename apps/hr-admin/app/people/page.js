@@ -114,12 +114,16 @@ function PeopleInner() {
           }}
           className="flex gap-2"
         >
+          <label htmlFor="people-search" className="sr-only">
+            Search employees by name, code, or email
+          </label>
           <input
+            id="people-search"
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search name, code, email…"
-            className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none text-sm w-72"
+            className="px-4 py-2.5 border border-gray-300 rounded-lg text-sm w-72"
           />
           <button
             type="submit"
@@ -128,10 +132,14 @@ function PeopleInner() {
             Search
           </button>
         </form>
+        <label htmlFor="people-status" className="sr-only">
+          Filter by status
+        </label>
         <select
+          id="people-status"
           value={status}
           onChange={(e) => pushQuery({ status: e.target.value, page: 1 })}
-          className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none text-sm"
+          className="px-4 py-2.5 border border-gray-300 rounded-lg text-sm"
         >
           {STATUSES.map((s) => (
             <option key={s.value} value={s.value}>
@@ -152,14 +160,15 @@ function PeopleInner() {
           <Empty text="No employees match your filters." />
         ) : (
           <table className="w-full text-sm">
+            <caption className="sr-only">Employees</caption>
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-gray-500 border-b border-gray-100">
-                <th className="px-4 py-3 font-medium">Code</th>
-                <th className="px-4 py-3 font-medium">Name</th>
-                <th className="px-4 py-3 font-medium">Department</th>
-                <th className="px-4 py-3 font-medium">Designation</th>
-                <th className="px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3 font-medium">Joined</th>
+                <th scope="col" className="px-4 py-3 font-medium">Code</th>
+                <th scope="col" className="px-4 py-3 font-medium">Name</th>
+                <th scope="col" className="px-4 py-3 font-medium">Department</th>
+                <th scope="col" className="px-4 py-3 font-medium">Designation</th>
+                <th scope="col" className="px-4 py-3 font-medium">Status</th>
+                <th scope="col" className="px-4 py-3 font-medium">Joined</th>
               </tr>
             </thead>
             <tbody>

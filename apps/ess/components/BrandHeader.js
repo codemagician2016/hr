@@ -24,12 +24,12 @@ export default function BrandHeader() {
       }}
     >
       <div className="mx-auto flex h-14 max-w-3xl items-center gap-3 px-4">
-        <Link href="/" className="flex items-center gap-2 min-w-0">
+        <Link href="/" aria-label={`${name} — home`} className="flex items-center gap-2 min-w-0">
           {logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={logoUrl}
-              alt={name}
+              alt={`${name} logo`}
               className="h-8 w-auto max-w-[140px] rounded bg-white/10 object-contain"
             />
           ) : tenantName ? (

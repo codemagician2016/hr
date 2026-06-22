@@ -22,7 +22,8 @@ export default function BottomNav() {
   const pathname = usePathname() || '/';
   return (
     <nav className="sticky bottom-0 z-20 border-t bg-white/95 backdrop-blur"
-         style={{ borderColor: 'var(--theme-border)' }}>
+         style={{ borderColor: 'var(--theme-border)' }}
+         aria-label="Primary">
       <div className="mx-auto flex max-w-3xl items-stretch justify-around">
         {TABS.map((t) => {
           const active = isActive(pathname, t.href);
@@ -30,10 +31,11 @@ export default function BottomNav() {
             <Link
               key={t.href}
               href={t.href}
+              aria-current={active ? 'page' : undefined}
               className="flex flex-1 flex-col items-center gap-1 py-2 text-[11px] font-medium"
               style={{ color: active ? 'var(--theme-primary)' : 'var(--theme-muted)' }}
             >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"
                    stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <path d={t.icon} />
               </svg>

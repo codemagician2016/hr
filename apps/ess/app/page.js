@@ -34,7 +34,8 @@ function StatCard({ label, value, sub, href }) {
   const inner = (
     <div className="rounded-2xl border bg-white p-4 shadow-sm" style={{ borderColor: 'var(--theme-border)' }}>
       <div className="text-xs" style={{ color: 'var(--theme-muted)' }}>{label}</div>
-      <div className="mt-1 text-lg font-semibold" style={{ color: 'var(--theme-primary)' }}>{value}</div>
+      {/* Ink, not teal: brand teal on white fails WCAG AA contrast for this size. */}
+      <div className="mt-1 text-lg font-semibold" style={{ color: 'var(--theme-text)' }}>{value}</div>
       {sub && <div className="text-xs" style={{ color: 'var(--theme-muted)' }}>{sub}</div>}
     </div>
   );
@@ -125,7 +126,7 @@ function DashboardInner() {
               className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl"
               style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}
             >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"
                    stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <path d={t.icon} />
               </svg>
