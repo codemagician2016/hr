@@ -9,8 +9,10 @@
 // origin so cookie-auth (credentials:'include') stays same-origin from the
 // browser's perspective.
 
+// Default EMPTY → browser uses same-origin relative /api (the edge router proxies
+// /api → backend). A baked absolute URL (localhost) breaks prod fetches.
 const apiOrigin = String(
-  process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || 'http://localhost:3001'
+  process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || ''
 ).replace(/\/$/, '');
 
 const nextConfig = {
@@ -24,12 +26,7 @@ const nextConfig = {
     NEXT_PUBLIC_API_URL: apiOrigin,
   },
   async rewrites() {
-    return [
-      {
-        source: '/api/:path*',
-        destination: `${apiOrigin}/api/:path*`,
-      },
-    ];
+    return apiOrigin ? [{ source: '/api/:path*', destination: `${apiOrigin}/api/:path*` }] : [];
   },
 };
 
