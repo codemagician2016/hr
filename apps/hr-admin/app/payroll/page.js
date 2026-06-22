@@ -166,7 +166,9 @@ function RunDetail({ runId, onBack }) {
       get(`/api/hr/payroll/runs/${runId}/payslips`).catch(() => null),
     ])
       .then(([detail, slips]) => {
-        setRun(detail);
+        // API returns { payRun, lines, totals, anomalies }. Flatten payRun to the top
+        // so run.currencyCode/status/period* resolve; keep totals/lines/anomalies.
+        setRun(detail ? { ...(detail.payRun || {}), totals: detail.totals, lines: detail.lines, anomalies: detail.anomalies } : null);
         setPayslips(slips);
       })
       .catch((e) => setError(e.message || 'Failed to load pay run.'))
@@ -265,15 +267,15 @@ function RunDetail({ runId, onBack }) {
 
       <div className="grid sm:grid-cols-3 gap-4 mb-6">
         <div className="rounded-2xl border border-gray-200 bg-white p-5">
-          <div className="text-2xl font-semibold text-gray-900">{moneyish(totals.gross ?? totals.grossPay, run?.currencyCode)}</div>
+          <div className="text-2xl font-semibold text-gray-900">{moneyish(totals.totalGross ?? totals.gross ?? totals.grossPay, run?.currencyCode)}</div>
           <div className="text-sm text-gray-500 mt-1">Gross</div>
         </div>
         <div className="rounded-2xl border border-gray-200 bg-white p-5">
-          <div className="text-2xl font-semibold text-gray-900">{moneyish(totals.deductions ?? totals.totalDeductions, run?.currencyCode)}</div>
+          <div className="text-2xl font-semibold text-gray-900">{moneyish(totals.totalDeductions ?? totals.deductions, run?.currencyCode)}</div>
           <div className="text-sm text-gray-500 mt-1">Deductions</div>
         </div>
         <div className="rounded-2xl border border-gray-200 bg-white p-5">
-          <div className="text-2xl font-semibold text-gray-900">{moneyish(totals.netPay ?? totals.net, run?.currencyCode)}</div>
+          <div className="text-2xl font-semibold text-gray-900">{moneyish(totals.totalNet ?? totals.netPay ?? totals.net, run?.currencyCode)}</div>
           <div className="text-sm text-gray-500 mt-1">Net pay</div>
         </div>
       </div>

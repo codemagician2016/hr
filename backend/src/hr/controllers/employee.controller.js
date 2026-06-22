@@ -36,7 +36,12 @@ async function list(req, res, next) {
     const skip = (Math.max(parseInt(page, 10) || 1, 1) - 1) * take;
 
     const where = { businessId, deletedAt: null };
-    if (status) where.status = status;
+    // Normalise the status filter to the EmployeeStatus enum (UI sends e.g. ?status=active).
+    if (status) {
+      const s = String(status).toUpperCase().replace(/[-\s]+/g, '_');
+      const VALID = ['PRE_HIRE', 'PROBATION', 'ACTIVE', 'ON_LEAVE', 'NOTICE_PERIOD', 'SUSPENDED', 'TERMINATED', 'RETIRED'];
+      if (VALID.includes(s)) where.status = s;
+    }
     if (q) {
       where.OR = [
         { firstName: { contains: q, mode: 'insensitive' } },
