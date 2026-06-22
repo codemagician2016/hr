@@ -6315,7 +6315,11 @@ model Entity {
   @@index([businessId, countryCode, status])
 }
 
-enum EntityStatus { ACTIVE SUSPENDED CLOSED }
+enum EntityStatus {
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
 
 /// Physical work-site. Generalizes Sitepresso BusinessLocation, bound to an
 /// Entity and carrying HR fields (PT state, ACC class unit, geofence).
@@ -6531,8 +6535,22 @@ model Employee {
   @@index([businessId, workEmail])
 }
 
-enum Gender        { MALE FEMALE NON_BINARY UNDISCLOSED OTHER }
-enum MaritalStatus { SINGLE MARRIED DIVORCED WIDOWED SEPARATED CIVIL_UNION UNDISCLOSED }
+enum Gender {
+  MALE
+  FEMALE
+  NON_BINARY
+  UNDISCLOSED
+  OTHER
+}
+enum MaritalStatus {
+  SINGLE
+  MARRIED
+  DIVORCED
+  WIDOWED
+  SEPARATED
+  CIVIL_UNION
+  UNDISCLOSED
+}
 enum EmployeeStatus {
   PRE_HIRE      // offer accepted, not joined
   PROBATION
@@ -6583,7 +6601,16 @@ model EmploymentRecord {
   @@index([businessId, departmentId])
 }
 
-enum EmploymentType { FULL_TIME PART_TIME FIXED_TERM CONTRACT INTERN APPRENTICE CASUAL CONSULTANT }
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  FIXED_TERM
+  CONTRACT
+  INTERN
+  APPRENTICE
+  CASUAL
+  CONSULTANT
+}
 enum WorkerCategory { STAFF WORKER } // IN Industrial Relations Code distinction
 enum EmploymentChangeReason {
   HIRE PROMOTION TRANSFER_LOCATION TRANSFER_DEPARTMENT
@@ -6651,7 +6678,13 @@ model Dependant {
   @@index([businessId, employeeId])
 }
 
-enum DependantRelation { SPOUSE CHILD PARENT SIBLING OTHER }
+enum DependantRelation {
+  SPOUSE
+  CHILD
+  PARENT
+  SIBLING
+  OTHER
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §5  COMPENSATION & SALARY STRUCTURES
@@ -6714,10 +6747,32 @@ enum ComponentKind {
   LOAN_REPAYMENT ADVANCE_RECOVERY LEAVE_ENCASHMENT NOTICE_RECOVERY
   REIMBURSEMENT_FUEL REIMBURSEMENT_PHONE CUSTOM
 }
-enum ComponentCategory  { EARNING DEDUCTION EMPLOYER_COST REIMBURSEMENT }
-enum ComponentCalcMethod { FLAT PERCENT_OF FORMULA SLAB STATUTORY BALANCING }
-enum ComponentBaseScope  { SINGLE MULTIPLE GROSS CTC }
-enum ProrationMethod     { CALENDAR_DAYS WORKING_DAYS THIRTY_DAY_STANDARD NONE }
+enum ComponentCategory {
+  EARNING
+  DEDUCTION
+  EMPLOYER_COST
+  REIMBURSEMENT
+}
+enum ComponentCalcMethod {
+  FLAT
+  PERCENT_OF
+  FORMULA
+  SLAB
+  STATUTORY
+  BALANCING
+}
+enum ComponentBaseScope {
+  SINGLE
+  MULTIPLE
+  GROSS
+  CTC
+}
+enum ProrationMethod {
+  CALENDAR_DAYS
+  WORKING_DAYS
+  THIRTY_DAY_STANDARD
+  NONE
+}
 
 /// Reusable salary template per grade/entity.
 model SalaryStructure {
@@ -6741,7 +6796,11 @@ model SalaryStructure {
   @@index([businessId, entityId, isActive])
 }
 
-enum StructureBasis { CTC GROSS NET }
+enum StructureBasis {
+  CTC
+  GROSS
+  NET
+}
 
 /// A component within a structure OR an assigned compensation revision.
 model SalaryComponentLine {
@@ -6801,7 +6860,14 @@ model CompensationRevision {
   @@index([businessId, entityId, effectiveFrom])
 }
 
-enum CompRevisionReason { HIRE ANNUAL_REVISION PROMOTION CORRECTION RESTRUCTURE STATUTORY_ADJUSTMENT }
+enum CompRevisionReason {
+  HIRE
+  ANNUAL_REVISION
+  PROMOTION
+  CORRECTION
+  RESTRUCTURE
+  STATUTORY_ADJUSTMENT
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §6  STATUTORY PROFILES  (per-employee identity/elections + per-entity regs)
@@ -6855,8 +6921,17 @@ model StatutoryProfile {
   @@index([businessId, irdNumber])
 }
 
-enum INTaxRegime     { NEW OLD }
-enum KiwiSaverStatus { NOT_ENROLLED ACTIVE OPTED_OUT SAVINGS_SUSPENSION CASUAL_AGRICULTURAL }
+enum INTaxRegime {
+  NEW
+  OLD
+}
+enum KiwiSaverStatus {
+  NOT_ENROLLED
+  ACTIVE
+  OPTED_OUT
+  SAVINGS_SUSPENSION
+  CASUAL_AGRICULTURAL
+}
 
 /// Append-only audit of regime/rate elections (effective-dated).
 model StatutoryElectionHistory {
@@ -6897,7 +6972,16 @@ model StatutoryRegistration {
   @@index([businessId, entityId, kind])
 }
 
-enum RegistrationKind { EPF ESI PT_STATE TAN LWF SHOPS_ESTABLISHMENT IRD_PAYE ACC }
+enum RegistrationKind {
+  EPF
+  ESI
+  PT_STATE
+  TAN
+  LWF
+  SHOPS_ESTABLISHMENT
+  IRD_PAYE
+  ACC
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §7  PAY CALENDAR · PAY RUN · PAY RUN LINE · PAYSLIP · REMITTANCE
@@ -6933,8 +7017,18 @@ model PayCalendar {
   @@index([businessId, entityId, isActive])
 }
 
-enum PayFrequency { WEEKLY FORTNIGHTLY SEMI_MONTHLY MONTHLY }
-enum PayDayRule   { LAST_WORKING_DAY FIRST_WORKING_DAY FIXED_DOM N_DAYS_AFTER_PERIOD_END }
+enum PayFrequency {
+  WEEKLY
+  FORTNIGHTLY
+  SEMI_MONTHLY
+  MONTHLY
+}
+enum PayDayRule {
+  LAST_WORKING_DAY
+  FIRST_WORKING_DAY
+  FIXED_DOM
+  N_DAYS_AFTER_PERIOD_END
+}
 
 /// Period batch (per entity, per cycle). LOCKED ⇒ child lines/payslips
 /// read-only; corrections spawn a CORRECTION child run.
@@ -6990,7 +7084,15 @@ model PayRun {
   @@index([businessId, taxYear])
 }
 
-enum PayRunType   { REGULAR OFF_CYCLE BONUS ARREAR FNF CORRECTION SUPPLEMENTARY }
+enum PayRunType {
+  REGULAR
+  OFF_CYCLE
+  BONUS
+  ARREAR
+  FNF
+  CORRECTION
+  SUPPLEMENTARY
+}
 enum PayRunStatus {
   DRAFT INPUTS_LOCKED COMPUTING COMPUTED REVIEW
   LOCKED APPROVED PAID FILED CANCELLED
@@ -7076,7 +7178,14 @@ model PayRunLine {
   @@index([businessId, payRunId, status])
 }
 
-enum PayRunLineStatus { PENDING COMPUTED ON_HOLD ERROR EXCLUDED FINALIZED }
+enum PayRunLineStatus {
+  PENDING
+  COMPUTED
+  ON_HOLD
+  ERROR
+  EXCLUDED
+  FINALIZED
+}
 
 /// Every component amount on a line (audit-grade, append-only).
 model PayRunLineComponent {
@@ -7138,7 +7247,12 @@ model Payslip {
   @@index([businessId, employeeId, payDate])
 }
 
-enum PayslipStatus { GENERATED PUBLISHED VIEWED SUPERSEDED }
+enum PayslipStatus {
+  GENERATED
+  PUBLISHED
+  VIEWED
+  SUPERSEDED
+}
 
 /// Employer filing/payment obligations generated from a pay run.
 model StatutoryRemittance {
@@ -7172,7 +7286,14 @@ enum RemittanceKind {
   IN_TDS IN_PF IN_ESI IN_PT IN_LWF IN_FORM24Q IN_FORM16
   NZ_PAYE NZ_PAYDAY_FILING NZ_KIWISAVER NZ_ESCT NZ_STUDENT_LOAN NZ_ACC
 }
-enum RemittanceStatus { PENDING DUE FILED PAID OVERDUE WAIVED }
+enum RemittanceStatus {
+  PENDING
+  DUE
+  FILED
+  PAID
+  OVERDUE
+  WAIVED
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §8  LEAVE  (type → policy → assignment → balance → transaction)
@@ -7214,7 +7335,11 @@ enum LeaveCategory {
   PUBLIC_HOLIDAY ALTERNATIVE_DAY COMP_OFF UNPAID SABBATICAL
   MARRIAGE ADOPTION FAMILY_VIOLENCE OTHER
 }
-enum LeaveUnit { DAYS HOURS WEEKS }
+enum LeaveUnit {
+  DAYS
+  HOURS
+  WEEKS
+}
 enum NZLeavePayBasis {
   RDP      // Relevant Daily Pay (Holidays Act s9)
   ADP      // Average Daily Pay (s9A)
@@ -7265,8 +7390,19 @@ model LeavePolicy {
   @@index([businessId, leaveTypeId, entityId])
 }
 
-enum AccrualMethod    { UPFRONT_ANNUAL MONTHLY_ACCRUAL ANNIVERSARY_GRANT WORKED_HOURS_RATIO CONTINUOUS_NZ }
-enum AccrualFrequency { MONTHLY QUARTERLY ANNUAL PER_PAY_PERIOD }
+enum AccrualMethod {
+  UPFRONT_ANNUAL
+  MONTHLY_ACCRUAL
+  ANNIVERSARY_GRANT
+  WORKED_HOURS_RATIO
+  CONTINUOUS_NZ
+}
+enum AccrualFrequency {
+  MONTHLY
+  QUARTERLY
+  ANNUAL
+  PER_PAY_PERIOD
+}
 
 /// Tenure-tiered accrual (more EL after N years). Append-only config row.
 model AccrualRule {
@@ -7299,7 +7435,13 @@ model LeavePolicyAssignment {
   @@index([businessId, leavePolicyId, scope, scopeRefId])
 }
 
-enum AssignmentScope { ENTITY DEPARTMENT GRADE EMPLOYMENT_TYPE EMPLOYEE }
+enum AssignmentScope {
+  ENTITY
+  DEPARTMENT
+  GRADE
+  EMPLOYMENT_TYPE
+  EMPLOYEE
+}
 
 /// Running balance per (employee, leaveType, period). Derived `closing` is
 /// persisted for fast reads; reconstructable from LeaveTransaction ledger.
@@ -7371,9 +7513,28 @@ model LeaveTransaction {
   @@index([businessId, startDate, endDate])
 }
 
-enum LeaveTxnType   { ACCRUAL APPLICATION CANCELLATION ENCASHMENT LAPSE ADJUSTMENT OPENING_BALANCE }
-enum LeaveTxnStatus { DRAFT PENDING APPROVED REJECTED CANCELLED WITHDRAWN AVAILED }
-enum DayHalf        { FIRST_HALF SECOND_HALF }
+enum LeaveTxnType {
+  ACCRUAL
+  APPLICATION
+  CANCELLATION
+  ENCASHMENT
+  LAPSE
+  ADJUSTMENT
+  OPENING_BALANCE
+}
+enum LeaveTxnStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+  WITHDRAWN
+  AVAILED
+}
+enum DayHalf {
+  FIRST_HALF
+  SECOND_HALF
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §9  ATTENDANCE · SHIFTS · TIMESHEETS  (mined from booking StaffSchedule,
@@ -7449,7 +7610,13 @@ model Holiday {
   @@index([businessId, entityId, locationId, date])
 }
 
-enum HolidayType { PUBLIC NATIONAL REGIONAL COMPANY RESTRICTED_OPTIONAL }
+enum HolidayType {
+  PUBLIC
+  NATIONAL
+  REGIONAL
+  COMPANY
+  RESTRICTED_OPTIONAL
+}
 
 model AttendancePunch {
   id          String   @id @default(uuid())
@@ -7474,8 +7641,22 @@ model AttendancePunch {
   @@index([businessId, locationId, punchAt])
 }
 
-enum PunchType   { IN OUT BREAK_START BREAK_END }
-enum PunchSource { WEB MOBILE_APP BIOMETRIC KIOSK GEO_FENCE API IMPORT MANUAL }
+enum PunchType {
+  IN
+  OUT
+  BREAK_START
+  BREAK_END
+}
+enum PunchSource {
+  WEB
+  MOBILE_APP
+  BIOMETRIC
+  KIOSK
+  GEO_FENCE
+  API
+  IMPORT
+  MANUAL
+}
 
 /// Derived daily summary (one per emp/day).
 model Attendance {
@@ -7532,7 +7713,13 @@ model Timesheet {
   @@index([businessId, status])
 }
 
-enum TimesheetStatus { DRAFT SUBMITTED APPROVED REJECTED LOCKED }
+enum TimesheetStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  LOCKED
+}
 
 model TimesheetEntry {
   id          String   @id @default(uuid())
@@ -7649,7 +7836,14 @@ model ExpenseClaimLine {
   @@index([businessId, claimId])
 }
 
-enum ExpenseClaimStatus { DRAFT SUBMITTED APPROVED REJECTED REIMBURSED CANCELLED }
+enum ExpenseClaimStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  REIMBURSED
+  CANCELLED
+}
 
 // ── Employee loans / salary advances ──────────────────────────────────────
 // A LoanScheme is the reusable product/template (interest rate, max tenure).
@@ -7743,9 +7937,24 @@ model LoanInstallment {
   @@index([businessId, status])
 }
 
-enum LoanType { LOAN ADVANCE }
-enum LoanStatus { DRAFT PENDING APPROVED REJECTED DISBURSED CLOSED CANCELLED }
-enum InstallmentStatus { PENDING PAID WAIVED }
+enum LoanType {
+  LOAN
+  ADVANCE
+}
+enum LoanStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+  DISBURSED
+  CLOSED
+  CANCELLED
+}
+enum InstallmentStatus {
+  PENDING
+  PAID
+  WAIVED
+}
 
 // =============================================================================
 // HR FORK — schema-gap-fix: previously-dangling relation targets now defined.
@@ -7839,8 +8048,18 @@ enum DocumentCategory {
   EDUCATION EXPERIENCE OFFER_LETTER CONTRACT PAYSLIP_COPY
   TAX_DECLARATION FORM16 BANK_PROOF MEDICAL POLICY_ACK OTHER
 }
-enum DocumentVisibility { HR_ONLY MANAGER_AND_HR EMPLOYEE_VISIBLE }
-enum SignatureStatus    { NOT_REQUIRED PENDING SIGNED DECLINED EXPIRED }
+enum DocumentVisibility {
+  HR_ONLY
+  MANAGER_AND_HR
+  EMPLOYEE_VISIBLE
+}
+enum SignatureStatus {
+  NOT_REQUIRED
+  PENDING
+  SIGNED
+  DECLINED
+  EXPIRED
+}
 
 model DocumentTemplate {                                // fixed-layout, merge-field templates
   id          String   @id @default(uuid())
@@ -7924,7 +8143,12 @@ model AttendanceRegularizationRequest {                // backs AttendancePunch.
   @@index([businessId, employeeId, date])
 }
 
-enum RequestStatus { PENDING APPROVED REJECTED CANCELLED }
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
 
 // ── §13 Asset management ──
 model Asset {
@@ -7951,9 +8175,34 @@ model Asset {
   @@index([businessId, status, category])
 }
 
-enum AssetCategory  { LAPTOP DESKTOP MOBILE MONITOR ACCESSORY SIM VEHICLE FURNITURE ID_CARD ACCESS_CARD SOFTWARE_LICENSE OTHER }
-enum AssetCondition { NEW GOOD FAIR DAMAGED RETIRED }
-enum AssetStatus    { AVAILABLE ASSIGNED IN_REPAIR LOST RETIRED }
+enum AssetCategory {
+  LAPTOP
+  DESKTOP
+  MOBILE
+  MONITOR
+  ACCESSORY
+  SIM
+  VEHICLE
+  FURNITURE
+  ID_CARD
+  ACCESS_CARD
+  SOFTWARE_LICENSE
+  OTHER
+}
+enum AssetCondition {
+  NEW
+  GOOD
+  FAIR
+  DAMAGED
+  RETIRED
+}
+enum AssetStatus {
+  AVAILABLE
+  ASSIGNED
+  IN_REPAIR
+  LOST
+  RETIRED
+}
 
 model AssetAssignment {
   id          String   @id @default(uuid())
@@ -7977,7 +8226,13 @@ model AssetAssignment {
   @@index([businessId, assetId])
 }
 
-enum AssetAssignmentStatus { ASSIGNED RETURNED LOST DAMAGED PENDING_RECOVERY }
+enum AssetAssignmentStatus {
+  ASSIGNED
+  RETURNED
+  LOST
+  DAMAGED
+  PENDING_RECOVERY
+}
 
 // ── §14 Performance ──
 model ReviewCycle {
@@ -7999,8 +8254,22 @@ model ReviewCycle {
   @@index([businessId, status])
 }
 
-enum ReviewCycleType   { ANNUAL HALF_YEARLY QUARTERLY PROBATION PROJECT CONTINUOUS }
-enum ReviewCycleStatus { DRAFT ACTIVE SELF_REVIEW MANAGER_REVIEW CALIBRATION CLOSED }
+enum ReviewCycleType {
+  ANNUAL
+  HALF_YEARLY
+  QUARTERLY
+  PROBATION
+  PROJECT
+  CONTINUOUS
+}
+enum ReviewCycleStatus {
+  DRAFT
+  ACTIVE
+  SELF_REVIEW
+  MANAGER_REVIEW
+  CALIBRATION
+  CLOSED
+}
 
 model PerformanceReview {
   id          String   @id @default(uuid())
@@ -8028,7 +8297,14 @@ model PerformanceReview {
   @@index([businessId, reviewerId, status])
 }
 
-enum ReviewStatus { NOT_STARTED SELF_SUBMITTED MANAGER_SUBMITTED CALIBRATED ACKNOWLEDGED CLOSED }
+enum ReviewStatus {
+  NOT_STARTED
+  SELF_SUBMITTED
+  MANAGER_SUBMITTED
+  CALIBRATED
+  ACKNOWLEDGED
+  CLOSED
+}
 
 model Goal {
   id          String   @id @default(uuid())
@@ -8052,8 +8328,22 @@ model Goal {
   @@index([businessId, employeeId, status])
 }
 
-enum GoalCategory { ORGANIZATION DEPARTMENT TEAM INDIVIDUAL DEVELOPMENT }
-enum GoalStatus   { DRAFT ACTIVE ON_TRACK AT_RISK ACHIEVED MISSED CANCELLED }
+enum GoalCategory {
+  ORGANIZATION
+  DEPARTMENT
+  TEAM
+  INDIVIDUAL
+  DEVELOPMENT
+}
+enum GoalStatus {
+  DRAFT
+  ACTIVE
+  ON_TRACK
+  AT_RISK
+  ACHIEVED
+  MISSED
+  CANCELLED
+}
 
 model EmployeeSkill {
   id          String   @id @default(uuid())
@@ -8101,7 +8391,14 @@ model Job {                                             // requisition
   @@index([businessId, status])
 }
 
-enum JobStatus { DRAFT OPEN ON_HOLD CLOSED CANCELLED FILLED }
+enum JobStatus {
+  DRAFT
+  OPEN
+  ON_HOLD
+  CLOSED
+  CANCELLED
+  FILLED
+}
 
 model JobStage {                                        // configurable pipeline (fixed stage kinds)
   id          String   @id @default(uuid())
@@ -8117,7 +8414,16 @@ model JobStage {                                        // configurable pipeline
   @@index([businessId, jobId])
 }
 
-enum StageKind { SOURCED SCREENING INTERVIEW ASSESSMENT OFFER HIRED REJECTED WITHDRAWN }
+enum StageKind {
+  SOURCED
+  SCREENING
+  INTERVIEW
+  ASSESSMENT
+  OFFER
+  HIRED
+  REJECTED
+  WITHDRAWN
+}
 
 model Candidate {
   id          String   @id @default(uuid())
@@ -8162,7 +8468,17 @@ model Application {
   @@index([businessId, status])
 }
 
-enum ApplicationStatus { APPLIED SCREENING INTERVIEWING ASSESSMENT OFFERED HIRED REJECTED WITHDRAWN ON_HOLD }
+enum ApplicationStatus {
+  APPLIED
+  SCREENING
+  INTERVIEWING
+  ASSESSMENT
+  OFFERED
+  HIRED
+  REJECTED
+  WITHDRAWN
+  ON_HOLD
+}
 
 model Interview {
   id          String   @id @default(uuid())
@@ -8182,9 +8498,25 @@ model Interview {
   @@index([businessId, applicationId])
 }
 
-enum InterviewMode           { ONSITE VIDEO PHONE }
-enum InterviewRecommendation { STRONG_YES YES NEUTRAL NO STRONG_NO }
-enum InterviewStatus         { SCHEDULED COMPLETED NO_SHOW CANCELLED RESCHEDULED }
+enum InterviewMode {
+  ONSITE
+  VIDEO
+  PHONE
+}
+enum InterviewRecommendation {
+  STRONG_YES
+  YES
+  NEUTRAL
+  NO
+  STRONG_NO
+}
+enum InterviewStatus {
+  SCHEDULED
+  COMPLETED
+  NO_SHOW
+  CANCELLED
+  RESCHEDULED
+}
 
 model Offer {
   id          String   @id @default(uuid())
@@ -8209,7 +8541,16 @@ model Offer {
   @@index([businessId, applicationId, status])
 }
 
-enum OfferStatus { DRAFT PENDING_APPROVAL APPROVED SENT ACCEPTED DECLINED EXPIRED REVOKED }
+enum OfferStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  SENT
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  REVOKED
+}
 
 // ── §16 Helpdesk (HR case management) ──
 model HelpdeskCategory {
@@ -8252,8 +8593,21 @@ model HelpdeskTicket {
   @@index([businessId, assigneeId, status])
 }
 
-enum TicketPriority { LOW NORMAL HIGH URGENT }
-enum TicketStatus   { OPEN IN_PROGRESS WAITING_ON_EMPLOYEE RESOLVED CLOSED REOPENED CANCELLED }
+enum TicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_ON_EMPLOYEE
+  RESOLVED
+  CLOSED
+  REOPENED
+  CANCELLED
+}
 
 model HelpdeskMessage {
   id          String   @id @default(uuid())
@@ -8312,8 +8666,21 @@ model WorkflowStep {
   @@index([businessId, workflowDefinitionId])
 }
 
-enum ApproverType   { REPORTING_MANAGER DEPARTMENT_HEAD HR PAYROLL_MANAGER SPECIFIC_ROLE SPECIFIC_EMPLOYEE AUTO_APPROVE }
-enum TimeoutAction  { ESCALATE AUTO_APPROVE AUTO_REJECT REMIND }
+enum ApproverType {
+  REPORTING_MANAGER
+  DEPARTMENT_HEAD
+  HR
+  PAYROLL_MANAGER
+  SPECIFIC_ROLE
+  SPECIFIC_EMPLOYEE
+  AUTO_APPROVE
+}
+enum TimeoutAction {
+  ESCALATE
+  AUTO_APPROVE
+  AUTO_REJECT
+  REMIND
+}
 
 model ApprovalRequest {
   id          String   @id @default(uuid())
@@ -8339,7 +8706,15 @@ model ApprovalRequest {
   @@index([businessId, entityType, entityId])
 }
 
-enum ApprovalStatus { PENDING APPROVED REJECTED CANCELLED ESCALATED EXPIRED WITHDRAWN }
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+  ESCALATED
+  EXPIRED
+  WITHDRAWN
+}
 
 model ApprovalAction {
   id          String   @id @default(uuid())
@@ -8357,7 +8732,13 @@ model ApprovalAction {
   @@index([businessId, approvalRequestId])
 }
 
-enum ApprovalDecision { APPROVED REJECTED REQUESTED_CHANGES DELEGATED ABSTAINED }
+enum ApprovalDecision {
+  APPROVED
+  REJECTED
+  REQUESTED_CHANGES
+  DELEGATED
+  ABSTAINED
+}
 
 // ── §19.2 Notification ──
 model Notification {
@@ -8386,8 +8767,20 @@ enum NotificationType {
   DOC_EXPIRING BIRTHDAY ANNIVERSARY REVIEW_DUE TIMESHEET_DUE
   STATUTORY_DUE ONBOARDING_TASK OFFBOARDING_TASK ASSET_RETURN_DUE
 }
-enum NotificationChannel { IN_APP EMAIL SMS WHATSAPP PUSH }
-enum DeliveryStatus      { QUEUED SENT DELIVERED FAILED READ }
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  SMS
+  WHATSAPP
+  PUSH
+}
+enum DeliveryStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  FAILED
+  READ
+}
 
 // ── §19.3 NumberSequence — tenant-safe human codes ──
 model NumberSequence {
