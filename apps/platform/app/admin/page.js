@@ -14,7 +14,7 @@ import { useConfirm } from '@/components/ConfirmDialog';
 // ---------------- Nav metadata (shared by sidebar + page header) ----------------
 
 const NAV_ITEMS = [
-  { key: 'analytics',     label: 'Analytics',     sub: 'Revenue, bookings, trends',    icon: IconChart },
+  { key: 'analytics',     label: 'Analytics',     sub: 'Revenue, MRR & growth trends',  icon: IconChart },
   { key: 'billing',       label: 'Billing',       sub: 'Payments, invoices, and subscription health', icon: IconCreditCard },
   { key: 'emails',        label: 'Emails',        sub: 'Delivery history and failures', icon: IconMail },
   { key: 'overview',      label: 'Overview',      sub: 'Platform at a glance',         icon: IconHome },
@@ -152,7 +152,7 @@ function SuperAdminDashboardContent() {
         <header className="lg:hidden sticky top-0 z-30 bg-white border-b border-gray-200 px-4 h-14 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2">
             <BrandMark />
-            <span className="font-semibold text-gray-900">Sitepresso</span>
+            <span className="font-semibold text-gray-900">HR Admin</span>
           </Link>
           <button onClick={() => setMobileNavOpen(true)} className="p-2 -mr-2 text-gray-600">
             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -308,7 +308,7 @@ function SupportConversationsTab() {
               value={reply}
               onChange={(e) => setReply(e.target.value)}
               rows={3}
-              placeholder="Reply as Sitepresso support..."
+              placeholder="Reply as HR support..."
               className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
             />
             <div className="mt-3 flex justify-end">
@@ -340,7 +340,7 @@ function Sidebar({ tab, onSelect, me, open, onClose }) {
           <Link href="/" className="flex items-center gap-2.5">
             <BrandMark />
             <div>
-              <div className="font-semibold text-gray-900 leading-tight">Sitepresso</div>
+              <div className="font-semibold text-gray-900 leading-tight">HR Platform</div>
               <div className="text-[10px] font-mono tracking-[0.2em] text-indigo-600 uppercase">Super Admin</div>
             </div>
           </Link>
@@ -536,7 +536,7 @@ function AnalyticsDashboard({ businesses }) {
       {/* Row 1: Bookings trend + Status pie */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-900 mb-4">Booking trend</h3>
+          <h3 className="text-sm font-semibold text-gray-900 mb-4">Activity trend</h3>
           {ResponsiveContainer && data.dailyBookings?.length > 0 ? (
             <ResponsiveContainer width="100%" height={280}>
               <LineChart data={data.dailyBookings}>
@@ -548,7 +548,7 @@ function AnalyticsDashboard({ businesses }) {
               </LineChart>
             </ResponsiveContainer>
           ) : (
-            <div className="h-[280px] flex items-center justify-center text-sm text-gray-400">No booking data for this period</div>
+            <div className="h-[280px] flex items-center justify-center text-sm text-gray-400">No activity data for this period</div>
           )}
         </div>
 
@@ -573,7 +573,7 @@ function AnalyticsDashboard({ businesses }) {
       {/* Row 2: Day of week + Hourly distribution */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-900 mb-4">Bookings by day of week</h3>
+          <h3 className="text-sm font-semibold text-gray-900 mb-4">Activity by day of week</h3>
           {BarChart && data.bookingsByDow?.length > 0 ? (
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={data.bookingsByDow}>
@@ -590,7 +590,7 @@ function AnalyticsDashboard({ businesses }) {
         </div>
 
         <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-900 mb-4">Peak booking hours</h3>
+          <h3 className="text-sm font-semibold text-gray-900 mb-4">Peak activity hours</h3>
           {BarChart && data.hourlyDistribution?.length > 0 ? (
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={data.hourlyDistribution}>
@@ -644,7 +644,7 @@ function AnalyticsDashboard({ businesses }) {
         </div>
       </div>
 
-      {/* Row 4: Customer growth + Booking duration */}
+      {/* Row 4: Customer growth + Session duration */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <h3 className="text-sm font-semibold text-gray-900 mb-4">Customer growth</h3>
@@ -719,7 +719,7 @@ function AnalyticsDashboard({ businesses }) {
 
       {/* Row 6: Top businesses ranking */}
       <div className="bg-white rounded-xl border border-gray-200 p-5">
-        <h3 className="text-sm font-semibold text-gray-900 mb-4">Top businesses by bookings</h3>
+        <h3 className="text-sm font-semibold text-gray-900 mb-4">Top tenants by activity</h3>
         {BarChart && data.topBusinesses?.length > 0 ? (
           <ResponsiveContainer width="100%" height={250}>
             <BarChart data={data.topBusinesses}>
@@ -1193,8 +1193,8 @@ function BusinessesTab({ businesses, onReload }) {
                 <th className="py-3 pr-4">Plan</th>
                 <th className="py-3 pr-4">Theme</th>
                 <th className="py-3 pr-4">Status</th>
-                <th className="py-3 pr-4 text-right">Staff</th>
-                <th className="py-3 pr-4 text-right">Appts</th>
+                <th className="py-3 pr-4 text-right">Employees</th>
+                <th className="py-3 pr-4 text-right">Records</th>
                 <th className="py-3 pr-4">Joined</th>
                 <th className="py-3 text-right">Actions</th>
               </tr>
@@ -1255,6 +1255,11 @@ function BusinessesTab({ businesses, onReload }) {
                           <svg className="w-3.5 h-3.5 text-gray-600" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                             <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3" strokeLinecap="round" strokeLinejoin="round" />
                           </svg>
+                        </a>
+                        <a href={`/${b.slug}/admin`} target="_blank" rel="noopener noreferrer"
+                          className="px-2.5 py-1 text-[10px] font-semibold rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50"
+                          title="Open this tenant's admin as an operator (impersonate)">
+                          Impersonate
                         </a>
                         {isSuspended ? (
                           <button onClick={() => toggleSuspend(b.id, false)} disabled={pendingId === b.id}

@@ -16,6 +16,13 @@ router.use('/assets', require('./assets.routes'));
 router.use('/expenses', require('./expenses.routes'));
 router.use('/loans', require('./loans.routes'));
 
+// Talent (recruitment/ATS + performance). RBAC: recruitment -> canManageEmployees;
+// performance -> canViewEmployees (read) / canManageEmployees (write). The offer
+// pre-flight reuses the payroll engine's India 50% wage check.
+const talent = require('../talent/routes');
+router.use('/recruitment', talent.recruitment);
+router.use('/performance', talent.performance);
+
 // Payroll orchestration — operator API (RBAC: canRunPayroll / canApprovePayroll
 // / canViewPayrollReports) and the ESS payslip API (customer session). The
 // /me/payslips router uses the customer-auth middleware internally.
