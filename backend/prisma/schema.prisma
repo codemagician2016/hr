@@ -465,6 +465,7 @@ model Business {
   hrHolidays               Holiday[]
   attendancePunches        AttendancePunch[]
   attendances             Attendance[]
+  overtimeRules            OvertimeRule[]
   timesheets               Timesheet[]
   // Expense / loan
   expenseCategories        ExpenseCategory[]
@@ -6560,6 +6561,7 @@ model Employee {
   punches           AttendancePunch[]
   shiftAssignments  ShiftAssignment[]
   timesheets        Timesheet[]
+  attendances       Attendance[]        @relation("EmployeeAttendances")
   attendancePayInputs AttendancePayInput[]
   expenseClaims     ExpenseClaim[]
   loans             Loan[]
@@ -7671,8 +7673,13 @@ model ShiftPattern {
   endTime       String // "18:00"
   breakMinutes  Int     @default(60)
   graceInMinutes Int    @default(10)
+  graceOutMinutes Int?  // early-out grace; defaults to graceInMinutes
   halfDayThresholdMinutes Int?
+  minMinutesForPresent Int? // defaults to halfDayThresholdMinutes
   fullDayMinutes Int    @default(480)
+  isFlexi       Boolean @default(false)
+  otEligible    Boolean @default(false)
+  dailyOtThresholdMin Int? // OT beyond N min/day (default = fullDayMinutes)
   isNightShift  Boolean @default(false)
   crossesMidnight Boolean @default(false)
   weeklyOffDays String  @default("0") // CSV ISO weekday (0=Sun)
@@ -7684,6 +7691,7 @@ model ShiftPattern {
   assignments   ShiftAssignment[]
 
   @@unique([businessId, code])
+  @@index([businessId, isActive])
 }
 
 model ShiftAssignment {
@@ -7782,6 +7790,7 @@ model Attendance {
   businessId     String
   business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
   employeeId     String
+  employee       Employee @relation("EmployeeAttendances", fields: [employeeId], references: [id], onDelete: Cascade)
   date           DateTime @db.Date
   shiftPatternId String?
   firstIn        DateTime?
@@ -8296,6 +8305,7 @@ model AttendanceRegularizationRequest {                // backs AttendancePunch.
   employeeId  String
   employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   date        DateTime @db.Date
+  kind        RegularizationKind @default(MISSED_PUNCH)
   requestedInAt  DateTime?
   requestedOutAt DateTime?
   reason      String
@@ -8306,6 +8316,34 @@ model AttendanceRegularizationRequest {                // backs AttendancePunch.
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   @@index([businessId, employeeId, date])
+}
+
+enum RegularizationKind {
+  MISSED_PUNCH
+  LATE_WAIVER
+  EARLY_OUT_WAIVER
+  WFH
+  ON_DUTY
+}
+
+/// Overtime policy (entity/location scoped). Absent → derivation uses defaults
+/// and credits OT only when the ShiftPattern is otEligible.
+model OvertimeRule {
+  id String @id @default(uuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId   String?
+  locationId String?
+  dailyThresholdMin   Int     @default(480)
+  weekdayMultiplier   Decimal @db.Decimal(4, 2) @default(1.0)
+  weeklyOffMultiplier Decimal @db.Decimal(4, 2) @default(2.0)
+  holidayMultiplier   Decimal @db.Decimal(4, 2) @default(2.0)
+  dailyCapMin Int?
+  roundingMin Int     @default(15)
+  isActive    Boolean @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([businessId, entityId, locationId])
 }
 
 enum RequestStatus {
