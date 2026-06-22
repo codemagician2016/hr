@@ -13,6 +13,10 @@ export const NAV_ITEMS = [
   { key: 'org', label: 'Org', href: '/org', feature: 'hr', permission: 'org.read' },
   { key: 'leave', label: 'Leave', href: '/leave', feature: 'leave', permission: 'leave.read' },
   { key: 'attendance', label: 'Attendance', href: '/attendance', feature: 'attendance', permission: 'attendance.read' },
+  { key: 'compensation', label: 'Compensation', href: '/compensation', feature: 'hr', permission: 'compensation.read' },
+  { key: 'expenses', label: 'Expenses', href: '/expenses', feature: 'hr', permission: 'expenses.read' },
+  { key: 'loans', label: 'Loans', href: '/loans', feature: 'hr', permission: 'loans.read' },
+  { key: 'documents', label: 'Documents', href: '/documents', feature: 'hr', permission: 'documents.read' },
   { key: 'payroll', label: 'Payroll', href: '/payroll', feature: 'payroll', permission: 'payroll.read' },
   { key: 'settings', label: 'Settings', href: '/settings', permission: 'settings.read' },
 ];

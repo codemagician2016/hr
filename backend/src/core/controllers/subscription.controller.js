@@ -117,11 +117,9 @@ const NAVBAR_TAGLINE_MAX_LENGTH = 48;
 // the registry has one source of truth).
 const { VALID_LAYOUT_PRESETS, resolvePreset, sanitizeSectionVariants } = require('../lib/layoutPresets');
 
-// Visual style variants — must match STYLE_KEYS in business/core/lib/themeStyles.js.
-const VALID_STYLES = new Set([
-  'light', 'dark', 'elegant', 'matte', 'minimal',
-  'bold', 'soft', 'editorial', 'tech', 'organic',
-]);
+// White-label visual styles — the 5 fixed HR styles (theme-engine FIXED_STYLE_KEYS).
+// The tenant picks one of these + one brand color + a logo; nothing else is designable.
+const VALID_STYLES = new Set(['slate', 'indigo', 'emerald', 'rose', 'mono']);
 
 // Sellers can use one of two custom-domain providers:
 //   - cloudflare: Cloudflare for SaaS custom hostnames + Worker routing.

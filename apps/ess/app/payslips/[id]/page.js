@@ -1,44 +1,115 @@
 'use client';
 
-// Payslip detail.
+// Payslip detail — full branded breakdown for one of the logged-in employee's
+// own payslips.
 //
-// STUB WIRE-UP: the single-payslip read route is a later backend task. We fetch
-// from /api/hr/me/payslips/:id (clearly marked) and render whatever line items
-// the payload carries; the path is the only thing that changes when the real
-// route lands.
+// Wired to GET /api/hr/me/payslips/:id (contract). Renders earnings,
+// deductions and employer contributions, the net, and — when the payslip
+// references its pay run — a download link to the run's bank/statutory file via
+// GET /api/hr/payroll/runs/:runId/files/:kind. Tolerant of several payload
+// shapes (lines[] with a `category`, or pre-split earnings/deductions arrays).
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import AppShell from '@/components/AppShell';
 import { ErrorBanner, Empty, Spinner, Centered } from '@hr/ui';
 import { useApi } from '@/lib/useApi';
+import { money, formatPeriod, formatDate } from '@/lib/format';
 
-function money(value, currency = 'INR') {
-  if (value == null) return '—';
-  const amount = typeof value === 'object' ? value.amount : value;
-  const code = (typeof value === 'object' && value.currency) || currency;
-  try {
-    return new Intl.NumberFormat(undefined, { style: 'currency', currency: code }).format(Number(amount));
-  } catch {
-    return String(amount);
-  }
-}
-
-function Row({ label, value, strong }) {
+function Row({ label, value, strong, accent }) {
   return (
     <div className="flex items-center justify-between py-2 text-sm">
-      <span style={{ color: strong ? 'var(--theme-text)' : 'var(--theme-muted)' }}
-            className={strong ? 'font-semibold' : ''}>{label}</span>
-      <span style={{ color: 'var(--theme-text)' }} className={strong ? 'font-semibold' : ''}>{value}</span>
+      <span
+        className={strong ? 'font-semibold' : ''}
+        style={{ color: strong ? 'var(--theme-text)' : 'var(--theme-muted)' }}
+      >
+        {label}
+      </span>
+      <span
+        className={strong ? 'font-semibold' : ''}
+        style={{ color: accent ? 'var(--theme-primary)' : 'var(--theme-text)' }}
+      >
+        {value}
+      </span>
     </div>
   );
+}
+
+function Section({ title, lines, currency, total }) {
+  return (
+    <section className="rounded-2xl border bg-white p-4 shadow-sm" style={{ borderColor: 'var(--theme-border)' }}>
+      <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--theme-muted)' }}>
+        {title}
+      </h2>
+      {(!lines || lines.length === 0) ? (
+        <p className="py-2 text-sm" style={{ color: 'var(--theme-muted)' }}>No line items.</p>
+      ) : (
+        <>
+          <div className="divide-y" style={{ borderColor: 'var(--theme-border)' }}>
+            {lines.map((l, i) => (
+              <Row key={l.id || l.code || i} label={l.label || l.name || l.code} value={money(l.amount, currency)} />
+            ))}
+          </div>
+          {total != null && (
+            <div className="mt-1 border-t pt-1" style={{ borderColor: 'var(--theme-border)' }}>
+              <Row label="Total" value={money(total, currency)} strong />
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+// Split a flat lines[] array by category into earnings/deductions/employer.
+function splitLines(slip) {
+  const earnings = [];
+  const deductions = [];
+  const employer = [];
+
+  const push = (arr, list) => { if (Array.isArray(list)) arr.push(...list); };
+
+  // Pre-split shapes.
+  push(earnings, slip?.earnings || slip?.lineItems?.earnings);
+  push(deductions, slip?.deductions || slip?.lineItems?.deductions);
+  push(employer, slip?.employerContributions || slip?.employerContrib || slip?.lineItems?.employerContributions);
+
+  // Flat lines[] with a category/type field.
+  const flat = slip?.lines || slip?.components || [];
+  for (const l of flat) {
+    const cat = String(l.category || l.type || l.kind || '').toUpperCase();
+    if (cat.includes('EARN') || cat === 'ALLOWANCE' || cat === 'EARNING') earnings.push(l);
+    else if (cat.includes('EMPLOYER') || cat.includes('CONTRIB')) employer.push(l);
+    else if (cat.includes('DEDUC') || cat.includes('TAX') || cat.includes('STATUTORY')) deductions.push(l);
+    else if (Number(l.amount?.amount ?? l.amount) < 0) deductions.push(l);
+    else earnings.push(l);
+  }
+  return { earnings, deductions, employer };
+}
+
+function sumOf(lines, currency) {
+  if (!lines || lines.length === 0) return undefined;
+  const total = lines.reduce((acc, l) => {
+    const a = typeof l.amount === 'object' ? Number(l.amount.amount ?? l.amount.value ?? 0) : Number(l.amount);
+    return acc + (Number.isFinite(a) ? a : 0);
+  }, 0);
+  return { amount: total, currency };
+}
+
+// Build a download URL to the pay-run file if the payslip references its run.
+function runFileHref(slip) {
+  const runId = slip?.runId || slip?.payRunId || slip?.run?.id;
+  if (!runId) return null;
+  const kind = slip?.bankFileKind || 'bank';
+  return `/api/hr/payroll/runs/${encodeURIComponent(runId)}/files/${encodeURIComponent(kind)}`;
 }
 
 function PayslipDetailInner() {
   const params = useParams();
   const id = params?.id;
-  // TODO(payslips): swap to the real single-read route once implemented.
-  const { data, loading, error } = useApi(id ? `/api/hr/me/payslips/${encodeURIComponent(id)}` : null);
+  const { data, loading, error } = useApi(
+    id ? `/api/hr/me/payslips/${encodeURIComponent(id)}` : null
+  );
 
   if (loading) return <Centered><Spinner /></Centered>;
   if (error && error.status !== 404) {
@@ -46,9 +117,11 @@ function PayslipDetailInner() {
   }
 
   const slip = data?.payslip || data;
-  const currency = slip?.currency || 'INR';
-  const earnings = slip?.earnings || slip?.lineItems?.earnings || [];
-  const deductions = slip?.deductions || slip?.lineItems?.deductions || [];
+  const currency = slip?.currency || slip?.currencyCode || 'INR';
+  const { earnings, deductions, employer } = splitLines(slip || {});
+  const gross = slip?.gross ?? slip?.grossPay ?? sumOf(earnings, currency);
+  const net = slip?.net ?? slip?.netPay ?? slip?.netPayable;
+  const fileHref = runFileHref(slip);
 
   return (
     <div className="space-y-5">
@@ -60,42 +133,43 @@ function PayslipDetailInner() {
         <Empty text="Payslip not found." />
       ) : (
         <>
-          <h1 className="text-xl font-semibold" style={{ color: 'var(--theme-text)' }}>
-            {slip.period?.label || slip.label || 'Payslip'}
-          </h1>
-
-          <section className="rounded-2xl border bg-white p-4 shadow-sm" style={{ borderColor: 'var(--theme-border)' }}>
-            <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--theme-muted)' }}>Earnings</h2>
-            {earnings.length === 0 ? (
-              <p className="py-2 text-sm" style={{ color: 'var(--theme-muted)' }}>No line items.</p>
-            ) : (
-              <div className="divide-y" style={{ borderColor: 'var(--theme-border)' }}>
-                {earnings.map((e, i) => (
-                  <Row key={i} label={e.label || e.name} value={money(e.amount, currency)} />
-                ))}
-              </div>
+          <header>
+            <h1 className="text-xl font-semibold" style={{ color: 'var(--theme-text)' }}>
+              {formatPeriod(slip.period || slip) || 'Payslip'}
+            </h1>
+            {(slip.employee?.name || slip.employeeName) && (
+              <p className="text-sm" style={{ color: 'var(--theme-muted)' }}>
+                {slip.employee?.name || slip.employeeName}
+                {(slip.employee?.employeeCode || slip.employeeCode) ? ` · ${slip.employee?.employeeCode || slip.employeeCode}` : ''}
+              </p>
             )}
-          </section>
-
-          <section className="rounded-2xl border bg-white p-4 shadow-sm" style={{ borderColor: 'var(--theme-border)' }}>
-            <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--theme-muted)' }}>Deductions</h2>
-            {deductions.length === 0 ? (
-              <p className="py-2 text-sm" style={{ color: 'var(--theme-muted)' }}>No line items.</p>
-            ) : (
-              <div className="divide-y" style={{ borderColor: 'var(--theme-border)' }}>
-                {deductions.map((d, i) => (
-                  <Row key={i} label={d.label || d.name} value={money(d.amount, currency)} />
-                ))}
-              </div>
+            {slip.paidOn && (
+              <p className="text-xs" style={{ color: 'var(--theme-muted)' }}>Paid on {formatDate(slip.paidOn)}</p>
             )}
-          </section>
+          </header>
+
+          <Section title="Earnings" lines={earnings} currency={currency} total={gross} />
+          <Section title="Deductions" lines={deductions} currency={currency} total={sumOf(deductions, currency)} />
+          {employer.length > 0 && (
+            <Section title="Employer contributions" lines={employer} currency={currency} total={sumOf(employer, currency)} />
+          )}
 
           <section className="rounded-2xl p-4" style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}>
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium opacity-90">Net pay</span>
-              <span className="text-lg font-bold">{money(slip.net ?? slip.netPay, currency)}</span>
+              <span className="text-lg font-bold">{money(net, currency)}</span>
             </div>
           </section>
+
+          {fileHref && (
+            <a
+              href={fileHref}
+              className="block w-full rounded-lg border py-2.5 text-center text-sm font-semibold"
+              style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-primary)' }}
+            >
+              Download payroll file
+            </a>
+          )}
         </>
       )}
     </div>
