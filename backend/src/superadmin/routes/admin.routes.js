@@ -19,6 +19,7 @@ const {
   replyPlatformForSuperadmin,
 } = require('../../core/controllers/support.controller');
 const { getIndiaGstReport } = require('../controllers/gstReport.controller');
+const { getComplianceRates } = require('../controllers/complianceRates.controller');
 
 router.use(requireAuth);
 router.use(requireSuperAdmin);
@@ -31,6 +32,8 @@ router.get('/businesses', listBusinesses);
 router.get('/stats', stats);
 // India GST (GSTR-1) export — self-billed Razorpay invoices for a date range.
 router.get('/gst/india-invoices', wrap(getIndiaGstReport));
+// Read-only effective statutory rates for the super-admin compliance console.
+router.get('/compliance/rates', wrap(getComplianceRates));
 router.get('/email-deliveries', emailDeliveryActivity);
 router.get('/billing', billingActivity);
 router.post('/billing/invoices/:transactionId', billingInvoice);

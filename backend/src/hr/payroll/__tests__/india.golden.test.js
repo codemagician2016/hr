@@ -249,6 +249,140 @@ function amt(arr, code) {
 }
 
 // ===========================================================================
+// SECTION C2 — Professional Tax: additional states (docs/05 §6 PT-state list).
+//   WB has explicit slabs in docs/05 §6.1; the remaining states (TS/AP/MP/OR/
+//   AS/KL/BR/JH) use the real current state PT schedules seeded in india.js
+//   with sources cited inline. Each case targets a SLAB BOUNDARY so an off-by-
+//   one band edit is caught. PT is an exact slab integer (docs/05 §16.6).
+// ===========================================================================
+
+// --- West Bengal (WB) monthly — docs/05 §6.1 WB table (110/130/150/200 bands).
+//   <=10,000 Nil; 10,001-15,000 ₹110; 15,001-25,000 ₹130; 25,001-40,000 ₹150;
+//   >40,000 ₹200. Boundaries: ₹10,000 (Nil edge), ₹15,000 (₹110 edge),
+//   ₹40,001 (₹200 edge).
+{
+  const at = (g) => computeProfessionalTax({ stateCode: 'WB', ptGrossMinor: R(g),
+    month: 6, asOf: '2025-06-30' }).amountMinor;
+  check('WB ₹10,000 Nil edge', 0, at(10000));
+  check('WB ₹15,000 ₹110 band edge', R(110), at(15000));
+  check('WB ₹25,000 ₹130 band edge', R(130), at(25000));
+  check('WB ₹40,000 ₹150 band edge', R(150), at(40000));
+  check('WB ₹40,001 ₹200 top band', R(200), at(40001));
+}
+
+// --- Telangana (TS) monthly — <=15,000 Nil; 15,001-20,000 ₹150; >20,000 ₹200.
+{
+  const at = (g) => computeProfessionalTax({ stateCode: 'TS', ptGrossMinor: R(g),
+    month: 6, asOf: '2025-06-30' }).amountMinor;
+  check('TS ₹15,000 Nil edge', 0, at(15000));
+  check('TS ₹20,000 ₹150 band edge', R(150), at(20000));
+  check('TS ₹20,001 ₹200 top band', R(200), at(20001));
+}
+
+// --- Andhra Pradesh (AP) monthly — same band structure as TS (AP Act 1987).
+{
+  const at = (g) => computeProfessionalTax({ stateCode: 'AP', ptGrossMinor: R(g),
+    month: 6, asOf: '2025-06-30' }).amountMinor;
+  check('AP ₹15,000 Nil edge', 0, at(15000));
+  check('AP ₹20,000 ₹150 band edge', R(150), at(20000));
+  check('AP ₹20,001 ₹200 top band', R(200), at(20001));
+}
+
+// --- Madhya Pradesh (MP) monthly — <=18,750 Nil; 18,751-25,000 ₹125;
+//   >25,000 ₹208 (Feb ₹212 to sum to the ₹2,500 national cap).
+{
+  const at = (g, m, asOf) => computeProfessionalTax({ stateCode: 'MP',
+    ptGrossMinor: R(g), month: m, asOf }).amountMinor;
+  check('MP ₹18,750 Nil edge', 0, at(18750, 6, '2025-06-30'));
+  check('MP ₹25,000 ₹125 band edge', R(125), at(25000, 6, '2025-06-30'));
+  check('MP ₹40,000 ₹208 top band (June)', R(208), at(40000, 6, '2025-06-30'));
+  check('MP ₹40,000 Feb top-up ₹212', R(212), at(40000, 2, '2026-02-28'));
+}
+
+// --- Odisha (OR) monthly — <=13,304 Nil; 13,305-25,000 ₹125; >25,000 ₹200
+//   (Feb ₹300 top-up -> ₹200×11 + ₹300 = ₹2,500 cap).
+{
+  const at = (g, m, asOf) => computeProfessionalTax({ stateCode: 'OR',
+    ptGrossMinor: R(g), month: m, asOf }).amountMinor;
+  check('OR ₹13,304 Nil edge', 0, at(13304, 6, '2025-06-30'));
+  check('OR ₹25,000 ₹125 band edge', R(125), at(25000, 6, '2025-06-30'));
+  check('OR ₹30,000 ₹200 top band (June)', R(200), at(30000, 6, '2025-06-30'));
+  check('OR ₹30,000 Feb top-up ₹300', R(300), at(30000, 2, '2026-02-28'));
+}
+
+// --- Assam (AS) monthly — <=10,000 Nil; 10,001-15,000 ₹150; 15,001-25,000 ₹180;
+//   >25,000 ₹208.
+{
+  const at = (g) => computeProfessionalTax({ stateCode: 'AS', ptGrossMinor: R(g),
+    month: 6, asOf: '2025-06-30' }).amountMinor;
+  check('AS ₹10,000 Nil edge', 0, at(10000));
+  check('AS ₹15,000 ₹150 band edge', R(150), at(15000));
+  check('AS ₹25,000 ₹180 band edge', R(180), at(25000));
+  check('AS ₹25,001 ₹208 top band', R(208), at(25001));
+}
+
+// --- Kerala (KL) HALF-YEARLY — slab on half-year income. <=11,999 Nil;
+//   12,000-17,999 ₹120; 30,000-44,999 ₹300; >=1,25,000 ₹1,250 (₹2,500/yr cap).
+{
+  const at = (g) => computeProfessionalTax({ stateCode: 'KL', ptGrossMinor: R(g),
+    asOf: '2025-09-30' }).amountMinor;
+  check('KL half-yr ₹11,999 Nil edge', 0, at(11999));
+  check('KL half-yr ₹12,000 ₹120 band', R(120), at(12000));
+  check('KL half-yr ₹35,000 ₹300 band', R(300), at(35000));
+  check('KL half-yr ₹1,25,000 ₹1,250 top band', R(1250), at(125000));
+  // half-yearly frequency is reported on the result.
+  const r = computeProfessionalTax({ stateCode: 'KL', ptGrossMinor: R(35000),
+    asOf: '2025-09-30' });
+  check('KL frequency HALF_YEARLY', 'HALF_YEARLY', r.frequency);
+}
+
+// --- Bihar (BR) monthly — annual-income bands rendered monthly. <=25,000 Nil;
+//   25,001-41,666 ₹83; 41,667-83,333 ₹167; >83,333 ₹208 (Feb ₹212).
+{
+  const at = (g, m, asOf) => computeProfessionalTax({ stateCode: 'BR',
+    ptGrossMinor: R(g), month: m, asOf }).amountMinor;
+  check('BR ₹25,000 Nil edge', 0, at(25000, 6, '2025-06-30'));
+  check('BR ₹30,000 ₹83 band', R(83), at(30000, 6, '2025-06-30'));
+  check('BR ₹60,000 ₹167 band', R(167), at(60000, 6, '2025-06-30'));
+  check('BR ₹90,000 ₹208 top band (June)', R(208), at(90000, 6, '2025-06-30'));
+  check('BR ₹90,000 Feb top-up ₹212', R(212), at(90000, 2, '2026-02-28'));
+}
+
+// --- Jharkhand (JH) monthly — <=25,000 Nil; 25,001-41,666 ₹100;
+//   41,667-66,666 ₹150; 66,667-83,333 ₹175; >83,333 ₹208 (Feb ₹212).
+{
+  const at = (g, m, asOf) => computeProfessionalTax({ stateCode: 'JH',
+    ptGrossMinor: R(g), month: m, asOf }).amountMinor;
+  check('JH ₹25,000 Nil edge', 0, at(25000, 6, '2025-06-30'));
+  check('JH ₹30,000 ₹100 band', R(100), at(30000, 6, '2025-06-30'));
+  check('JH ₹60,000 ₹150 band', R(150), at(60000, 6, '2025-06-30'));
+  check('JH ₹80,000 ₹175 band', R(175), at(80000, 6, '2025-06-30'));
+  check('JH ₹90,000 Feb top-up ₹212', R(212), at(90000, 2, '2026-02-28'));
+}
+
+// --- NO-PT STATE: Delhi (DL) — no state PT levied (docs/05 §6 "Not levied in:
+//   Delhi, Haryana, UP, ..."). computeProfessionalTax must report unconfigured
+//   with amount 0, and compute() must emit NO PT line.
+{
+  const r = computeProfessionalTax({ stateCode: 'DL', ptGrossMinor: R(50000),
+    month: 6, asOf: '2025-06-30' });
+  check('DL no-PT: not configured', false, r.configured);
+  check('DL no-PT: amount 0', 0, r.amountMinor);
+
+  // End-to-end: a Delhi establishment yields no PT deduction line.
+  const out = IN.compute({
+    periodGrossMinor: R(50000),
+    basicMinor: R(30000),
+    components: [],
+    ytd: { taxableGrossMinor: 0, tdsDeductedMinor: 0, monthsElapsed: 0, esiLatchedCovered: false },
+    period: { end: '2025-06-30', year: 2025, month: 6 },
+    employee: { hasPan: true, gender: 'male' },
+    entity: { stateCode: 'DL', pfApplicable: true, esiApplicable: true },
+  });
+  check('DL no-PT: compute() emits no PT line', null, amt(out.employeeDeductions, 'PT'));
+}
+
+// ===========================================================================
 // SECTION D — TDS §192 (slabs, §87A rebate band, marginal relief, surcharge,
 //   cess, no-PAN 206AA, mid-year projection). docs/05 §2, §7.
 //   annualTaxNewRegime(taxableRupees) -> { totalAnnualTaxMinor, ... }

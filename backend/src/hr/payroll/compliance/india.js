@@ -269,6 +269,208 @@ const rules = {
           },
         ],
       },
+
+      // ---------------------------------------------------------------------
+      //  Additional PT states (docs/05 §6, "levied in MH, KA, TN, WB, GJ, TS,
+      //  AP, MP, KL, OR, AS, BR, JH..."). All monthly except Kerala (half-yearly).
+      //  Sources cited per state; all re-verified against current state PT
+      //  schedules (cleartax.in / greythr / saral.pro / state commercial-tax
+      //  portals) as of docs §20 "verified 2026-06-22".
+      // ---------------------------------------------------------------------
+
+      // West Bengal (WB) — monthly. docs/05 §6.1 WB table + wbcomtax.gov.in.
+      //   <=10,000 Nil; 10,001-15,000 ₹110; 15,001-25,000 ₹130;
+      //   25,001-40,000 ₹150; >40,000 ₹200. Annual max ₹2,500.
+      //   (No Feb top-up: 12×₹200 = ₹2,400 < cap; lower bands sum below cap too.)
+      WB: {
+        frequency: 'MONTHLY',
+        annualCapRupees: 2500,
+        versions: [
+          {
+            effectiveFrom: '2014-04-01', // WB PT Act slabs (₹110/130/150/200 bands).
+            any: [
+              { upToRupees: 10000, amountRupees: 0 },
+              { upToRupees: 15000, amountRupees: 110 },
+              { upToRupees: 25000, amountRupees: 130 },
+              { upToRupees: 40000, amountRupees: 150 },
+              { upToRupees: null, amountRupees: 200, febAmountRupees: 200 },
+            ],
+          },
+        ],
+      },
+
+      // Telangana (TS) — monthly. AP & Telangana PT Act 1987 (Telangana adopted).
+      //   <=15,000 Nil; 15,001-20,000 ₹150; >20,000 ₹200. Annual max ₹2,500.
+      //   Source: cleartax.in/s/professional-tax-telangana; tgct.gov.in.
+      TS: {
+        frequency: 'MONTHLY',
+        annualCapRupees: 2500,
+        versions: [
+          {
+            effectiveFrom: '2000-01-01',
+            any: [
+              { upToRupees: 15000, amountRupees: 0 },
+              { upToRupees: 20000, amountRupees: 150 },
+              { upToRupees: null, amountRupees: 200, febAmountRupees: 200 },
+            ],
+          },
+        ],
+      },
+
+      // Andhra Pradesh (AP) — monthly. AP Tax on Professions Act 1987.
+      //   <=15,000 Nil; 15,001-20,000 ₹150; >20,000 ₹200. Annual max ₹2,500.
+      //   Source: cleartax.in/s/professional-tax-andhra-pradesh; apct.gov.in.
+      AP: {
+        frequency: 'MONTHLY',
+        annualCapRupees: 2500,
+        versions: [
+          {
+            effectiveFrom: '2000-01-01',
+            any: [
+              { upToRupees: 15000, amountRupees: 0 },
+              { upToRupees: 20000, amountRupees: 150 },
+              { upToRupees: null, amountRupees: 200, febAmountRupees: 200 },
+            ],
+          },
+        ],
+      },
+
+      // Madhya Pradesh (MP) — monthly (computed on annual salary; encoded as the
+      //   equivalent monthly bands). MP Vritti Kar Adhiniyam 1995.
+      //   Annual <=2,25,000 Nil (≈ <=18,750/mo); 2,25,001-3,00,000 ₹125/mo
+      //   (₹1,500/yr ≈ 18,751-25,000/mo); >3,00,000 ₹208/mo×11 + ₹212 Feb = ₹2,500/yr.
+      //   Source: cleartax.in/s/professional-tax-madhya-pradesh; mptax.mp.gov.in.
+      MP: {
+        frequency: 'MONTHLY',
+        annualCapRupees: 2500,
+        versions: [
+          {
+            effectiveFrom: '2018-04-01',
+            any: [
+              { upToRupees: 18750, amountRupees: 0 },
+              { upToRupees: 25000, amountRupees: 125 },
+              // >₹25,000/mo: ₹208 × 11 + ₹212 (Feb) = ₹2,500/yr (national cap).
+              { upToRupees: null, amountRupees: 208, febAmountRupees: 212 },
+            ],
+          },
+        ],
+      },
+
+      // Odisha (OR) — monthly (slab on annual income; encoded as monthly bands).
+      //   Orissa State Tax on Professions Act 2000.
+      //   <=13,304/mo (₹1,59,650/yr) Nil; 13,305-25,000 ₹125/mo;
+      //   >25,000 ₹200/mo × 11 + ₹300 (Feb top-up) = ₹2,500/yr.
+      //   Source: cleartax.in/s/professional-tax-odisha; odishatax.gov.in.
+      OR: {
+        frequency: 'MONTHLY',
+        annualCapRupees: 2500,
+        versions: [
+          {
+            effectiveFrom: '2000-01-01',
+            any: [
+              { upToRupees: 13304, amountRupees: 0 },
+              { upToRupees: 25000, amountRupees: 125 },
+              { upToRupees: null, amountRupees: 200, febAmountRupees: 300 },
+            ],
+          },
+        ],
+      },
+
+      // Assam (AS) — monthly. Assam Professions, Trades, Callings & Employments
+      //   Taxation Act 1947.
+      //   <=10,000 Nil; 10,001-15,000 ₹150; 15,001-25,000 ₹180; >25,000 ₹208.
+      //   Annual max ₹2,500 (₹208×12 ≈ ₹2,496). Source: cleartax.in/s/
+      //   professional-tax-assam; tax.assam.gov.in.
+      AS: {
+        frequency: 'MONTHLY',
+        annualCapRupees: 2500,
+        versions: [
+          {
+            effectiveFrom: '2000-01-01',
+            any: [
+              { upToRupees: 10000, amountRupees: 0 },
+              { upToRupees: 15000, amountRupees: 150 },
+              { upToRupees: 25000, amountRupees: 180 },
+              { upToRupees: null, amountRupees: 208, febAmountRupees: 208 },
+            ],
+          },
+        ],
+      },
+
+      // Kerala (KL) — HALF-YEARLY (slab on half-year income). Kerala Municipality
+      //   Act 1994 / Panchayat Raj Act — PT levied by local bodies half-yearly.
+      //   Half-year income: <=11,999 Nil; 12,000-17,999 ₹120; 18,000-29,999 ₹180;
+      //   30,000-44,999 ₹300; 45,000-59,999 ₹450; 60,000-74,999 ₹600;
+      //   75,000-99,999 ₹750; 1,00,000-1,24,999 ₹1,000; >=1,25,000 ₹1,250.
+      //   Annual max ₹2,500 (₹1,250 × 2). Source: cleartax.in/s/
+      //   professional-tax-kerala; lsgkerala.gov.in.
+      KL: {
+        frequency: 'HALF_YEARLY',
+        annualCapRupees: 2500,
+        versions: [
+          {
+            effectiveFrom: '2005-04-01',
+            halfYear: [
+              { upToRupees: 11999, amountRupees: 0 },
+              { upToRupees: 17999, amountRupees: 120 },
+              { upToRupees: 29999, amountRupees: 180 },
+              { upToRupees: 44999, amountRupees: 300 },
+              { upToRupees: 59999, amountRupees: 450 },
+              { upToRupees: 74999, amountRupees: 600 },
+              { upToRupees: 99999, amountRupees: 750 },
+              { upToRupees: 124999, amountRupees: 1000 },
+              { upToRupees: null, amountRupees: 1250 },
+            ],
+          },
+        ],
+      },
+
+      // Bihar (BR) — monthly (slab on annual income; encoded as monthly bands).
+      //   Bihar Tax on Professions, Trades, Callings & Employments Act 2011.
+      //   Annual <=3,00,000 Nil (<=25,000/mo); 3,00,001-5,00,000 ₹83.33/mo
+      //   (₹1,000/yr); 5,00,001-10,00,000 ₹166.67/mo (₹2,000/yr);
+      //   >10,00,000 ₹208.33/mo (₹2,500/yr). We round each band to whole ₹.
+      //   Source: cleartax.in/s/professional-tax-bihar; state.bihar.gov.in/
+      //   commercialtaxes.
+      BR: {
+        frequency: 'MONTHLY',
+        annualCapRupees: 2500,
+        versions: [
+          {
+            effectiveFrom: '2011-10-01',
+            any: [
+              { upToRupees: 25000, amountRupees: 0 },
+              { upToRupees: 41666, amountRupees: 83 }, // ₹3L-₹5L/yr → ₹1,000/yr
+              { upToRupees: 83333, amountRupees: 167 }, // ₹5L-₹10L/yr → ₹2,000/yr
+              { upToRupees: null, amountRupees: 208, febAmountRupees: 212 }, // ₹2,500/yr
+            ],
+          },
+        ],
+      },
+
+      // Jharkhand (JH) — monthly (slab on annual income; encoded as monthly bands).
+      //   Jharkhand Tax on Professions, Trades, Callings & Employments Act 2011.
+      //   Annual <=3,00,000 Nil (<=25,000/mo); 3,00,001-5,00,000 ₹100/mo
+      //   (₹1,200/yr); 5,00,001-8,00,000 ₹150/mo (₹1,800/yr);
+      //   8,00,001-10,00,000 ₹175/mo (₹2,100/yr); >10,00,000 ₹208/mo × 11 +
+      //   ₹212 (Feb) = ₹2,500/yr. Source: cleartax.in/s/professional-tax-jharkhand;
+      //   jharkhandcomtax.gov.in.
+      JH: {
+        frequency: 'MONTHLY',
+        annualCapRupees: 2500,
+        versions: [
+          {
+            effectiveFrom: '2012-04-01',
+            any: [
+              { upToRupees: 25000, amountRupees: 0 },
+              { upToRupees: 41666, amountRupees: 100 },
+              { upToRupees: 66666, amountRupees: 150 },
+              { upToRupees: 83333, amountRupees: 175 },
+              { upToRupees: null, amountRupees: 208, febAmountRupees: 212 },
+            ],
+          },
+        ],
+      },
     },
   },
 
@@ -471,7 +673,8 @@ function computeEsi({ esiGrossMinor, latchedCovered, disabled = false, avgDailyW
  * half-year aggregate; the returned amount is the half-year PT (the engine
  * spreads it across months for cash-flow but remits per state frequency).
  *
- * @param stateCode   'MH' | 'KA' | 'TN' | (others -> nil/unconfigured)
+ * @param stateCode   'MH'|'KA'|'TN'|'GJ'|'WB'|'TS'|'AP'|'MP'|'OR'|'AS'|'KL'|
+ *                    'BR'|'JH' (no-PT states e.g. DL/UP/HR/RJ -> nil/unconfigured)
  * @param ptGrossMinor  monthly gross (monthly states) or half-year income (TN)
  * @param gender        'MALE' | 'FEMALE' | undefined
  * @param month         1..12 calendar month (for Feb top-up)
