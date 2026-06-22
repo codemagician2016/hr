@@ -444,7 +444,7 @@ function emailStyles(palette) {
   `;
 }
 
-function renderEmail({ eyebrow = 'Sitepresso', title, lead = '', introHtml = '', bodyHtml = '', footerHtml = '', headHtml = '' }) {
+function renderEmail({ eyebrow = 'DriftHR', title, lead = '', introHtml = '', bodyHtml = '', footerHtml = '', headHtml = '' }) {
   return `
     <!DOCTYPE html>
     <html>
@@ -459,7 +459,7 @@ function renderEmail({ eyebrow = 'Sitepresso', title, lead = '', introHtml = '',
           <div class="container">
             <div class="hero">
               <div class="hero-top">
-                <span class="brand-pill">Sitepresso</span>
+                <span class="brand-pill">DriftHR</span>
               </div>
               <p class="hero-kicker">${escapeHtml(eyebrow)}</p>
               <h1>${title}</h1>
@@ -470,7 +470,7 @@ function renderEmail({ eyebrow = 'Sitepresso', title, lead = '', introHtml = '',
               ${bodyHtml}
             </div>
             <div class="footer">
-              <p class="footer-brand">Sitepresso</p>
+              <p class="footer-brand">DriftHR</p>
               <div class="footer-copy">${footerHtml}</div>
             </div>
           </div>
@@ -521,7 +521,7 @@ function renderNotice(title, body, tone = 'default') {
   `;
 }
 
-function renderSignature(name = 'The Sitepresso team', note = '') {
+function renderSignature(name = 'The DriftHR team', note = '') {
   return `
     <div class="signature">
       <p>Thanks,</p>
@@ -571,7 +571,7 @@ function buildAppointmentMarkup(ctx, options = {}) {
     const googleUrl = generateGoogleCalendarLink({ ...ctx, status: options.status || 'CONFIRMED' });
     const postalAddress = buildPostalAddressSchema(ctx);
     const serviceName = optionalText(ctx.serviceName) || 'Appointment';
-    const businessName = optionalText(ctx.businessName) || 'Sitepresso';
+    const businessName = optionalText(ctx.businessName) || 'DriftHR';
     const staffName = optionalText(ctx.staffName);
     const eventDescription = [
       `${serviceName} appointment`,
@@ -608,7 +608,7 @@ function buildAppointmentMarkup(ctx, options = {}) {
       },
       bookingAgent: {
         '@type': 'Organization',
-        name: 'Sitepresso',
+        name: 'DriftHR',
         ...(optionalText(process.env.FRONTEND_URL) ? { url: optionalText(process.env.FRONTEND_URL) } : {}),
       },
       bookingTime: new Date().toISOString(),
@@ -632,14 +632,14 @@ function buildAppointmentMarkup(ctx, options = {}) {
 async function sendWelcomeEmail(to, name, options = {}) {
   const platformUrl = process.env.FRONTEND_URL || 'https://sitepresso.com';
   const safeName = escapeHtml(name);
-  const subject = `Welcome to Sitepresso, ${name}`;
+  const subject = `Welcome to DriftHR, ${name}`;
   const html = renderEmail({
     eyebrow: 'Welcome',
     title: `You’re in, ${name}`,
     lead: 'Your account is verified. Next stop: set up your booking page in a few minutes.',
     introHtml: `
       <p>Hi ${safeName},</p>
-      <p class="lead">Thanks for joining Sitepresso. We built this to get your booking page live fast — so let&rsquo;s finish setup and get you ready to take your first appointment.</p>
+      <p class="lead">Thanks for joining DriftHR. We built this to get your booking page live fast — so let&rsquo;s finish setup and get you ready to take your first appointment.</p>
     `,
     bodyHtml: `
       ${renderChecklist([
@@ -650,9 +650,9 @@ async function sendWelcomeEmail(to, name, options = {}) {
       ${renderNotice('Tip', 'Most people finish setup in one sitting — it takes about 5 minutes. You can change anything later from your admin dashboard.')}
       <a href="${escapeHtml(platformUrl)}/onboarding" class="btn">Finish setup →</a>
       <p class="muted">Already started? Your progress is saved — just head back to <a href="${escapeHtml(platformUrl)}/onboarding">${escapeHtml(platformUrl)}/onboarding</a>.</p>
-      ${renderSignature('The Sitepresso team', 'Reply to this email anytime — a real person will get back to you.')}
+      ${renderSignature('The DriftHR team', 'Reply to this email anytime — a real person will get back to you.')}
     `,
-    footerHtml: `&copy; ${new Date().getFullYear()} Sitepresso. All rights reserved.`,
+    footerHtml: `&copy; ${new Date().getFullYear()} DriftHR. All rights reserved.`,
   });
 
   await sendTrackedEmail({
@@ -726,7 +726,7 @@ async function sendOtpStyledEmail(to, name, otp, subject, config, options = {}) 
         <div class="otp">${safeOtp}</div>
       </div>
       ${config.noticeTitle ? renderNotice(config.noticeTitle, config.noticeBody) : ''}
-      ${config.signatureNote ? renderSignature('The Sitepresso team', config.signatureNote) : ''}
+      ${config.signatureNote ? renderSignature('The DriftHR team', config.signatureNote) : ''}
     `,
     footerHtml: config.footer || 'Didn&rsquo;t request this? You can safely ignore this email.',
   });
@@ -748,7 +748,7 @@ async function sendOtpStyledEmail(to, name, otp, subject, config, options = {}) 
 }
 
 // Customer-side signup OTP (for storefront bookings). Friendly, short,
-// branded to the business rather than Sitepresso platform-speak.
+// branded to the business rather than DriftHR platform-speak.
 async function sendCustomerSignupOtpEmail(to, name, otp, options = {}) {
   const t = tFor(options.locale);
   return sendOtpStyledEmail(to, name, otp, t('customerSignupOtp.subject'), {
@@ -773,7 +773,7 @@ async function sendUserSignupOtpEmail(to, name, otp, options = {}) {
   const subject = 'Verify your email to get started';
   const html = renderEmail({
     eyebrow: 'Verify your email',
-    title: 'Welcome to Sitepresso',
+    title: 'Welcome to DriftHR',
     lead: 'One small step before you set up your business — verify your email with the code below.',
     introHtml: `
       <p>Hi ${safeName},</p>
@@ -785,7 +785,7 @@ async function sendUserSignupOtpEmail(to, name, otp, options = {}) {
         <div class="otp">${safeOtp}</div>
       </div>
       ${renderNotice('Why verify?', 'A verified email keeps your account secure and makes sure booking confirmations and reminders reach you.')}
-      ${renderSignature('The Sitepresso team', 'See you on the other side of the form.')}
+      ${renderSignature('The DriftHR team', 'See you on the other side of the form.')}
     `,
     footerHtml: 'Didn&rsquo;t sign up? You can safely ignore this email.',
   });
@@ -1224,7 +1224,7 @@ async function sendStaffInviteEmail(to, name, inviteLink, tempPassword, options 
     lead: 'Your access has been prepared so you can sign in, review your calendar, and start managing appointments smoothly.',
     introHtml: `
       <p>Hi ${safeName},</p>
-      <p class="lead">You&rsquo;ve been invited to join <strong>${escapeHtml(options.businessName)}</strong> as a staff member on Sitepresso.</p>
+      <p class="lead">You&rsquo;ve been invited to join <strong>${escapeHtml(options.businessName)}</strong> as a staff member on DriftHR.</p>
     `,
     bodyHtml: `
       ${renderNotice('Temporary access', 'Use the credentials below for your first sign-in. After logging in, update your password so your account is fully secured.')}
@@ -1259,7 +1259,7 @@ async function sendRiderInviteEmail(to, name, inviteLink, tempPassword, options 
     lead: 'Sign in to see assigned deliveries, customer drop details, and route updates for your store.',
     introHtml: `
       <p>Hi ${safeName},</p>
-      <p class="lead">You&rsquo;ve been invited to join <strong>${escapeHtml(options.businessName)}</strong> as a delivery rider on Sitepresso.</p>
+      <p class="lead">You&rsquo;ve been invited to join <strong>${escapeHtml(options.businessName)}</strong> as a delivery rider on DriftHR.</p>
     `,
     bodyHtml: `
       ${renderNotice('Temporary access', 'Use the credentials below for your first sign-in. After logging in, update your password so your account is fully secured.')}
@@ -1572,14 +1572,14 @@ async function sendBookingReminderEmail(to, options = {}) {
 
 async function sendStaffInviteReminderEmail(to, name, inviteLink, options = {}) {
   const safeName = escapeHtml(name);
-  const subject = `Reminder: Join ${options.businessName} on Sitepresso`;
+  const subject = `Reminder: Join ${options.businessName} on DriftHR`;
   const html = renderEmail({
     eyebrow: 'Invitation Reminder',
     title: 'Your staff invitation is still waiting',
     lead: 'Your team access is ready. Finish setup so you can start managing your schedule without delay.',
     introHtml: `
       <p>Hi ${safeName},</p>
-      <p class="lead">This is a reminder that you have a pending invitation to join <strong>${escapeHtml(options.businessName)}</strong> as a staff member on Sitepresso.</p>
+      <p class="lead">This is a reminder that you have a pending invitation to join <strong>${escapeHtml(options.businessName)}</strong> as a staff member on DriftHR.</p>
     `,
     bodyHtml: `
       ${renderNotice('Ready when you are', 'Use the temporary password from your original invitation email, then complete your setup once you sign in.')}
@@ -1612,7 +1612,7 @@ async function sendTrialExpiringEmail(to, name, options = {}) {
     lead: 'You&rsquo;re close to the end of your trial window. Update billing now to avoid any interruption in premium features.',
     introHtml: `
       <p>Hi ${safeName},</p>
-      <p class="lead">We hope you&rsquo;ve been enjoying Sitepresso.</p>
+      <p class="lead">We hope you&rsquo;ve been enjoying DriftHR.</p>
     `,
     bodyHtml: `
       ${renderNotice('3 days remaining', `Your trial for <strong>${escapeHtml(options.businessName)}</strong> ends soon. To keep everything running without interruption, update your billing details now.`)}
@@ -1626,7 +1626,7 @@ async function sendTrialExpiringEmail(to, name, options = {}) {
     eventKey: EMAIL_EVENTS.TRIAL_EXPIRING,
     to,
     recipientName: name,
-    subject: `Action Required: Your Sitepresso trial expires in 3 days`,
+    subject: `Action Required: Your DriftHR trial expires in 3 days`,
     htmlBody: html,
     businessId: options.businessId,
     metadata: { businessName: options.businessName },
@@ -1655,7 +1655,7 @@ async function sendSubscriptionStartedEmail(to, name, options = {}) {
     eventKey: EMAIL_EVENTS.SUBSCRIPTION_STARTED,
     to,
     recipientName: name,
-    subject: `Welcome to Sitepresso Premium`,
+    subject: `Welcome to DriftHR Premium`,
     htmlBody: html,
     businessId: options.businessId,
     metadata: { businessName: options.businessName },
@@ -1684,7 +1684,7 @@ async function sendPaymentFailedEmail(to, name, options = {}) {
     eventKey: EMAIL_EVENTS.PAYMENT_FAILED,
     to,
     recipientName: name,
-    subject: `Action Required: Payment failed for Sitepresso`,
+    subject: `Action Required: Payment failed for DriftHR`,
     htmlBody: html,
     businessId: options.businessId,
     metadata: { businessName: options.businessName },
@@ -1706,14 +1706,14 @@ async function sendSubscriptionCancelledEmail(to, name, options = {}) {
       <a href="${escapeHtml(options.billingUrl || '#')}" class="btn">Reactivate Subscription</a>
       ${renderSignature()}
     `,
-    footerHtml: `Thank you for having tried Sitepresso.`,
+    footerHtml: `Thank you for having tried DriftHR.`,
   });
 
   return sendTrackedEmail({
     eventKey: EMAIL_EVENTS.SUBSCRIPTION_CANCELLED,
     to,
     recipientName: name,
-    subject: `Your Sitepresso subscription has been cancelled`,
+    subject: `Your DriftHR subscription has been cancelled`,
     htmlBody: html,
     businessId: options.businessId,
     metadata: { businessName: options.businessName },
@@ -2224,7 +2224,7 @@ async function sendWaitlistSlotOpenEmail(to, ctx) {
 //     shippingMinor, taxMinor, totalMinor, shippingAddress, notes,
 //     orderUrl, supportEmail }
 async function sendOrderReceivedCustomerEmail(to, ctx) {
-  const businessName = ctx.businessName || 'Sitepresso';
+  const businessName = ctx.businessName || 'DriftHR';
   const subject = `Action required: complete payment for order #${ctx.orderShortId}`;
   const itemsRows = (ctx.items || []).map((item) => [
     `<strong>${escapeHtml(item.productName)}</strong>`
@@ -2414,7 +2414,7 @@ function renderShippingBlock(ctx) {
 // from PENDING → PAID. Reassures the customer that their money landed
 // and gives them a fulfillment timeline expectation.
 async function sendOrderPaidEmail(to, ctx) {
-  const businessName = ctx.businessName || 'Sitepresso';
+  const businessName = ctx.businessName || 'DriftHR';
   const subject = `Payment confirmed for order #${ctx.orderShortId} — ${businessName}`;
   const html = renderEmail({
     eyebrow: 'Payment received',
@@ -2453,7 +2453,7 @@ async function sendOrderPaidEmail(to, ctx) {
 // PACKING → OUT_FOR_DELIVERY. Sets the customer's expectation that they
 // should be available to receive it today/tomorrow.
 async function sendOrderOutForDeliveryEmail(to, ctx) {
-  const businessName = ctx.businessName || 'Sitepresso';
+  const businessName = ctx.businessName || 'DriftHR';
   const subject = `Out for delivery — order #${ctx.orderShortId}`;
   const html = renderEmail({
     eyebrow: 'On the way',
@@ -2490,7 +2490,7 @@ async function sendOrderOutForDeliveryEmail(to, ctx) {
 // pickup code prominently (buyer reads it to staff) and the location
 // address + hours so the buyer can plan their visit.
 async function sendOrderReadyForPickupEmail(to, ctx) {
-  const businessName = ctx.businessName || 'Sitepresso';
+  const businessName = ctx.businessName || 'DriftHR';
   const subject = `Ready for pickup — order #${ctx.orderShortId}`;
   const pickup = ctx.pickup || {};
   const code = pickup.code || '——';
@@ -2544,7 +2544,7 @@ async function sendOrderReadyForPickupEmail(to, ctx) {
 // and needs the customer's decision. Lists each proposed swap and links to the
 // order page where they approve or decline (decline = refund those items).
 async function sendSubstitutionProposedEmail(to, ctx) {
-  const businessName = ctx.businessName || 'Sitepresso';
+  const businessName = ctx.businessName || 'DriftHR';
   const subject = `Action needed — a substitution on order #${ctx.orderShortId}`;
   const proposed = (ctx.items || []).filter(
     (it) => it.fulfillmentStatus === 'SUBSTITUTED' && it.substitutionStatus === 'PROPOSED',
@@ -2594,7 +2594,7 @@ async function sendSubstitutionProposedEmail(to, ctx) {
 // weights, shorted items, accepted substitutions). Sent once as the order
 // leaves picking. Shows the original vs adjusted total and any refund.
 async function sendOrderAdjustedEmail(to, ctx) {
-  const businessName = ctx.businessName || 'Sitepresso';
+  const businessName = ctx.businessName || 'DriftHR';
   const subject = `Your order #${ctx.orderShortId} total was updated`;
   const money = (minor) => {
     if (minor == null) return '';
@@ -2641,7 +2641,7 @@ async function sendOrderAdjustedEmail(to, ctx) {
 // OUT_FOR_DELIVERY → DELIVERED. Wraps up the order lifecycle and
 // invites a follow-up purchase.
 async function sendOrderDeliveredEmail(to, ctx) {
-  const businessName = ctx.businessName || 'Sitepresso';
+  const businessName = ctx.businessName || 'DriftHR';
   const subject = `Delivered — order #${ctx.orderShortId}`;
   const shopUrl = (() => {
     if (!ctx.orderUrl) return null;
@@ -2680,7 +2680,7 @@ async function sendOrderDeliveredEmail(to, ctx) {
 }
 
 async function sendOrderDeliveryAttemptFailedEmail(to, ctx) {
-  const businessName = ctx.businessName || 'Sitepresso';
+  const businessName = ctx.businessName || 'DriftHR';
   const subject = `Delivery attempt update — order #${ctx.orderShortId}`;
   const html = renderEmail({
     eyebrow: 'Delivery update',

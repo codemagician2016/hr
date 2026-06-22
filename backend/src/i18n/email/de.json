@@ -3,7 +3,7 @@
     "greeting": "Hallo {name}",
     "greetingFallback": "Hallo",
     "footerSafeIgnore": "Du hast das nicht angefordert? Du kannst diese E-Mail bedenkenlos ignorieren.",
-    "signOff": "Das Sitepresso-Team",
+    "signOff": "Das DriftHR-Team",
     "viewBookingCta": "Buchung ansehen",
     "rescheduleCta": "Neu planen",
     "cancelCta": "Stornieren"

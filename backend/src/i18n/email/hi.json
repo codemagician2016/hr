@@ -3,7 +3,7 @@
     "greeting": "नमस्ते {name}",
     "greetingFallback": "नमस्ते",
     "footerSafeIgnore": "अगर आपने यह नहीं माँगा, तो आप इस ईमेल को नज़रअंदाज़ कर सकते हैं।",
-    "signOff": "Sitepresso टीम",
+    "signOff": "DriftHR टीम",
     "viewBookingCta": "बुकिंग देखें",
     "rescheduleCta": "समय बदलें",
     "cancelCta": "रद्द करें"
