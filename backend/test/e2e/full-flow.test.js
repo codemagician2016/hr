@@ -70,7 +70,10 @@ function callController(handler, req) {
 
 // Build a demo-operator request context.
 function mkReq(user, { body = {}, params = {}, query = {} } = {}) {
-  return { user, body, params, query };
+  // The e2e operator is a BUSINESS_ADMIN → ALL data scope. Controllers here are
+  // invoked directly (bypassing the withEmployeeScope middleware), so simulate the
+  // req.scope the middleware would attach for an ALL-band actor.
+  return { user, body, params, query, scope: { kind: 'ALL' } };
 }
 
 const RUN = Date.now(); // unique-ish suffix for re-runnable codes where needed

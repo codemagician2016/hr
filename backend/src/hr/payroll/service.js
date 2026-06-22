@@ -31,6 +31,10 @@ const filing = require('./filing');
 const india = require('./compliance/india');
 const newzealand = require('./compliance/newzealand');
 
+// Attendance freeze bridge (Feature 2). Opt-in from computeRun so existing
+// seed-driven pay runs (which pre-seed AttendancePayInput) are untouched.
+const { freezeAttendance } = require('../attendance/freeze');
+
 const { CATEGORY, CALC, PRORATION, LOP_BEHAVIOR, computePayslip } = engine;
 const { STATE, PayRunError, transition, computeInputHash } = payrun;
 
@@ -257,16 +261,16 @@ function buildEmployeePayInput(rows) {
   }
 
   // ── Inputs (proration / LOP / overtime) from the frozen AttendancePayInput ──
+  // M1 — gate on `!= null` (presence), NOT truthiness. A frozen ZERO (e.g.
+  // payableDays=0 for a fully-LOP month) is meaningful and MUST reach the engine;
+  // `if (payableDays)` would silently drop it and the engine would fall back to a
+  // full-period proration, overpaying the employee.
   const inputs = {};
   if (attendance) {
-    const calendarDays = toNum(attendance.calendarDays);
-    const payableDays = toNum(attendance.payableDays);
-    const lopDays = toNum(attendance.lopDays);
-    const overtimeHours = toNum(attendance.overtimeHours);
-    if (calendarDays) inputs.calendarDays = calendarDays;
-    if (payableDays) inputs.payableDays = payableDays;
-    if (lopDays) inputs.lopDays = lopDays;
-    if (overtimeHours) inputs.otHours = overtimeHours;
+    if (attendance.calendarDays != null) inputs.calendarDays = toNum(attendance.calendarDays);
+    if (attendance.payableDays != null) inputs.payableDays = toNum(attendance.payableDays);
+    if (attendance.lopDays != null) inputs.lopDays = toNum(attendance.lopDays);
+    if (attendance.overtimeHours != null) inputs.otHours = toNum(attendance.overtimeHours);
   }
 
   // ── period (engine + compliance module both key off this) ──
@@ -320,12 +324,32 @@ function buildEmployeePayInput(rows) {
     currencyCode: entity.payCurrency || undefined,
   };
 
+  // M2 — OT hours that no component will consume vanish silently. When otHours>0
+  // but no ATTENDANCE_DRIVEN earning reads them (the paid path is unchanged), emit
+  // a WARNING the run surfaces so the structure gap is visible.
+  const preAnomalies = [];
+  const otHours = toNum(inputs.otHours, 0);
+  if (otHours > 0) {
+    const consumes = componentsForEngine.some(
+      (def) => def.calcMethod === CALC.ATTENDANCE_DRIVEN
+        && (def.hoursField || 'otHours') === 'otHours',
+    );
+    if (!consumes) {
+      preAnomalies.push({
+        code: 'OT_HOURS_UNCONSUMED',
+        severity: 'WARNING',
+        message: `Frozen overtime of ${otHours}h is not consumed by any component (no FORMULA/overtime earning in the structure); the hours will not be paid.`,
+      });
+    }
+  }
+
   const meta = {
     employeeId: employee.id,
     compensationId: compensation.id,
     payableDays: attendance ? toNum(attendance.payableDays) : 0,
     lopDays: attendance ? toNum(attendance.lopDays) : 0,
     overtimeHours: attendance ? toNum(attendance.overtimeHours) : 0,
+    preAnomalies,
   };
 
   return { componentsForEngine, engineArgs, meta };
@@ -476,10 +500,11 @@ function sequenceFor(periodStart, startMonth, frequency) {
 /**
  * loadEmployeesForRun — gather the active employees of the run's entity and,
  * for each, the row bundle the PURE mapping needs. DB-touching; the mapping
- * itself stays pure.
+ * itself stays pure. Accepts an optional Prisma transaction client (`db`) so the
+ * freeze + bundle-load + persist can share ONE transaction (M3).
  */
-async function loadRunRowBundles(businessId, payRun) {
-  const entity = await prisma.entity.findFirst({
+async function loadRunRowBundles(businessId, payRun, db = prisma) {
+  const entity = await db.entity.findFirst({
     where: { id: payRun.entityId, businessId },
   });
   if (!entity) throw notFound('Entity not found');
@@ -487,20 +512,20 @@ async function loadRunRowBundles(businessId, payRun) {
   const periodEnd = isoDate(payRun.periodEnd);
 
   // Active employees with a CURRENT employment record in this entity.
-  const employments = await prisma.employmentRecord.findMany({
+  const employments = await db.employmentRecord.findMany({
     where: { businessId, entityId: payRun.entityId, isCurrent: true },
     select: { employeeId: true },
   });
   const employeeIds = [...new Set(employments.map((e) => e.employeeId))];
   if (employeeIds.length === 0) return { entity, bundles: [] };
 
-  const employees = await prisma.employee.findMany({
+  const employees = await db.employee.findMany({
     where: { id: { in: employeeIds }, businessId, isActive: true, deletedAt: null },
     include: { statutoryProfile: true },
   });
 
   // Frozen attendance inputs for this run, indexed by employee.
-  const attendanceRows = await prisma.attendancePayInput.findMany({
+  const attendanceRows = await db.attendancePayInput.findMany({
     where: { businessId, payRunId: payRun.id },
   });
   const attendanceByEmp = new Map(attendanceRows.map((a) => [a.employeeId, a]));
@@ -508,7 +533,7 @@ async function loadRunRowBundles(businessId, payRun) {
   const bundles = [];
   for (const emp of employees) {
     // Resolve the current compensation revision effective on the period end.
-    const compensation = await resolveCurrentCompensation(businessId, emp.id, periodEnd);
+    const compensation = await resolveCurrentCompensation(businessId, emp.id, periodEnd, db);
     if (!compensation) continue; // no pay structure -> skip (not an error)
 
     bundles.push({
@@ -529,7 +554,7 @@ async function loadRunRowBundles(businessId, payRun) {
   }
 
   // Attach the pay frequency (from the calendar) to every bundle's period.
-  const cal = await prisma.payCalendar.findFirst({ where: { id: payRun.payCalendarId, businessId } });
+  const cal = await db.payCalendar.findFirst({ where: { id: payRun.payCalendarId, businessId } });
   const frequency = cal ? cal.frequency : null;
   for (const b of bundles) b.period.frequency = frequency;
 
@@ -537,10 +562,10 @@ async function loadRunRowBundles(businessId, payRun) {
 }
 
 /** Resolve the CompensationRevision effective on `asOf`, with its lines + components. */
-async function resolveCurrentCompensation(businessId, employeeId, asOf) {
+async function resolveCurrentCompensation(businessId, employeeId, asOf, db = prisma) {
   const asOfDate = new Date(isoDate(asOf) + 'T00:00:00Z');
   // Prefer the revision whose [effectiveFrom, effectiveTo] window covers asOf.
-  const covering = await prisma.compensationRevision.findFirst({
+  const covering = await db.compensationRevision.findFirst({
     where: {
       businessId,
       employeeId,
@@ -552,7 +577,7 @@ async function resolveCurrentCompensation(businessId, employeeId, asOf) {
   });
   if (covering) return covering;
   // Fallback: the current revision (isCurrent) even if effectiveTo already closed.
-  return prisma.compensationRevision.findFirst({
+  return db.compensationRevision.findFirst({
     where: { businessId, employeeId, isCurrent: true },
     orderBy: { effectiveFrom: 'desc' },
     include: { lines: { orderBy: { sortOrder: 'asc' }, include: { component: true } } },
@@ -564,7 +589,7 @@ async function resolveCurrentCompensation(businessId, employeeId, asOf) {
  * payslips, transition DRAFT -> INPUTS_LOCKED -> CALCULATED in one transaction.
  * Idempotent: re-running with the same inputHash is a no-op.
  */
-async function computeRun({ businessId, actorId, payRunId }) {
+async function computeRun({ businessId, actorId, payRunId, freezeAttendance: doFreeze = false }) {
   const payRun = await prisma.payRun.findFirst({ where: { id: payRunId, businessId } });
   if (!payRun) throw notFound('Pay run not found');
 
@@ -577,151 +602,207 @@ async function computeRun({ businessId, actorId, payRunId }) {
     throw badRequest('BAD_STATE', `Cannot compute a run in ${payRun.status}`);
   }
 
-  const { entity, bundles } = await loadRunRowBundles(businessId, payRun);
-
-  // Map + compute each employee (PURE per employee).
-  const lines = [];
-  const anomalies = [];
-  let blockingCount = 0;
-  for (const bundle of bundles) {
-    const { engineArgs, meta } = buildEmployeePayInput(bundle);
-    const result = computePayslip(engineArgs);
-    for (const a of result.anomalies || []) {
-      anomalies.push({ employeeId: meta.employeeId, ...a });
-      if (a.severity === 'BLOCKER' || a.severity === 'BLOCK') blockingCount += 1;
-    }
-    lines.push({
-      employeeId: meta.employeeId,
-      compensationId: meta.compensationId,
-      payableDays: meta.payableDays,
-      lopDays: meta.lopDays,
-      overtimeHours: meta.overtimeHours,
-      employeeCode: bundle.employee.code,
-      result,
-    });
-  }
-
-  // Content-address the frozen inputs for idempotency (§11.1).
-  const inputHash = computeInputHash({
-    inputs: lines.map((l) => ({
-      employeeId: l.employeeId,
-      compensationId: l.compensationId,
-      payableDays: l.payableDays,
-      lopDays: l.lopDays,
-      overtimeHours: l.overtimeHours,
-      grossMinor: l.result.grossMinor,
-      netMinor: l.result.netMinor,
-    })),
-    ruleVersions: { country: entity.countryCode },
-    engineVersion: ENGINE_VERSION,
-  });
-
-  // Idempotency: same inputHash already computed -> no-op.
-  if (payRun.status === 'COMPUTED' && payRun.complianceVersionId === inputHash) {
-    return getRun({ businessId, payRunId });
-  }
-
-  // ── Transition DRAFT -> INPUTS_LOCKED -> CALCULATED in one transaction. ──
+  // M3/L2 — when freezing, the freeze + bundle-load + compute + persist all run in
+  // ONE transaction so a later throw rolls back the AttendancePayInput rows AND the
+  // Attendance locks (no half-frozen run), and the FROZEN set is EXACTLY the set
+  // compute processes (active + current employment + has-compensation). The engine
+  // itself is pure (no DB), so running it inside the tx callback is safe.
   const now = new Date();
-  await prisma.$transaction(async (tx) => {
-    // Pure state-machine guard (DRAFT -> INPUTS_LOCKED requires inputHash).
-    let runState = { id: payRun.id, status: STATE.DRAFT, preparerId: payRun.lockedBy || actorId };
-    if (payRun.status === 'INPUTS_LOCKED') runState.status = STATE.INPUTS_LOCKED;
-    if (runState.status === STATE.DRAFT) {
-      runState = transition(runState, STATE.INPUTS_LOCKED, { inputHash, actorId, at: now });
-    } else {
-      runState.inputHash = inputHash;
-    }
-    runState = transition(runState, STATE.CALCULATED, { inputHash, actorId, at: now });
+  let lines = [];
+  let anomalies = [];
+  let blockingCount = 0;
+  let entity;
+  let inputHash;
+  let freezeResult = null;
 
-    // Persist the locked/computed status + the inputHash (as complianceVersionId).
-    await tx.payRun.update({
-      where: { id: payRun.id },
-      data: {
-        status: 'COMPUTED',
-        lockedAt: payRun.lockedAt || now,
-        lockedBy: payRun.lockedBy || actorId || null,
-        computedAt: now,
-        computedBy: actorId || null,
-        complianceVersionId: inputHash,
-        version: { increment: 1 },
-      },
-    });
-
-    // Clear prior compute artefacts for this run (recompute is idempotent).
-    await tx.payslip.deleteMany({ where: { businessId, payRunId: payRun.id } });
-    await tx.payRunLineComponent.deleteMany({ where: { payRunLine: { payRunId: payRun.id } } });
-    await tx.payRunLine.deleteMany({ where: { payRunId: payRun.id } });
-
-    let totGross = 0, totDed = 0, totNet = 0, totEr = 0;
-    for (const ln of lines) {
-      const r = ln.result;
-      const lineRow = await tx.payRunLine.create({
-        data: {
-          businessId,
-          payRunId: payRun.id,
-          employeeId: ln.employeeId,
-          compensationId: ln.compensationId,
-          payableDays: ln.payableDays || 0,
-          lopDays: ln.lopDays || 0,
-          overtimeHours: ln.overtimeHours || 0,
-          grossEarnings: toDec(r.grossMinor),
-          totalDeductions: toDec(r.totalEmployeeDeductionsMinor),
-          netPay: toDec(r.netMinor),
-          employerCost: toDec(r.totalEmployerContributionsMinor),
-          currencyCode: payRun.currencyCode,
-          status: 'COMPUTED',
-          computeTrace: r.explain || null,
-          errorJson: (r.anomalies && r.anomalies.length) ? r.anomalies : undefined,
-          ...statutoryRollups(r),
-        },
+  // Pure per-employee compute (the engine touches no DB). Factored so the DEFAULT
+  // path runs the CPU-bound compute OUTSIDE the write transaction — matching the
+  // pre-refactor behaviour and avoiding the 5s interactive-tx default timeout on
+  // real-size runs — while the freeze path keeps freeze+compute+persist atomic.
+  const loadAndCompute = async (client) => {
+    const loaded = await loadRunRowBundles(businessId, payRun, client);
+    entity = loaded.entity;
+    lines = [];
+    anomalies = [];
+    blockingCount = 0;
+    for (const bundle of loaded.bundles) {
+      const { engineArgs, meta } = buildEmployeePayInput(bundle);
+      const result = computePayslip(engineArgs);
+      // Collect anomalies twice: the run-level list carries employeeId; the per-line
+      // list keeps the engine shape (no employeeId) so it round-trips through
+      // PayRunLine.errorJson the way getRun/approveRun expect.
+      const lineAnoms = [];
+      const pushAnom = (raw) => {
+        anomalies.push({ employeeId: meta.employeeId, ...raw });
+        lineAnoms.push(raw);
+        if (raw.severity === 'BLOCKER' || raw.severity === 'BLOCK') blockingCount += 1;
+      };
+      for (const a of meta.preAnomalies || []) pushAnom(a); // M2 OT_HOURS_UNCONSUMED
+      for (const a of (freezeResult ? freezeResult.anomalies : []) || []) {
+        if (a.employeeId === meta.employeeId) { const { employeeId: _e, ...rest } = a; pushAnom(rest); } // H3
+      }
+      for (const a of result.anomalies || []) pushAnom(a);
+      lines.push({
+        employeeId: meta.employeeId,
+        compensationId: meta.compensationId,
+        payableDays: meta.payableDays,
+        lopDays: meta.lopDays,
+        overtimeHours: meta.overtimeHours,
+        employeeCode: bundle.employee.code,
+        result,
+        allAnomalies: lineAnoms, // persisted to errorJson so warnings survive re-read
       });
-
-      const comps = buildComponentRows(businessId, lineRow.id, r);
-      if (comps.length) await tx.payRunLineComponent.createMany({ data: comps });
-
-      // Payslip (frozen snapshot).
-      await tx.payslip.create({
-        data: {
-          businessId,
-          payRunId: payRun.id,
-          payRunLineId: lineRow.id,
-          employeeId: ln.employeeId,
-          code: buildPayslipCode(payRun.periodStart, ln.employeeCode || ln.employeeId),
-          periodStart: payRun.periodStart,
-          periodEnd: payRun.periodEnd,
-          payDate: payRun.payDate,
-          currencyCode: payRun.currencyCode,
-          grossEarnings: toDec(r.grossMinor),
-          totalDeductions: toDec(r.totalEmployeeDeductionsMinor),
-          netPay: toDec(r.netMinor),
-          snapshotJson: buildPayslipSnapshot(r, payRun, ln),
-          status: 'GENERATED',
-        },
-      });
-
-      totGross += r.grossMinor;
-      totDed += r.totalEmployeeDeductionsMinor;
-      totNet += r.netMinor;
-      totEr += r.totalEmployerContributionsMinor;
     }
-
-    await tx.payRun.update({
-      where: { id: payRun.id },
-      data: {
-        headcount: lines.length,
-        totalGross: toDec(totGross),
-        totalDeductions: toDec(totDed),
-        totalNet: toDec(totNet),
-        totalEmployerCost: toDec(totEr),
-      },
+    // Content-address the frozen inputs for idempotency (§11.1).
+    inputHash = computeInputHash({
+      inputs: lines.map((l) => ({
+        employeeId: l.employeeId,
+        compensationId: l.compensationId,
+        payableDays: l.payableDays,
+        lopDays: l.lopDays,
+        overtimeHours: l.overtimeHours,
+        grossMinor: l.result.grossMinor,
+        netMinor: l.result.netMinor,
+      })),
+      ruleVersions: { country: entity.countryCode },
+      engineVersion: ENGINE_VERSION,
     });
-  });
+  };
+
+  // Explicit long timeout: a real-size payroll run's compute + per-line writes must
+  // not race Prisma's 5s interactive-transaction default (P2028 would roll back the
+  // whole computed run).
+  const TX_OPTS = { timeout: 120000, maxWait: 15000 };
+  if (doFreeze) {
+    // Freeze + compute + persist atomically (M3): a later throw rolls back the
+    // AttendancePayInput rows AND the Attendance locks (no half-frozen run), and the
+    // frozen set is EXACTLY the set compute pays (L2).
+    await prisma.$transaction(async (tx) => {
+      const pre = await loadRunRowBundles(businessId, payRun, tx);
+      const freezeIds = pre.bundles.map((b) => b.employee.id);
+      if (freezeIds.length) {
+        freezeResult = await freezeAttendance(
+          payRun.id, businessId, payRun.periodStart, payRun.periodEnd, freezeIds, tx,
+        );
+      }
+      await loadAndCompute(tx);
+      await persistComputedRun(tx, { businessId, payRun, actorId, now, inputHash, lines });
+    }, TX_OPTS);
+  } else {
+    // Default path — compute OUTSIDE the write tx; only persistence is transactional.
+    await loadAndCompute(prisma);
+    await prisma.$transaction(
+      (tx) => persistComputedRun(tx, { businessId, payRun, actorId, now, inputHash, lines }),
+      TX_OPTS,
+    );
+  }
 
   const detail = await getRun({ businessId, payRunId });
   detail.anomalies = anomalies;
   detail.blockingAnomalies = blockingCount;
   return detail;
+}
+
+/**
+ * persistComputedRun — the DB-writing half of computeRun, factored out so the
+ * freeze + compute + persist can share one transaction (M3). Runs the pure
+ * state-machine guard, writes the COMPUTED status + inputHash, clears prior
+ * artefacts, then persists PayRunLine + components + payslips and the run totals.
+ * `tx` MUST be a Prisma transaction client.
+ */
+async function persistComputedRun(tx, { businessId, payRun, actorId, now, inputHash, lines }) {
+  // Pure state-machine guard (DRAFT -> INPUTS_LOCKED requires inputHash).
+  let runState = { id: payRun.id, status: STATE.DRAFT, preparerId: payRun.lockedBy || actorId };
+  if (payRun.status === 'INPUTS_LOCKED') runState.status = STATE.INPUTS_LOCKED;
+  if (runState.status === STATE.DRAFT) {
+    runState = transition(runState, STATE.INPUTS_LOCKED, { inputHash, actorId, at: now });
+  } else {
+    runState.inputHash = inputHash;
+  }
+  runState = transition(runState, STATE.CALCULATED, { inputHash, actorId, at: now });
+
+  // Persist the locked/computed status + the inputHash (as complianceVersionId).
+  await tx.payRun.update({
+    where: { id: payRun.id },
+    data: {
+      status: 'COMPUTED',
+      lockedAt: payRun.lockedAt || now,
+      lockedBy: payRun.lockedBy || actorId || null,
+      computedAt: now,
+      computedBy: actorId || null,
+      complianceVersionId: inputHash,
+      version: { increment: 1 },
+    },
+  });
+
+  // Clear prior compute artefacts for this run (recompute is idempotent).
+  await tx.payslip.deleteMany({ where: { businessId, payRunId: payRun.id } });
+  await tx.payRunLineComponent.deleteMany({ where: { payRunLine: { payRunId: payRun.id } } });
+  await tx.payRunLine.deleteMany({ where: { payRunId: payRun.id } });
+
+  let totGross = 0, totDed = 0, totNet = 0, totEr = 0;
+  for (const ln of lines) {
+    const r = ln.result;
+    const lineRow = await tx.payRunLine.create({
+      data: {
+        businessId,
+        payRunId: payRun.id,
+        employeeId: ln.employeeId,
+        compensationId: ln.compensationId,
+        payableDays: ln.payableDays || 0,
+        lopDays: ln.lopDays || 0,
+        overtimeHours: ln.overtimeHours || 0,
+        grossEarnings: toDec(r.grossMinor),
+        totalDeductions: toDec(r.totalEmployeeDeductionsMinor),
+        netPay: toDec(r.netMinor),
+        employerCost: toDec(r.totalEmployerContributionsMinor),
+        currencyCode: payRun.currencyCode,
+        status: 'COMPUTED',
+        computeTrace: r.explain || null,
+        errorJson: (ln.allAnomalies && ln.allAnomalies.length) ? ln.allAnomalies : undefined,
+        ...statutoryRollups(r),
+      },
+    });
+
+    const comps = buildComponentRows(businessId, lineRow.id, r);
+    if (comps.length) await tx.payRunLineComponent.createMany({ data: comps });
+
+    // Payslip (frozen snapshot).
+    await tx.payslip.create({
+      data: {
+        businessId,
+        payRunId: payRun.id,
+        payRunLineId: lineRow.id,
+        employeeId: ln.employeeId,
+        code: buildPayslipCode(payRun.periodStart, ln.employeeCode || ln.employeeId),
+        periodStart: payRun.periodStart,
+        periodEnd: payRun.periodEnd,
+        payDate: payRun.payDate,
+        currencyCode: payRun.currencyCode,
+        grossEarnings: toDec(r.grossMinor),
+        totalDeductions: toDec(r.totalEmployeeDeductionsMinor),
+        netPay: toDec(r.netMinor),
+        snapshotJson: buildPayslipSnapshot(r, payRun, ln),
+        status: 'GENERATED',
+      },
+    });
+
+    totGross += r.grossMinor;
+    totDed += r.totalEmployeeDeductionsMinor;
+    totNet += r.netMinor;
+    totEr += r.totalEmployerContributionsMinor;
+  }
+
+  await tx.payRun.update({
+    where: { id: payRun.id },
+    data: {
+      headcount: lines.length,
+      totalGross: toDec(totGross),
+      totalDeductions: toDec(totDed),
+      totalNet: toDec(totNet),
+      totalEmployerCost: toDec(totEr),
+    },
+  });
 }
 
 /** Minor units -> Decimal string "x.xx" (scale 2). No float. */

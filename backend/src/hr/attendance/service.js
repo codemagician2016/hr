@@ -1,0 +1,388 @@
+'use strict';
+
+/**
+ * service.js — Attendance DERIVATION ORCHESTRATOR (Feature 2, Phase 3).
+ *
+ * Bridges the PURE derivation core (./derive.js) to Prisma. This is the DB-facing
+ * half of the pipeline:
+ *
+ *   AttendancePunch ┐
+ *   LeaveTransaction├─► derive(ctx) ─► Attendance (1/emp/day, upsert)
+ *   Holiday         ┤
+ *   Schedule        ┘
+ *
+ * `recompute(businessId, employeeId, fromDate, toDate, tx?)` walks each CIVIL day
+ * in [fromDate, toDate], gathers the inputs the pure engine needs, calls derive(),
+ * and UPSERTs the canonical daily Attendance row — but NEVER overwrites a row that
+ * is `isLocked = true` (frozen by period-close / freeze). Idempotent: re-running
+ * with the same DB state yields the same rows.
+ *
+ * Tenant scope: every query is filtered by businessId. derive.js itself is PURE and
+ * is consumed unchanged.
+ */
+
+const prisma = require('../../core/lib/prisma');
+const {
+  derive,
+  resolveSchedule,
+  isHoliday,
+  isWeeklyOff,
+} = require('./derive');
+const { resolveTimezone, civilDateInTz, zonedWallTimeToUtc } = require('./tz');
+
+// A @db.Date column is stored at UTC midnight. Build the civil-day key the same
+// way everywhere so the unique (businessId, employeeId, date) lines up. The civil
+// day itself is computed in the EMPLOYEE timezone (see civilDateInTz); this only
+// pins a 'YYYY-MM-DD' to the @db.Date storage convention.
+function utcDay(d) {
+  const t = d instanceof Date ? d : new Date(d);
+  return new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate()));
+}
+// A 'YYYY-MM-DD' string → its @db.Date midnight-UTC Date.
+function dayKeyToDate(key) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(key));
+  if (!m) return utcDay(new Date(key));
+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+}
+function addDays(day, n) {
+  return new Date(day.getTime() + n * 86400000);
+}
+function dayKey(d) {
+  return utcDay(d).toISOString().slice(0, 10);
+}
+
+// Enumerate civil days [from, to] inclusive as UTC-midnight Dates.
+function eachDay(fromDate, toDate) {
+  const start = utcDay(fromDate);
+  const end = utcDay(toDate);
+  const out = [];
+  for (let d = start; d.getTime() <= end.getTime(); d = addDays(d, 1)) out.push(d);
+  return out;
+}
+
+// "HH:MM" LOCAL clock on a civil day (key 'YYYY-MM-DD') → the true UTC instant,
+// resolved in the employee timezone (C2). Used by derive for LATE_IN / EARLY_OUT
+// comparison against punchAt (which is a true UTC instant). A night shift whose
+// endTime <= startTime rolls the end onto the next civil day before resolving.
+function clockInstant(dayKeyStr, hhmm, tz) {
+  if (!hhmm) return null;
+  return zonedWallTimeToUtc(dayKeyStr, hhmm, tz) || null;
+}
+
+/**
+ * Compute the shift's working INSTANT window for one civil day D (in the employee
+ * timezone), as a half-open [start, end) of UTC instants used to FILTER punches
+ * before they reach derive (C1):
+ *   - night shift (endTime <= startTime, or crossesMidnight): the worked span runs
+ *     from D's local startTime up to (but not including) D+1's local startTime, so
+ *     the OUT after midnight — even one exactly at the nominal end time — pairs with
+ *     D, while D+1's own window (starting at D+1's startTime) cannot re-pull it.
+ *     This stops day D's post-midnight OUT being double-counted on D+1.
+ *   - day / flexi shift: the civil day [D 00:00 local, D+1 00:00 local).
+ *   - no schedule (open attendance): the civil day [D 00:00 local, D+1 00:00 local).
+ * Returns { gte, lt } as UTC Date instants (half-open [gte, lt)).
+ */
+function shiftInstantWindow(dayKeyStr, schedule, tz) {
+  const nextKey = civilDateInTz(addDays(dayKeyToDate(dayKeyStr), 1), tz);
+  const isNight = schedule && schedule.startTime && schedule.endTime
+    && (schedule.crossesMidnight || schedule.isNightShift || schedule.endTime <= schedule.startTime);
+  if (isNight) {
+    const gte = zonedWallTimeToUtc(dayKeyStr, schedule.startTime, tz);
+    // Run up to the NEXT day's local startTime (exclusive). This captures a
+    // post-midnight OUT (including one exactly at the nominal end time) for D, and
+    // is exactly where D+1's own window begins — so there is no overlap / re-pull.
+    const lt = zonedWallTimeToUtc(nextKey, schedule.startTime, tz);
+    if (gte && lt && lt.getTime() > gte.getTime()) return { gte, lt };
+    // Fallback (degenerate times): civil day window.
+  }
+  const gte = zonedWallTimeToUtc(dayKeyStr, '00:00', tz);
+  const lt = zonedWallTimeToUtc(nextKey, '00:00', tz);
+  return { gte, lt };
+}
+
+/**
+ * Resolve the {fraction, affectsLOP, half} leave context for a civil day from the
+ * employee's APPROVED/AVAILED LeaveTransaction APPLICATION rows covering the day.
+ * Returns null when no leave covers the day.
+ *
+ * M5: AGGREGATE every covering txn (not just the first). Two half-day leaves on
+ * the same day (e.g. FIRST_HALF + SECOND_HALF, or two back-to-back applications)
+ * sum to a full day; affectsLOP is the OR across covering txns; the per-day
+ * fraction is capped at 1. The collapsed `half` is set only when a single half is
+ * involved (informational).
+ */
+function resolveLeaveForDay(day, leaveTxns) {
+  const key = typeof day === 'string' ? day : dayKey(day);
+  let fraction = 0;
+  let affectsLOP = false;
+  const halves = new Set();
+  let covered = false;
+
+  for (const lt of leaveTxns || []) {
+    if (!lt.startDate || !lt.endDate) continue;
+    const s = dayKey(lt.startDate);
+    const e = dayKey(lt.endDate);
+    if (key < s || key > e) continue;
+    covered = true;
+
+    // This txn's contribution to the day: a startHalf on its first day or an
+    // endHalf on its last day makes that boundary a half-day; otherwise full.
+    let f = 1;
+    let half = null;
+    if (key === s && lt.startHalf) { f = 0.5; half = lt.startHalf; }
+    if (key === e && lt.endHalf) { f = 0.5; half = lt.endHalf; }
+    // A single-day half application (start === end) with both halves stays 0.5.
+
+    fraction += f;
+    if (half) halves.add(half);
+    if (lt.leaveType && lt.leaveType.affectsLOP) affectsLOP = true;
+  }
+
+  if (!covered) return null;
+  // Two distinct halves (FIRST_HALF + SECOND_HALF) collapse to a full day.
+  if (fraction > 1) fraction = 1;
+  const half = halves.size === 1 ? [...halves][0] : null;
+  return { fraction, affectsLOP, half };
+}
+
+/**
+ * Resolve approved WFH / On-Duty presence for a civil day from
+ * AttendanceRegularizationRequest rows (kind=WFH|ON_DUTY, status=APPROVED).
+ */
+function resolvePresenceForDay(day, regs) {
+  const key = dayKey(day);
+  const out = { wfh: false, onDuty: false };
+  for (const r of regs || []) {
+    if (r.status !== 'APPROVED') continue;
+    if (dayKey(r.date) !== key) continue;
+    if (r.kind === 'WFH') out.wfh = true;
+    if (r.kind === 'ON_DUTY') out.onDuty = true;
+  }
+  return out;
+}
+
+/** Pick the most-specific active OvertimeRule for an employee (entity/location). */
+function resolveOtRule(employee, rules) {
+  const emp = employee || {};
+  const matches = (rules || []).filter((r) => {
+    if (r.entityId && r.entityId !== emp.entityId) return false;
+    if (r.locationId && r.locationId !== emp.locationId) return false;
+    return true;
+  });
+  if (!matches.length) return null;
+  const rank = (r) => (r.entityId ? 2 : 0) + (r.locationId ? 1 : 0);
+  matches.sort((a, b) => rank(b) - rank(a));
+  return matches[0];
+}
+
+/**
+ * recompute(businessId, employeeId, fromDate, toDate, tx?)
+ *
+ * Re-derive + upsert the daily Attendance rollup for one employee across a civil
+ * date range. Skips locked rows (never retro-mutates a frozen day). Returns a
+ * summary { employeeId, days, written, skippedLocked }.
+ */
+async function recompute(businessId, employeeId, fromDate, toDate, tx) {
+  const db = tx || prisma;
+  if (!businessId || !employeeId) throw new Error('recompute requires businessId and employeeId');
+
+  const from = utcDay(fromDate);
+  const to = utcDay(toDate);
+  if (to.getTime() < from.getTime()) return { employeeId, days: 0, written: 0, skippedLocked: 0 };
+
+  const empRow = await db.employee.findFirst({
+    where: { id: employeeId, businessId, deletedAt: null },
+    select: { id: true },
+  });
+  if (!empRow) return { employeeId, days: 0, written: 0, skippedLocked: 0, notFound: true };
+
+  // Employee entity/location live on the CURRENT EmploymentRecord (there is no
+  // entityId/locationId column on Employee). Resolve them so holiday-scope
+  // matching, OT-rule resolution, and TIMEZONE resolution can key off them.
+  const employment = await db.employmentRecord.findFirst({
+    where: { businessId, employeeId, isCurrent: true },
+    select: {
+      entityId: true, locationId: true,
+      entity: { select: { timezone: true, countryCode: true } },
+      location: { select: { timezone: true, countryCode: true } },
+    },
+  });
+  const [empMeta, business] = await Promise.all([
+    db.employee.findFirst({ where: { id: employeeId, businessId }, select: { countryCode: true } }),
+    db.business.findFirst({ where: { id: businessId }, select: { timezone: true } }),
+  ]);
+  const employee = {
+    id: employeeId,
+    entityId: employment ? employment.entityId : null,
+    locationId: employment ? employment.locationId : null,
+    countryCode: empMeta ? empMeta.countryCode : null,
+  };
+  // C2/H5 — the employee's IANA zone: location → entity → business → countryCode.
+  const tz = resolveTimezone(employee, {
+    location: employment ? employment.location : null,
+    entity: employment ? employment.entity : null,
+    business: business || null,
+  });
+
+  // Window-load once for the whole range (cheaper than per-day round-trips), with a
+  // small pad so a cross-midnight night shift on the final day still pairs.
+  const winStart = from;
+  const winEnd = addDays(to, 2);
+
+  // M4 — never let entityId become `undefined` (Prisma drops an undefined filter,
+  // which would match EVERY entity's default pattern). Build the OR conditionally.
+  const defaultPatternWhere = employee.entityId
+    ? { OR: [{ entityId: employee.entityId }, { entityId: null }] }
+    : { entityId: null };
+
+  const [assignments, defaultPatterns, leaveTxns, regs, holidays, otRules, lockedRows] = await Promise.all([
+    db.shiftAssignment.findMany({
+      where: { businessId, employeeId, effectiveFrom: { lt: winEnd } },
+      include: { shiftPattern: true },
+      orderBy: { effectiveFrom: 'desc' },
+    }),
+    // Entity/location default pattern fallback (active, scoped to the employee's entity or global).
+    db.shiftPattern.findMany({
+      where: {
+        businessId, deletedAt: null, isActive: true,
+        ...defaultPatternWhere,
+      },
+      orderBy: { createdAt: 'asc' },
+    }),
+    db.leaveTransaction.findMany({
+      where: {
+        businessId, employeeId, txnType: 'APPLICATION',
+        status: { in: ['APPROVED', 'AVAILED'] },
+        startDate: { lte: winEnd }, endDate: { gte: winStart },
+      },
+      include: { leaveType: { select: { affectsLOP: true, isPaid: true } } },
+    }),
+    db.attendanceRegularizationRequest.findMany({
+      where: {
+        businessId, employeeId, status: 'APPROVED',
+        kind: { in: ['WFH', 'ON_DUTY'] },
+        date: { gte: winStart, lt: winEnd },
+      },
+    }),
+    db.holiday.findMany({
+      where: { businessId, date: { gte: winStart, lt: winEnd } },
+    }),
+    db.overtimeRule.findMany({ where: { businessId, isActive: true } }),
+    db.attendance.findMany({
+      where: { businessId, employeeId, date: { gte: from, lte: to }, isLocked: true },
+      select: { date: true },
+    }),
+  ]);
+
+  const lockedKeys = new Set(lockedRows.map((r) => dayKey(r.date)));
+  // The entity/location default = first matching active pattern (prefer entity-specific).
+  const defaultPattern = defaultPatterns.sort((a, b) => {
+    const rank = (p) => (p.entityId === employee.entityId ? 1 : 0);
+    return rank(b) - rank(a);
+  })[0] || null;
+  const otRule = resolveOtRule(employee, otRules);
+
+  let written = 0;
+  let skippedLocked = 0;
+  const days = eachDay(from, to);
+
+  for (const day of days) {
+    const key = dayKey(day);
+    if (lockedKeys.has(key)) { skippedLocked += 1; continue; }
+
+    const schedule = resolveSchedule(day, assignments, defaultPattern);
+    // C1 — the shift's working INSTANT window for THIS day, in the employee tz.
+    // A night shift's window runs up to the NEXT day's local startTime so its
+    // post-midnight OUT pairs with THIS day and is excluded from D+1's window.
+    const win = shiftInstantWindow(key, schedule, tz);
+    const punches = await db.attendancePunch.findMany({
+      where: {
+        businessId, employeeId,
+        punchAt: { gte: win.gte, lt: win.lt },
+        // Pending manual (regularization) punches don't count until approved
+        // materialises real source=MANUAL rows; here we include all stored punches
+        // except those still flagged isManual + pending (regularizationRequestId set
+        // but not yet materialised). Approved regularization writes isManual=false.
+        OR: [{ isManual: false }, { isManual: true, regularizationRequestId: null }],
+      },
+      orderBy: { punchAt: 'asc' },
+      select: { punchType: true, punchAt: true },
+    });
+
+    const holiday = isHoliday(employee, day, holidays, null);
+    const weeklyOff = schedule ? isWeeklyOff(day, schedule.weeklyOffDays) : false;
+    const leave = resolveLeaveForDay(key, leaveTxns);
+    const presence = resolvePresenceForDay(day, regs);
+
+    // C2 — scheduledStart/End are the LOCAL shift wall-clock resolved to UTC
+    // instants in the employee tz. The night-shift end rolls to the next civil day.
+    const nextKey = civilDateInTz(addDays(dayKeyToDate(key), 1), tz);
+    const endKey = (schedule && schedule.startTime && schedule.endTime
+      && schedule.endTime <= schedule.startTime) ? nextKey : key;
+    const ctx = {
+      date: key,
+      schedule,
+      scheduledStart: schedule ? clockInstant(key, schedule.startTime, tz) : null,
+      scheduledEnd: schedule ? clockInstant(endKey, schedule.endTime, tz) : null,
+      punches,
+      leave,
+      presence,
+      holiday: !!holiday,
+      weeklyOff,
+      otRule,
+    };
+
+    const d = derive(ctx);
+
+    // Open-attendance day with no punches and no schedule → derive returns
+    // status=null; we skip writing a row for it (nothing to record).
+    if (d.status == null) continue;
+
+    const data = {
+      shiftPatternId: schedule ? schedule.id || null : null,
+      firstIn: d.firstIn ? new Date(d.firstIn) : null,
+      lastOut: d.lastOut ? new Date(d.lastOut) : null,
+      workedMinutes: d.workedMinutes || 0,
+      breakMinutes: d.breakMinutes || 0,
+      overtimeMinutes: d.overtimeMinutes || 0,
+      status: d.status,
+      lopFraction: d.lopFraction || 0,
+      exceptionsJson: (d.exceptions && d.exceptions.length)
+        ? { flags: d.exceptions, otEquivalentHours: d.otEquivalentHours, holidayId: holiday ? holiday.id : null }
+        : { otEquivalentHours: d.otEquivalentHours, holidayId: holiday ? holiday.id : null },
+    };
+
+    // L3 — TOCTOU-safe write. A plain upsert(update) would overwrite a row that
+    // got locked AFTER the pre-scan (freeze races recompute). Instead update only
+    // when isLocked=false; if no row matched, either it doesn't exist (create) or
+    // it was locked mid-flight (leave it — monotonic freeze).
+    const dateAt = utcDay(day);
+    const upd = await db.attendance.updateMany({
+      where: { businessId, employeeId, date: dateAt, isLocked: false },
+      data,
+    });
+    if (upd.count === 0) {
+      try {
+        await db.attendance.create({ data: { businessId, employeeId, date: dateAt, ...data } });
+      } catch (e) {
+        // P2002: a row appeared between updateMany and create (it must be locked,
+        // since an unlocked row would have been updated) — skip, don't clobber.
+        if (e.code !== 'P2002') throw e;
+        skippedLocked += 1;
+        continue;
+      }
+    }
+    written += 1;
+  }
+
+  return { employeeId, days: days.length, written, skippedLocked };
+}
+
+module.exports = {
+  recompute,
+  // exposed for tests / freeze rollup reuse
+  _internals: {
+    resolveLeaveForDay, resolvePresenceForDay, resolveOtRule, eachDay, utcDay, dayKey,
+    shiftInstantWindow, clockInstant, dayKeyToDate,
+  },
+};

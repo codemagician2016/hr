@@ -6,21 +6,21 @@
 //   - ShiftAssignment  : effective-dated emp -> shift pattern mapping (hard model).
 //   - Timesheet        : read + DRAFT/SUBMITTED/APPROVED/REJECTED transitions.
 //   - AttendancePayInput: FROZEN payroll feed — READ ONLY here (see freeze note).
-//   - Regularization   : manual-punch request + approve.
+//   - Regularization   : AttendanceRegularizationRequest (real model) with a real
+//     status/decidedBy/decidedAt and a `kind` discriminator. Self-create allowed
+//     (PENDING + resolveApprover); approve materializes MANUAL IN/OUT punches and
+//     re-derives; reject sets REJECTED (no hard-delete).
 //
-// SCHEMA NOTE (regularization): the schema declares
-// `AttendanceRegularizationRequest[]` relations on Business/Employee, but the
-// model itself is NOT yet defined (forward-declared by the lead). We therefore
-// implement regularization against the REAL, existing AttendancePunch columns
-// (`isManual`, `source = MANUAL`, `regularizationRequestId`): a request inserts
-// pending manual punches grouped by a generated requestId; approve confirms them
-// (clears the pending flag), reject removes them. When the dedicated model lands
-// this controller's request/approve handlers can be repointed without changing
-// the route contract. Until then there is no extra status column to rely on, so
-// pending-state is tracked by `isManual = true` + a grouping requestId.
-const crypto = require('crypto');
+// Derivation: a punch (and an approved regularization) triggers
+// attendance/service.recompute for the affected (employee, day) so the daily
+// Attendance rollup stays current. Period-close freezes the rollup (isLocked) and
+// a punch into a locked range is rejected (409).
 const prisma = require('../../core/lib/prisma');
 const { scopeWhere, scopeAllows } = require('../lib/scopeResolver');
+const { resolveApprover } = require('../lib/approvalRouting');
+const { writeAudit } = require('../../core/lib/audit');
+const { recompute } = require('../attendance/service');
+const { resolveTimezone, civilDateInTz } = require('../attendance/tz');
 
 const PUNCH_TYPES = ['IN', 'OUT', 'BREAK_START', 'BREAK_END'];
 const PUNCH_SOURCES = ['WEB', 'MOBILE_APP', 'BIOMETRIC', 'KIOSK', 'GEO_FENCE', 'API', 'IMPORT', 'MANUAL'];
@@ -36,6 +36,55 @@ function clampPage(query) {
 async function findEmployee(businessId, employeeId) {
   if (!employeeId) return null;
   return prisma.employee.findFirst({ where: { id: employeeId, businessId, deletedAt: null } });
+}
+
+// A @db.Date civil day at UTC midnight (matches the Attendance unique key).
+function utcDay(value) {
+  const t = value instanceof Date ? value : new Date(value);
+  return new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate()));
+}
+
+// A 'YYYY-MM-DD' civil-day key → its @db.Date midnight-UTC Date.
+function civilKeyToDate(key) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(key));
+  if (!m) return utcDay(new Date(key));
+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+}
+
+// Resolve an employee's IANA timezone (location → entity → business → countryCode)
+// from the CURRENT EmploymentRecord. Used to bucket a true-UTC punchAt into the
+// correct LOCAL civil day (H5). Returns a zone string (never throws).
+async function resolveEmployeeTz(businessId, employeeId, employee) {
+  const employment = await prisma.employmentRecord.findFirst({
+    where: { businessId, employeeId, isCurrent: true },
+    select: {
+      entity: { select: { timezone: true, countryCode: true } },
+      location: { select: { timezone: true, countryCode: true } },
+    },
+  });
+  const business = await prisma.business.findFirst({ where: { id: businessId }, select: { timezone: true } });
+  return resolveTimezone(
+    { countryCode: employee ? employee.countryCode : null },
+    { location: employment ? employment.location : null, entity: employment ? employment.entity : null, business },
+  );
+}
+
+// The @db.Date civil day a UTC instant belongs to, in the employee timezone (H5):
+// an NZ 11:00 NZST punch (23:00 UTC prev day) must bucket to its LOCAL date, not
+// the UTC date. `tz` is the resolved zone from resolveEmployeeTz.
+function civilDayInTz(instant, tz) {
+  return civilKeyToDate(civilDateInTz(instant, tz));
+}
+
+// True when the (employee, civil-day) lands on a LOCKED Attendance row — writes
+// into a frozen/closed period must be rejected (409). `day` is already the
+// employee-local civil @db.Date (resolved by the caller via the employee tz).
+async function isDayLocked(businessId, employeeId, day) {
+  const row = await prisma.attendance.findFirst({
+    where: { businessId, employeeId, date: utcDay(day), isLocked: true },
+    select: { id: true },
+  });
+  return !!row;
 }
 
 /* ------------------------------------------------------------------ */
@@ -61,10 +110,24 @@ async function createPunch(req, res, next) {
 
     const emp = await findEmployee(businessId, employeeId);
     if (!emp) return res.status(404).json({ message: 'Employee not found' });
+    // Feature 1: a punch for an out-of-scope employee is an IDOR target → 404.
+    if (!scopeAllows(req.scope, employeeId)) {
+      return res.status(404).json({ message: 'Employee not found' });
+    }
 
     if (locationId) {
       const loc = await prisma.location.findFirst({ where: { id: locationId, businessId, deletedAt: null } });
       if (!loc) return res.status(400).json({ message: 'locationId does not belong to this business' });
+    }
+
+    const punchAt = req.body.punchAt ? new Date(req.body.punchAt) : new Date();
+    // H5 — bucket the punch into the employee's LOCAL civil day (not the UTC day)
+    // so the lock guard and recompute key off the correct date for IN/NZ punches.
+    const tz = await resolveEmployeeTz(businessId, employeeId, emp);
+    const localDay = civilDayInTz(punchAt, tz);
+    // Period-lock guard: cannot punch into a frozen/closed day (409).
+    if (await isDayLocked(businessId, employeeId, localDay)) {
+      return res.status(409).json({ message: 'Attendance for this day is locked (period closed)' });
     }
 
     const data = {
@@ -72,7 +135,7 @@ async function createPunch(req, res, next) {
       employeeId,
       punchType: type,
       source: punchSource,
-      punchAt: req.body.punchAt ? new Date(req.body.punchAt) : new Date(),
+      punchAt,
       locationId: locationId || null,
       // Decimal lat/lng — pass through, never parseInt.
       geoLat: req.body.geoLat != null ? req.body.geoLat : null,
@@ -83,7 +146,284 @@ async function createPunch(req, res, next) {
     };
 
     const punch = await prisma.attendancePunch.create({ data });
+    // Re-derive the affected LOCAL civil day so the daily Attendance rollup stays
+    // current (recompute keys @db.Date by the employee-local day — H5).
+    await recompute(businessId, employeeId, localDay, localDay);
     res.status(201).json(punch);
+  } catch (e) { next(e); }
+}
+
+/* ------------------------------------------------------------------ */
+/* Bulk punch import (CSV / biometric feed)                           */
+/* ------------------------------------------------------------------ */
+
+// POST /punches/import — array (or {rows:[...]}) of {employeeCode|employeeId,
+// punchType, punchAt, source?}. All-or-nothing: validates every row first, builds
+// an error report, and only on a fully clean batch inserts (deduped) + recomputes
+// the affected (employee, day) pairs. canManageAttendance + scope.
+async function importPunches(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const rows = Array.isArray(req.body) ? req.body : (Array.isArray(req.body.rows) ? req.body.rows : null);
+    if (!rows || rows.length === 0) {
+      return res.status(400).json({ message: 'Body must be a non-empty array (or { rows: [...] }) of punch rows' });
+    }
+    if (rows.length > 5000) {
+      return res.status(400).json({ message: 'Import is capped at 5000 rows per call' });
+    }
+
+    // Resolve employees by code or id once (tenant-scoped).
+    const codes = [...new Set(rows.map((r) => r.employeeCode).filter(Boolean))];
+    const ids = [...new Set(rows.map((r) => r.employeeId).filter(Boolean))];
+    const employees = await prisma.employee.findMany({
+      where: {
+        businessId, deletedAt: null,
+        OR: [
+          codes.length ? { code: { in: codes } } : undefined,
+          ids.length ? { id: { in: ids } } : undefined,
+        ].filter(Boolean),
+      },
+      select: { id: true, code: true, countryCode: true },
+    });
+    const byCode = new Map(employees.map((e) => [e.code, e.id]));
+    const byId = new Map(employees.map((e) => [e.id, e.id]));
+    const empById = new Map(employees.map((e) => [e.id, e]));
+
+    // H5 — resolve each in-scope employee's tz ONCE so punchAt buckets into the
+    // correct LOCAL civil day (not the UTC day) for lock-check + recompute keys.
+    const tzCache = new Map();
+    const tzFor = async (employeeId) => {
+      if (tzCache.has(employeeId)) return tzCache.get(employeeId);
+      const t = await resolveEmployeeTz(businessId, employeeId, empById.get(employeeId));
+      tzCache.set(employeeId, t);
+      return t;
+    };
+
+    const errors = [];
+    const valid = [];
+    const seen = new Set(); // intra-batch dedupe key (employeeId|type|punchAt|source)
+    const lockCheck = new Set(); // (employeeId|localDayKey) to verify not locked
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i] || {};
+      const rowErr = (message) => errors.push({ row: i, message });
+
+      const employeeId = r.employeeId ? byId.get(r.employeeId) : (r.employeeCode ? byCode.get(r.employeeCode) : null);
+      if (!employeeId) { rowErr('employee not found in this tenant (employeeId/employeeCode)'); continue; }
+      if (!scopeAllows(req.scope, employeeId)) { rowErr('employee is out of scope'); continue; }
+      if (!PUNCH_TYPES.includes(r.punchType)) { rowErr(`punchType must be one of ${PUNCH_TYPES.join(', ')}`); continue; }
+      const source = r.source || 'IMPORT';
+      if (!PUNCH_SOURCES.includes(source)) { rowErr(`source must be one of ${PUNCH_SOURCES.join(', ')}`); continue; }
+      const punchAt = r.punchAt ? new Date(r.punchAt) : null;
+      if (!punchAt || Number.isNaN(punchAt.getTime())) { rowErr('punchAt is not a parseable date'); continue; }
+
+      const dedupeKey = `${employeeId}|${r.punchType}|${punchAt.toISOString()}|${source}`;
+      if (seen.has(dedupeKey)) { rowErr('duplicate of another row in this batch'); continue; }
+      seen.add(dedupeKey);
+
+      const tz = await tzFor(employeeId);
+      const localKey = civilDateInTz(punchAt, tz); // 'YYYY-MM-DD' local
+      valid.push({ businessId, employeeId, punchType: r.punchType, source, punchAt, locationId: r.locationId || null, _dedupeKey: dedupeKey, _localKey: localKey });
+      lockCheck.add(`${employeeId}|${localKey}`);
+    }
+
+    if (errors.length) {
+      // All-or-nothing: reject the whole batch with the error report.
+      return res.status(422).json({ message: 'Import rejected; fix the listed rows', errors, accepted: 0, rejected: rows.length });
+    }
+
+    // Reject the batch if any target day is locked (keyed by LOCAL civil day).
+    const lockedHits = [];
+    for (const k of lockCheck) {
+      const [employeeId, dayKey] = k.split('|');
+      if (await isDayLocked(businessId, employeeId, civilKeyToDate(dayKey))) lockedHits.push({ employeeId, date: dayKey });
+    }
+    if (lockedHits.length) {
+      return res.status(409).json({ message: 'Some rows fall in a locked period', locked: lockedHits, accepted: 0, rejected: rows.length });
+    }
+
+    // Persist + recompute in one transaction (dedupe against existing rows).
+    const affected = new Set();
+    let inserted = 0;
+    await prisma.$transaction(async (tx) => {
+      for (const v of valid) {
+        const existing = await tx.attendancePunch.findFirst({
+          where: { businessId, employeeId: v.employeeId, punchType: v.punchType, punchAt: v.punchAt, source: v.source },
+          select: { id: true },
+        });
+        if (existing) continue; // dedupe against the DB (idempotent re-import)
+        await tx.attendancePunch.create({
+          data: { businessId, employeeId: v.employeeId, punchType: v.punchType, source: v.source, punchAt: v.punchAt, locationId: v.locationId },
+        });
+        inserted += 1;
+        affected.add(`${v.employeeId}|${v._localKey}`); // LOCAL civil day (H5)
+      }
+      for (const k of affected) {
+        const [employeeId, dayKey] = k.split('|');
+        const localDay = civilKeyToDate(dayKey);
+        await recompute(businessId, employeeId, localDay, localDay, tx);
+      }
+    });
+
+    await writeAudit({
+      businessId, actorId: req.user.id, action: 'attendance.punches.import',
+      entityType: 'AttendancePunch', entityId: null,
+      meta: { rows: rows.length, inserted, recomputedDays: affected.size },
+    });
+
+    res.status(201).json({ accepted: rows.length, inserted, recomputedDays: affected.size, errors: [] });
+  } catch (e) { next(e); }
+}
+
+/* ------------------------------------------------------------------ */
+/* Summary (dashboard aggregate)                                       */
+/* ------------------------------------------------------------------ */
+
+// GET /summary?from=&to=&groupBy=status|date — counts of Attendance rows, scoped.
+async function summary(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const { from, to } = req.query;
+    const groupBy = req.query.groupBy === 'date' ? 'date' : 'status';
+
+    const where = { businessId, ...scopeWhere(req.scope, 'employeeId') };
+    if (from || to) {
+      where.date = {};
+      if (from) where.date.gte = utcDay(from);
+      if (to) where.date.lte = utcDay(to);
+    }
+
+    const grouped = await prisma.attendance.groupBy({
+      by: [groupBy],
+      where,
+      _count: { _all: true },
+      _sum: { lopFraction: true, overtimeMinutes: true },
+    });
+
+    const buckets = grouped.map((g) => ({
+      key: groupBy === 'date' ? (g.date instanceof Date ? g.date.toISOString().slice(0, 10) : g.date) : g.status,
+      count: g._count._all,
+      lopDays: Number(g._sum.lopFraction || 0),
+      overtimeMinutes: g._sum.overtimeMinutes || 0,
+    }));
+    const total = buckets.reduce((a, b) => a + b.count, 0);
+    res.json({ groupBy, total, buckets });
+  } catch (e) { next(e); }
+}
+
+/* ------------------------------------------------------------------ */
+/* Recompute (idempotent re-derivation)                                */
+/* ------------------------------------------------------------------ */
+
+// POST /recompute { employeeId? | all in scope, from, to } — canManageAttendance + scope.
+async function recomputeRange(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const { employeeId, from, to } = req.body;
+    if (!from || !to) return res.status(400).json({ message: 'from and to are required' });
+    const fromD = new Date(from);
+    const toD = new Date(to);
+    if (Number.isNaN(fromD.getTime()) || Number.isNaN(toD.getTime())) {
+      return res.status(400).json({ message: 'from and to must be valid dates' });
+    }
+
+    let targets;
+    if (employeeId) {
+      if (!scopeAllows(req.scope, employeeId)) return res.status(404).json({ message: 'Employee not found' });
+      targets = [employeeId];
+    } else {
+      // All employees in scope. ALL band → every active employee in the tenant.
+      const where = { businessId, deletedAt: null, ...scopeWhere(req.scope, 'id') };
+      const emps = await prisma.employee.findMany({ where, select: { id: true } });
+      targets = emps.map((e) => e.id);
+    }
+
+    const results = [];
+    for (const id of targets) {
+      results.push(await recompute(businessId, id, fromD, toD));
+    }
+    const written = results.reduce((a, r) => a + (r.written || 0), 0);
+    res.json({ employees: targets.length, written, results });
+  } catch (e) { next(e); }
+}
+
+/* ------------------------------------------------------------------ */
+/* Period close (bulk lock)                                            */
+/* ------------------------------------------------------------------ */
+
+// POST /period/close { from, to, entityId? } — set Attendance.isLocked for the
+// scoped range. Blocks when pending regularizations or unsubmitted timesheets
+// exist in the range (returns the blockers). canManageAttendance.
+async function closePeriod(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const { from, to, entityId } = req.body;
+    if (!from || !to) return res.status(400).json({ message: 'from and to are required' });
+    const fromD = utcDay(from);
+    const toD = utcDay(to);
+    if (Number.isNaN(fromD.getTime()) || Number.isNaN(toD.getTime())) {
+      return res.status(400).json({ message: 'from and to must be valid dates' });
+    }
+
+    // Scope the affected employees: entity filter (via current EmploymentRecord) ∩ scope.
+    let employeeIds = null;
+    if (entityId) {
+      const emps = await prisma.employmentRecord.findMany({
+        where: { businessId, entityId, isCurrent: true }, select: { employeeId: true },
+      });
+      employeeIds = [...new Set(emps.map((e) => e.employeeId))];
+    }
+    const scopeFilter = scopeWhere(req.scope, 'employeeId');
+    const empFilter = {};
+    if (employeeIds) empFilter.employeeId = { in: employeeIds };
+
+    // Blockers: pending regularizations in the date range.
+    const pendingRegs = await prisma.attendanceRegularizationRequest.count({
+      where: { businessId, status: 'PENDING', date: { gte: fromD, lte: toD }, ...scopeFilter, ...empFilter },
+    });
+    // Blockers: timesheets overlapping the range that are not yet SUBMITTED/APPROVED/LOCKED.
+    const unsubmitted = await prisma.timesheet.count({
+      where: {
+        businessId, status: { in: ['DRAFT', 'REJECTED'] },
+        periodStart: { lte: toD }, periodEnd: { gte: fromD },
+        ...scopeFilter, ...empFilter,
+      },
+    });
+    const blockers = { pendingRegularizations: pendingRegs, unsubmittedTimesheets: unsubmitted };
+    const hasBlockers = pendingRegs > 0 || unsubmitted > 0;
+
+    // Dry-run preview: the UI calls with confirm:false to surface blockers + the
+    // would-lock count WITHOUT mutating. Only confirm:true actually locks the period.
+    if (req.body.confirm !== true) {
+      const wouldLock = await prisma.attendance.count({
+        where: { businessId, date: { gte: fromD, lte: toD }, ...scopeFilter, ...empFilter },
+      });
+      return res.json({
+        dryRun: true,
+        from: fromD.toISOString().slice(0, 10),
+        to: toD.toISOString().slice(0, 10),
+        blockers,
+        wouldLock,
+        canClose: !hasBlockers,
+      });
+    }
+
+    if (hasBlockers) {
+      return res.status(409).json({ message: 'Cannot close period; resolve blockers first', blockers });
+    }
+
+    const locked = await prisma.attendance.updateMany({
+      where: { businessId, date: { gte: fromD, lte: toD }, ...scopeFilter, ...empFilter },
+      data: { isLocked: true },
+    });
+
+    await writeAudit({
+      businessId, actorId: req.user.id, action: 'attendance.period.close',
+      entityType: 'Attendance', entityId: null,
+      meta: { from: fromD.toISOString().slice(0, 10), to: toD.toISOString().slice(0, 10), entityId: entityId || null, locked: locked.count },
+    });
+
+    res.json({ from: fromD.toISOString().slice(0, 10), to: toD.toISOString().slice(0, 10), locked: locked.count });
   } catch (e) { next(e); }
 }
 
@@ -210,14 +550,41 @@ async function assignShift(req, res, next) {
 
     const emp = await findEmployee(businessId, employeeId);
     if (!emp) return res.status(404).json({ message: 'Employee not found' });
+    // Feature 1 scope (write path): a manager may only assign within their sub-tree.
+    if (!scopeAllows(req.scope, employeeId)) return res.status(404).json({ message: 'Employee not found' });
+
+    const from = utcDay(effectiveFrom);
+    const to = effectiveTo ? utcDay(effectiveTo) : null;
+    if (to && to.getTime() < from.getTime()) {
+      return res.status(400).json({ message: 'effectiveTo must be on or after effectiveFrom' });
+    }
+
+    // Reject an assignment whose [effectiveFrom, effectiveTo] window overlaps an
+    // existing assignment for the same employee. Open-ended (null effectiveTo)
+    // windows are treated as extending to +infinity. Overlap iff
+    // existing.from <= new.to (or new open) AND new.from <= existing.to (or existing open).
+    const existing = await prisma.shiftAssignment.findMany({
+      where: { businessId, employeeId },
+      select: { id: true, effectiveFrom: true, effectiveTo: true },
+    });
+    const overlaps = existing.some((a) => {
+      const aFrom = utcDay(a.effectiveFrom).getTime();
+      const aTo = a.effectiveTo ? utcDay(a.effectiveTo).getTime() : Infinity;
+      const nFrom = from.getTime();
+      const nTo = to ? to.getTime() : Infinity;
+      return aFrom <= nTo && nFrom <= aTo;
+    });
+    if (overlaps) {
+      return res.status(409).json({ message: 'Assignment overlaps an existing effective-dated assignment for this employee' });
+    }
 
     const assignment = await prisma.shiftAssignment.create({
       data: {
         businessId,
         employeeId,
         shiftPatternId,
-        effectiveFrom: new Date(effectiveFrom),
-        effectiveTo: effectiveTo ? new Date(effectiveTo) : null,
+        effectiveFrom: from,
+        effectiveTo: to,
       },
     });
     res.status(201).json(assignment);
@@ -249,6 +616,8 @@ async function removeAssignment(req, res, next) {
     const { businessId } = req.user;
     const existing = await prisma.shiftAssignment.findFirst({ where: { id: req.params.id, businessId } });
     if (!existing) return res.status(404).json({ message: 'Assignment not found' });
+    // Feature 1 scope (write path): out-of-sub-tree target → 404 (IDOR-safe).
+    if (!scopeAllows(req.scope, existing.employeeId)) return res.status(404).json({ message: 'Assignment not found' });
     await prisma.shiftAssignment.delete({ where: { id: req.params.id } });
     res.status(204).end();
   } catch (e) { next(e); }
@@ -314,6 +683,18 @@ async function transitionTimesheet(req, res, next, target) {
     const ts = await prisma.timesheet.findFirst({ where: { id: req.params.id, businessId } });
     if (!ts) return res.status(404).json({ message: 'Timesheet not found' });
 
+    // SUBMIT is a self/manager action: the owning employee may submit their own
+    // timesheet, or anyone whose scope covers the owner (manager/HR). Other
+    // transitions (approve/reject/lock) are management-gated by the route and only
+    // need the scope-covers check. When req.scope is absent (route didn't attach
+    // it — pure management path) the route's permission gate already authorised it.
+    if (req.scope) {
+      const isSelf = req.user.employeeId && req.user.employeeId === ts.employeeId;
+      if (!isSelf && !scopeAllows(req.scope, ts.employeeId)) {
+        return res.status(404).json({ message: 'Timesheet not found' });
+      }
+    }
+
     const allowed = TIMESHEET_TRANSITIONS[ts.status] || [];
     if (!allowed.includes(target)) {
       return res.status(409).json({ message: `Cannot move timesheet from ${ts.status} to ${target}` });
@@ -351,9 +732,17 @@ async function listPayInputs(req, res, next) {
     const { payRunId, employeeId } = req.query;
     const { take, skip, page } = clampPage(req.query);
 
-    const where = { businessId };
+    // H1 — IDOR fix: scope to the actor's reporting sub-tree (employeeId-keyed).
+    const where = { businessId, ...scopeWhere(req.scope, 'employeeId') };
     if (payRunId) where.payRunId = payRunId;
-    if (employeeId) where.employeeId = employeeId;
+    // A client-supplied employeeId is only honored when it is in scope; an
+    // out-of-scope/forged id yields an empty page (mirrors listPunches).
+    if (employeeId) {
+      if (!scopeAllows(req.scope, employeeId)) {
+        return res.json({ items: [], total: 0, page, pageSize: take });
+      }
+      where.employeeId = employeeId;
+    }
 
     const [items, total] = await Promise.all([
       prisma.attendancePayInput.findMany({ where, orderBy: { frozenAt: 'desc' }, skip, take }),
@@ -364,100 +753,164 @@ async function listPayInputs(req, res, next) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Regularization (manual-punch request + approve)                    */
+/* Regularization — AttendanceRegularizationRequest (real model)       */
 /* ------------------------------------------------------------------ */
-// See SCHEMA NOTE at top: implemented over AttendancePunch until the dedicated
-// AttendanceRegularizationRequest model is materialized by the lead.
 
-// POST /regularizations  — employee/manager requests a manual punch correction.
-// Body: { employeeId, punches: [{ type, punchAt, locationId? }], reason? }.
-// Inserts pending manual punches grouped under a generated requestId.
+const REGULARIZATION_KINDS = ['MISSED_PUNCH', 'LATE_WAIVER', 'EARLY_OUT_WAIVER', 'WFH', 'ON_DUTY'];
+
+// POST /regularizations — self/manager raises a correction request → PENDING +
+// routed to an approver. Body: { employeeId, date, kind?, requestedInAt?,
+// requestedOutAt?, reason }. Self-create allowed: an employee may raise their own
+// request (employeeId defaults to the caller's own employee). A manager may raise
+// for an in-scope report; out-of-scope → 404.
 async function createRegularization(req, res, next) {
   try {
     const { businessId } = req.user;
-    const { employeeId, punches } = req.body;
+    const employeeId = req.body.employeeId || req.user.employeeId;
+    const { date, requestedInAt, requestedOutAt } = req.body;
+    const kind = req.body.kind || 'MISSED_PUNCH';
+    const reason = req.body.reason;
 
-    if (!employeeId) return res.status(400).json({ message: 'employeeId is required' });
-    if (!Array.isArray(punches) || punches.length === 0) {
-      return res.status(400).json({ message: 'punches must be a non-empty array' });
+    if (!employeeId) return res.status(400).json({ message: 'employeeId is required (or link the caller to an employee)' });
+    if (!date) return res.status(400).json({ message: 'date is required' });
+    if (!REGULARIZATION_KINDS.includes(kind)) {
+      return res.status(400).json({ message: `kind must be one of ${REGULARIZATION_KINDS.join(', ')}` });
     }
-    for (const p of punches) {
-      if (!PUNCH_TYPES.includes(p.type)) {
-        return res.status(400).json({ message: `each punch.type must be one of ${PUNCH_TYPES.join(', ')}` });
-      }
-      if (!p.punchAt) return res.status(400).json({ message: 'each punch requires punchAt' });
-    }
+    if (!reason) return res.status(400).json({ message: 'reason is required' });
 
     const emp = await findEmployee(businessId, employeeId);
     if (!emp) return res.status(404).json({ message: 'Employee not found' });
-    // Feature 1: cannot raise a regularization for an out-of-scope employee → 404.
-    if (!scopeAllows(req.scope, employeeId)) {
+    // Self is always allowed; otherwise the target must be in scope (→ 404 if not).
+    const isSelf = req.user.employeeId && req.user.employeeId === employeeId;
+    if (!isSelf && !scopeAllows(req.scope, employeeId)) {
       return res.status(404).json({ message: 'Employee not found' });
     }
 
-    const requestId = crypto.randomUUID();
-    const rows = punches.map((p) => ({
-      businessId,
-      employeeId,
-      punchType: p.type,
-      source: 'MANUAL',
-      punchAt: new Date(p.punchAt),
-      locationId: p.locationId || null,
-      isManual: true, // pending manual correction until approved
-      regularizationRequestId: requestId,
-    }));
+    const d = utcDay(date);
+    if (Number.isNaN(d.getTime())) return res.status(400).json({ message: 'date is not a valid YYYY-MM-DD' });
+    // Cannot raise a correction for a locked (closed) day.
+    if (await isDayLocked(businessId, employeeId, d)) {
+      return res.status(409).json({ message: 'Attendance for this day is locked (period closed)' });
+    }
 
-    await prisma.attendancePunch.createMany({ data: rows });
-    res.status(201).json({ requestId, employeeId, status: 'PENDING', punchCount: rows.length });
+    // Route to an approver (manager → escalate → HR-Admin fallback). Stored as a
+    // hint on approvalRequestId; the actual decide path re-checks scope.
+    const approver = await resolveApprover(emp);
+
+    const reqRow = await prisma.attendanceRegularizationRequest.create({
+      data: {
+        businessId,
+        employeeId,
+        date: d,
+        kind,
+        requestedInAt: requestedInAt ? new Date(requestedInAt) : null,
+        requestedOutAt: requestedOutAt ? new Date(requestedOutAt) : null,
+        reason,
+        status: 'PENDING',
+        approvalRequestId: approver && approver.employeeId ? approver.employeeId : (approver && approver.userId ? approver.userId : null),
+      },
+    });
+    res.status(201).json({ ...reqRow, routing: approver });
   } catch (e) { next(e); }
 }
 
-// GET /regularizations?employeeId=  — list pending/processed manual-punch groups.
+// GET /regularizations?employeeId=&status= — scoped read of the model.
 async function listRegularizations(req, res, next) {
   try {
     const { businessId } = req.user;
-    const { employeeId } = req.query;
-    // Feature 1: filter to the actor's reporting sub-tree (employeeId-keyed).
-    const where = { businessId, regularizationRequestId: { not: null }, ...scopeWhere(req.scope, 'employeeId') };
+    const { employeeId, status } = req.query;
+    const where = { businessId, ...scopeWhere(req.scope, 'employeeId') };
     if (employeeId) {
       if (!scopeAllows(req.scope, employeeId)) return res.json({ items: [] });
       where.employeeId = employeeId;
     }
-    const items = await prisma.attendancePunch.findMany({
+    if (status) where.status = status;
+    const items = await prisma.attendanceRegularizationRequest.findMany({
       where,
-      orderBy: { punchAt: 'desc' },
+      orderBy: { date: 'desc' },
       take: 200,
     });
     res.json({ items });
   } catch (e) { next(e); }
 }
 
-// POST /regularizations/:requestId/approve  — confirm the manual punches.
-// POST /regularizations/:requestId/reject   — discard them.
+// POST /regularizations/:id/approve — APPROVED + decidedBy/At; MATERIALIZE the
+// manual IN/OUT punches from requestedInAt/Out, then re-derive the affected day.
+// POST /regularizations/:id/reject  — REJECTED + decidedBy/At (no hard-delete).
 async function decideRegularization(req, res, next, decision) {
   try {
     const { businessId } = req.user;
-    const { requestId } = req.params;
+    const id = req.params.id;
 
-    const group = await prisma.attendancePunch.findMany({
-      where: { businessId, regularizationRequestId: requestId },
-    });
-    if (group.length === 0) return res.status(404).json({ message: 'Regularization request not found' });
-    // Feature 1: out-of-scope target employee → 404 (the :requestId is a group id,
-    // so the per-target check is here rather than the middleware's idParam guard).
-    if (!scopeAllows(req.scope, group[0].employeeId)) {
+    const reqRow = await prisma.attendanceRegularizationRequest.findFirst({ where: { id, businessId } });
+    if (!reqRow) return res.status(404).json({ message: 'Regularization request not found' });
+    // H2 (SoD) — a filer can NEVER approve/reject their OWN request, even with an
+    // ALL-band scope (HR admin). The scope already excludes self for narrow bands;
+    // this explicit guard closes the ALL-band self-approval hole. Materializing a
+    // self-filed request would inflate the filer's own pay.
+    if (req.user.employeeId && req.user.employeeId === reqRow.employeeId) {
       return res.status(404).json({ message: 'Regularization request not found' });
+    }
+    // Out-of-scope target employee → 404 (the :id is a request id, so the per-target
+    // check lives here rather than the middleware idParam guard).
+    if (!scopeAllows(req.scope, reqRow.employeeId)) {
+      return res.status(404).json({ message: 'Regularization request not found' });
+    }
+    if (reqRow.status !== 'PENDING') {
+      return res.status(409).json({ message: `Request is already ${reqRow.status}` });
     }
 
     if (decision === 'REJECTED') {
-      await prisma.attendancePunch.deleteMany({ where: { businessId, regularizationRequestId: requestId } });
-      return res.json({ requestId, status: 'REJECTED', removed: group.length });
+      const updated = await prisma.attendanceRegularizationRequest.update({
+        where: { id },
+        data: { status: 'REJECTED', decidedBy: req.user.id || null, decidedAt: new Date() },
+      });
+      await writeAudit({
+        businessId, actorId: req.user.id, action: 'attendance.regularization.reject',
+        entityType: 'AttendanceRegularizationRequest', entityId: id,
+        meta: { employeeId: reqRow.employeeId, kind: reqRow.kind },
+      });
+      return res.json(updated);
     }
 
-    // APPROVED: the punches stand as authoritative. There is no status column on
-    // AttendancePunch, so approval is recorded by keeping the rows in place; the
-    // grouping requestId remains as provenance. (No-op mutation by design.)
-    return res.json({ requestId, status: 'APPROVED', confirmed: group.length });
+    // APPROVED: materialize manual punches from the requested in/out, then recompute.
+    const updated = await prisma.$transaction(async (tx) => {
+      const row = await tx.attendanceRegularizationRequest.update({
+        where: { id },
+        data: { status: 'APPROVED', decidedBy: req.user.id || null, decidedAt: new Date() },
+      });
+
+      // Only punch-bearing kinds materialize IN/OUT rows. WFH/ON_DUTY are presence
+      // markers consumed directly by derive (no punches needed); LATE/EARLY waivers
+      // are advisory. MISSED_PUNCH (default) writes the corrected punches.
+      const punches = [];
+      if (reqRow.kind === 'MISSED_PUNCH' || reqRow.requestedInAt || reqRow.requestedOutAt) {
+        if (reqRow.requestedInAt) {
+          punches.push({ businessId, employeeId: reqRow.employeeId, punchType: 'IN', source: 'MANUAL', punchAt: reqRow.requestedInAt, isManual: false, regularizationRequestId: id });
+        }
+        if (reqRow.requestedOutAt) {
+          punches.push({ businessId, employeeId: reqRow.employeeId, punchType: 'OUT', source: 'MANUAL', punchAt: reqRow.requestedOutAt, isManual: false, regularizationRequestId: id });
+        }
+      }
+      for (const p of punches) {
+        // Dedupe: don't double-materialize on a re-approve race.
+        const existing = await tx.attendancePunch.findFirst({
+          where: { businessId, employeeId: p.employeeId, punchType: p.punchType, punchAt: p.punchAt, regularizationRequestId: id },
+          select: { id: true },
+        });
+        if (!existing) await tx.attendancePunch.create({ data: p });
+      }
+      // Re-derive the affected civil day inside the same transaction.
+      await recompute(businessId, reqRow.employeeId, reqRow.date, reqRow.date, tx);
+      return row;
+    });
+
+    await writeAudit({
+      businessId, actorId: req.user.id, action: 'attendance.regularization.approve',
+      entityType: 'AttendanceRegularizationRequest', entityId: id,
+      meta: { employeeId: reqRow.employeeId, kind: reqRow.kind, date: utcDay(reqRow.date).toISOString().slice(0, 10) },
+    });
+    res.json(updated);
   } catch (e) { next(e); }
 }
 
@@ -466,7 +919,9 @@ const rejectRegularization = (req, res, next) => decideRegularization(req, res, 
 
 module.exports = {
   // punches
-  createPunch, listPunches,
+  createPunch, listPunches, importPunches,
+  // derivation / dashboard / period
+  summary, recomputeRange, closePeriod,
   // shifts
   listShifts, getShift, createShift, updateShift, removeShift,
   // assignments

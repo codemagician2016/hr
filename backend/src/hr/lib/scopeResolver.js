@@ -21,8 +21,8 @@ const { effectiveScope } = require('../../core/lib/rbac');
 const { ROLES } = require('../../core/lib/roles');
 
 // Approval actions exclude the actor themselves (separation of duties — a manager
-// cannot approve their own leave; it escalates up the chain).
-const APPROVAL_ACTIONS = new Set(['canApproveLeave', 'canApprovePayroll']);
+// cannot approve their own leave/regularization; it escalates up the chain).
+const APPROVAL_ACTIONS = new Set(['canApproveLeave', 'canApprovePayroll', 'canApproveRegularization']);
 
 const ALL = { kind: 'ALL' };
 const NONE = { kind: 'NONE' };
