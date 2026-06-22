@@ -13,13 +13,14 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "prisma:seed:pricing": "node prisma/seeds/pricing.seed.js",
+    "prisma:seed:hr": "node prisma/seed-hr.js",
     "seed:it-services": "node scripts/seed-it-services-websites.js",
     "smoke:billing-local": "node scripts/smoke-billing-local.js",
     "smoke:inbox-local": "node scripts/smoke-inbox-calendar-local.js",
     "lint": "eslint src/routes/appointment/ src/routes/shop/ src/web/routes/"
   },
   "prisma": {
-    "seed": "node prisma/seeds/pricing.seed.js"
+    "seed": "node prisma/seeds/pricing.seed.js && node prisma/seed-hr.js"
   },
   "dependencies": {
     "@anthropic-ai/bedrock-sdk": "^0.29.2",
