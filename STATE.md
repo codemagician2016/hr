@@ -15,12 +15,15 @@ White-label **HRMS & Payroll SaaS** (multi-tenant, India + New Zealand), forked 
 - ✅ **`apps/platform`** decoupled from deleted `@hr/ecom-ui` (shims + 14 ecom tabs removed; admin-shell cleaned).
 - ✅ **auth/RBAC** → 15 HR permissions + presets Owner/HR-Admin/Finance/Manager; `ensureDefaultHrRole`.
 - ✅ **White-label theming** → 5 fixed styles × 12 curated colors; per-tenant `{styleKey,colorKey,logoUrl}`; `HR` added to `@hr/types` VERTICALS.
+- ✅ **HR data model** (`backend/prisma/schema.prisma`): 38 HR models + 40 enums (Employee, Entity/Location/Dept/Designation/Grade/Band, Compensation, PayRun/Payslip, Leave, Attendance, StatutoryProfile IN+NZ, docs/assets/loans, performance). Tenant-scoped, Decimal money, effective-dated, `region`. ⚠ needs `prisma validate` once `npm install`.
+- ✅ **Backend HR module** (`backend/src/hr`): employees + org CRUD, `protect`+`requirePermission`, scoped by `businessId`, soft-delete; mounted `/api/hr`. CRUD-factory pattern set for further modules.
 
 ## NEXT — ordered
-1. **HR Prisma models** (`docs/03-data-model.md`, ~74 models) — THE P1 foundation, IN PROGRESS. Add Employee, Org/LegalEntity, Compensation/PayComponent, PayRun/PayRunLine/Payslip, LeaveLedger/LeavePolicy/LeaveRequest, Attendance/Shift/AttendancePayInput, StatutoryProfile (IN: PAN/UAN/PF/ESI/PT; NZ: IRD/KiwiSaver/taxCode), Document, Asset, etc. Tenant-scoped by `businessId`; money `Decimal`/`BigInt` (never Int); effective-dated; pin `region` column. Brand fields (`styleKey`,`colorKey`,`logoUrl`) for the theme resolver. Mine shapes from booking/shop. KEEP existing vertical models for now (surviving code still refs `prisma.appointment` etc.).
-2. **Scaffold** `apps/hr-admin` (app.hr.com), `apps/ess` (tenant.com), `backend/src/hr/*` from the `(unified-admin)` + customer-sub-app shells.
-3. **billing trim**: remove now-dead buyer-side fns from `core/lib/billing/gatewayRouter.js`; reseed `PricingTier`/`TierFeature` as HR plans (Starter/Growth/Enterprise).
-4. **Cosmetic**: rebrand remaining `@sitepresso` content (legal pages, pricing/demo seeds).
+1. **Backend HR modules** (follow the `backend/src/hr` employee/org CRUD-factory pattern): **leave** (LeaveType/LeavePolicy + append-only LeaveTransaction/LeaveBalance + request state machine), **attendance** (AttendancePunch clock-in/out, Shift/Timesheet, frozen AttendancePayInput), **compensation** (SalaryStructure/PayComponent + Basic+DA≥50% rule). Then **payroll engine** (P2) + **IN/NZ compliance** (P2/P3) — correctness-critical, golden-dataset gated.
+2. **Frontend scaffold**: `apps/hr-admin` (app.hr.com — fork the `(unified-admin)` shell; Employees + Org screens on `/api/hr`), `apps/ess` (tenant.com — fork the customer sub-app shell; payslip/leave/profile). Wire router HR_ADMIN_PORT/ESS_PORT.
+3. **billing trim**: remove dead buyer-side fns from `core/lib/billing/gatewayRouter.js`; reseed `PricingTier`/`TierFeature` as HR plans.
+4. **prisma validate + reconcile vs `docs/03`** once `npm install` — closes the schema gate.
+5. **Cosmetic**: rebrand remaining `@sitepresso` content.
 
 ## Follow-up TODOs (flagged by fork passes — backlog)
 - **AdminCoupon (SaaS promo codes) is DARK** — its controller was in deleted `booking/`; re-home `adminCoupon.controller.js` into `core/controllers/` + re-register `/api/admin/subscription-coupons` (reuse-map §2.3.1 = REUSE). TODO markers in `subscription.routes.js` + `index.js`.
