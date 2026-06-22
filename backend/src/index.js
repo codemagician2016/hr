@@ -33,25 +33,16 @@ const publicPricingRoutes = require('./core/routes/publicPricing.routes');
 const subscriptionRoutes = require('./core/routes/subscription.routes');
 const adminRoutes = require('./superadmin/routes/admin.routes');
 const pricingAdminRoutes = require('./core/routes/pricing.routes');
-const adminCouponRoutes = require('./core/routes/adminCoupon.routes');
 const tenantRoutes = require('./core/routes/tenant.routes');
 const customerRoutes = require('./core/routes/customer.routes');
 const notificationRoutes = require('./core/routes/notification.routes');
 const inboxRoutes = require('./core/routes/inbox.routes');
 const chatRoutes = require('./core/routes/chat.routes');
-const storefrontRoutes = require('./core/routes/storefront.routes');
 const uploadRoutes = require('./core/routes/upload.routes');
 const localeRoutes = require('./core/routes/locale.routes');
 const { handlePaddleWebhook } = require('./core/controllers/paddle.controller');
 const { handleStripeWebhook } = require('./core/controllers/stripe.controller');
 const { handleRazorpayWebhook } = require('./core/controllers/razorpay.controller');
-// ECOMMERCE buyer-payment (order) webhooks — distinct from the SaaS subscription
-// webhooks above. Registered directly on `app` below so their raw-body parser
-// runs before the global express.json() (see the raw-body note at the routes).
-const {
-  razorpayWebhook: razorpayOrderWebhook,
-  stripeWebhook: stripeOrderWebhook,
-} = require('./core/controllers/payments.controller');
 const asyncHandler = require('./core/middleware/asyncHandler');
 const { initScheduler } = require('./core/lib/scheduler');
 const { routableCustomDomainWhere } = require('./core/lib/customDomainRouting');
@@ -179,16 +170,6 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), handl
 // Razorpay SUBSCRIPTION webhook (HMAC over raw body). Distinct from the
 // ecommerce-order webhook at /api/payments/razorpay/webhook.
 app.post('/api/razorpay/webhook', express.raw({ type: 'application/json' }), handleRazorpayWebhook);
-// ECOMMERCE buyer-payment (order) webhooks verify HMAC over the RAW body too, so
-// they MUST be registered here — before express.json() — not inside the payments
-// router (mounted after the parser at app.use('/api/payments', …)). When they
-// lived in that router, express.json() consumed the stream first and the HMAC
-// was computed over the string "[object Object]", so EVERY payment.captured /
-// payment_intent.succeeded returned 400 and no order ever flipped to PAID via
-// webhook (the only PAID path for Stripe storefront orders). Do not move these
-// back into the router.
-app.post('/api/payments/razorpay/webhook', express.raw({ type: 'application/json' }), asyncHandler(razorpayOrderWebhook));
-app.post('/api/payments/stripe/webhook',   express.raw({ type: 'application/json' }), asyncHandler(stripeOrderWebhook));
 // AapkaConnect inbound webhooks (any connected provider) — HMAC-verified over the
 // RAW body, so they live here before express.json() for the same reason as above.
 app.post('/api/integrations/:id/webhook', express.raw({ type: 'application/json' }), asyncHandler(require('./core/controllers/integrations.controller').receiveWebhook));
@@ -329,7 +310,10 @@ app.use('/api/business', businessRoutes);
 app.use('/api/public/pricing', publicPricingRoutes);
 app.use('/api/subscription', subscriptionRoutes);
 app.use('/api/admin/pricing', pricingAdminRoutes);
-app.use('/api/admin/subscription-coupons', adminCouponRoutes);
+// NOTE: /api/admin/subscription-coupons removed — its controller lived in the
+// deleted booking vertical (backend/src/booking/controllers/adminCoupon.controller).
+// AdminCoupon is REUSE-AS-IS per reuse-map §2.3.1; re-home the controller into
+// core and re-register. TODO(billing): re-home adminCoupon.controller + routes.
 app.use('/api/admin/notification-access', require('./core/routes/notificationAccess.routes'));
 app.use('/api/admin', adminRoutes);
 app.use('/api/tenant', tenantRoutes);
@@ -342,11 +326,9 @@ app.use('/api/locations', require('./core/routes/locations.routes'));
 app.use('/api/rbac', require('./core/routes/businessRoles.routes'));
 app.use('/api/public-api', require('./core/routes/publicApi.routes'));
 app.use('/api/v1', require('./core/routes/publicV1.routes'));
-app.use('/api/payments', require('./core/routes/payments.routes'));
 app.use('/api/ai', require('./core/routes/ai.routes'));
 app.use('/api/inbox', inboxRoutes);
 app.use('/api/chat', chatRoutes);
-app.use('/api/storefront', storefrontRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/locale', localeRoutes);
 app.use('/api/internal', require('./core/routes/internal.routes'));

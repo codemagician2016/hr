@@ -2,20 +2,16 @@ const express = require('express');
 const router = express.Router();
 const { register, login, me, logout, updateMe, changePassword, deleteAccount, undoDeleteAccount, verifyOtp, resendOtp, forgotPassword, resetPassword } = require('../controllers/customer.controller');
 const { socialStart, socialExchange, googleAuth, googleAuthCode, exchangeCode } = require('../controllers/social.controller');
-const { listAddresses, createAddress, updateAddress, deleteAddress, setDefaultAddress } = require('../../shop/controllers/customerAddress.controller');
 const { requireCustomer } = require('../../core/middleware/auth.middleware');
 const { requireCustomerVertical } = require('../../core/middleware/requireVertical');
 const { authLimiter } = require('../../core/middleware/abuse.middleware');
 const { validateBody } = require('../../core/lib/validate');
 const { signupSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } = require('../../core/lib/schemas/signup.schema');
 const { verifyOtpSchema, resendOtpSchema, changePasswordSchema } = require('../../core/lib/schemas/customer.schema');
-const { createAddressSchema, updateAddressSchema } = require('../../core/lib/schemas/customerAddress.schema');
-const { myWaitlist, cancelMyWaitlist } = require('../../booking/controllers/waitlist.controller');
 const prisma = require('../../core/lib/prisma');
 const { INBOX_TYPES, createNotifications, formatWhenLabel, listBusinessAdminRecipients } = require('../../core/lib/inbox');
 
 const requireAppointmentCustomer = requireCustomerVertical('APPOINTMENT');
-const requireShopCustomer = requireCustomerVertical('ECOMMERCE');
 
 function parseJsonField(raw, fallback) {
   if (!raw) return fallback;
@@ -103,9 +99,6 @@ router.get('/auth/:provider',    authLimiter, (req, res) => {
   target.searchParams.set('redirect', redirect);
   res.redirect(302, target.toString());
 });
-// Customer's own waitlist entries — list + cancel-own.
-router.get('/waitlist',          requireCustomer, requireAppointmentCustomer, myWaitlist);
-router.delete('/waitlist/:id',   requireCustomer, requireAppointmentCustomer, cancelMyWaitlist);
 // Generic, provider-agnostic social login (Google now; Apple/MS later).
 router.post('/social/:provider/start', authLimiter, socialStart); // platform → one-time code
 router.post('/social/exchange',        authLimiter, socialExchange); // tenant host → JWT
@@ -114,13 +107,6 @@ router.post('/social/exchange',        authLimiter, socialExchange); // tenant h
 router.post('/google-auth',      authLimiter, googleAuth);
 router.post('/google-auth-code', authLimiter, googleAuthCode);
 router.post('/exchange-code',    authLimiter, exchangeCode);
-
-// Address book — saved shipping addresses for the storefront /account page.
-router.get('/addresses',                  requireCustomer, requireShopCustomer, listAddresses);
-router.post('/addresses',                 requireCustomer, requireShopCustomer, validateBody(createAddressSchema), createAddress);
-router.put('/addresses/:id',              requireCustomer, requireShopCustomer, validateBody(updateAddressSchema), updateAddress);
-router.delete('/addresses/:id',           requireCustomer, requireShopCustomer, deleteAddress);
-router.post('/addresses/:id/default',     requireCustomer, requireShopCustomer, setDefaultAddress);
 
 // GET /api/customer/appointments — customer's own appointments at this business
 router.get('/appointments', requireCustomer, requireAppointmentCustomer, async (req, res, next) => {

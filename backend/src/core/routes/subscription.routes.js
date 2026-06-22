@@ -27,7 +27,6 @@ const {
   disconnectCustomDomain,
   getCustomDomainStatus,
 } = require('../controllers/subscription.controller');
-const { redeemCoupon, validateCouponPreview } = require('../../booking/controllers/adminCoupon.controller');
 const { confirmMandate } = require('../lib/billing/chargeAtWill');
 
 // Razorpay charge-at-will: the frontend posts the Checkout.js authorization
@@ -83,8 +82,10 @@ router.delete('/custom-domain', requireBusinessAdmin, disconnectCustomDomain);
 router.get('/custom-domain/status', requireBusinessAdmin, getCustomDomainStatus);
 router.post('/custom-domain/verify', requireBusinessAdmin, getCustomDomainStatus);
 
-// Super-admin subscription coupon redemption (validate + apply)
-router.post('/validate-coupon', requireBusinessAdmin, validateCouponPreview);
-router.post('/redeem-coupon', requireBusinessAdmin, redeemCoupon);
+// NOTE: subscription-coupon validate/redeem routes were removed with the
+// booking vertical (their controller lived in backend/src/booking, now
+// deleted). Super-admin promo codes (AdminCoupon) remain REUSE-AS-IS per
+// reuse-map §2.3.1 — re-add a tenant-facing redeem path here once the coupon
+// controller is re-homed into core. TODO(billing): re-home adminCoupon.controller.
 
 module.exports = router;

@@ -7,14 +7,13 @@ const { EMAIL_EVENTS } = require('../lib/emailEvents');
 const { validateSignupEmail, validatePassword, validatePhone } = require('../lib/inputValidation');
 const { setCustomerTokenCookie, clearCustomerTokenCookie } = require('../utils/generateToken');
 const { resolveRecipientLocale } = require('../lib/locale');
-const { claimOrdersForCustomer } = require('../../shop/controllers/order.controller');
 const cartLib = require('../lib/cart');
 
-// Fire-and-forget — never block auth on guest-order attachment failure.
-function fireClaim({ customerId, businessId, email }) {
-  claimOrdersForCustomer({ customerId, businessId, email })
-    .catch((err) => console.error('[customer auth] order claim failed:', err?.message));
-}
+// Fire-and-forget guest-order attachment. The shop order vertical was deleted
+// (no buyer storefront / orders in HR), so this is now a no-op kept at the call
+// sites so the surviving employee-auth flow is untouched. Restore a real
+// implementation here if a claim-on-login flow is reintroduced.
+function fireClaim(_args) { /* no-op: shop order claim removed with the ecom vertical */ }
 
 // Fire-and-forget — merge guest session cart into customer cart after login/verify.
 function fireCartMerge({ customerId, businessId, sessionId }) {

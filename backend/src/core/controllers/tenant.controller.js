@@ -276,17 +276,32 @@ async function resolve(req, res) {
   }
 
   const sub = business.subscription;
-  // Theme resolution mirrors the auto-provisioning rule from
-  // backend/src/controllers/business.controller.js, with a hard guard
-  // for restaurant reservations. Older restaurant tenants can have a
-  // stale medical subscription.theme, but their category must still win
-  // so the public site never renders doctor vocabulary.
-  const { getBookingTheme } = require('../../booking/themes');
-  const { getEcomTheme } = require('../../shop/themes');
+  // Theme resolution — HR theme engine. A tenant picks one of 5 fixed styles
+  // + one brand color + logo; resolveTenantTheme composes the runtime theme
+  // from the subscription's stored brand record. The legacy booking/shop
+  // per-profession theme resolvers were deleted with their verticals; HR has
+  // a single GENERIC theme model (see reuse-map §8).
+  const { resolveTenantTheme } = require('@hr/theme-engine');
   const vertical = resolveVertical(business.vertical);
   const theme = resolveSubscriptionThemeForBusiness(business);
-  const bookingTheme = vertical === 'APPOINTMENT' ? getBookingTheme(theme || business.category) : null;
-  const ecomTheme = vertical === 'ECOMMERCE' ? getEcomTheme(business.category) : null;
+  let storedPrimary;
+  if (sub?.themeColors) {
+    try { storedPrimary = JSON.parse(sub.themeColors)?.primary; } catch { storedPrimary = undefined; }
+  }
+  // resolveTenantTheme maps the stored brand → { styleKey, colorKey, primary,
+  // logoUrl } onto a composed HR theme object. styleKey falls back to the
+  // engine default for unknown/legacy keys, so stale profession themes resolve
+  // cleanly instead of throwing.
+  const hrTheme = resolveTenantTheme({
+    styleKey: sub?.themeStyle || theme,
+    primary: storedPrimary,
+    logoUrl: sub?.logoUrl || business.logoUrl,
+  });
+  // Backward-compat payload keys retained for existing storefront/admin
+  // readers. HR is a single GENERIC theme, so both surface the same resolved
+  // object; non-matching verticals see null exactly as before.
+  const bookingTheme = vertical === 'APPOINTMENT' ? hrTheme : null;
+  const ecomTheme = vertical === 'ECOMMERCE' ? hrTheme : null;
   const status = sub?.status || 'ACTIVE';
   const bookingOpen = status === 'ACTIVE' || status === 'TRIALING';
   const features = await resolveFeatures(business);
