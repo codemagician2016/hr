@@ -60,12 +60,21 @@ function cfAccount() {
 }
 
 function platformZoneName() {
-  return String(process.env.PLATFORM_DOMAIN || 'drifthr.com')
+  // The DNS ZONE (registrable apex, e.g. drifthr.com) — distinct from
+  // PLATFORM_DOMAIN, which on staging is the ROUTING suffix (staging.drifthr.com)
+  // so that hyphenated 1-level hosts ({slug}-staging.drifthr.com) resolve via the
+  // custom-domain path rather than the slug branch. Tenant subdomain CNAMEs are
+  // always written into the apex zone, so derive the last two labels.
+  const explicit = String(process.env.SUBDOMAIN_ZONE || '').trim().toLowerCase();
+  if (explicit) return explicit;
+  const pd = String(process.env.PLATFORM_DOMAIN || 'drifthr.com')
     .toLowerCase()
     .replace(/^https?:\/\//, '')
     .split('/')[0]
     .replace(/\.$/, '')
-    .trim() || 'drifthr.com';
+    .trim();
+  const labels = pd.split('.').filter(Boolean);
+  return labels.length >= 2 ? labels.slice(-2).join('.') : (pd || 'drifthr.com');
 }
 
 // The CNAME content that points a tenant host at the DEDICATED tunnel.
