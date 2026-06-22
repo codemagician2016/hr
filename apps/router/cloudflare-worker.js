@@ -180,9 +180,9 @@ function unifiedAdminRedirect(url, cfg) {
 // Existence check for a platform-subdomain tenant (<slug>.hr.com). HR has a
 // single vertical, so the Worker no longer asks WHICH vertical a slug is — only
 // WHETHER it maps to a routable tenant. Returns the slug if it exists, else null.
-// NOTE FOR LEAD: hits the legacy /api/internal/tenant-vertical?slug endpoint as
-// an existence probe (its `vertical` field is ignored). Rename it to a
-// vertical-agnostic existence endpoint when the backend is rewired.
+// Hits the vertical-agnostic /api/internal/tenant-route?slug endpoint, which
+// answers WHETHER the slug resolves to a routable tenant (and returns its
+// businessId/slug). Returns the slug if it exists, else null.
 async function lookupTenantExists(slug, backendApi, env) {
   // Try KV cache first (namespaced per backend so staging/prod don't collide)
   const cacheKey = `t:${backendApi}:${slug}`;
@@ -192,7 +192,7 @@ async function lookupTenantExists(slug, backendApi, env) {
   }
 
   // Call backend API
-  const res = await fetch(`${backendApi}/api/internal/tenant-vertical?slug=${encodeURIComponent(slug)}`, {
+  const res = await fetch(`${backendApi}/api/internal/tenant-route?slug=${encodeURIComponent(slug)}`, {
     headers: { 'x-internal-secret': env.INTERNAL_SECRET || '' },
     cf: { cacheTtl: 60 },
   });

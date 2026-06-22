@@ -31,6 +31,7 @@ const authRoutes = require('./core/routes/auth.routes');
 const businessRoutes = require('./core/routes/business.routes');
 const publicPricingRoutes = require('./core/routes/publicPricing.routes');
 const subscriptionRoutes = require('./core/routes/subscription.routes');
+const adminCouponRoutes = require('./core/routes/adminCoupon.routes');
 const adminRoutes = require('./superadmin/routes/admin.routes');
 const pricingAdminRoutes = require('./core/routes/pricing.routes');
 const tenantRoutes = require('./core/routes/tenant.routes');
@@ -310,10 +311,9 @@ app.use('/api/business', businessRoutes);
 app.use('/api/public/pricing', publicPricingRoutes);
 app.use('/api/subscription', subscriptionRoutes);
 app.use('/api/admin/pricing', pricingAdminRoutes);
-// NOTE: /api/admin/subscription-coupons removed — its controller lived in the
-// deleted booking vertical (backend/src/booking/controllers/adminCoupon.controller).
-// AdminCoupon is REUSE-AS-IS per reuse-map §2.3.1; re-home the controller into
-// core and re-register. TODO(billing): re-home adminCoupon.controller + routes.
+// Super-admin SaaS subscription promo codes (AdminCoupon). Controller +
+// routes re-homed into core for the HR fork (reuse-map §2.3.1).
+app.use('/api/admin/subscription-coupons', adminCouponRoutes);
 app.use('/api/admin/notification-access', require('./core/routes/notificationAccess.routes'));
 app.use('/api/admin', adminRoutes);
 app.use('/api/tenant', tenantRoutes);

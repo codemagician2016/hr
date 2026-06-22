@@ -352,14 +352,13 @@ async function lookupDomainRouteFromBackend(host) {
 // single vertical, so the router no longer asks the backend WHICH vertical a
 // slug is — only WHETHER the slug maps to a routable tenant. A 2xx (tenant
 // exists) → route the host to the ESS app; a 404 → "no site connected".
-// NOTE FOR LEAD: this hits the legacy /api/internal/tenant-vertical?slug
-// endpoint purely as an existence probe (its `vertical` field is ignored).
-// When you rewire the backend, rename it to a vertical-agnostic existence
-// endpoint (e.g. /api/internal/tenant-route?slug) and update the path below.
+// Hits the vertical-agnostic /api/internal/tenant-route?slug endpoint, which
+// answers WHETHER the slug resolves to a routable tenant (and returns its
+// businessId/slug). A 2xx → tenant exists; a 404 → "no site connected".
 async function lookupTenantExistsFromBackend(slug) {
   return new Promise((resolve) => {
     const req = http.request(
-      { hostname: 'localhost', port: BACKEND_PORT, path: `/api/internal/tenant-vertical?slug=${encodeURIComponent(slug)}`, method: 'GET', agent: localHttpAgent },
+      { hostname: 'localhost', port: BACKEND_PORT, path: `/api/internal/tenant-route?slug=${encodeURIComponent(slug)}`, method: 'GET', agent: localHttpAgent },
       (res) => {
         let data = '';
         res.on('data', (chunk) => { data += chunk; });

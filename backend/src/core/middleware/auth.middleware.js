@@ -13,6 +13,7 @@ const {
 const { effectivePermissions, SYSTEM_ROLES } = require('../lib/rbac');
 const { ROLES } = require('../lib/roles');
 const { resolveVertical } = require('../lib/vertical');
+const { routableCustomDomainWhere } = require('../lib/customDomainRouting');
 
 const USER_SELECT = {
   id: true,
@@ -115,9 +116,20 @@ async function resolveTenantBusinessId(req) {
     }
   }
 
-  // BYO custom-domain lookup retired 2026-05-10 (Cloudflare orange-cloud +
-  // GA decommission). All hosts are now platform subdomains.
-  return null;
+  // BYO custom-domain lookup, re-enabled for the white-label ESS: a tenant's
+  // own domain (e.g. careers.acme.com) must resolve to its businessId so the
+  // cross-tenant session guard below can reject a customer session that belongs
+  // to a different business. Uses the same routable-host filter as the public
+  // tenant resolver (core/lib/customDomainRouting + internal.routes /tenant-route).
+  // Returns null when the host is not a connected custom domain, so platform
+  // subdomains and unknown hosts behave exactly as before.
+  const customDomainWhere = routableCustomDomainWhere(host);
+  if (!customDomainWhere) return null;
+  const biz = await prisma.business.findFirst({
+    where: { subscription: { is: customDomainWhere } },
+    select: { id: true },
+  });
+  return biz?.id || null;
 }
 
 // Seed the HR system roles (Owner / HR-Admin / Finance / Manager) for a

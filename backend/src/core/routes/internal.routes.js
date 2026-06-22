@@ -132,6 +132,41 @@ router.get('/tenant-vertical', async (req, res) => {
   }
 });
 
+// GET /api/internal/tenant-route?slug=<slug>
+// GET /api/internal/tenant-route?host=<custom-domain>
+// Vertical-agnostic tenant-EXISTENCE probe for the router. The HR fork has a
+// single vertical, so the router no longer cares WHICH vertical a slug maps to
+// — only WHETHER the slug/host resolves to a routable tenant. Returns the
+// resolved tenant's businessId + slug (or 404 when none). Back-compat alias of
+// /tenant-vertical (which keeps working and still returns a `vertical` field);
+// new router call sites should prefer this endpoint.
+router.get('/tenant-route', async (req, res) => {
+  const slug = String(req.query.slug || '').toLowerCase().trim();
+  const host = String(req.query.host || '').toLowerCase().trim();
+  if (!slug && !host) return res.status(400).json({ error: 'slug or host required' });
+  try {
+    const biz = host
+      ? await prisma.business.findFirst({
+          where: {
+            subscription: { is: routableCustomDomainWhere(host) },
+          },
+          select: { id: true, slug: true },
+        })
+      : await prisma.business.findUnique({
+          where: { slug },
+          select: { id: true, slug: true },
+        });
+    if (!biz) return res.status(404).json({ error: 'not found' });
+    return res.json({
+      exists: true,
+      businessId: biz.id,
+      slug: biz.slug || slug || null,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: 'db error' });
+  }
+});
+
 // GET /api/internal/domain-route?host=<custom-or-alias-domain>
 // Router-facing canonicalization endpoint. It returns whether a custom host
 // should serve the tenant app or 301 to the tenant's primary domain. This keeps
