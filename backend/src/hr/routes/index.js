@@ -29,6 +29,10 @@ router.use('/performance', talent.performance);
 router.use('/payroll', require('../payroll/payroll.routes'));
 router.use('/me/payslips', require('../payroll/mePayslips.routes'));
 
+// Reports / analytics — read-only payroll register, statutory summary,
+// headcount & attrition, leave liability. RBAC: canViewPayrollReports.
+router.use('/reports', require('../reports/reports.routes'));
+
 // Integrations — accounting GL export (operator) + public read-only HR API.
 //   /api/hr/integrations  → operator API (session auth + RBAC)
 //   /api/hr/v1            → public read-only API (ApiKey auth, no session)

@@ -18,6 +18,7 @@ export const NAV_ITEMS = [
   { key: 'loans', label: 'Loans', href: '/loans', feature: 'hr', permission: 'loans.read' },
   { key: 'documents', label: 'Documents', href: '/documents', feature: 'hr', permission: 'documents.read' },
   { key: 'payroll', label: 'Payroll', href: '/payroll', feature: 'payroll', permission: 'payroll.read' },
+  { key: 'reports', label: 'Reports', href: '/reports', feature: 'payroll', permission: 'payroll.read' },
   { key: 'settings', label: 'Settings', href: '/settings', permission: 'settings.read' },
 ];
 
