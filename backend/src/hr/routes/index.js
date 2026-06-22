@@ -16,6 +16,12 @@ router.use('/assets', require('./assets.routes'));
 router.use('/expenses', require('./expenses.routes'));
 router.use('/loans', require('./loans.routes'));
 
+// Employee lifecycle (Feature 4) — onboarding pipeline + checklist tasks. RBAC:
+// reads/task actions are F1-scoped (canViewEmployees; manager sees only sub-tree
+// hires), HR pipeline actions require canManageOnboarding. Separation/e-sign land
+// in later slices (4d/4f).
+router.use('/onboarding', require('../lifecycle/routes/onboarding.routes'));
+
 // Talent (recruitment/ATS + performance). RBAC: recruitment -> canManageEmployees;
 // performance -> canViewEmployees (read) / canManageEmployees (write). The offer
 // pre-flight reuses the payroll engine's India 50% wage check.

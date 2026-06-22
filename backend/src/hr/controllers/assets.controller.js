@@ -1,6 +1,7 @@
 'use strict';
 // Asset register + assignment lifecycle. Tenant-scoped by req.user.businessId;
-// soft-delete via deletedAt on both Asset and AssetAssignment. The interesting
+// soft-delete via deletedAt on Asset (AssetAssignment is NOT soft-deleted — it
+// has no deletedAt column; its lifecycle is the returnedAt stamp). The interesting
 // domain logic is the assign -> return transition on AssetAssignment:
 //   assign  -> creates an OPEN assignment (returnedAt = null) and flips the
 //              underlying Asset to ASSIGNED.
@@ -12,12 +13,15 @@ const prisma = require('../../core/lib/prisma');
 
 // ── Asset register ───────────────────────────────────────────────────────────
 // Allow-list of directly-assignable Asset fields (never trust the body wholesale).
+// Allow-listed against the REAL Asset schema (schema.prisma L8357): the human
+// code is `code` (NOT `assetTag`), warranty is `warrantyExpiry`, and there are
+// no make/model columns. Writing unknown fields makes Prisma throw at runtime.
 const ASSET_WRITABLE = [
-  'assetTag', 'name', 'category', 'serialNumber', 'make', 'model',
-  'purchaseDate', 'purchaseCost', 'currencyCode', 'warrantyExpiresAt',
-  'condition', 'status', 'notes',
+  'code', 'name', 'category', 'serialNumber',
+  'purchaseDate', 'purchaseCost', 'currencyCode', 'warrantyExpiry',
+  'condition', 'status',
 ];
-const ASSET_DATE_FIELDS = ['purchaseDate', 'warrantyExpiresAt'];
+const ASSET_DATE_FIELDS = ['purchaseDate', 'warrantyExpiry'];
 // Money fields are Prisma Decimal — pass through untouched (never parseInt).
 
 function pickAsset(body) {
@@ -40,7 +44,7 @@ async function listAssets(req, res, next) {
     if (q) {
       where.OR = [
         { name: { contains: q, mode: 'insensitive' } },
-        { assetTag: { contains: q, mode: 'insensitive' } },
+        { code: { contains: q, mode: 'insensitive' } },
         { serialNumber: { contains: q, mode: 'insensitive' } },
       ];
     }
@@ -59,8 +63,9 @@ async function getAsset(req, res, next) {
     const asset = await prisma.asset.findFirst({
       where: { id: req.params.id, businessId, deletedAt: null },
       include: {
-        assetAssignments: {
-          where: { deletedAt: null },
+        // The relation is `assignments` (schema L8376); AssetAssignment has no
+        // soft-delete column, so no deletedAt filter here.
+        assignments: {
           orderBy: { assignedAt: 'desc' },
           include: { employee: { select: { id: true, code: true, firstName: true, lastName: true } } },
         },
@@ -74,16 +79,16 @@ async function getAsset(req, res, next) {
 async function createAsset(req, res, next) {
   try {
     const { businessId } = req.user;
-    const { assetTag, name } = req.body;
-    if (!assetTag || !name) {
-      return res.status(400).json({ message: 'assetTag and name are required' });
+    const { code, name } = req.body;
+    if (!code || !name) {
+      return res.status(400).json({ message: 'code and name are required' });
     }
     const data = { ...pickAsset(req.body), businessId };
     if (data.status === undefined) data.status = 'AVAILABLE';
     const asset = await prisma.asset.create({ data });
     res.status(201).json(asset);
   } catch (e) {
-    if (e.code === 'P2002') return res.status(409).json({ message: 'An asset with that tag already exists' });
+    if (e.code === 'P2002') return res.status(409).json({ message: 'An asset with that code already exists' });
     next(e);
   }
 }
@@ -96,7 +101,7 @@ async function updateAsset(req, res, next) {
     const asset = await prisma.asset.update({ where: { id: req.params.id }, data: pickAsset(req.body) });
     res.json(asset);
   } catch (e) {
-    if (e.code === 'P2002') return res.status(409).json({ message: 'An asset with that tag already exists' });
+    if (e.code === 'P2002') return res.status(409).json({ message: 'An asset with that code already exists' });
     next(e);
   }
 }
@@ -108,7 +113,7 @@ async function removeAsset(req, res, next) {
     if (!existing) return res.status(404).json({ message: 'Asset not found' });
     // Block deleting an asset that is still out with an employee.
     const open = await prisma.assetAssignment.findFirst({
-      where: { assetId: req.params.id, businessId, returnedAt: null, deletedAt: null },
+      where: { assetId: req.params.id, businessId, returnedAt: null },
     });
     if (open) return res.status(409).json({ message: 'Asset is currently assigned; return it before deleting' });
     await prisma.asset.update({ where: { id: req.params.id }, data: { deletedAt: new Date() } });
@@ -118,7 +123,7 @@ async function removeAsset(req, res, next) {
 
 // ── Assignment lifecycle ─────────────────────────────────────────────────────
 const ASSIGNMENT_INCLUDE = {
-  asset: { select: { id: true, assetTag: true, name: true, category: true, status: true } },
+  asset: { select: { id: true, code: true, name: true, category: true, status: true } },
   employee: { select: { id: true, code: true, firstName: true, lastName: true } },
 };
 
@@ -131,7 +136,8 @@ async function listAssignments(req, res, next) {
     const take = Math.min(Math.max(parseInt(pageSize, 10) || 25, 1), 100);
     const skip = (Math.max(parseInt(page, 10) || 1, 1) - 1) * take;
 
-    const where = { businessId, deletedAt: null };
+    // AssetAssignment has no soft-delete column — do NOT filter deletedAt here.
+    const where = { businessId };
     if (employeeId) where.employeeId = employeeId;
     if (assetId) where.assetId = assetId;
     if (open === 'true') where.returnedAt = null;
@@ -151,7 +157,7 @@ async function getAssignment(req, res, next) {
   try {
     const { businessId } = req.user;
     const item = await prisma.assetAssignment.findFirst({
-      where: { id: req.params.id, businessId, deletedAt: null },
+      where: { id: req.params.id, businessId },
       include: ASSIGNMENT_INCLUDE,
     });
     if (!item) return res.status(404).json({ message: 'Assignment not found' });
@@ -178,7 +184,7 @@ async function assign(req, res, next) {
     if (!employee) return res.status(404).json({ message: 'Employee not found' });
 
     const openExisting = await prisma.assetAssignment.findFirst({
-      where: { assetId, businessId, returnedAt: null, deletedAt: null },
+      where: { assetId, businessId, returnedAt: null },
     });
     if (openExisting) {
       return res.status(409).json({ message: 'Asset is already assigned; return it before reassigning' });
@@ -206,14 +212,18 @@ async function assign(req, res, next) {
   }
 }
 
-// Return an asset: stamp returnedAt + the return `condition`, close the
-// assignment, and flip the Asset back to AVAILABLE. Idempotency guard — a
-// already-returned assignment yields 409 rather than silently re-closing.
+// Return an asset: stamp returnedAt + the return condition (the schema field is
+// `conditionIn`, NOT `condition` — writing the latter makes Prisma throw), close
+// the assignment, and flip the Asset back to AVAILABLE. When the item comes back
+// lost/damaged the caller may pass a `recoveryAmount` (and the assignment is
+// marked DAMAGED/LOST instead of RETURNED) — this is the recovery seam that the
+// FnF `assetRecoveryAmount` deduction reads (Feature 4 §4.3). Idempotency guard:
+// an already-returned assignment yields 409 rather than silently re-closing.
 async function returnAsset(req, res, next) {
   try {
     const { businessId } = req.user;
     const existing = await prisma.assetAssignment.findFirst({
-      where: { id: req.params.id, businessId, deletedAt: null },
+      where: { id: req.params.id, businessId },
     });
     if (!existing) return res.status(404).json({ message: 'Assignment not found' });
     if (existing.returnedAt) {
@@ -221,13 +231,31 @@ async function returnAsset(req, res, next) {
     }
 
     const returnedAt = req.body.returnedAt ? new Date(req.body.returnedAt) : new Date();
-    const data = { returnedAt, status: 'RETURNED' };
-    if (req.body.condition !== undefined) data.condition = req.body.condition;
+    const conditionIn = req.body.conditionIn !== undefined ? req.body.conditionIn : undefined;
+    // Lost/damaged returns carry a recovery amount and a non-RETURNED status that
+    // feeds the separation FnF asset-recovery line.
+    const lostOrDamaged = conditionIn === 'DAMAGED' || conditionIn === 'RETIRED' || req.body.lost === true;
+    const data = {
+      returnedAt,
+      status: req.body.lost === true ? 'LOST' : (conditionIn === 'DAMAGED' ? 'DAMAGED' : 'RETURNED'),
+    };
+    if (conditionIn !== undefined) data.conditionIn = conditionIn;
     if (req.body.notes !== undefined) data.notes = req.body.notes;
+    if (req.body.recoveryAmount !== undefined) data.recoveryAmount = req.body.recoveryAmount;
+
+    // Asset register reflects the physical outcome: a lost item never returns to
+    // the available pool.
+    const assetStatus = req.body.lost === true ? 'LOST' : 'AVAILABLE';
 
     const [assignment] = await prisma.$transaction([
       prisma.assetAssignment.update({ where: { id: existing.id }, data, include: ASSIGNMENT_INCLUDE }),
-      prisma.asset.update({ where: { id: existing.assetId }, data: { status: 'AVAILABLE' } }),
+      prisma.asset.update({
+        where: { id: existing.assetId },
+        data: {
+          status: assetStatus,
+          ...(lostOrDamaged && conditionIn ? { condition: conditionIn } : {}),
+        },
+      }),
     ]);
     res.json(assignment);
   } catch (e) { next(e); }

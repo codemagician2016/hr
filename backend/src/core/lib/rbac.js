@@ -29,6 +29,10 @@ const PERMISSIONS = Object.freeze({
   canEditBilling:       'Manage subscription + payment method',
   canEditDomain:        'Connect/change white-label domain',
   canEditBranding:      'Logo, brand color, style, domain binding',
+  // Employee lifecycle (Feature 4)
+  canManageOnboarding:  'Onboarding templates + run pipeline + provision',
+  canRunSeparation:     'Initiate/run separation + FnF (distinct from terminate)',
+  canGenerateLetters:   'Generate offer/relieving/experience letters',
 });
 
 const PERMISSION_KEYS = Object.freeze(Object.keys(PERMISSIONS));
@@ -47,6 +51,8 @@ const SYSTEM_ROLES = Object.freeze({
     canRunPayroll: true, canViewPayrollReports: true,
     canManageStatutory: true, canFileReturns: true,
     canManageOrg: true, canEditBranding: true,
+    // Feature 4 — HR-Admin owns the lifecycle (onboarding/separation/letters).
+    canManageOnboarding: true, canRunSeparation: true, canGenerateLetters: true,
     // No canEditBilling / canEditDomain / canApprovePayroll — Owner/Finance only
   },
   // Finance — payroll + compensation + statutory + billing.

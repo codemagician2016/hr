@@ -477,6 +477,10 @@ model Business {
   loanInstallments         LoanInstallment[]
   // Separation
   separationCases          SeparationCase[]
+  // Employee lifecycle (Feature 4: onboarding/offboarding journeys + built-in e-sign)
+  lifecycleTemplates       LifecycleTemplate[]
+  lifecycleJourneys        LifecycleJourney[]
+  signatureEnvelopes       SignatureEnvelope[]
   // Documents / assets
   employeeDocuments        EmployeeDocument[]
   documentTemplates        DocumentTemplate[]
@@ -8162,6 +8166,301 @@ enum SeparationStatus {
   FNF_APPROVED
   SETTLED
   CANCELLED
+}
+
+// ── Feature 4 (Employee Lifecycle) §A — configurable onboarding/offboarding checklist templates ──
+enum LifecycleDirection {
+  ONBOARDING
+  OFFBOARDING
+}
+
+model LifecycleTemplate {                 // one starter template per direction in v1
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId    String?
+  code        String                                  // ONBT-… / OFBT-… (NumberSequence)
+  name        String
+  direction   LifecycleDirection
+  countryCode String?  @db.Char(2)                    // IN / NZ variant
+  // Applicability selectors (most-specific wins; NULLs are wildcards)
+  departmentId  String?
+  designationId String?
+  isDefault   Boolean  @default(true)                 // v1: exactly one default per (business,direction)
+  isActive    Boolean  @default(true)
+  version     Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  taskDefs    LifecycleTaskDef[]
+  @@unique([businessId, code])
+  @@index([businessId, direction, isActive])
+}
+
+model LifecycleTaskDef {                   // the blueprint task (template-level)
+  id          String   @id @default(uuid())
+  businessId  String
+  templateId  String
+  template    LifecycleTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  stageKey    LifecycleStage
+  taskKey     LifecycleTaskKey?                        // NULL = manual/custom; non-NULL = system-actioned
+  title       String
+  description String?  @db.Text
+  ownerRole   TaskOwner
+  taskOrder   Int      @default(0)
+  dueOffsetDays Int    @default(0)                     // relative to dueAnchor
+  dueAnchor   DueAnchor @default(JOIN_DATE)
+  isBlocking  Boolean  @default(true)                  // blocks card→Active / settlement
+  isMandatory Boolean  @default(true)
+  documentCategory DocumentCategory?                   // upload/verify tasks
+  esignTemplateKind TemplateKind?                      // e-sign tasks (offer/contract/policy)
+  assetCategory AssetCategory?                         // asset assign/return tasks
+  @@index([businessId, templateId, stageKey])
+}
+
+enum LifecycleStage {
+  // onboarding
+  PRE_JOIN
+  SELF_ONBOARDING
+  DOCS_ESIGN
+  PROVISIONING
+  DAY_ONE
+  WEEK_ONE
+  PROBATION
+  // offboarding
+  SEPARATION_INITIATED
+  NOTICE
+  CLEARANCE
+  ASSET_RETURN
+  FNF
+  EXIT_DOCS
+  POST_EXIT
+}
+
+enum TaskOwner {
+  NEW_HIRE
+  EMPLOYEE
+  MANAGER
+  HR
+  IT
+  FINANCE
+  ADMIN
+}
+
+enum DueAnchor {
+  OFFER_ACCEPT
+  JOIN_DATE
+  NOTICE_START
+  LWD
+  RELIEVING
+}
+
+enum LifecycleTaskKey {                     // system-actioned (code knows how to action/verify)
+  // onboarding
+  COLLECT_PERSONAL
+  COLLECT_STATUTORY
+  COLLECT_BANK
+  COLLECT_EMERGENCY
+  UPLOAD_DOCS
+  ESIGN_OFFER
+  ESIGN_CONTRACT
+  ESIGN_POLICIES
+  PROVISION_EMPLOYEE
+  ASSIGN_ASSET
+  VERIFY_DOCS
+  PROBATION_REVIEW
+  // offboarding
+  ACCEPT_RESIGNATION
+  KNOWLEDGE_TRANSFER
+  RETURN_ASSET
+  CLEARANCE_IT
+  CLEARANCE_FINANCE
+  CLEARANCE_ADMIN
+  COMPUTE_FNF
+  GENERATE_RELIEVING
+  GENERATE_EXPERIENCE
+  EXIT_INTERVIEW
+  REVOKE_ACCESS
+  CUSTOM
+}
+
+// ── Feature 4 §B — runtime instance (one per hire / leaver) ──
+model LifecycleJourney {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId    String?
+  code        String                                  // ONB-000123 / OFB-000045 (NumberSequence)
+  direction   LifecycleDirection
+  templateId  String?                                 // provenance; tasks are snapshotted in
+  // Subject: pre-hire is offer-anchored; post-provision/offboarding is employee-anchored
+  offerId      String?  @unique                       // onboarding seeded from accepted Offer
+  employeeId   String?                                // set on provision (onboarding) / always (offboarding)
+  separationId String?  @unique                       // offboarding ↔ SeparationCase 1:1
+  // Anchors for due-date math
+  offerAcceptedAt DateTime?
+  joinDate        DateTime? @db.Date
+  noticeStartDate DateTime? @db.Date
+  lastWorkingDay  DateTime? @db.Date
+  relievingDate   DateTime? @db.Date
+  currentStage    LifecycleStage
+  status          JourneyStatus @default(NOT_STARTED)
+  // ESS pre-join self-onboarding bucket (staged until provisioning promotes it)
+  selfServiceJson Json?                               // {personal,statutory,bank,emergency, completeness:{...}}
+  preJoinTokenHash String?                            // hashed magic-link (no portal User yet)
+  preJoinTokenExpiresAt DateTime?
+  meta        Json?
+  version     Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  tasks       LifecycleTask[]
+  @@unique([businessId, code])
+  @@index([businessId, direction, status])
+  @@index([businessId, employeeId])
+}
+
+enum JourneyStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  BLOCKED
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+  RESCINDED
+  NO_SHOW
+}
+
+model LifecycleTask {                       // materialized per-journey task
+  id          String   @id @default(uuid())
+  businessId  String
+  journeyId   String
+  journey     LifecycleJourney @relation(fields: [journeyId], references: [id], onDelete: Cascade)
+  taskDefId   String?                                 // provenance (NULL = ad-hoc)
+  stageKey    LifecycleStage
+  taskKey     LifecycleTaskKey?
+  title       String
+  ownerRole   TaskOwner
+  assigneeEmployeeId String?                          // RESOLVED owner (the actual person)
+  assigneeUserId     String?                          // IT/admin who are Users not Employees
+  dueDate     DateTime? @db.Date
+  isBlocking  Boolean  @default(true)
+  isMandatory Boolean  @default(true)
+  status      TaskStatus @default(PENDING)
+  // bindings to produced/consumed artifacts (audit + dedup)
+  employeeDocumentId  String?
+  signatureEnvelopeId String?
+  assetAssignmentId   String?
+  approvalRequestId   String?
+  resultJson  Json?
+  completedAt DateTime?
+  completedByUserId String?
+  skippedReason String?
+  version     Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([businessId, journeyId, stageKey])
+  @@index([businessId, assigneeEmployeeId, status])
+  @@index([businessId, status, dueDate])
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  WAITING_APPROVAL
+  BLOCKED
+  DONE
+  SKIPPED
+  NOT_APPLICABLE
+  OVERDUE
+  FAILED
+}
+
+// ── Feature 4 §C — built-in e-sign (provider-agnostic envelope; v1 = BUILTIN only) ──
+model SignatureEnvelope {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeDocumentId String?                          // the doc the signed PDF lands on
+  documentTemplateId String?                          // generated-on-the-fly source
+  provider    EsignProvider @default(BUILTIN)
+  providerEnvelopeId String?                          // external id (vendor adapters; idempotency)
+  subject     String
+  status      EnvelopeStatus @default(DRAFT)
+  finalFileUrl   String? @db.Text                     // re-stamped signed PDF (object storage key)
+  certificateUrl String? @db.Text                     // audit certificate
+  sequential  Boolean  @default(false)
+  expiresAt   DateTime?
+  sentAt      DateTime?
+  completedAt DateTime?
+  voidedReason String?
+  webhookSecret String?                               // reserved for vendor webhooks (HMAC)
+  version     Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  signers     SignatureSigner[]
+  @@index([businessId, status])
+}
+
+enum EsignProvider {
+  BUILTIN
+  DOCUSIGN
+  ZOHO_SIGN
+  ADOBE_SIGN
+  DIGIO
+  LEEGALITY
+}
+enum EnvelopeStatus {
+  DRAFT
+  SENT
+  DELIVERED
+  PARTIALLY_SIGNED
+  COMPLETED
+  DECLINED
+  VOIDED
+  EXPIRED
+  ERROR
+}
+
+model SignatureSigner {
+  id          String   @id @default(uuid())
+  businessId  String
+  envelopeId  String
+  envelope    SignatureEnvelope @relation(fields: [envelopeId], references: [id], onDelete: Cascade)
+  signerOrder Int      @default(1)
+  role        SignerRole
+  name        String
+  email       String
+  employeeId  String?
+  userId      String?
+  status      SignerStatus @default(PENDING)
+  accessTokenHash String?                             // BUILTIN: hashed magic-link to the sign page
+  tokenExpiresAt DateTime?
+  // tamper evidence captured at sign time
+  signedAt    DateTime?
+  declinedReason String?
+  ipAddress   String?
+  userAgent   String?
+  consentAt   DateTime?                               // explicit intent-to-sign consent
+  signatureImageUrl String?                           // drawn/typed signature artifact
+  signatureHash String?                               // SHA-256 over (docHash + signer + ts)
+  @@unique([businessId, envelopeId, signerOrder])
+  @@index([businessId, envelopeId, status])
+}
+
+enum SignerRole {
+  EMPLOYEE
+  EMPLOYER
+  WITNESS
+  APPROVER
+}
+enum SignerStatus {
+  PENDING
+  SENT
+  VIEWED
+  SIGNED
+  DECLINED
+  EXPIRED
 }
 
 // ── §12 Documents ──

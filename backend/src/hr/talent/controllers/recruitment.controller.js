@@ -16,6 +16,8 @@ const prisma = require('../../../core/lib/prisma');
 // 50% rule). Exported via india.js `_internals.computeStatutoryWages`.
 const indiaCompliance = require('../../payroll/compliance/india.js');
 const { computeStatutoryWages } = indiaCompliance._internals;
+// Feature 4: onboarding journey seeding (invoked inside the acceptOffer tx).
+const { seedOnboardingJourney } = require('../../lifecycle/onboarding.service');
 
 const DUP_MSG = 'A record with that code already exists';
 
@@ -517,7 +519,11 @@ async function sendOffer(req, res, next) {
 }
 
 // POST /offers/:id/accept — SENT -> ACCEPTED, stamping respondedAt. Also marks
-// the linked application HIRED so the pipeline reflects the outcome.
+// the linked application HIRED so the pipeline reflects the outcome, and seeds
+// the onboarding LifecycleJourney (Feature 4 §4.1) INSIDE the same transaction
+// so accept + journey commit atomically. The journey seeding is idempotent (the
+// partial unique onb_one_active_per_offer is the backstop) so a retried accept
+// never doubles the pipeline card.
 async function acceptOffer(req, res, next) {
   try {
     const { businessId } = req.user;
@@ -535,10 +541,17 @@ async function acceptOffer(req, res, next) {
         where: { id: offer.applicationId },
         data: { status: 'HIRED' },
       });
+      // Feature 4: seed the onboarding journey from the default IN/NZ template.
+      await seedOnboardingJourney(updated, tx);
       return updated;
     });
     res.json(item);
-  } catch (e) { next(e); }
+  } catch (e) {
+    // The onb_one_active_per_offer partial unique → 409 if a concurrent accept
+    // already seeded a journey for this offer (idempotency backstop).
+    if (e.code === 'P2002') return res.status(409).json({ message: 'Offer already accepted' });
+    next(e);
+  }
 }
 
 // POST /offers/:id/decline — SENT -> DECLINED, stamping respondedAt.
