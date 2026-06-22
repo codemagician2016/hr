@@ -87,7 +87,7 @@ function publicMicrocacheKey(host, url, cookieHeader, acceptLanguage) {
     search = parsed.search || '';
   } catch {}
 
-  const platformDomain = (process.env.PLATFORM_DOMAIN || 'sitepresso.com').toLowerCase();
+  const platformDomain = (process.env.PLATFORM_DOMAIN || 'hr.com').toLowerCase();
   const isApexHost = cleanHost === platformDomain || cleanHost === `www.${platformDomain}`;
   const isAuthShellHost = cleanHost === `app.${platformDomain}` || cleanHost === `admin.${platformDomain}`;
   const isApiHost = cleanHost === `api.${platformDomain}`;
@@ -297,7 +297,7 @@ function resolveEssPort(pathname) {
 
 function platformTenantSlug(host) {
   const cleanHost = (host || '').toLowerCase().split(':')[0];
-  const platformDomain = (process.env.PLATFORM_DOMAIN || 'sitepresso.com').toLowerCase();
+  const platformDomain = (process.env.PLATFORM_DOMAIN || 'hr.com').toLowerCase();
   const suffix = `.${platformDomain}`;
   if (!cleanHost.endsWith(suffix)) return null;
 
@@ -502,7 +502,7 @@ function tenantNotFoundRoute(host, platformDomain) {
 
 async function resolveRoute(host, url, referer) {
   const cleanHost = (host || '').toLowerCase().split(':')[0];
-  const platformDomain = (process.env.PLATFORM_DOMAIN || 'sitepresso.com').toLowerCase();
+  const platformDomain = (process.env.PLATFORM_DOMAIN || 'hr.com').toLowerCase();
   const subdomain = platformSubdomainForHost(cleanHost, platformDomain);
   const isPlatformHost = subdomain !== null;
   const pathname = (url || '/').split('?')[0];
@@ -596,7 +596,7 @@ const ADMIN_HOST_ALLOWED_PREFIXES = [
 
 function adminHostLoginRedirectUrl(host, requestUrl) {
   const cleanHost = (host || '').toLowerCase().split(':')[0];
-  const platformDomain = (process.env.PLATFORM_DOMAIN || 'sitepresso.com').toLowerCase();
+  const platformDomain = (process.env.PLATFORM_DOMAIN || 'hr.com').toLowerCase();
   if (cleanHost !== `admin.${platformDomain}`) return null;
 
   const pathname = (requestUrl || '/').split('?')[0];
@@ -619,7 +619,7 @@ function unauthenticatedDashboardRedirectUrl(host, requestUrl, cookieHeader) {
   if (hasOperatorCookie(cookieHeader)) return null;
 
   const cleanHost = (host || '').toLowerCase().split(':')[0];
-  const platformDomain = (process.env.PLATFORM_DOMAIN || 'sitepresso.com').toLowerCase();
+  const platformDomain = (process.env.PLATFORM_DOMAIN || 'hr.com').toLowerCase();
   if (cleanHost !== `app.${platformDomain}`) return null;
 
   const parsed = new URL(requestUrl || '/', `http://${host || cleanHost}`);
@@ -634,7 +634,7 @@ function unauthenticatedDashboardRedirectUrl(host, requestUrl, cookieHeader) {
 
 function unifiedAdminRedirectUrl(host, requestUrl) {
   const cleanHost = (host || '').toLowerCase().split(':')[0];
-  const platformDomain = (process.env.PLATFORM_DOMAIN || 'sitepresso.com').toLowerCase();
+  const platformDomain = (process.env.PLATFORM_DOMAIN || 'hr.com').toLowerCase();
   const subdomain = platformSubdomainForHost(cleanHost, platformDomain);
   const isPlatformHost = subdomain !== null;
   const base = `http://${host || `app.${platformDomain}`}`;
@@ -656,7 +656,7 @@ function unifiedAdminRedirectUrl(host, requestUrl) {
 const server = http.createServer(async (req, res) => {
   try {
     const cleanHost = (req.headers.host || '').toLowerCase().split(':')[0];
-    const platformDomain = (process.env.PLATFORM_DOMAIN || 'sitepresso.com').toLowerCase();
+    const platformDomain = (process.env.PLATFORM_DOMAIN || 'hr.com').toLowerCase();
     const isPlatformHost = cleanHost === platformDomain || cleanHost.endsWith(`.${platformDomain}`);
     const microcacheKey = (req.method === 'GET' || req.method === 'HEAD')
       ? publicMicrocacheKey(req.headers.host, req.url, req.headers.cookie, req.headers['accept-language'])

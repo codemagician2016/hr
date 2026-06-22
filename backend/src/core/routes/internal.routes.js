@@ -186,4 +186,27 @@ router.get('/tenant-vertical/by-domain', async (req, res) => {
   }
 });
 
+// GET /api/internal/domain-route?host=<custom-domain>
+// Binding-only custom-domain → white-label ESS resolution for the router.
+// With single-domain binding (no domain resale / multi-domain canonicalization),
+// a routable bound host always returns action:'serve'; 404 when the host is not
+// a connected, routable custom domain. Replaces the former resale-aware
+// /domain-route (which used the deleted domains/ resolver) with the kept
+// routableCustomDomainWhere binding lookup — keeps apps/router + cloudflare-worker
+// working unchanged (they only read `action`).
+router.get('/domain-route', async (req, res) => {
+  const host = String(req.query.host || '').toLowerCase().trim();
+  if (!host) return res.status(400).json({ error: 'host required' });
+  try {
+    const biz = await prisma.business.findFirst({
+      where: { subscription: { is: routableCustomDomainWhere(host) } },
+      select: { id: true, slug: true },
+    });
+    if (!biz) return res.status(404).json({ error: 'not found' });
+    return res.json({ action: 'serve', slug: biz.slug || null, businessId: biz.id });
+  } catch (err) {
+    return res.status(500).json({ error: 'db error' });
+  }
+});
+
 module.exports = router;
