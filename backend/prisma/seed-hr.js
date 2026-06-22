@@ -188,20 +188,17 @@ async function main() {
   // ═════════════════════════════════════════════════════════════════════════
   // Super-admin is platform-scoped (businessId null). Tenant-admin is the HR
   // operator. A BusinessRole gives the operator HR permissions.
+  // Tenant-admin gets the full Owner preset (every permission key) — it's the
+  // company's own administrator. Re-seeding repairs the permissions too.
+  const { SYSTEM_ROLES } = require('../src/core/lib/rbac');
   const adminRole = await prisma.businessRole.upsert({
     where: { businessId_name: { businessId, name: 'HR Administrator' } },
-    update: {},
+    update: { permissions: SYSTEM_ROLES.Owner, isSystem: true },
     create: {
       businessId,
       name: 'HR Administrator',
       isSystem: true,
-      permissions: {
-        canManageStaff: true,
-        canRunPayroll: true,
-        canApprovePayroll: true,
-        canViewReports: true,
-        canExportData: true,
-      },
+      permissions: SYSTEM_ROLES.Owner,
     },
   });
 
