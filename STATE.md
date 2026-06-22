@@ -1,43 +1,31 @@
-# STATE — Resume Guide
+# STATE — DriftHR (Release Candidate)
 
-White-label **HRMS & Payroll SaaS** (multi-tenant, India + New Zealand), forked from Sitepresso.
-**To resume: open this project and say "continue". Read this file + ROADMAP.md + docs/19-delivery-plan.md + docs/17-reuse-map.md.**
+**DriftHR** — "Effortless HR & payroll." Multi-tenant, white-label HRMS & Payroll SaaS (India 🇮🇳 + New Zealand 🇳🇿), forked from Sitepresso. Brand: teal `#16B6A6` / ink `#16243B`, Manrope. Kit in `drifthr-brand-kit/`.
+**Repo:** branch `development` on `github.com/codemagician2016/hr` (push to `development` only until staging domains are provided). **42 commits.**
 
-## Where we are (updated 2026-06-22, HEAD aec53d6)
-- **Repo:** branch `development` pushed to `github.com/codemagician2016/hr`. `staging`/`main` LOCAL only — **push to `development` only** until domains provided.
-- **Plan:** complete + verified in `docs/` (`00-18` + `reviews/` + `README.md` + `19-delivery-plan.md`). 6 correctness-gated phases (P0 Foundation → P1 Core HR → P2 IN Payroll → P3 NZ Payroll → P4 Polish → P5 Talent).
+## Status: RELEASE CANDIDATE — every sandbox-verifiable gate is GREEN
+Run the full sweep any time (≈ what CI should gate on):
+- `cd backend && npx prisma validate` → valid
+- `node backend/test/boot.test.js` → app require-graph resolves (server boots)
+- payroll golden: `node backend/src/hr/payroll/__tests__/india.golden.test.js` (120/120) + `nz.golden.test.js` (63/63) + `orchestration.test.js` (26/26) + `filing/__tests__/filing.test.js`
+- `node backend/src/hr/integrations/accounting.test.js` (GL balanced) · `node --test backend/src/hr/reports/aggregations.test.js` (9/9) · talent offer 50%-rule
+- LIVE-DB (isolated `hr_test` schema): isolation IDOR 15/15 + full e2e 71/71 (build URL = DATABASE_URL + `?schema=hr_test`)
+- 3 web apps `next build` exit 0 (hr-admin, ess, platform); mobile (apps/hr-mobile) needs Expo toolchain.
 
-## DONE — Phase 0 fork is coherent (the SaaS substrate is rewired & loadable)
-- ✅ Forked reusable layers: `apps/{platform,router}`, `packages/{ui,admin-core,theme-engine,types}`, `backend/src/{core,domains,superadmin,i18n,lib}`.
-- ✅ Scope rename `@sitepresso/*`→`@hr/*`. Root `package.json`→`hr-platform`, workspaces `apps/*`+`packages/*`. `PLATFORM_DOMAIN`→`hr.com`.
-- ✅ **Backend de-verticalized**: deleted ecom storefront/buyer-payments/coupon routes; trimmed business/customer/subscription routes; rewired `tenant.controller` theme to `@hr/theme-engine`. **0 requires to deleted verticals; all 239 backend/src files parse.**
-- ✅ **Router** (`apps/router/index.js` + `cloudflare-worker.js`) → 3 HR surfaces: admin.hr.com→3000, app.hr.com→3010, hr.com→3000, `<slug>.hr.com`/custom-domain→ESS 3020. Host→tenant + custom-domain + microcache preserved.
-- ✅ **`apps/platform`** decoupled from deleted `@hr/ecom-ui` (shims + 14 ecom tabs removed; admin-shell cleaned).
-- ✅ **auth/RBAC** → 15 HR permissions + presets Owner/HR-Admin/Finance/Manager; `ensureDefaultHrRole`.
-- ✅ **White-label theming** → 5 fixed styles × 12 curated colors; per-tenant `{styleKey,colorKey,logoUrl}`; `HR` added to `@hr/types` VERTICALS.
-- ✅ **HR data model** (`backend/prisma/schema.prisma`): 38 HR models + 40 enums (Employee, Entity/Location/Dept/Designation/Grade/Band, Compensation, PayRun/Payslip, Leave, Attendance, StatutoryProfile IN+NZ, docs/assets/loans, performance). Tenant-scoped, Decimal money, effective-dated, `region`. ⚠ needs `prisma validate` once `npm install`.
-- ✅ **Backend HR module** (`backend/src/hr`): employees + org CRUD, `protect`+`requirePermission`, scoped by `businessId`, soft-delete; mounted `/api/hr`. CRUD-factory pattern set for further modules.
+## Local DB (testing only)
+No CREATEDB rights here, so tests use an **isolated `hr_test` schema inside `sitepresso_local`** (public schema untouched). Already migrated (`prisma db push`) + seeded (`backend/prisma/seed-hr.js`: demo tenant, IN+NZ entities, 5 employees, 2 pay runs). Real IN+NZ pay runs COMPUTE correctly end-to-end against it.
 
-## NEXT — ordered
-1. **Backend HR modules** (follow the `backend/src/hr` employee/org CRUD-factory pattern): **leave** (LeaveType/LeavePolicy + append-only LeaveTransaction/LeaveBalance + request state machine), **attendance** (AttendancePunch clock-in/out, Shift/Timesheet, frozen AttendancePayInput), **compensation** (SalaryStructure/PayComponent + Basic+DA≥50% rule). Then **payroll engine** (P2) + **IN/NZ compliance** (P2/P3) — correctness-critical, golden-dataset gated.
-2. **Frontend scaffold**: `apps/hr-admin` (app.hr.com — fork the `(unified-admin)` shell; Employees + Org screens on `/api/hr`), `apps/ess` (tenant.com — fork the customer sub-app shell; payslip/leave/profile). Wire router HR_ADMIN_PORT/ESS_PORT.
-3. **billing trim**: remove dead buyer-side fns from `core/lib/billing/gatewayRouter.js`; reseed `PricingTier`/`TierFeature` as HR plans.
-4. **prisma validate + reconcile vs `docs/03`** once `npm install` — closes the schema gate.
-5. **Cosmetic**: rebrand remaining `@sitepresso` content.
+## What exists
+- **Backend** (`backend/src`): core (auth/RBAC/billing/notifications/domains), HR API `/api/hr/*` (employees, org, leave, attendance, compensation, documents, assets, expenses, loans, **payroll** run→payslip→filing, recruitment, performance, reports, integrations), super-admin, audit log, rate limits, webhooks, public API. Boots clean.
+- **Payroll**: pure engine (integer minor units) + IN (TDS/§87A/EPF/ESI/PT-13-states/gratuity/BALANCING) + NZ (PAYE/KiwiSaver/ESCT/ACC/student-loan/**Holidays Act**) + filing (ECR/ESIC/24Q · EI/bank). Golden-tested + real-DB-proven.
+- **Frontends**: `apps/hr-admin` (HR console, all modules), `apps/ess` (white-label ESS), `apps/platform` (marketing + super-admin + onboarding), `apps/hr-mobile` (Expo scaffold). DriftHR-branded, WCAG pass.
+- **Data**: 236 Prisma models, `prisma validate` clean, baseline migration `backend/prisma/migrations/00000000000000_init` (234 tables).
 
-## Follow-up TODOs (flagged by fork passes — backlog)
-- **AdminCoupon (SaaS promo codes) is DARK** — its controller was in deleted `booking/`; re-home `adminCoupon.controller.js` into `core/controllers/` + re-register `/api/admin/subscription-coupons` (reuse-map §2.3.1 = REUSE). TODO markers in `subscription.routes.js` + `index.js`.
-- **Custom-domain re-enable** in backend (`resolveTenantBusinessId`/`routableCustomDomainWhere` retired 2026-05-10) for white-label ESS.
-- **Router internal endpoint**: rename `/api/internal/tenant-vertical` → vertical-agnostic existence probe; update both router files' call sites (NOTE-FOR-LEAD markers left).
-- **Dead vertical surface**: remove `customer.routes.js` appointment/matters routes + vertical Prisma models (Appointment/Product/Order) when HR routes land.
-- **Deploy-time**: cloudflare-worker Vercel project names + `wrangler` zone (`hr.com`); decide `qa-portal` passthrough.
+## Remaining = STAGING GATE (needs infra — cannot run in this sandbox)
+1. Provision real Postgres → `cd backend && npx prisma migrate deploy` → `npm run prisma:seed:hr` (or real onboarding).
+2. Deploy backend (PM2/container) + the 3 Next apps; set env (DATABASE_URL, gateway keys, Cloudflare-for-SaaS, SES, JWT, PLATFORM_DOMAIN=the real domain).
+3. Wire the router host map to the real domains (admin/app/tenant); custom-domain binding (Cloudflare-for-SaaS) live test.
+4. Live: gateway sandboxes (Razorpay IN / Stripe NZ / Paddle RoW), IRD payday-filing + EPFO/ESIC submission, accounting (Xero/Tally/Zoho).
+5. `expo` build the mobile app; load test (10k-employee pay run); external pen-test; legal sign-off (Holidays Act citations, IN labour-code).
 
-## P0/P1 founder decisions (defaulting per plan unless told otherwise)
-- #5 Employee identity → **new `Employee` model** (auth columns only from Customer).
-- #6 Data residency → **pin `region` column** (IN `ap-south-1`, NZ `ap-southeast-2`).
-- #4 Multi-entity → **one tenant = one billing account, multiple legal entities/pay-groups**.
-- Full ~20-decision list: `docs/README.md` §4.
-
-## Build discipline
-- Incremental, **committed** progress (session limits cut off mid-task). Commit + push to `development` after each coherent step.
-- Verify statically (`node --check`); full `turbo build` / `prisma validate` deferred until `npm install` (node_modules absent in this checkout).
+## Founder decisions still open: `docs/README.md` §4 (pricing points, payout depth, FBT scope, regions).
