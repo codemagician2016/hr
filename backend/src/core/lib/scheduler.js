@@ -17,7 +17,6 @@ function staffPortalUrlForBusiness(business, platformBaseUrl) {
 }
 const {
   customDomainProvider,
-  deleteCloudflareCustomHostname,
   provisionCustomDomain,
 } = require('../controllers/subscription.controller');
 
@@ -626,62 +625,6 @@ async function processCustomDomainProvisioning() {
   }
 }
 
-async function processDomainPricingSync() {
-  try {
-    if (!prisma.domainPricing) return;
-    const { syncDomainPricing } = require('../../domains/pricingSync');
-    const summary = await syncDomainPricing({ prisma });
-    if (summary.synced > 0) {
-      console.log(`[Scheduler] domain pricing synced=${summary.synced}`);
-    }
-  } catch (err) {
-    console.error('[Scheduler] domain pricing sync failed:', err.message);
-  }
-}
-
-async function processDomainRenewals() {
-  try {
-    if (!prisma.domain) return;
-    const { listBusinessAdminRecipients } = require('./inbox');
-    const { sendEmail } = require('../utils/email');
-    const { createDomainRenewalCheckout } = require('../../domains/domainService');
-    const { runDomainRenewalCron } = require('../../domains/renewalCron');
-    const summary = await runDomainRenewalCron({
-      prisma,
-      startRenewal: createDomainRenewalCheckout,
-      expireDomain: async (domain) => {
-        const subscription = await prisma.subscription.findUnique({
-          where: { businessId: domain.businessId },
-          select: { customDomain: true, customHostnameId: true },
-        }).catch(() => null);
-        if (subscription?.customDomain !== domain.name) return;
-        if (subscription.customHostnameId) {
-          await deleteCloudflareCustomHostname(subscription.customHostnameId, { domain: subscription.customDomain }).catch(() => null);
-        }
-        await prisma.subscription.update({
-          where: { businessId: domain.businessId },
-          data: {
-            customDomain: null,
-            customHostnameId: null,
-            customDomainVerified: false,
-            customDomainStatus: 'NONE',
-            customDomainStatusMessage: 'Domain expired. Your Sitepresso subdomain remains available.',
-            customDomainCheckedAt: new Date(),
-          },
-        });
-      },
-      listRecipients: listBusinessAdminRecipients,
-      sendEmail,
-      logger: console,
-    });
-    if ((summary.notices?.length || 0) + (summary.renewals?.length || 0) > 0) {
-      console.log(`[Scheduler] domain renewal sweep: notices=${summary.notices.length} renewals=${summary.renewals.length}`);
-    }
-  } catch (err) {
-    console.error('[Scheduler] domain renewal sweep failed:', err.message);
-  }
-}
-
 async function processPaddleWebhookRetries() {
   try {
     if (!prisma.paddleWebhookEvent) return;
@@ -737,10 +680,9 @@ async function processRazorpayWebhookRetries() {
 async function processPaddleReconciliation() {
   try {
     const { reconcilePaddleBilling } = require('./paddleReconciliation');
-    const summary = await reconcilePaddleBilling({ subscriptionLimit: 50, domainLimit: 50 });
+    const summary = await reconcilePaddleBilling({ subscriptionLimit: 50 });
     if (
       summary.subscriptionsChanged > 0
-      || summary.domainsChanged > 0
       || summary.skipped
     ) {
       console.log(`[Scheduler] paddle reconcile: ${JSON.stringify(summary)}`);
@@ -1015,19 +957,6 @@ function initScheduler() {
     }
   });
 
-  // Domain reseller — refresh starter TLD pricing snapshots daily. Live
-  // registrar wholesale sync can feed syncDomainPricing() later without
-  // changing the scheduler contract.
-  cron.schedule('12 6 * * *', () => {
-    processDomainPricingSync();
-  });
-
-  // Domain reseller — renewal notices and expiry cleanup. Run in the
-  // primary support timezone so expiry emails land during business hours.
-  cron.schedule('0 3 * * *', () => {
-    processDomainRenewals();
-  }, { timezone: 'Asia/Kolkata' });
-
   // Paddle Billing — process verified webhook events that were queued by the
   // HTTP endpoint or left pending after a process crash. The endpoint returns
   // quickly; this sweep is the reliability backstop.
@@ -1213,8 +1142,6 @@ module.exports = {
   initScheduler,
   processBookingReminders,
   processAutoCancellations,
-  processDomainPricingSync,
-  processDomainRenewals,
   processPaddleWebhookRetries,
   processStripeWebhookRetries,
   processRazorpayWebhookRetries,

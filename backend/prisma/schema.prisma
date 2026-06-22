@@ -228,7 +228,6 @@ model Business {
   supportConversations     SupportConversation[]
   supportMessages          SupportMessage[]
   integrations             BusinessIntegration[]
-  domains                  Domain[]
   // Vertical the business is configured for. Drives storefront layout +
   // admin nav. APPOINTMENT is the existing product (booking-first).
   // STATIC = marketing-only site (no booking, no shop).
@@ -414,7 +413,6 @@ model Business {
   deliveryEtaMinutes             Int?
   pickupLocations          EcomPickupLocation[]
   ProductLocationOverride  ProductLocationOverride[]
-  mailboxes                Mailbox[]
   matters                  Matter[]
   trustTransactions        TrustTransaction[]
   installedUnits           InstalledUnit[]
@@ -1797,75 +1795,6 @@ model RazorpayWebhookEvent {
   @@index([businessId, createdAt])
 }
 
-model Domain {
-  id                 String       @id @default(cuid())
-  businessId         String
-  business           Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  name               String
-  tld                String
-  registrar          Registrar
-  registrarRef       String?
-  status             DomainStatus
-  statusMessage      String?      @db.Text
-  registeredAt       DateTime?
-  expiresAt          DateTime?
-  autoRenew          Boolean      @default(true)
-  privacyEnabled     Boolean      @default(false)
-  trusteeEnabled     Boolean      @default(false)
-  wholesaleMinor     Int
-  retailMinor        Int
-  renewalRetailMinor Int?
-  currency           String       @default("INR")
-  customHostnameId   String?
-  registrationPaddleTransactionId String? @unique
-  renewalPaddleTransactionId String? @unique
-  renewalPaymentStatus      String?
-  renewalPaymentDueAt       DateTime?
-  renewalYears              Int?
-  createdAt          DateTime     @default(now())
-  updatedAt          DateTime     @updatedAt
-
-  @@unique([name])
-  @@index([businessId])
-  @@index([expiresAt, status])
-  @@index([renewalPaymentStatus, updatedAt])
-}
-
-// Mailbox — a Zoho-provisioned business email inbox sold as a reseller
-// subscription. Sitepresso creates the account in its Zoho org, writes the
-// domain's mail DNS (MX/SPF/DKIM), and emails the customer their credentials;
-// the customer then signs in at Zoho directly. Mirrors the Domain status
-// pattern (PENDING -> ACTIVE / FAILED) so a scheduler can retry pending ones.
-model Mailbox {
-  id            String   @id @default(cuid())
-  businessId    String
-  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  address       String // full mailbox address, e.g. hello@acme.com
-  domain        String // mail domain, e.g. acme.com
-  status        String   @default("PENDING") // PENDING | PROVISIONING | ACTIVE | FAILED | PENDING_DNS
-  statusMessage String?  @db.Text
-  provider      String   @default("ZOHO")
-  zohoZoid      String? // Zoho organization id the account lives in
-  zohoAccountId String? // Zoho account/zuid for the created mailbox
-  dnsManaged    Boolean  @default(false) // true when we wrote DNS in our Cloudflare zone
-  deliveredTo   String? // address the credentials email was sent to
-  credentialsSentAt DateTime?
-  billingStatus String?  // Mirrors Paddle status for the mailbox subscription.
-  billingCycle  String?
-  billingQuantity Int    @default(1)
-  paddleCustomerId String?
-  paddleSubscriptionId String? @unique
-  paddleTransactionId String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  @@unique([businessId, address])
-  @@index([businessId])
-  @@index([status])
-  @@index([billingStatus])
-  @@index([paddleTransactionId])
-}
-
 model PaddleBillingSubscription {
   id                   String   @id @default(uuid())
   businessId           String
@@ -2010,23 +1939,6 @@ model AdjustmentLedger {
   @@index([purchaseId])
   @@index([paddleTransactionId])
   @@index([paddleSubscriptionId])
-}
-
-model DomainPricing {
-  tld                   String    @id
-  registrar             Registrar
-  wholesaleMinor        Int
-  retailMinor           Int
-  renewalWholesaleMinor Int?
-  renewalRetailMinor    Int?
-  currency              String    @default("INR")
-  isAvailable           Boolean   @default(true)
-  requiresTrustee       Boolean   @default(false)
-  notes                 String?   @db.Text
-  updatedAt             DateTime  @updatedAt
-
-  @@index([registrar])
-  @@index([isAvailable])
 }
 
 model Service {
@@ -2425,23 +2337,6 @@ enum SubscriptionStatus {
 enum BillingCycle {
   MONTHLY
   YEARLY
-}
-
-enum Registrar {
-  OPENPROVIDER
-  BYOD
-}
-
-enum DomainStatus {
-  PENDING
-  ACTIVE
-  EXPIRING
-  EXPIRED
-  TRANSFER_IN_PENDING
-  TRANSFER_OUT_PENDING
-  BYOD
-  FAILED
-  LOCKED
 }
 
 model StaffLeave {

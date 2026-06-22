@@ -667,48 +667,6 @@ async function sendWelcomeEmail(to, name, options = {}) {
   });
 }
 
-async function sendMailboxCredentialsEmail(to, { businessName, address, password, loginUrl, dnsRecords, dnsManaged } = {}, options = {}) {
-  const safeAddr = escapeHtml(address);
-  const safePass = escapeHtml(password);
-  const login = escapeHtml(loginUrl || 'https://mail.zoho.com');
-  const subject = `Your new business email: ${address}`;
-  const dnsBlock = (!dnsManaged && Array.isArray(dnsRecords) && dnsRecords.length)
-    ? renderNotice('One DNS step to finish', 'Add these records at your domain provider so email delivers:<br>' +
-        dnsRecords.map((r) => `<code>${escapeHtml(r.type)} &nbsp; ${escapeHtml(r.name)} &nbsp;&rarr;&nbsp; ${escapeHtml(r.content)}${r.priority ? ` (priority ${r.priority})` : ''}</code>`).join('<br>'))
-    : '';
-  const html = renderEmail({
-    eyebrow: 'Your business email is ready',
-    title: address,
-    lead: 'Sign in at Zoho Mail with the credentials below.',
-    introHtml: `
-      <p>Hi,</p>
-      <p class="lead">We created your business mailbox for ${escapeHtml(businessName || 'your business')}. Use the details below to sign in &mdash; you manage everything directly in Zoho Mail.</p>
-    `,
-    bodyHtml: `
-      <div class="otp-shell">
-        <p class="otp-label">Email address</p>
-        <div class="otp" style="font-size:18px">${safeAddr}</div>
-        <p class="otp-label" style="margin-top:14px">Temporary password</p>
-        <div class="otp" style="font-size:18px">${safePass}</div>
-      </div>
-      <a href="${login}" class="btn">Sign in to Zoho Mail &rarr;</a>
-      ${renderNotice('Change your password', 'For security, change this temporary password right after your first sign-in (Zoho Mail &rarr; Settings &rarr; Security).')}
-      ${dnsBlock}
-      ${renderSignature('The Sitepresso team', 'Reply to this email anytime — a real person will help.')}
-    `,
-    footerHtml: `&copy; ${new Date().getFullYear()} Sitepresso. All rights reserved.`,
-  });
-
-  await sendTrackedEmail({
-    eventKey: EMAIL_EVENTS.MAILBOX_PROVISIONED,
-    to,
-    subject,
-    htmlBody: html,
-    businessId: options.businessId || null,
-    metadata: { address, dnsManaged: !!dnsManaged },
-  });
-}
-
 async function sendPasswordResetOtpEmail(to, name, otp, options = {}) {
   const safeName = escapeHtml(name);
   const safeOtp = escapeHtml(otp);
@@ -2758,7 +2716,6 @@ module.exports = {
   sendEmail,
   sendTrackedEmail,
   sendWelcomeEmail,
-  sendMailboxCredentialsEmail,
   sendPasswordResetOtpEmail,
   sendUserSignupOtpEmail,
   sendCustomerSignupOtpEmail,

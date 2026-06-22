@@ -444,7 +444,10 @@ async function getMyBusiness(req, res) {
       prisma.enquiry.count({ where: { businessId: business.id } }),
       prisma.businessPage.count({ where: { businessId: business.id, isPublished: true } }),
       prisma.blogPost.count({ where: { businessId: business.id, isPublished: true } }),
-      prisma.domain.count({ where: { businessId: business.id } }),
+      // Domain RESALE removed (custom-domain BINDING only). This STATIC/web
+      // vertical dashboard tile is legacy dead code in the HR fork; no Domain
+      // model to count, so report zero.
+      Promise.resolve(0),
       prisma.enquiry.findMany({
         where: { businessId: business.id },
         orderBy: { createdAt: 'desc' },

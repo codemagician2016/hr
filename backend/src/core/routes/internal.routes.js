@@ -27,7 +27,6 @@ const { isProductionDeploy, getStagingInbox } = require('../../core/lib/emailOve
 const prisma = require('../../core/lib/prisma');
 const { setTenantVertical } = require('../../core/lib/redis');
 const { routableCustomDomainWhere } = require('../../core/lib/customDomainRouting');
-const { resolveDomainTraffic } = require('../../domains/domainService');
 
 const router = express.Router();
 
@@ -164,24 +163,6 @@ router.get('/tenant-route', async (req, res) => {
     });
   } catch (err) {
     return res.status(500).json({ error: 'db error' });
-  }
-});
-
-// GET /api/internal/domain-route?host=<custom-or-alias-domain>
-// Router-facing canonicalization endpoint. It returns whether a custom host
-// should serve the tenant app or 301 to the tenant's primary domain. This keeps
-// multiple customer-owned domains SEO-safe without exposing admin-only data.
-router.get('/domain-route', async (req, res) => {
-  const host = String(req.query.host || '').toLowerCase().trim();
-  if (!host) return res.status(400).json({ error: 'host required' });
-  try {
-    const route = await resolveDomainTraffic({ prisma, host });
-    return res.json(route);
-  } catch (err) {
-    return res.status(err?.status || 500).json({
-      error: err?.code === 'DOMAIN_ROUTE_NOT_FOUND' ? 'not found' : 'db error',
-      code: err?.code || 'DOMAIN_ROUTE_ERROR',
-    });
   }
 });
 

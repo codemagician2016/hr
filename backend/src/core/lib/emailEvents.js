@@ -61,9 +61,6 @@ const EMAIL_EVENTS = {
   // for PENDING comments (auto-approved comments are routine; admin
   // doesn't need an inbox ping).
   BLOG_COMMENT_NEW_ADMIN: 'blog_comment_new_admin',
-  // Reseller email — a Zoho business mailbox was provisioned; this delivers
-  // the login credentials to the customer so they can sign in at Zoho.
-  MAILBOX_PROVISIONED: 'mailbox_provisioned',
 };
 
 const EMAIL_EVENT_CATEGORIES = {

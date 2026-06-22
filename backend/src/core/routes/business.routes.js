@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const { protect, requireRole } = require('../../core/middleware/auth.middleware');
 const { ROLES } = require('../../core/lib/roles');
-const { requireBusiness } = require('../../core/middleware/requireBusiness');
 const { requireVertical } = require('../../core/middleware/requireVertical');
 const {
   checkSlug,
@@ -50,8 +49,6 @@ const {
   deleteRedirect,
   importRedirectsCsv,
 } = require('../controllers/seoCenter.controller');
-const domainAdmin = require('../../domains/domainAdmin.controller');
-const mailboxAdmin = require('../controllers/mailbox.controller');
 
 // Public — anyone can check if a slug is available (used during onboarding)
 router.get('/check-slug', checkSlug);
@@ -69,29 +66,11 @@ router.patch('/settings', protect, requireRole(ROLES.BUSINESS_ADMIN), validateBo
 router.get('/feature-flags', protect, requireRole(ROLES.BUSINESS_ADMIN), getFeatureFlags);
 router.get('/vertical-impact', protect, requireRole(ROLES.BUSINESS_ADMIN), verticalImpact);
 
-// Domain reseller — tenant owner self-service. Search is authenticated here
-// so onboarding/admin can use one shape; a public read-only search also
-// exists under /api/storefront/:slug/domain/search.
-router.get('/domains/search', protect, requireRole(ROLES.BUSINESS_ADMIN), requireBusiness, domainAdmin.search);
-router.get('/domains', protect, requireRole(ROLES.BUSINESS_ADMIN), requireBusiness, domainAdmin.list);
-router.post('/domains/checkout', protect, requireRole(ROLES.BUSINESS_ADMIN), requireBusiness, domainAdmin.checkout);
-router.post('/domains/register', protect, requireRole(ROLES.BUSINESS_ADMIN), requireBusiness, domainAdmin.register);
-router.post('/domains/transfer-in', protect, requireRole(ROLES.BUSINESS_ADMIN), requireBusiness, domainAdmin.transferIn);
-router.post('/domains/byod', protect, requireRole(ROLES.BUSINESS_ADMIN), requireBusiness, domainAdmin.byod);
-router.post('/domains/sync-paddle-payment', protect, requireRole(ROLES.BUSINESS_ADMIN), requireBusiness, domainAdmin.syncPayment);
-// Reseller business email (Zoho mailbox) — create + status
-router.post('/mailbox/provision', protect, requireRole(ROLES.BUSINESS_ADMIN), requireBusiness, mailboxAdmin.provision);
-router.get('/mailbox', protect, requireRole(ROLES.BUSINESS_ADMIN), requireBusiness, mailboxAdmin.list);
-router.get('/domains/:id/transfer-status', protect, requireRole(ROLES.BUSINESS_ADMIN), requireBusiness, domainAdmin.transferStatus);
-router.post('/domains/:id/auth-code', protect, requireRole(ROLES.BUSINESS_ADMIN), requireBusiness, domainAdmin.authCode);
-router.post('/domains/:id/privacy', protect, requireRole(ROLES.BUSINESS_ADMIN), requireBusiness, domainAdmin.privacy);
-router.post('/domains/:id/toggle-privacy', protect, requireRole(ROLES.BUSINESS_ADMIN), requireBusiness, domainAdmin.privacy);
-router.post('/domains/:id/auto-renew', protect, requireRole(ROLES.BUSINESS_ADMIN), requireBusiness, domainAdmin.autoRenew);
-router.post('/domains/:id/toggle-autorenew', protect, requireRole(ROLES.BUSINESS_ADMIN), requireBusiness, domainAdmin.autoRenew);
-router.post('/domains/:id/renew', protect, requireRole(ROLES.BUSINESS_ADMIN), requireBusiness, domainAdmin.renew);
-router.post('/domains/:id/primary', protect, requireRole(ROLES.BUSINESS_ADMIN), requireBusiness, domainAdmin.primary);
-router.post('/domains/:id/redirect', protect, requireRole(ROLES.BUSINESS_ADMIN), requireBusiness, domainAdmin.redirect);
-router.delete('/domains/:id', protect, requireRole(ROLES.BUSINESS_ADMIN), requireBusiness, domainAdmin.remove);
+// Custom-domain BINDING for the white-label ESS (connect/verify/disconnect an
+// EXISTING tenant-owned domain via Cloudflare-for-SaaS) lives in
+// subscription.routes.js under /api/subscription/custom-domain*. Domain
+// REGISTRATION/PURCHASE and business-email/mailbox RESALE were removed — we
+// do not sell domains or mailboxes.
 
 // GDPR Art. 20 / NZ Privacy Act IPP 6 right-to-portability — exports a
 // JSON snapshot of everything we hold for this business.

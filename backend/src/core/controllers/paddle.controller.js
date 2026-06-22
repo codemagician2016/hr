@@ -19,15 +19,6 @@ const {
   sendPaymentFailedEmail,
   sendSubscriptionCancelledEmail,
 } = require('../utils/email');
-const {
-  completePaidDomainRegistration,
-  completePaidDomainRenewal,
-  isDomainRegistrationPayment,
-  isDomainRenewalPayment,
-  markDomainPaymentFailed,
-  handleDomainPaymentAdjustment,
-} = require('../../domains/domainService');
-const { provisionMailbox } = require('../lib/mailboxProvisioning');
 const { addOveragePurchaseOnce, getCurrentCycle } = require('../lib/notifications/budgetEngine');
 const {
   recordAdjustmentLedger,
@@ -117,8 +108,6 @@ function makePaddleReconciliationError(message, code = 'PADDLE_RECONCILIATION_FA
 
 function normalizeProductKind(entity) {
   const kind = String(entity?.custom_data?.kind || entity?.custom_data?.productKind || 'plan').trim().toLowerCase();
-  if (kind === 'mailbox' || kind === 'business_email') return 'MAILBOX';
-  if (kind === 'domain' || kind === 'domain_registration' || kind === 'domain_renewal') return 'DOMAIN';
   if (kind === 'sms' || kind === 'sms_topup' || kind === 'messaging_topup') return 'SMS';
   if (kind === 'plan' || kind === 'subscription' || kind === '') return 'PLAN';
   return 'OTHER';
@@ -126,12 +115,6 @@ function normalizeProductKind(entity) {
 
 function productRefForEntity(entity, productKind) {
   const custom = entity?.custom_data || {};
-  if (productKind === 'MAILBOX') {
-    return String(custom.mailboxAddress || custom.address || '').trim().toLowerCase();
-  }
-  if (productKind === 'DOMAIN') {
-    return String(custom.domainName || custom.domain || '').trim().toLowerCase();
-  }
   if (productKind === 'SMS') {
     const cycle = String(custom.cycle || '').trim();
     const amount = String(custom.amountUsd || '').trim();
@@ -366,20 +349,6 @@ async function resolveBusinessIdFromPaddleEntity(entity) {
       }).catch(() => null);
       if (byBillingTransaction?.businessId) return byBillingTransaction.businessId;
     }
-
-    if (prisma.domain) {
-      const byDomain = await prisma.domain.findFirst({
-        where: {
-          OR: [
-            { registrarRef: `PADDLE:${transactionId}` },
-            { registrationPaddleTransactionId: transactionId },
-            { renewalPaddleTransactionId: transactionId },
-          ],
-        },
-        select: { businessId: true },
-      }).catch(() => null);
-      if (byDomain?.businessId) return byDomain.businessId;
-    }
   }
 
   const subscriptionId = entity?.subscription_id || (String(entity?.id || '').startsWith('sub_') ? entity.id : null);
@@ -523,37 +492,6 @@ async function handleTransactionCompleted(entity, meta = {}) {
     );
   }
 
-  if (isDomainRegistrationPayment(entity)) {
-    const businessId = await resolveBusinessIdFromPaddleEntity(entity).catch(() => null);
-    if (businessId) {
-      await upsertPurchaseFromPaddleTransaction(entity, {
-        businessId,
-        fallbackProductKind: 'DOMAIN',
-      }).catch((err) => console.error('[paddle webhook] domain billing ledger transaction write failed', err?.message || err));
-      await recordPaymentAttemptFromTransaction(entity, {
-        businessId,
-        status: entity?.status || 'completed',
-      }).catch((err) => console.error('[paddle webhook] domain billing ledger payment-attempt write failed', err?.message || err));
-    }
-    await completePaidDomainRegistration({ prisma, entity });
-    return;
-  }
-  if (isDomainRenewalPayment(entity)) {
-    const businessId = await resolveBusinessIdFromPaddleEntity(entity).catch(() => null);
-    if (businessId) {
-      await upsertPurchaseFromPaddleTransaction(entity, {
-        businessId,
-        fallbackProductKind: 'DOMAIN',
-      }).catch((err) => console.error('[paddle webhook] domain renewal billing ledger transaction write failed', err?.message || err));
-      await recordPaymentAttemptFromTransaction(entity, {
-        businessId,
-        status: entity?.status || 'completed',
-      }).catch((err) => console.error('[paddle webhook] domain renewal billing ledger payment-attempt write failed', err?.message || err));
-    }
-    await completePaidDomainRenewal({ prisma, entity });
-    return;
-  }
-
   const productKind = normalizeProductKind(entity);
   const businessId = await resolveBusinessIdFromPaddleEntity(entity);
   if (!businessId) {
@@ -652,74 +590,12 @@ async function handleNonPlanBillingSubscriptionChange(entity, meta = {}) {
   if (productKind === 'PLAN') return false;
   const status = String(entity?.status || '').toLowerCase();
 
-  if (productKind === 'MAILBOX' && ['active', 'trialing'].includes(status) && !meta.transaction) {
-    console.warn('[paddle webhook] deferring mailbox provisioning until transaction.completed confirms payment', entity?.id || 'unknown');
-    await upsertPaddleBillingSubscriptionRecord({ entity, transaction: null, meta });
-    return true;
-  }
-
   await upsertPaddleBillingSubscriptionRecord({ entity, transaction: meta.transaction || null, meta });
-
-  if (productKind === 'MAILBOX') {
-    await handleMailboxBillingSubscriptionChange(entity, meta);
-    return true;
-  }
 
   return true;
 }
 
-async function handleMailboxBillingSubscriptionChange(entity, meta = {}) {
-  const custom = entity?.custom_data || meta.transaction?.custom_data || {};
-  const businessId = await resolveBusinessIdFromPaddleEntity(entity);
-  const address = String(custom.mailboxAddress || '').trim().toLowerCase();
-  const domain = String(custom.domain || '').trim().toLowerCase();
-  const localPart = String(custom.localPart || address.split('@')[0] || '').trim().toLowerCase();
-  const deliverTo = String(custom.deliverTo || custom.userEmail || '').trim();
-  const status = String(entity?.status || '').toLowerCase();
-  if (!businessId || !address || !domain) return;
-
-  if (status === 'active') {
-    const existing = await prisma.mailbox?.findUnique({
-      where: { businessId_address: { businessId, address } },
-    }).catch(() => null);
-    if (!existing || !['ACTIVE', 'PROVISIONING'].includes(String(existing.status || '').toUpperCase())) {
-      await provisionMailbox({
-        businessId,
-        localPart,
-        domain,
-        deliverTo,
-        businessName: custom.businessName || null,
-      });
-    }
-  }
-
-  await prisma.mailbox?.updateMany({
-    where: { businessId, address },
-    data: {
-      status: ['past_due', 'paused', 'canceled'].includes(status) ? 'SUSPENDED' : undefined,
-      billingStatus: status.toUpperCase() || null,
-      billingCycle: String(custom.billingCycle || billingCycleFromPaddle(entity) || '').toUpperCase() || null,
-      billingQuantity: Number.parseInt(entity?.items?.[0]?.quantity || custom.quantity || 1, 10) || 1,
-      paddleCustomerId: entity?.customer_id || meta.transaction?.customer_id || null,
-      paddleSubscriptionId: entity?.id || meta.transaction?.subscription_id || null,
-      paddleTransactionId: meta.transaction?.id || entity?.transaction_id || null,
-      statusMessage: ['past_due', 'paused', 'canceled'].includes(status)
-        ? `Mailbox billing is ${status.replace('_', ' ')}. Update billing to keep this mailbox active.`
-        : undefined,
-    },
-  }).catch(() => null);
-}
-
 async function handleTransactionFailed(entity) {
-  if (isDomainRegistrationPayment(entity)) {
-    await markDomainPaymentFailed({ prisma, entity });
-    return;
-  }
-  if (isDomainRenewalPayment(entity)) {
-    await markDomainPaymentFailed({ prisma, entity });
-    return;
-  }
-
   const businessId = await resolveBusinessIdFromPaddleEntity(entity);
   if (!businessId) return;
   await recordPaymentAttemptFromTransaction(entity, {
@@ -743,9 +619,6 @@ async function handleTransactionFailed(entity) {
 }
 
 async function handleTransactionCanceled(entity) {
-  if (isDomainRegistrationPayment(entity) || isDomainRenewalPayment(entity)) {
-    await markDomainPaymentFailed({ prisma, entity });
-  }
   const businessId = await resolveBusinessIdFromPaddleEntity(entity).catch(() => null);
   if (businessId) {
     await recordPaymentAttemptFromTransaction(entity, {
@@ -1075,18 +948,6 @@ async function handleNonPlanAdjustment(entity) {
     },
   });
 
-  if (billing.productKind === 'MAILBOX' && billing.productRef) {
-    await prisma.mailbox?.updateMany({
-      where: { businessId: billing.businessId, address: billing.productRef },
-      data: {
-        billingStatus: action === 'chargeback' ? 'CHARGEBACK' : 'REFUNDED',
-        statusMessage: action === 'chargeback'
-          ? 'Mailbox payment was disputed. Mailbox management is locked until billing is resolved.'
-          : 'Mailbox payment was refunded. Mailbox management is locked until billing is resolved.',
-      },
-    }).catch(() => null);
-  }
-
   return true;
 }
 
@@ -1101,14 +962,6 @@ async function handleAdjustmentChange(entity) {
   if (ledgerBusinessId) {
     await recordAdjustmentLedger(entity, { businessId: ledgerBusinessId })
       .catch((err) => console.error('[paddle webhook] billing ledger adjustment write failed', err?.message || err));
-  }
-
-  const domainResult = await handleDomainPaymentAdjustment({ prisma, entity }).catch((err) => {
-    console.error('[paddle webhook] domain adjustment handling failed:', err?.message || err);
-    return { handled: false };
-  });
-  if (domainResult?.handled) {
-    return;
   }
 
   if (await handleNonPlanAdjustment(entity)) {

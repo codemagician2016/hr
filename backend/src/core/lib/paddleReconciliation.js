@@ -7,9 +7,6 @@ const {
 const {
   syncBusinessSubscriptionFromPaddle,
 } = require('./subscriptionBilling');
-const {
-  syncPendingDomainRegistrationPayment,
-} = require('../../domains/domainService');
 
 function lower(value) {
   return String(value || '').trim().toLowerCase();
@@ -60,21 +57,7 @@ async function reconcileSubscriptionRow(subscription) {
   return changed;
 }
 
-async function reconcilePendingDomain(domain) {
-  if (!domain?.registrarRef?.startsWith('PADDLE:')) return false;
-  const transactionId = domain.registrarRef.replace(/^PADDLE:/, '');
-  const result = await syncPendingDomainRegistrationPayment({
-    prisma,
-    businessId: domain.businessId,
-    transactionId,
-  }).catch((err) => {
-    console.error('[paddle reconcile] domain payment sync failed:', domain.name, err?.message || err);
-    return null;
-  });
-  return Boolean(result?.synced);
-}
-
-async function reconcilePaddleBilling({ subscriptionLimit = 50, domainLimit = 50 } = {}) {
+async function reconcilePaddleBilling({ subscriptionLimit = 50 } = {}) {
   if (!isPaddleConfigured()) {
     return { skipped: true, reason: 'paddle_not_configured' };
   }
@@ -82,8 +65,6 @@ async function reconcilePaddleBilling({ subscriptionLimit = 50, domainLimit = 50
   const summary = {
     subscriptionsScanned: 0,
     subscriptionsChanged: 0,
-    domainsScanned: 0,
-    domainsChanged: 0,
   };
 
   const subscriptions = await prisma.subscription.findMany({
@@ -103,24 +84,6 @@ async function reconcilePaddleBilling({ subscriptionLimit = 50, domainLimit = 50
       if (await reconcileSubscriptionRow(subscription)) summary.subscriptionsChanged += 1;
     } catch (err) {
       console.error('[paddle reconcile] subscription row failed:', subscription.businessId, err?.message || err);
-    }
-  }
-
-  if (prisma.domain) {
-    const domains = await prisma.domain.findMany({
-      where: {
-        OR: [
-          { status: 'PENDING', registrarRef: { startsWith: 'PADDLE:' } },
-          { renewalPaymentStatus: 'PENDING', renewalPaddleTransactionId: { not: null } },
-        ],
-      },
-      orderBy: { updatedAt: 'asc' },
-      take: domainLimit,
-    }).catch(() => []);
-    summary.domainsScanned = domains.length;
-
-    for (const domain of domains) {
-      if (await reconcilePendingDomain(domain)) summary.domainsChanged += 1;
     }
   }
 
@@ -159,6 +122,5 @@ async function reconcilePaddleBilling({ subscriptionLimit = 50, domainLimit = 50
 
 module.exports = {
   reconcilePaddleBilling,
-  reconcilePendingDomain,
   reconcileSubscriptionRow,
 };
