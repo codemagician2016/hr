@@ -519,10 +519,16 @@ async function main() {
       check(typeof res.body?.subdomainSuffix === 'string' && res.body.subdomainSuffix.endsWith('drifthr.com'), 'subdomainSuffix present and ends with drifthr.com');
       check('targetCname' in res.body, 'targetCname key present');
 
-      // CF configured → true (token + zone id set).
-      process.env = { ...ORIGINAL_ENV, CLOUDFLARE_CUSTOM_HOSTNAME_TOKEN: 'cf', CLOUDFLARE_CUSTOM_HOSTNAME_ZONE_ID: 'z1' };
+      // CF-for-SaaS fully configured → true (token + zone id + FALLBACK ORIGIN).
+      // The fallback origin is the SaaS-specific signal: the general subdomain CF
+      // token alone must NOT enable Mode B.
+      process.env = { ...ORIGINAL_ENV, CLOUDFLARE_CUSTOM_HOSTNAME_TOKEN: 'cf', CLOUDFLARE_CUSTOM_HOSTNAME_ZONE_ID: 'z1', CLOUDFLARE_CUSTOM_HOSTNAME_FALLBACK_ORIGIN: 'saas-origin.drifthr.com' };
       const res2 = await callController(businessController.getDomainConfig, { user: { id: fxAdmin.id, businessId: fixture.id, role: ROLES.BUSINESS_ADMIN } });
-      check(res2.body?.customDomainEnabled === true, 'customDomainEnabled true when CF custom-hostname configured');
+      check(res2.body?.customDomainEnabled === true, 'customDomainEnabled true when CF custom-hostname fully configured (incl. fallback origin)');
+      // token + zone but NO fallback origin → still false (the shared-token trap).
+      process.env = { ...ORIGINAL_ENV, CLOUDFLARE_API_TOKEN: 'cf', CF_ZONE_ID: 'z1' };
+      const res3 = await callController(businessController.getDomainConfig, { user: { id: fxAdmin.id, businessId: fixture.id, role: ROLES.BUSINESS_ADMIN } });
+      check(res3.body?.customDomainEnabled === false, 'customDomainEnabled false when only the subdomain token is set (no fallback origin)');
       process.env = ORIGINAL_ENV;
     }
 

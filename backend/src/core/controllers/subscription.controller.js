@@ -487,7 +487,17 @@ function cloudflareCustomHostnameZoneName() {
 }
 
 function isCloudflareCustomHostnameConfigured() {
-  return Boolean(cloudflareCustomHostnameToken() && (cloudflareCustomHostnameZoneId() || cloudflareCustomHostnameZoneName()));
+  // Custom domains (Cloudflare-for-SaaS) require a ONE-TIME platform enablement:
+  // a configured fallback origin. The general CF token used for subdomain
+  // auto-provisioning (CLOUDFLARE_API_TOKEN) must NOT, on its own, light up the
+  // custom-domain (Mode B) path — so gate on the SaaS-specific fallback origin,
+  // which is only set once Cloudflare-for-SaaS has actually been turned on.
+  const fallbackOrigin = String(process.env.CLOUDFLARE_CUSTOM_HOSTNAME_FALLBACK_ORIGIN || '').trim();
+  return Boolean(
+    fallbackOrigin
+    && cloudflareCustomHostnameToken()
+    && (cloudflareCustomHostnameZoneId() || cloudflareCustomHostnameZoneName())
+  );
 }
 
 async function cloudflareApi(path, options = {}) {

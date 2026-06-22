@@ -107,7 +107,9 @@ async function checkSlug(req, res) {
     slug: normalized,
     available: !existing,
     reason: existing ? 'Already in use' : null,
-    url: `https://${normalized}.${process.env.PLATFORM_DOMAIN || 'drifthr.com'}`,
+    // The real provisioned host ({slug}-staging.drifthr.com), not {slug}.PLATFORM_DOMAIN —
+    // keeps the availability preview consistent with what gets provisioned.
+    url: `https://${hostForSlug(normalized)}`,
   });
 }
 
