@@ -1,6 +1,7 @@
 export const THEME_CONTRACT_VERSION: 1;
 
 export const VERTICALS: {
+  HR: 'HR';
   APPOINTMENT: 'APPOINTMENT';
   ECOMMERCE: 'ECOMMERCE';
   STATIC: 'STATIC';
@@ -36,7 +37,7 @@ export const ADMIN_SURFACE_MODEL: {
   CANONICAL_ROUTE: '/dashboard';
 };
 
-export type Vertical = 'APPOINTMENT' | 'ECOMMERCE' | 'STATIC';
+export type Vertical = 'HR' | 'APPOINTMENT' | 'ECOMMERCE' | 'STATIC';
 export type ThemeMode = 'generic' | 'mixed' | 'bespoke';
 export type ThemeInheritanceMode = 'merge' | 'replace';
 export type ThemeSlotGroup = 'admin' | 'storefront' | 'customer' | 'staff';

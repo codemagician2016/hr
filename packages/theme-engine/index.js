@@ -1,24 +1,19 @@
 const {
   THEME_CONTRACT_VERSION,
-  VERTICALS,
   THEME_MODES,
   THEME_INHERITANCE_MODES,
   SLOT_GROUPS,
+  VERTICALS: TYPES_VERTICALS,
 } = require('@hr/types');
 
-const VERTICAL_ALIASES = Object.freeze({
-  booking: VERTICALS.APPOINTMENT,
-  appointment: VERTICALS.APPOINTMENT,
-  appointments: VERTICALS.APPOINTMENT,
-  service: VERTICALS.APPOINTMENT,
-  shop: VERTICALS.ECOMMERCE,
-  ecommerce: VERTICALS.ECOMMERCE,
-  e_commerce: VERTICALS.ECOMMERCE,
-  commerce: VERTICALS.ECOMMERCE,
-  web: VERTICALS.STATIC,
-  website: VERTICALS.STATIC,
-  static: VERTICALS.STATIC,
-});
+// HRMS is a single-vertical product. The 60+ profession verticals
+// (booking/shop/web and their aliases) have been collapsed to one 'HR'
+// vertical. The canonical value now lives in `@hr/types` (VERTICALS.HR); we
+// keep a local fallback in case the import shape differs (older @hr/types).
+const HR = (TYPES_VERTICALS && TYPES_VERTICALS.HR) || 'HR';
+// Back-compat alias: existing code/tests referenced HR_VERTICAL.
+const HR_VERTICAL = HR;
+const VERTICALS = Object.freeze({ HR });
 
 function isPlainObject(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -34,14 +29,13 @@ function cleanKey(value, fallback = 'default') {
   return key || fallback;
 }
 
-function normalizeVertical(value, fallback = VERTICALS.APPOINTMENT) {
-  const raw = String(value || fallback).trim();
-  const upper = raw.toUpperCase();
-  if (VERTICALS[upper]) return VERTICALS[upper];
-  return VERTICAL_ALIASES[cleanKey(raw, '')] || fallback;
+// Single-vertical product: every theme is an HR theme. The argument is
+// accepted for signature/back-compat but the result is always 'HR'.
+function normalizeVertical() {
+  return HR_VERTICAL;
 }
 
-function normalizeMode(value, fallback = THEME_MODES.MIXED) {
+function normalizeMode(value, fallback = THEME_MODES.GENERIC) {
   const mode = String(value || fallback).trim().toLowerCase();
   return Object.values(THEME_MODES).includes(mode) ? mode : fallback;
 }
@@ -288,6 +282,143 @@ function buildBackendThemeManifest(entries = {}, options = {}) {
   }));
 }
 
+// ============================================================================
+// HR fixed styles
+//
+// Core product principle: a tenant picks ONE of these 5 fixed styles, ONE
+// brand color (palette.primary), and a logo — they do NOT design themes. Each
+// style is a base palette + neutral defaults, expressed as a normalizeThemeConfig
+// seed. The tenant override model is `{ palette: { primary }, logoUrl, styleKey }`.
+// ============================================================================
+
+const DEFAULT_STYLE_KEY = 'slate';
+
+// ============================================================================
+// Curated brand colors
+//
+// White-label model: a tenant picks ONE of 5 fixed styles + ONE of these 12
+// curated brand colors (palette.primary) + a logo. No freeform color picker.
+// Every hex below is pre-vetted for WCAG AA contrast on the styles' surfaces.
+// ============================================================================
+
+const COLORS = Object.freeze([
+  { key: 'indigo', name: 'Indigo', hex: '#4F46E5' },
+  { key: 'blue', name: 'Blue', hex: '#2563EB' },
+  { key: 'teal', name: 'Teal', hex: '#0D9488' },
+  { key: 'emerald', name: 'Emerald', hex: '#059669' },
+  { key: 'green', name: 'Green', hex: '#16A34A' },
+  { key: 'amber', name: 'Amber', hex: '#D97706' },
+  { key: 'orange', name: 'Orange', hex: '#EA580C' },
+  { key: 'red', name: 'Red', hex: '#DC2626' },
+  { key: 'rose', name: 'Rose', hex: '#E11D48' },
+  { key: 'pink', name: 'Pink', hex: '#DB2777' },
+  { key: 'violet', name: 'Violet', hex: '#7C3AED' },
+  { key: 'slate', name: 'Slate', hex: '#475569' },
+]);
+
+const COLOR_KEYS = Object.freeze(COLORS.map((c) => c.key));
+const DEFAULT_COLOR_KEY = 'indigo';
+const COLORS_BY_KEY = Object.freeze(
+  COLORS.reduce((acc, c) => { acc[c.key] = c; return acc; }, {})
+);
+
+function normalizeColorKey(colorKey) {
+  const key = cleanKey(colorKey, DEFAULT_COLOR_KEY);
+  return COLORS_BY_KEY[key] ? key : DEFAULT_COLOR_KEY;
+}
+
+// Resolve a curated brand color key to its hex. Unknown/empty → default color.
+function resolveColor(colorKey) {
+  return COLORS_BY_KEY[normalizeColorKey(colorKey)].hex;
+}
+
+const FIXED_STYLE_SEEDS = Object.freeze({
+  slate: {
+    key: 'slate',
+    label: 'Slate',
+    palette: { primary: '#475569', background: '#FFFFFF', foreground: '#0F172A' },
+    metadata: { mood: 'neutral', source: 'fixed' },
+  },
+  indigo: {
+    key: 'indigo',
+    label: 'Indigo',
+    palette: { primary: '#4F46E5', background: '#FFFFFF', foreground: '#1E1B4B' },
+    metadata: { mood: 'professional', source: 'fixed' },
+  },
+  emerald: {
+    key: 'emerald',
+    label: 'Emerald',
+    palette: { primary: '#059669', background: '#FFFFFF', foreground: '#064E3B' },
+    metadata: { mood: 'fresh', source: 'fixed' },
+  },
+  rose: {
+    key: 'rose',
+    label: 'Rose',
+    palette: { primary: '#E11D48', background: '#FFFFFF', foreground: '#4C0519' },
+    metadata: { mood: 'warm', source: 'fixed' },
+  },
+  mono: {
+    key: 'mono',
+    label: 'Mono',
+    palette: { primary: '#171717', background: '#FFFFFF', foreground: '#0A0A0A' },
+    metadata: { mood: 'minimal', source: 'fixed' },
+  },
+});
+
+const FIXED_STYLE_KEYS = Object.freeze(Object.keys(FIXED_STYLE_SEEDS));
+
+// Build the registry once. Each seed normalizes to an HR-vertical, GENERIC theme.
+function createHrStyleRegistry() {
+  return createThemeRegistry(FIXED_STYLE_SEEDS, { defaultKey: DEFAULT_STYLE_KEY });
+}
+
+const hrStyleRegistry = createHrStyleRegistry();
+
+function normalizeStyleKey(styleKey) {
+  const key = cleanKey(styleKey, DEFAULT_STYLE_KEY);
+  return FIXED_STYLE_SEEDS[key] ? key : DEFAULT_STYLE_KEY;
+}
+
+// Resolve a runtime theme for a tenant from their stored brand record:
+// `{ styleKey, colorKey, primary, logoUrl }`. The chosen fixed style supplies
+// the base palette + neutral defaults; the tenant's single brand color
+// overrides `palette.primary`; the logo is carried through on the theme.
+//
+// Brand primary resolution: a curated `colorKey` (one of COLOR_KEYS) takes
+// precedence and resolves via COLORS; a raw `primary` hex is used only when no
+// colorKey is supplied. When neither is given, fall back to DEFAULT_COLOR_KEY.
+function resolveTenantTheme(tenant = {}) {
+  const styleKey = normalizeStyleKey(tenant.styleKey);
+  const base = hrStyleRegistry.get(styleKey);
+
+  let colorKey;
+  let primary;
+  if (tenant.colorKey) {
+    colorKey = normalizeColorKey(tenant.colorKey);
+    primary = resolveColor(colorKey);
+  } else {
+    const rawPrimary = tenant.primary || tenant.primaryColor || tenant.palette?.primary;
+    if (rawPrimary) {
+      primary = rawPrimary;
+    } else {
+      colorKey = DEFAULT_COLOR_KEY;
+      primary = resolveColor(colorKey);
+    }
+  }
+
+  const logoUrl = tenant.logoUrl || tenant.logo || base.raw?.logoUrl;
+
+  const override = { key: styleKey };
+  if (primary) override.palette = { primary };
+  if (logoUrl) override.logoUrl = logoUrl;
+
+  const theme = composeTheme(base.raw, override, { inheritance: THEME_INHERITANCE_MODES.MERGE });
+  theme.styleKey = styleKey;
+  theme.colorKey = colorKey || null;
+  theme.logoUrl = logoUrl || null;
+  return theme;
+}
+
 module.exports = {
   THEME_CONTRACT_VERSION,
   VERTICALS,
@@ -308,4 +439,20 @@ module.exports = {
   createLazySlotResolver,
   buildThemeManifest,
   buildBackendThemeManifest,
+  // HR fixed-style system
+  HR,
+  HR_VERTICAL,
+  DEFAULT_STYLE_KEY,
+  FIXED_STYLE_SEEDS,
+  FIXED_STYLE_KEYS,
+  createHrStyleRegistry,
+  hrStyleRegistry,
+  normalizeStyleKey,
+  resolveTenantTheme,
+  // Curated brand colors
+  COLORS,
+  COLOR_KEYS,
+  DEFAULT_COLOR_KEY,
+  normalizeColorKey,
+  resolveColor,
 };

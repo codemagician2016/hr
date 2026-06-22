@@ -5,7 +5,7 @@
 // route reads — same pattern as lib/blogArticles.js. When a draft is reviewed and promoted via
 // /seo-publish, its fields land here with status: 'published'.
 //
-// Every field below is real data pulled from packages/theme-engine/profession-registry.mjs
+// Every field below is real data captured from the original theme catalog
 // (palette, hero copy, vocab, trust items) — not invented. Keep copy human and specific.
 
 export const themePages = [

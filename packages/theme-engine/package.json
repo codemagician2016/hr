@@ -9,6 +9,6 @@
     "@hr/types": "file:../types"
   },
   "scripts": {
-    "test": "node test/theme-engine.test.js && node test/profession-registry.test.mjs && node test/layout-presets.test.cjs"
+    "test": "node test/theme-engine.test.js && node test/layout-presets.test.cjs"
   }
 }
