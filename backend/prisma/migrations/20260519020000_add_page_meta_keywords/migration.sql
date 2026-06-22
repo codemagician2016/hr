@@ -1,2 +1,0 @@
-ALTER TABLE "BusinessPage"
-ADD COLUMN IF NOT EXISTS "metaKeywords" TEXT;

@@ -5,7 +5,7 @@
 // Keep the brand entity description IDENTICAL to content-seo/rules/RULES.md section G
 // (GEO consistency — AI engines should form one stable DriftHR entity).
 
-export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://sitepresso.com';
+export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://drifthr.com';
 export const SITE_NAME = 'DriftHR';
 export const DEFAULT_TITLE = 'DriftHR · Effortless HR & payroll';
 export const DEFAULT_DESCRIPTION =

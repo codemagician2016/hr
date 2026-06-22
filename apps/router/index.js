@@ -39,6 +39,14 @@ const ASSET_PREFIX_SUBAPP = {
   'ess-static': 'ess',
 };
 
+// Staging uses hyphenated ONE-level hosts (app-staging.drifthr.com) because
+// Cloudflare Universal SSL only covers a single subdomain level (*.drifthr.com) —
+// app.staging.drifthr.com (two levels) would have NO certificate. This maps each
+// hyphenated host to its canonical dotted form so all routing/guard logic below
+// works unchanged. JSON env, e.g.
+//   {"app-staging.drifthr.com":"app.staging.drifthr.com", ...}
+const HOST_ALIAS = (() => { try { return JSON.parse(process.env.ROUTER_HOST_ALIAS || '{}'); } catch { return {}; } })();
+
 const QA_PORTAL_PORT = parseInt(process.env.QA_PORTAL_PORT || '3801', 10);
 const PUBLIC_MICROCACHE_TTL_SECONDS = parseInt(process.env.PUBLIC_MICROCACHE_TTL_SECONDS || '300', 10);
 const PUBLIC_MICROCACHE_MAX_BYTES = parseInt(process.env.PUBLIC_MICROCACHE_MAX_BYTES || String(2 * 1024 * 1024), 10);
@@ -397,92 +405,49 @@ function escapeHtml(value) {
 
 function unknownSiteHtml(host, platformDomain) {
   const safeHost = escapeHtml(host);
-  const homeUrl = `https://${platformDomain || 'sitepresso.com'}/`;
-  const loginUrl = `https://app.${platformDomain || 'sitepresso.com'}/login`;
+  const base = platformDomain || 'drifthr.com';
+  const homeUrl = `https://${base}/`;
+  const loginUrl = `https://app.${base}/login`;
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="robots" content="noindex" />
-  <title>No site connected | Sitepresso</title>
+  <title>No workspace connected | DriftHR</title>
   <style>
-    :root { color-scheme: light; --ink: #111827; --muted: #667085; --line: #d9e2ec; --bg: #f7faf8; }
+    :root { color-scheme: light; --ink: #16243B; --teal: #16B6A6; --muted: #5b6b7e; --line: #dbe7e6; }
     * { box-sizing: border-box; }
-    body { margin: 0; min-height: 100vh; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--ink); background: radial-gradient(circle at top left, #e5fff2 0, #f6fbff 34%, #ffffff 70%); }
-    main { width: min(1120px, calc(100% - 32px)); margin: 0 auto; padding: 72px 0 44px; }
-    .panel { min-height: 420px; border: 1px solid var(--line); border-radius: 24px; background: linear-gradient(135deg, rgba(230, 255, 244, .92), rgba(255, 255, 255, .95)); box-shadow: 0 24px 70px rgba(15, 23, 42, .08); display: grid; place-items: center; text-align: center; padding: 48px 24px; }
-    .brand { display: inline-flex; align-items: center; justify-content: center; margin-bottom: 28px; }
-    .sitepresso-logo { display: block; width: min(248px, 72vw); height: auto; }
-    .eyebrow { margin: 0 0 14px; color: #52606d; font-size: 13px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
-    h1 { margin: 0 auto; max-width: 760px; font-size: clamp(36px, 6vw, 64px); line-height: 1.02; letter-spacing: 0; }
-    .lead { margin: 22px auto 0; max-width: 680px; color: var(--muted); font-size: 18px; line-height: 1.65; }
-    code { display: inline-block; border: 1px solid #d5dde7; border-radius: 8px; background: rgba(255, 255, 255, .76); padding: 2px 7px; color: #1f2937; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; overflow-wrap: anywhere; }
-    .actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; margin-top: 34px; }
-    a { color: inherit; }
-    .button { min-width: 172px; border: 2px solid #0b1220; border-radius: 999px; background: #0b1220; color: white; padding: 14px 24px; font-weight: 800; text-decoration: none; }
-    .button.secondary { background: transparent; color: #0b1220; }
-    .notes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; margin-top: 46px; }
-    .note h2 { margin: 0 0 10px; font-size: 20px; }
-    .note p { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.6; }
-    footer { margin-top: 54px; text-align: center; color: #7b8794; font-size: 13px; }
-    @media (max-width: 760px) { main { padding-top: 36px; } .panel { min-height: 0; border-radius: 18px; padding: 38px 18px; } .lead { font-size: 16px; } .actions { flex-direction: column; } .button { width: 100%; } .notes { grid-template-columns: 1fr; } }
+    body { margin: 0; min-height: 100vh; font-family: Manrope, Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); background: radial-gradient(circle at top left, #e6f7f4 0, #f4fbfa 34%, #ffffff 70%); }
+    main { width: min(960px, calc(100% - 32px)); margin: 0 auto; padding: 80px 0 44px; }
+    .panel { border: 1px solid var(--line); border-radius: 24px; background: linear-gradient(135deg, rgba(227,246,243,.9), rgba(255,255,255,.96)); box-shadow: 0 24px 70px rgba(15,23,42,.08); text-align: center; padding: 56px 28px; }
+    .brand { display: inline-flex; align-items: center; gap: 10px; margin-bottom: 28px; font-weight: 800; font-size: 22px; color: var(--ink); }
+    .dot { display:inline-flex; height: 34px; width: 34px; border-radius: 9px; background: var(--teal); align-items:center; justify-content:center; color:#fff; font-weight:800; }
+    .eyebrow { margin: 0 0 14px; color: var(--teal); font-size: 13px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
+    h1 { margin: 0 auto; max-width: 680px; font-size: clamp(30px, 5vw, 50px); line-height: 1.05; }
+    .lead { margin: 20px auto 0; max-width: 600px; color: var(--muted); font-size: 17px; line-height: 1.65; }
+    code { display: inline-block; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.8); padding: 2px 7px; color: var(--ink); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .92em; overflow-wrap: anywhere; }
+    .actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; margin-top: 32px; }
+    a { color: inherit; text-decoration: none; }
+    .button { min-width: 160px; border-radius: 999px; background: var(--ink); color: #fff; padding: 13px 24px; font-weight: 700; }
+    .button.secondary { background: transparent; color: var(--ink); border: 2px solid var(--ink); }
+    footer { margin-top: 40px; text-align: center; color: #8aa0a0; font-size: 13px; }
+    @media (max-width: 640px) { main { padding-top: 40px; } .panel { padding: 40px 18px; } .actions { flex-direction: column; } .button { width: 100%; } }
   </style>
 </head>
 <body>
   <main>
     <section class="panel" aria-labelledby="missing-site-title">
-      <div>
-        <div class="brand" aria-label="Sitepresso">
-          <svg class="sitepresso-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 140" role="img" aria-labelledby="sitepresso-logo-title">
-            <title id="sitepresso-logo-title">Sitepresso</title>
-            <defs>
-              <linearGradient id="missing-site-logo-g1" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#8B5CF6"/>
-                <stop offset="100%" stop-color="#4C1D95"/>
-              </linearGradient>
-              <linearGradient id="missing-site-logo-steam" x1="0%" y1="100%" x2="0%" y2="0%">
-                <stop offset="0%" stop-color="#8B5CF6" stop-opacity="0.6"/>
-                <stop offset="100%" stop-color="#8B5CF6" stop-opacity="0"/>
-              </linearGradient>
-            </defs>
-            <path d="M 38 22 Q 32 14 38 6" stroke="url(#missing-site-logo-steam)" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.7"/>
-            <path d="M 52 24 Q 58 14 52 4" stroke="url(#missing-site-logo-steam)" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.7"/>
-            <path d="M 66 22 Q 60 14 66 6" stroke="url(#missing-site-logo-steam)" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.7"/>
-            <g transform="translate(20,30)">
-              <rect x="4" y="8" width="64" height="68" rx="10" fill="url(#missing-site-logo-g1)"/>
-              <rect x="4" y="8" width="64" height="14" rx="10" fill="#1E1B4B"/>
-              <rect x="4" y="16" width="64" height="6" fill="#1E1B4B"/>
-              <circle cx="12" cy="15" r="2" fill="#A78BFA"/>
-              <circle cx="20" cy="15" r="2" fill="#C4B5FD"/>
-              <circle cx="28" cy="15" r="2" fill="#EDE9FE"/>
-              <path d="M 38 30 L 28 50 L 36 50 L 32 66 L 46 44 L 38 44 L 42 30 Z" fill="#FFFFFF"/>
-              <path d="M 68 30 Q 88 30 88 48 Q 88 64 68 64" stroke="url(#missing-site-logo-g1)" stroke-width="6" fill="none" stroke-linecap="round"/>
-              <ellipse cx="36" cy="82" rx="40" ry="4" fill="#1E1B4B" opacity="0.9"/>
-            </g>
-            <text x="125" y="82" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="42" font-weight="800" fill="#1E1B4B" letter-spacing="-1.5">
-              site<tspan fill="url(#missing-site-logo-g1)">presso</tspan>
-            </text>
-            <text x="126" y="106" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="500" fill="#6B7280" letter-spacing="2">
-              WEBSITES IN 5 MINUTES
-            </text>
-          </svg>
-        </div>
-        <p class="eyebrow">Site address unavailable</p>
-        <h1 id="missing-site-title">No Sitepresso site is connected at this address.</h1>
-        <p class="lead">The address <code>${safeHost}</code> does not currently point to a published Sitepresso storefront or website. If you expected a store, check the spelling or contact the business owner.</p>
-        <div class="actions">
-          <a class="button" href="${homeUrl}">Go to Sitepresso</a>
-          <a class="button secondary" href="${loginUrl}">Sign in</a>
-        </div>
+      <div class="brand"><span class="dot">D</span> DriftHR</div>
+      <p class="eyebrow">Workspace unavailable</p>
+      <h1 id="missing-site-title">No DriftHR workspace is connected at this address.</h1>
+      <p class="lead">The address <code>${safeHost}</code> isn't linked to a DriftHR workspace yet. If you're an employee, check the link from your HR team; if you're an admin, connect this domain from your settings.</p>
+      <div class="actions">
+        <a class="button" href="${homeUrl}">Go to DriftHR</a>
+        <a class="button secondary" href="${loginUrl}">Sign in</a>
       </div>
     </section>
-    <section class="notes" aria-label="Helpful next steps">
-      <div class="note"><h2>Looking for a store?</h2><p>Store addresses are created by each business. A small spelling change can open a different address.</p></div>
-      <div class="note"><h2>Managing your site?</h2><p>Sign in to connect a domain, publish your storefront, or check your Sitepresso subdomain.</p></div>
-      <div class="note"><h2>New to Sitepresso?</h2><p>Visit the main Sitepresso site to see the current product and setup options.</p></div>
-    </section>
-    <footer>HTTP 404 - This page is not indexed by search engines.</footer>
+    <footer>HTTP 404 — this page is not indexed by search engines.</footer>
   </main>
 </body>
 </html>`;
@@ -655,6 +620,10 @@ function unifiedAdminRedirectUrl(host, requestUrl) {
 
 const server = http.createServer(async (req, res) => {
   try {
+    // Rewrite hyphenated staging hosts to their canonical dotted form BEFORE any
+    // routing/guard logic (so app-staging.drifthr.com is treated as app.staging.…).
+    const aliasFrom = (req.headers.host || '').toLowerCase().split(':')[0];
+    if (HOST_ALIAS[aliasFrom]) req.headers.host = HOST_ALIAS[aliasFrom];
     const cleanHost = (req.headers.host || '').toLowerCase().split(':')[0];
     const platformDomain = (process.env.PLATFORM_DOMAIN || 'hr.com').toLowerCase();
     const isPlatformHost = cleanHost === platformDomain || cleanHost.endsWith(`.${platformDomain}`);

@@ -1,3 +1,0 @@
--- AlterTable
-ALTER TABLE "BusinessContent" ADD COLUMN "showHero" BOOLEAN NOT NULL DEFAULT true,
-ADD COLUMN "showTopBar" BOOLEAN NOT NULL DEFAULT true;
