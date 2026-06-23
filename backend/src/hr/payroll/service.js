@@ -1137,6 +1137,81 @@ async function getMyPayslip({ businessId, customer, payslipId }) {
   return payslip;
 }
 
+/**
+ * getMyPayslipPdfContext — the SECURE PDF context for the ESS download.
+ *
+ * Resolves the payslip via getMyPayslip (which enforces employee-own + PUBLISHED
+ * scoping AND marks the first view), then loads the employee + business identity
+ * the renderer needs. Security is unchanged: ALL scoping flows through
+ * getMyPayslip; this only adds read-only identity for the header/employee block.
+ *
+ * @returns {{ payslip, employee, business }}
+ */
+async function getMyPayslipPdfContext({ businessId, customer, payslipId }) {
+  const payslip = await getMyPayslip({ businessId, customer, payslipId });
+
+  // Employee identity, tenant-scoped.
+  const employee = await prisma.employee.findFirst({
+    where: { id: payslip.employeeId, businessId, deletedAt: null },
+    select: {
+      id: true, code: true, firstName: true, middleName: true, lastName: true,
+      preferredName: true, currentEmploymentRecordId: true,
+    },
+  });
+
+  // Current department/designation: the pointed-at employment record, else the
+  // latest by effectiveFrom. (There is no scalar->relation on Employee.)
+  let department = null;
+  let designation = null;
+  if (employee) {
+    const cer = await prisma.employmentRecord.findFirst({
+      where: employee.currentEmploymentRecordId
+        ? { id: employee.currentEmploymentRecordId, businessId }
+        : { employeeId: employee.id, businessId },
+      orderBy: { effectiveFrom: 'desc' },
+      select: {
+        department: { select: { name: true } },
+        designation: { select: { name: true } },
+      },
+    });
+    department = cer && cer.department ? cer.department.name : null;
+    designation = cer && cer.designation ? cer.designation.name : null;
+  }
+
+  const business = await prisma.business.findUnique({
+    where: { id: businessId },
+    select: { id: true, name: true },
+  });
+
+  const identity = employee
+    ? {
+        id: employee.id,
+        code: employee.code,
+        firstName: employee.firstName,
+        middleName: employee.middleName,
+        lastName: employee.lastName,
+        preferredName: employee.preferredName,
+        department,
+        designation,
+      }
+    : null;
+
+  return { payslip, employee: identity, business: business || { id: businessId } };
+}
+
+/**
+ * recordPayslipPdfHash — persist the SHA-256 of the rendered PDF (tamper
+ * evidence). Tenant-scoped, idempotent (skips the write when unchanged). Called
+ * best-effort from the controller; failures here never block the download.
+ */
+async function recordPayslipPdfHash({ businessId, payslipId, pdfHash }) {
+  if (!pdfHash) return;
+  await prisma.payslip.updateMany({
+    where: { id: payslipId, businessId, deletedAt: null, NOT: { pdfHash } },
+    data: { pdfHash },
+  });
+}
+
 // ===========================================================================
 //  FEATURE 7 — RUN ORCHESTRATION (checklist · one-time · variance · lifecycle)
 //
@@ -1996,6 +2071,8 @@ module.exports = {
   getPayslip,
   getMyPayslips,
   getMyPayslip,
+  getMyPayslipPdfContext,
+  recordPayslipPdfHash,
   generateFile,
   // Feature 7 — run orchestration / lifecycle past APPROVED
   listRunEntities,
