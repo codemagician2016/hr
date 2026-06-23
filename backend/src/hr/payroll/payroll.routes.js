@@ -55,5 +55,8 @@ router.post('/runs/:id/reopen', payrollMutationLimiter, requirePermission('canRu
 
 // ── Payslips (operator view) ──
 router.get('/payslips/:id', requirePermission('canViewPayrollReports'), c.getPayslip);
+// Operator payslip PDF — the "View" target. Renders the SAME branded PDF as ESS
+// from the frozen snapshot (finding #23), tenant-scoped behind reports RBAC.
+router.get('/payslips/:id/pdf', requirePermission('canViewPayrollReports'), c.getPayslipPdf);
 
 module.exports = router;

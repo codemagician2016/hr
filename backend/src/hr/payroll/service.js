@@ -1149,7 +1149,17 @@ async function getMyPayslip({ businessId, customer, payslipId }) {
  */
 async function getMyPayslipPdfContext({ businessId, customer, payslipId }) {
   const payslip = await getMyPayslip({ businessId, customer, payslipId });
+  return resolvePayslipPdfIdentity({ businessId, payslip });
+}
 
+/**
+ * resolvePayslipPdfIdentity — shared identity loader for the payslip renderer.
+ * Given an already-scoped `payslip`, loads the employee + department/designation
+ * + business identity blocks the PDF header needs. Tenant-scoped, read-only.
+ * Used by BOTH the ESS download and the operator download so the two paths
+ * render an identical document from the same frozen snapshot.
+ */
+async function resolvePayslipPdfIdentity({ businessId, payslip }) {
   // Employee identity, tenant-scoped.
   const employee = await prisma.employee.findFirst({
     where: { id: payslip.employeeId, businessId, deletedAt: null },
@@ -1197,6 +1207,21 @@ async function getMyPayslipPdfContext({ businessId, customer, payslipId }) {
     : null;
 
   return { payslip, employee: identity, business: business || { id: businessId } };
+}
+
+/**
+ * getPayslipPdfContext — the OPERATOR PDF context (finding #23). Operator
+ * payslip view is gated by canViewPayrollReports (route RBAC), so unlike the ESS
+ * path it does NOT require PUBLISHED/employee-own — an operator can render any
+ * run payslip in the tenant. Scoping is strictly by businessId; the payslip must
+ * exist, not be soft-deleted, and carry a frozen snapshot to render.
+ */
+async function getPayslipPdfContext({ businessId, payslipId }) {
+  const payslip = await prisma.payslip.findFirst({
+    where: { id: payslipId, businessId, deletedAt: null },
+  });
+  if (!payslip) throw notFound('Payslip not found');
+  return resolvePayslipPdfIdentity({ businessId, payslip });
 }
 
 /**
@@ -1320,17 +1345,27 @@ async function getInputsChecklist({ businessId, payRunId }) {
     count: pendingRevs,
   };
 
-  // One-time inputs.
+  // One-time inputs. Resolve subject employee names so the editor renders names,
+  // not raw UUIDs (finding #25 premium UX). PayRunInputItem carries only a scalar
+  // employeeId, so we batch-load the referenced employees and decorate.
   const oneTime = await prisma.payRunInputItem.findMany({
     where: { businessId, payRunId },
     orderBy: { createdAt: 'asc' },
   });
+  const oneTimeEmpIds = [...new Set(oneTime.map((it) => it.employeeId).filter(Boolean))];
+  const oneTimeEmps = oneTimeEmpIds.length
+    ? await prisma.employee.findMany({
+        where: { id: { in: oneTimeEmpIds }, businessId },
+        select: { id: true, code: true, firstName: true, lastName: true },
+      })
+    : [];
+  const empById = new Map(oneTimeEmps.map((e) => [e.id, e]));
   const oneTimeRow = {
     key: 'oneTime', label: 'One-time inputs',
     status: 'OK',
     detail: oneTime.length ? `${oneTime.length} one-time item(s) staged.` : 'No one-time items.',
     editable: payRun.status === 'DRAFT',
-    items: oneTime.map(serializeInputItem),
+    items: oneTime.map((it) => serializeInputItem(it, empById.get(it.employeeId))),
   };
 
   return {
@@ -1342,12 +1377,18 @@ async function getInputsChecklist({ businessId, payRunId }) {
 }
 
 /** BigInt-safe serialization of a PayRunInputItem (amountMinor is BigInt). */
-function serializeInputItem(it) {
+function serializeInputItem(it, employee) {
+  const name = employee
+    ? ([employee.firstName, employee.lastName].filter(Boolean).join(' ') || employee.code || null)
+    : null;
   return {
     id: it.id, payRunId: it.payRunId, employeeId: it.employeeId, kind: it.kind,
     componentCode: it.componentCode, amountMinor: Number(it.amountMinor),
     sourcePeriod: it.sourcePeriod, taxable: it.taxable, note: it.note,
     createdBy: it.createdBy, createdAt: it.createdAt,
+    // Decorated for the editor UI (finding #25); absent on bare create/update echoes.
+    employeeName: name,
+    employeeCode: employee ? employee.code || null : null,
   };
 }
 
@@ -1960,13 +2001,53 @@ async function generateFile({ businessId, payRunId, kind }) {
     },
   });
 
-  const aggregate = buildFilingAggregate(payRun, lines, spec.country);
+  // The NZ direct-credit batch needs the employee's PRIMARY bank account. Load
+  // them up-front (tenant-scoped) and pass them into the aggregate builder so we
+  // emit REAL accounts and can pre-validate, instead of always sending null.
+  let bankByEmployee = null;
+  if (spec.country === 'NZ' && spec.fn === 'generateBankBatch') {
+    const employeeIds = lines.map((l) => l.employeeId).filter(Boolean);
+    const accounts = employeeIds.length
+      ? await prisma.bankAccount.findMany({
+          where: { businessId, employeeId: { in: employeeIds }, isActive: true, deletedAt: null },
+          orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+          select: { employeeId: true, nzBankAccount: true, accountNumber: true, isPrimary: true },
+        })
+      : [];
+    bankByEmployee = new Map();
+    for (const a of accounts) {
+      // First match wins (primary first by ordering); don't clobber.
+      if (!bankByEmployee.has(a.employeeId)) {
+        bankByEmployee.set(a.employeeId, a.nzBankAccount || a.accountNumber || null);
+      }
+    }
+  }
+
+  const aggregate = buildFilingAggregate(payRun, lines, spec.country, { bankByEmployee });
+
+  // Fail-closed pre-validation for the bank batch: rather than let the pure
+  // generator throw a bare RangeError mid-loop (→ 500), collect EVERY offender
+  // and return a structured 422 MISSING_BANK_DETAILS the operator can act on.
+  if (spec.fn === 'generateBankBatch') {
+    const issues = filing.newzealand.collectBankBatchIssues(aggregate);
+    if (issues.length) {
+      const e = badRequest(
+        'MISSING_BANK_DETAILS',
+        `${issues.length} employee(s) cannot be paid: fix bank details, then re-export.`,
+      );
+      e.statusCode = 422;
+      e.offenders = issues;
+      throw e;
+    }
+  }
+
   const gen = filing[spec.country === 'IN' ? 'india' : 'newzealand'][spec.fn];
   return gen(aggregate);
 }
 
 /** Assemble the pure filing aggregate (integer minor units) from persisted rows. */
-function buildFilingAggregate(payRun, lines, country) {
+function buildFilingAggregate(payRun, lines, country, opts = {}) {
+  const bankByEmployee = opts.bankByEmployee || null;
   const period = isoDate(payRun.periodStart).slice(0, 7); // YYYY-MM
   const empName = (e) => [e.firstName, e.lastName].filter(Boolean).join(' ');
 
@@ -2025,9 +2106,10 @@ function buildFilingAggregate(payRun, lines, country) {
       return {
         employee: {
           name: empName(l.employee),
+          code: l.employee ? l.employee.code : null,
           irdNumber: sp.irdNumber || '',
           taxCode: sp.taxCode || '',
-          bankAccount: null,
+          bankAccount: bankByEmployee ? (bankByEmployee.get(l.employeeId) || null) : null,
         },
         grossMinor: decimalToMinor(l.grossEarnings),
         notLiableAccMinor: 0,
@@ -2072,6 +2154,7 @@ module.exports = {
   getMyPayslips,
   getMyPayslip,
   getMyPayslipPdfContext,
+  getPayslipPdfContext,
   recordPayslipPdfHash,
   generateFile,
   // Feature 7 — run orchestration / lifecycle past APPROVED

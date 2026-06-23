@@ -16,9 +16,10 @@
 // contract and previews CTC live, which unblocks the backend QA criteria.
 
 import { useCallback, useEffect, useState } from 'react';
-import { ErrorBanner, PrimaryButton, TextInput, DateField, formatAdminDate } from '@hr/ui';
-import { get, post } from '@/lib/api';
-import { asList, DataTable, PageHeader, Tabs, StatusBadge, moneyish } from '@/lib/ui';
+import { ErrorBanner, PrimaryButton, TextInput, DateField, Modal, ModalActions, formatAdminDate } from '@hr/ui';
+import { get, post, patch, del } from '@/lib/api';
+import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, moneyish } from '@/lib/ui';
+import { permissionsFromSession, hasPermission } from '@/lib/nav';
 // Entities (and their authoritative countryCode) back the structure form's
 // country/currency derivation; imported directly via /api/hr/payroll/entities.
 
@@ -26,17 +27,62 @@ const TABS = [
   { key: 'components', label: 'Pay components' },
   { key: 'structures', label: 'Salary structures' },
   { key: 'revisions', label: 'Employee revisions' },
+  { key: 'proposals', label: 'Approvals' },
 ];
 
 const KINDS = ['BASIC', 'DEARNESS_ALLOWANCE', 'HRA', 'SPECIAL_ALLOWANCE', 'CONVEYANCE', 'MEDICAL', 'LTA', 'BONUS'];
 const CATEGORIES = ['EARNING', 'DEDUCTION', 'EMPLOYER_COST', 'REIMBURSEMENT'];
 const CALC_METHODS = ['FLAT', 'PERCENT_OF', 'BALANCING', 'FORMULA', 'STATUTORY'];
 
-// ── Pay components — real create contract ──
-function ComponentsTab() {
+// ── Edit-component modal (PATCH /components/:id) — finding #27 ──
+function EditComponentModal({ component, onClose, onSaved }) {
+  const [draft, setDraft] = useState({
+    name: component.name || '', kind: component.kind || 'BASIC',
+    category: component.category || 'EARNING', calcMethod: component.calcMethod || 'FLAT',
+    isActive: component.isActive !== false,
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  async function save(e) {
+    e.preventDefault();
+    setSaving(true); setError('');
+    try {
+      await patch(`/api/hr/compensation/components/${component.id}`, draft);
+      onSaved();
+    } catch (err) { setError(err.data?.message || err.message || 'Failed to update.'); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <Modal title={`Edit ${component.code || 'component'}`} onClose={onClose}>
+      <form onSubmit={save} className="space-y-3">
+        {error && <ErrorBanner message={error} />}
+        <p className="text-xs text-gray-500">Code <span className="font-mono text-gray-700">{component.code}</span> is immutable.</p>
+        <TextInput label="Name" value={draft.name} onChange={(v) => setDraft((d) => ({ ...d, name: v }))} required />
+        <Select label="Kind" value={draft.kind} options={KINDS} onChange={(v) => setDraft((d) => ({ ...d, kind: v }))} />
+        <Select label="Category" value={draft.category} options={CATEGORIES} onChange={(v) => setDraft((d) => ({ ...d, category: v }))} />
+        <Select label="Calc method" value={draft.calcMethod} options={CALC_METHODS} onChange={(v) => setDraft((d) => ({ ...d, calcMethod: v }))} />
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={draft.isActive} onChange={(e) => setDraft((d) => ({ ...d, isActive: e.target.checked }))} />
+          <span className="text-gray-700">Active</span>
+        </label>
+        <ModalActions>
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+          <PrimaryButton type="submit" loading={saving}>Save changes</PrimaryButton>
+        </ModalActions>
+      </form>
+    </Modal>
+  );
+}
+
+// ── Pay components — real create contract + edit/delete row actions (#27) ──
+function ComponentsTab({ canManage }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [busyId, setBusyId] = useState('');
   const [draft, setDraft] = useState({ name: '', code: '', kind: 'BASIC', category: 'EARNING', calcMethod: 'FLAT' });
 
   const load = useCallback(() => {
@@ -58,6 +104,14 @@ function ComponentsTab() {
     finally { setSaving(false); }
   }
 
+  async function onDelete(row) {
+    if (!window.confirm(`Deactivate component "${row.name}" (${row.code})? It will be hidden from new structures.`)) return;
+    setBusyId(row.id); setError('');
+    try { await del(`/api/hr/compensation/components/${row.id}`); load(); }
+    catch (e) { setError(e.data?.message || e.message || 'Failed to delete.'); }
+    finally { setBusyId(''); }
+  }
+
   const columns = [
     { key: 'name', header: 'Component', render: (r) => <span className="font-medium text-gray-900">{r.name}</span> },
     { key: 'code', header: 'Code', render: (r) => r.code || '—' },
@@ -65,6 +119,17 @@ function ComponentsTab() {
     { key: 'category', header: 'Category', render: (r) => <StatusBadge status={r.category} /> },
     { key: 'calcMethod', header: 'Calc', render: (r) => r.calcMethod || '—' },
   ];
+  if (canManage) {
+    columns.push({
+      key: 'actions', header: '',
+      render: (r) => (
+        <div className="flex items-center gap-1.5 justify-end">
+          <ActionButton onClick={() => setEditing(r)}>Edit</ActionButton>
+          <ActionButton tone="danger" disabled={busyId === r.id} onClick={() => onDelete(r)}>Delete</ActionButton>
+        </div>
+      ),
+    });
+  }
 
   return (
     <div className="grid lg:grid-cols-3 gap-4">
@@ -72,24 +137,70 @@ function ComponentsTab() {
         {error && <ErrorBanner message={error} />}
         <DataTable columns={columns} rows={rows} loading={rows === null} emptyText="No pay components yet." />
       </div>
-      <form onSubmit={onCreate} className="rounded-2xl border border-gray-200 bg-white p-5 space-y-3 h-fit">
-        <h2 className="text-sm font-semibold text-gray-900">Add component</h2>
-        <TextInput label="Name" value={draft.name} onChange={(v) => setDraft((d) => ({ ...d, name: v }))} required />
-        <TextInput label="Code" value={draft.code} onChange={(v) => setDraft((d) => ({ ...d, code: v }))} required />
-        <Select label="Kind" value={draft.kind} options={KINDS} onChange={(v) => setDraft((d) => ({ ...d, kind: v }))} />
-        <Select label="Category" value={draft.category} options={CATEGORIES} onChange={(v) => setDraft((d) => ({ ...d, category: v }))} />
-        <Select label="Calc method" value={draft.calcMethod} options={CALC_METHODS} onChange={(v) => setDraft((d) => ({ ...d, calcMethod: v }))} />
-        {draft.calcMethod === 'BALANCING' && (
-          <p className="text-xs text-amber-700">Balancing (fills to target) — amount is derived, not entered.</p>
-        )}
-        <PrimaryButton type="submit" loading={saving}>Save</PrimaryButton>
-      </form>
+      {canManage ? (
+        <form onSubmit={onCreate} className="rounded-2xl border border-gray-200 bg-white p-5 space-y-3 h-fit">
+          <h2 className="text-sm font-semibold text-gray-900">Add component</h2>
+          <TextInput label="Name" value={draft.name} onChange={(v) => setDraft((d) => ({ ...d, name: v }))} required />
+          <TextInput label="Code" value={draft.code} onChange={(v) => setDraft((d) => ({ ...d, code: v }))} required />
+          <Select label="Kind" value={draft.kind} options={KINDS} onChange={(v) => setDraft((d) => ({ ...d, kind: v }))} />
+          <Select label="Category" value={draft.category} options={CATEGORIES} onChange={(v) => setDraft((d) => ({ ...d, category: v }))} />
+          <Select label="Calc method" value={draft.calcMethod} options={CALC_METHODS} onChange={(v) => setDraft((d) => ({ ...d, calcMethod: v }))} />
+          {draft.calcMethod === 'BALANCING' && (
+            <p className="text-xs text-amber-700">Balancing (fills to target) — amount is derived, not entered.</p>
+          )}
+          <PrimaryButton type="submit" loading={saving}>Save</PrimaryButton>
+        </form>
+      ) : (
+        <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-5 text-sm text-gray-500 h-fit">
+          You have read-only access to compensation. Editing requires the Manage Compensation permission.
+        </div>
+      )}
+      {editing && <EditComponentModal component={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
     </div>
   );
 }
 
+// ── Edit-structure modal (PATCH /structures/:id) — finding #27. Lines are set
+// at create time; this edits the header fields (name/basis/active). ──
+function EditStructureModal({ structure, onClose, onSaved }) {
+  const [draft, setDraft] = useState({
+    name: structure.name || '', basis: structure.basis || 'CTC', isActive: structure.isActive !== false,
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  async function save(e) {
+    e.preventDefault();
+    setSaving(true); setError('');
+    try {
+      await patch(`/api/hr/compensation/structures/${structure.id}`, draft);
+      onSaved();
+    } catch (err) { setError(err.data?.message || err.message || 'Failed to update.'); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <Modal title={`Edit ${structure.code || 'structure'}`} onClose={onClose}>
+      <form onSubmit={save} className="space-y-3">
+        {error && <ErrorBanner message={error} />}
+        <p className="text-xs text-gray-500">Code <span className="font-mono text-gray-700">{structure.code}</span> and component lines are fixed at creation.</p>
+        <TextInput label="Name" value={draft.name} onChange={(v) => setDraft((d) => ({ ...d, name: v }))} required />
+        <Select label="Basis" value={draft.basis} options={['CTC', 'GROSS', 'NET']} onChange={(v) => setDraft((d) => ({ ...d, basis: v }))} />
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={draft.isActive} onChange={(e) => setDraft((d) => ({ ...d, isActive: e.target.checked }))} />
+          <span className="text-gray-700">Active</span>
+        </label>
+        <ModalActions>
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+          <PrimaryButton type="submit" loading={saving}>Save changes</PrimaryButton>
+        </ModalActions>
+      </form>
+    </Modal>
+  );
+}
+
 // ── Salary structures — real create contract + live CTC preview ──
-function StructuresTab() {
+function StructuresTab({ canManage }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -104,6 +215,8 @@ function StructuresTab() {
   const [previewErr, setPreviewErr] = useState('');
   const [components, setComponents] = useState([]);
   const [entities, setEntities] = useState([]);
+  const [editing, setEditing] = useState(null);
+  const [busyId, setBusyId] = useState('');
 
   const load = useCallback(() => {
     setError('');
@@ -151,14 +264,25 @@ function StructuresTab() {
 
   async function onCreate(e) {
     e.preventDefault();
+    // Mirror the backend rule (#27): a structure must declare at least one line.
+    if (!previewLines.length) { setError('Add at least one component line in the builder before saving.'); return; }
     setSaving(true); setError('');
     try {
       // entityId/countryCode/currencyCode/basis are required by the API.
       await post('/api/hr/compensation/structures', { ...draft, lines: previewLines });
       setDraft({ name: '', code: '', entityId: '', countryCode: '', currencyCode: '', basis: 'CTC' });
+      setPreviewLines([]);
       load();
     } catch (e) { setError(e.data?.message || e.message || 'Failed to create.'); }
     finally { setSaving(false); }
+  }
+
+  async function onDelete(row) {
+    if (!window.confirm(`Deactivate structure "${row.name}" (${row.code})?`)) return;
+    setBusyId(row.id); setError('');
+    try { await del(`/api/hr/compensation/structures/${row.id}`); load(); }
+    catch (e) { setError(e.data?.message || e.message || 'Failed to delete.'); }
+    finally { setBusyId(''); }
   }
 
   function addLine() {
@@ -172,7 +296,19 @@ function StructuresTab() {
     { key: 'code', header: 'Code', render: (r) => r.code || '—' },
     { key: 'basis', header: 'Basis', render: (r) => r.basis || '—' },
     { key: 'lines', header: 'Lines', render: (r) => (Array.isArray(r.lines) ? r.lines.length : '—') },
+    { key: 'active', header: 'Active', render: (r) => (r.isActive === false ? <span className="text-xs text-gray-400">Inactive</span> : <span className="text-xs text-emerald-600">Yes</span>) },
   ];
+  if (canManage) {
+    columns.push({
+      key: 'actions', header: '',
+      render: (r) => (
+        <div className="flex items-center gap-1.5 justify-end">
+          <ActionButton onClick={() => setEditing(r)}>Edit</ActionButton>
+          <ActionButton tone="danger" disabled={busyId === r.id} onClick={() => onDelete(r)}>Delete</ActionButton>
+        </div>
+      ),
+    });
+  }
 
   return (
     <div className="grid lg:grid-cols-3 gap-4">
@@ -247,20 +383,26 @@ function StructuresTab() {
         {verdict && verdict.applies && !verdict.ok && (
           <p className="text-xs text-red-600">Basic + DA must be ≥ 50% of gross — save is blocked.</p>
         )}
-        <PrimaryButton type="submit" loading={saving} disabled={!!(verdict && verdict.applies && !verdict.ok)}>Save</PrimaryButton>
+        {!previewLines.length && <p className="text-xs text-amber-700">Add at least one component line in the builder.</p>}
+        <PrimaryButton type="submit" loading={saving} disabled={!previewLines.length || !!(verdict && verdict.applies && !verdict.ok)}>Save</PrimaryButton>
       </form>
+      {editing && <EditStructureModal structure={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
     </div>
   );
 }
 
-function RevisionsTab() {
+function RevisionsTab({ canApprove }) {
   const [employeeId, setEmployeeId] = useState('');
   const [active, setActive] = useState('');
   const [rows, setRows] = useState(null);
   const [visibility, setVisibility] = useState(null);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  // A checker (canApprove) may commit directly (EFFECTIVE); a maker without it is
+  // always routed through PROPOSED server-side. Default the toggle to "propose".
+  const [propose, setPropose] = useState(true);
   const [draft, setDraft] = useState({ effectiveFrom: '', ctcAnnual: '', structureId: '', entityId: '', currencyCode: 'INR', basis: 'CTC', revisionReason: 'ANNUAL_REVISION' });
 
   const load = useCallback((id) => {
@@ -277,12 +419,18 @@ function RevisionsTab() {
   async function onCreate(e) {
     e.preventDefault();
     if (!active) return;
-    setSaving(true); setError('');
+    setSaving(true); setError(''); setNotice('');
     try {
       // revisionReason (NOT reason), entityId/currencyCode/basis required.
       const payload = Object.fromEntries(Object.entries(draft).filter(([, v]) => v !== ''));
-      await post(`/api/hr/compensation/employees/${active}/revisions`, payload);
+      // Route through the maker-checker queue unless a checker explicitly opts to
+      // commit directly. A maker without canApprove is forced to PROPOSED server-side.
+      if (propose || !canApprove) payload.propose = true;
+      const res = await post(`/api/hr/compensation/employees/${active}/revisions`, payload);
       setDraft({ effectiveFrom: '', ctcAnnual: '', structureId: '', entityId: '', currencyCode: 'INR', basis: 'CTC', revisionReason: 'ANNUAL_REVISION' });
+      setNotice(res?.status === 'PROPOSED'
+        ? 'Revision proposed — a different approver must approve it from the Approvals tab.'
+        : 'Revision saved as effective.');
       load(active);
     } catch (e) { setError(e.data?.message || e.message || 'Failed to create revision.'); }
     finally { setSaving(false); }
@@ -305,6 +453,7 @@ function RevisionsTab() {
       </form>
 
       {error && <ErrorBanner message={error} />}
+      {notice && <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-xs text-emerald-700 mb-2">{notice}</div>}
       {visibility === 'RANGE_ONLY' && <p className="text-xs text-amber-700 mb-2">Range-only view: absolute amounts are hidden (compa-ratio shown).</p>}
 
       {!active ? (
@@ -325,10 +474,88 @@ function RevisionsTab() {
             <Select label="Basis" value={draft.basis} options={['CTC', 'GROSS', 'NET']} onChange={(v) => setDraft((d) => ({ ...d, basis: v }))} />
             <Select label="Reason" value={draft.revisionReason} options={['ANNUAL_REVISION', 'PROMOTION', 'CORRECTION', 'RESTRUCTURE', 'STATUTORY_ADJUSTMENT']} onChange={(v) => setDraft((d) => ({ ...d, revisionReason: v }))} />
             <TextInput label="Structure ID" value={draft.structureId} onChange={(v) => setDraft((d) => ({ ...d, structureId: v }))} />
-            <PrimaryButton type="submit" loading={saving}>Save revision</PrimaryButton>
+            {canApprove ? (
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={propose} onChange={(e) => setPropose(e.target.checked)} />
+                <span className="text-gray-700">Propose for approval (separation of duties)</span>
+              </label>
+            ) : (
+              <p className="text-xs text-gray-500">This revision will be <span className="font-medium">proposed</span> and needs a separate approver.</p>
+            )}
+            <PrimaryButton type="submit" loading={saving}>{(propose || !canApprove) ? 'Propose revision' : 'Save revision'}</PrimaryButton>
           </form>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Approvals: maker-checker proposals queue (#28) ──
+// Lists PROPOSED revisions awaiting a checker; approve/reject wired to
+// /revisions/:id/approve|reject. SoD is enforced server-side (the approver must
+// differ from the proposer) AND hinted client-side via row.canApprove.
+function ProposalsTab({ canApprove, me }) {
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState('');
+  const [busyId, setBusyId] = useState('');
+
+  const load = useCallback(() => {
+    setError('');
+    get('/api/hr/compensation/revisions/proposed')
+      .then((r) => setRows(asList(r)))
+      .catch((e) => { setError(e.data?.message || e.message || 'Failed to load proposals.'); setRows([]); });
+  }, []);
+  useEffect(() => { if (canApprove) load(); else setRows([]); }, [load, canApprove]);
+
+  async function act(row, action) {
+    setBusyId(`${row.id}:${action}`); setError('');
+    try {
+      await post(`/api/hr/compensation/revisions/${row.id}/${action}`, {});
+      load();
+    } catch (e) { setError(e.data?.message || e.message || `Failed to ${action}.`); }
+    finally { setBusyId(''); }
+  }
+
+  if (!canApprove) {
+    return (
+      <div className="rounded-2xl border border-dashed border-gray-300 bg-white py-12 text-center text-sm text-gray-500">
+        The approvals queue is for checkers — it needs the Approve Compensation permission.
+      </div>
+    );
+  }
+
+  const columns = [
+    { key: 'employee', header: 'Employee', render: (r) => <span className="font-medium text-gray-900">{r.employee?.name || r.employee?.code || r.employeeId}</span> },
+    { key: 'effectiveFrom', header: 'Effective from', render: (r) => formatAdminDate(r.effectiveFrom) },
+    { key: 'reason', header: 'Reason', render: (r) => r.revisionReason || '—' },
+    { key: 'ctc', header: 'CTC (annual)', render: (r) => (r.absolute ? moneyish(r.absolute.ctcAnnual, r.currencyCode) : (r.range ? `••• (compa ${r.range.compaRatio ?? '—'})` : '•••')) },
+    { key: 'proposed', header: 'Proposed', render: (r) => <span className="text-xs text-gray-500">{formatAdminDate(r.createdAt)}</span> },
+    {
+      key: 'actions', header: '',
+      render: (r) => {
+        const sameActor = me && r.proposedById === me.id;
+        return (
+          <div className="flex items-center gap-1.5 justify-end">
+            {sameActor && <span className="text-[11px] text-amber-600 mr-1">Your proposal</span>}
+            <ActionButton tone="positive" disabled={!!busyId || sameActor} onClick={() => act(r, 'approve')}>Approve</ActionButton>
+            <ActionButton tone="danger" disabled={!!busyId || sameActor} onClick={() => act(r, 'reject')}>Reject</ActionButton>
+          </div>
+        );
+      },
+    },
+  ];
+
+  return (
+    <div className="space-y-3">
+      {error && <ErrorBanner message={error} />}
+      <p className="text-xs text-gray-500">
+        Proposed salary revisions awaiting approval. Separation of duties: you cannot approve a revision you proposed.
+      </p>
+      <DataTable columns={columns} rows={rows} loading={rows === null} emptyText="No proposals awaiting approval." />
+      <p className="text-[11px] text-gray-400">
+        Bulk increment cycles (open cycle → propose per-employee → batch approve) are deferred to the merit phase
+        (ROADMAP §8). Use the per-employee revision flow above for now — it carries the same maker-checker governance.
+      </p>
     </div>
   );
 }
@@ -349,13 +576,28 @@ function Select({ label, value, options, onChange }) {
 
 export default function CompensationPage() {
   const [tab, setTab] = useState('components');
+  const [me, setMe] = useState(null);
+  const [perms, setPerms] = useState(null);
+
+  useEffect(() => {
+    get('/api/auth/me').then((res) => {
+      const session = res?.user || res;
+      setMe(session);
+      setPerms(permissionsFromSession(session));
+    }).catch(() => {});
+  }, []);
+
+  const canManage = hasPermission(perms, 'canManageCompensation');
+  const canApprove = hasPermission(perms, 'canApproveCompensation');
+
   return (
     <div>
       <PageHeader title="Compensation" subtitle="Pay components, salary structures and revisions" />
       <Tabs tabs={TABS} active={tab} onChange={setTab} />
-      {tab === 'components' && <ComponentsTab />}
-      {tab === 'structures' && <StructuresTab />}
-      {tab === 'revisions' && <RevisionsTab />}
+      {tab === 'components' && <ComponentsTab canManage={canManage} />}
+      {tab === 'structures' && <StructuresTab canManage={canManage} />}
+      {tab === 'revisions' && <RevisionsTab canApprove={canApprove} />}
+      {tab === 'proposals' && <ProposalsTab canApprove={canApprove} me={me} />}
     </div>
   );
 }

@@ -16,7 +16,7 @@ const money = require('../payroll/money');
 const india = require('../payroll/compliance/india');
 const { deriveBreakup, materializeRevisionLines, DeriveError } = require('../compensation/deriveBreakup');
 const { maskCompensation } = require('../compensation/maskCompensation');
-const { effectiveCompVisibility } = require('../../core/lib/rbac');
+const { effectiveCompVisibility, effectivePermissions } = require('../../core/lib/rbac');
 
 // Coerce a Decimal|number|string → integer minor units (paise/cents). Reuses
 // payroll money string-math so no float drift creeps in.
@@ -243,17 +243,21 @@ const structures = {
       if (!entityId || !code || !name || !countryCode || !currencyCode || !basis) {
         return res.status(400).json({ message: 'entityId, code, name, countryCode, currencyCode and basis are required' });
       }
-      const data = { ...pickStructure(req.body), businessId };
-      // Optional nested lines — stamp businessId on each (tenant scope) and
-      // allow-list the line fields so callers can seed a template in one call.
-      if (Array.isArray(req.body.lines) && req.body.lines.length) {
-        for (const l of req.body.lines) {
-          if (!l || !l.componentId || !l.calcMethod) {
-            return res.status(400).json({ message: 'each line requires componentId and calcMethod' });
-          }
-        }
-        data.lines = { create: req.body.lines.map((l) => ({ ...pickLine(l), businessId })) };
+      // FIX (#27): a salary structure is a TEMPLATE — an empty one is meaningless
+      // and silently produces a structure that pays nothing. Require at least one
+      // component line on create (reject a missing OR empty lines[]).
+      if (!Array.isArray(req.body.lines) || req.body.lines.length === 0) {
+        return res.status(400).json({ message: 'A salary structure needs at least one component line.' });
       }
+      const data = { ...pickStructure(req.body), businessId };
+      // Nested lines — stamp businessId on each (tenant scope) and allow-list the
+      // line fields so callers can seed a template in one call.
+      for (const l of req.body.lines) {
+        if (!l || !l.componentId || !l.calcMethod) {
+          return res.status(400).json({ message: 'each line requires componentId and calcMethod' });
+        }
+      }
+      data.lines = { create: req.body.lines.map((l) => ({ ...pickLine(l), businessId })) };
       const item = await prisma.salaryStructure.create({
         data,
         include: { lines: { orderBy: { sortOrder: 'asc' } } },
@@ -490,12 +494,17 @@ const revisions = {
         }
       }
 
-      // Feature 5 — maker-checker status machine. A maker without
-      // canApproveCompensation writes PROPOSED (SoD: proposedById=self); the
-      // existing direct-write path (programmatic / a full canManage operator that
-      // also approves) may write EFFECTIVE directly. Default keeps back-compat.
+      // Feature 5 — maker-checker status machine (SoD fail-closed, finding #28).
+      // A maker WITHOUT canApproveCompensation can NEVER write live (EFFECTIVE)
+      // pay directly — they can only PROPOSE; a distinct checker commits it via
+      // /revisions/:id/approve. Only an operator who actually HOLDS the approve
+      // grant may write EFFECTIVE directly (the privileged single-operator path),
+      // and even then an explicit `propose` request is honoured. This closes the
+      // hole where a manage-only role minted EFFECTIVE revisions unilaterally.
+      const canApprove = !!(effectivePermissions(req.user) || {}).canApproveCompensation
+        || req.user.role === 'SUPER_ADMIN';
       const wantsPropose = req.body.status === 'PROPOSED' || req.body.propose === true;
-      const status = wantsPropose ? 'PROPOSED' : (req.body.status || 'EFFECTIVE');
+      const status = (wantsPropose || !canApprove) ? 'PROPOSED' : (req.body.status || 'EFFECTIVE');
       const makeCurrent = status === 'EFFECTIVE';
 
       const data = {
@@ -643,6 +652,44 @@ const revisions = {
         { grade, target: { employeeId: committed.employeeId } },
       );
       res.json(masked);
+    } catch (e) { next(e); }
+  },
+
+  // ── Proposals queue (finding #28): list PROPOSED revisions awaiting a checker. ──
+  // Tenant-scoped; each row is MASKED per the viewer's compVisibility so a
+  // RANGE_ONLY checker sees the workflow envelope (who/when/why) without absolute
+  // money. Joins the subject employee's name + the proposer for the queue UI.
+  listProposed: async (req, res, next) => {
+    try {
+      const { businessId } = req.user;
+      const rows = await prisma.compensationRevision.findMany({
+        where: { businessId, status: 'PROPOSED' },
+        orderBy: { createdAt: 'desc' },
+        include: {
+          lines: { orderBy: { sortOrder: 'asc' }, include: { component: true } },
+          employee: { select: { id: true, code: true, firstName: true, lastName: true } },
+        },
+      });
+      const viewer = { ...req.user, employeeId: req.user.employeeId };
+      const items = await Promise.all(rows.map(async (r) => {
+        const grade = await resolveEmployeeGrade(businessId, r.employeeId);
+        const masked = maskCompensation(
+          revisionPayload(r, r.employeeId, null),
+          viewer,
+          { grade, target: { employeeId: r.employeeId } },
+        );
+        return {
+          ...masked,
+          employee: r.employee
+            ? { id: r.employee.id, code: r.employee.code, name: [r.employee.firstName, r.employee.lastName].filter(Boolean).join(' ') }
+            : null,
+          proposedById: r.proposedById || null,
+          createdAt: r.createdAt,
+          // SoD hint for the UI: the current actor may not approve their own proposal.
+          canApprove: !!r.proposedById && r.proposedById !== req.user.id,
+        };
+      }));
+      res.json({ items, total: items.length });
     } catch (e) { next(e); }
   },
 

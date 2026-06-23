@@ -200,6 +200,36 @@ ok('Bank batch: rejects invalid NZ account format', () => {
   assert.throws(() => NZ.generateBankBatch(bad), /invalid NZ account/);
 });
 
+// finding #22 — the thrown error now carries a stable .code + .statusCode so the
+// HTTP layer maps it to a 422 (MISSING_BANK_DETAILS), never a bare 500.
+ok('Bank batch: invalid account error is coded 422 MISSING_BANK_DETAILS', () => {
+  const bad = { ...nzPayRun, lines: [{ employee: { name: 'X', bankAccount: '' }, netPayMinor: D(10) }] };
+  try {
+    NZ.generateBankBatch(bad);
+    assert.fail('expected throw');
+  } catch (e) {
+    assert.strictEqual(e.code, 'MISSING_BANK_DETAILS');
+    assert.strictEqual(e.statusCode, 422);
+  }
+});
+
+// finding #22 — pure pre-validation lists EVERY offender (missing/invalid/non-positive)
+// without throwing, so the service can fail-closed with an actionable 422 payload.
+ok('collectBankBatchIssues: reports missing, invalid, and non-positive lines', () => {
+  const run = {
+    lines: [
+      { employee: { name: 'Good', code: 'E1', bankAccount: '12-3456-0078901-00' }, netPayMinor: D(100) },
+      { employee: { name: 'NoAcct', code: 'E2', bankAccount: '' }, netPayMinor: D(50) },
+      { employee: { name: 'BadAcct', code: 'E3', bankAccount: 'XYZ' }, netPayMinor: D(50) },
+      { employee: { name: 'ZeroNet', code: 'E4', bankAccount: '06-0001-0123456-00' }, netPayMinor: 0 },
+    ],
+  };
+  const issues = NZ.collectBankBatchIssues(run);
+  const reasons = issues.map((i) => i.reason).sort();
+  assert.deepStrictEqual(reasons, ['INVALID_BANK_ACCOUNT', 'MISSING_BANK_ACCOUNT', 'NON_POSITIVE_NET']);
+  assert.ok(issues.every((i) => i.employee && i.detail), 'each offender carries name + detail');
+});
+
 ok('index re-exports all five generators', () => {
   for (const k of ['generateEcr', 'generateEsic', 'generate24Q', 'generateEmploymentInformation', 'generateBankBatch']) {
     assert.strictEqual(typeof filing[k], 'function', k);

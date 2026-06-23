@@ -117,3 +117,27 @@ The tenant *configures* (data + settings + plan feature flags) and *uses*. Brand
 ## 7. Compliance watch (super-admin updates these — versioned, dated)
 - 🇮🇳 New Labour Codes live **21 Nov 2025**; Basic ≥ 50% CTC; new tax regime default; Form 16 → Form 130 (track final notification).
 - 🇳🇿 From **1 Apr 2026**: KiwiSaver 3%→3.5%, ACC 1.67%→1.75% (cap $156,641), min wage $23.95/hr, 16–17yo KiwiSaver eligibility.
+
+---
+
+## 8. Scope decisions — explicitly deferred (with rationale)
+These features have schema and/or backend hooks but are **deliberately deferred** to
+a later phase. They are NOT half-built dead ends in the UI — the supported
+alternative is wired and signposted in-product.
+
+- **Compensation — bulk increment-cycle worksheet (audit #26).** The `IncrementCycle`
+  / cycle-line bulk merit worksheet (open cycle → propose %/amount per employee →
+  HR approve → batch-commit revisions) is deferred to **Phase 5 (Performance + merit)**.
+  Rationale: the per-employee **revision maker-checker** flow already delivers the
+  governance contract end-to-end (propose → distinct-checker approve/reject, SoD
+  fail-closed, India 50% guard, comp masking). Bulk cycles are an efficiency layer
+  on top of that primitive, best built alongside performance merit hand-off. The
+  Compensation console signposts this on the Approvals tab; no increment-cycle tab
+  is shown so there is no dead action.
+- **Performance — advanced admin surfaces (audit #39).** Cycle config, rating scales,
+  review templates, calibration sessions, goals/OKRs and 1:1s have backend routes
+  but the admin console ships the **review-operations** surfaces first (My Team
+  Reviews + cycle list/launch/release/stats). Goals/OKR authoring, calibration-session
+  management, template/scale editors and merit review are deferred to **Phase 5**
+  polish. The Performance page lists these as "available via API / coming to the
+  console" rather than rendering empty tabs.

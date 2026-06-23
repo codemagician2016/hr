@@ -88,6 +88,21 @@ function main() {
   ok(nz.wagesVerdict.applies === false, 'QA4 NZ gross-basis → 50% rule NOT applied (country-gated)');
   ok(nz.grossMinor === R(7500), 'NZ balancing fills to gross target exactly');
 
+  // ── finding #30: an EXPLICIT per-line BALANCING method forces pass 3 even when
+  // the component carries a stored derivationPass for a different role. Pre-fix the
+  // stored derivationPass:0 won and the balancing residual resolved to 0. ──
+  {
+    const lines30 = [
+      { component: { id: 'b30', code: 'BASIC', kind: 'BASIC', category: 'EARNING', calcBaseScope: 'GROSS', derivationPass: 2 }, calcMethod: 'PERCENT_OF', calcValue: '50', sortOrder: 0 },
+      // SPECIAL stores derivationPass:0 but the LINE method is BALANCING — must win.
+      { component: { id: 's30', code: 'SPECIAL', kind: 'SPECIAL_ALLOWANCE', category: 'EARNING', derivationPass: 0 }, calcMethod: 'BALANCING', sortOrder: 1 },
+    ];
+    const d30 = deriveBreakup({ target: { grossMonthlyMinor: R(100000) }, basis: 'GROSS', lines: lines30, ctx: { countryCode: 'NZ', asOf: '2026-06-01' } });
+    const special = d30.resolved.find((r) => r.code === 'SPECIAL');
+    ok(special && special.amountMonthlyMinor === R(50000), 'per-line BALANCING fills residual (₹50k) despite stored derivationPass:0');
+    ok(d30.grossMinor === R(100000), 'balancing override reconciles Σ to target gross');
+  }
+
   // ── STRUCTURE_INFEASIBLE: fixed earnings exceed target, no balancing ──
   const infeasible = [
     { component: { id: 'x1', code: 'A', kind: 'SPECIAL_ALLOWANCE', category: 'EARNING', calcMethod: 'FLAT', derivationPass: 0 }, calcMethod: 'FLAT', calcValue: '60000', sortOrder: 0 },

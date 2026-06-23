@@ -185,12 +185,54 @@ function generateEmploymentInformation(payRun) {
 const NZ_ACCOUNT_RE = /^(\d{2})-(\d{4})-(\d{1,7})-(\d{2,4})$/;
 const DC_FIELD_MAX = 12; // particulars / code / reference statement fields
 
+/**
+ * Build a RangeError carrying a stable `.code` + `.statusCode` so the HTTP
+ * layer maps it to a 4xx (MISSING_BANK_DETAILS / 422) instead of a bare 500.
+ * The message stays human-readable for the operator banner.
+ */
+function bankFileError(code, statusCode, message, extra = {}) {
+  const e = new RangeError(message);
+  e.code = code;
+  e.statusCode = statusCode;
+  Object.assign(e, extra);
+  return e;
+}
+
 function fitField(s, label) {
   const out = String(s == null ? '' : s).slice(0, DC_FIELD_MAX);
   if (String(s || '').length > DC_FIELD_MAX) {
-    throw new RangeError(`${label} exceeds ${DC_FIELD_MAX} chars: "${s}"`);
+    throw bankFileError('BANK_FIELD_TOO_LONG', 422, `${label} exceeds ${DC_FIELD_MAX} chars: "${s}"`);
   }
   return out;
+}
+
+/** Shape-validate an NZ bank account string. */
+function isValidNzAccount(account) {
+  return NZ_ACCOUNT_RE.test(String(account || ''));
+}
+
+/**
+ * collectBankBatchIssues — PURE pre-validation: returns the per-line offenders
+ * (missing/invalid account, or non-positive net pay) WITHOUT throwing. The
+ * service uses this to fail-closed with a structured 422 listing the employees
+ * to fix, instead of letting generateBankBatch throw a bare RangeError mid-loop.
+ */
+function collectBankBatchIssues(payRun) {
+  assertPayRun(payRun);
+  const issues = [];
+  (payRun.lines || []).forEach((l, i) => {
+    const emp = l.employee || {};
+    const account = String(emp.bankAccount || '');
+    if (!account) {
+      issues.push({ index: i, employee: emp.name || null, code: emp.code || null, reason: 'MISSING_BANK_ACCOUNT', detail: 'No primary NZ bank account on file.' });
+    } else if (!isValidNzAccount(account)) {
+      issues.push({ index: i, employee: emp.name || null, code: emp.code || null, reason: 'INVALID_BANK_ACCOUNT', detail: `Account "${account}" is not BB-bbbb-AAAAAAA-SSS.` });
+    }
+    if (l.netPayMinor != null && Number(l.netPayMinor) <= 0) {
+      issues.push({ index: i, employee: emp.name || null, code: emp.code || null, reason: 'NON_POSITIVE_NET', detail: 'Net pay must be greater than zero to credit.' });
+    }
+  });
+  return issues;
 }
 
 /** Hash of account-number digits (truncation guard) — sums every digit. */
@@ -217,11 +259,11 @@ function generateBankBatch(payRun, opts = {}) {
     const emp = l.employee || {};
     const account = String(emp.bankAccount || '');
     if (!NZ_ACCOUNT_RE.test(account)) {
-      throw new RangeError(`line ${i}: invalid NZ account "${account}" (expect BB-bbbb-AAAAAAA-SSS)`);
+      throw bankFileError('MISSING_BANK_DETAILS', 422, `line ${i}: invalid NZ account "${account}" (expect BB-bbbb-AAAAAAA-SSS)`);
     }
     const amtMinor = num(l.netPayMinor);
     if (amtMinor <= 0) {
-      throw new RangeError(`line ${i}: net pay must be > 0 for a credit, got ${amtMinor}`);
+      throw bankFileError('MISSING_BANK_DETAILS', 422, `line ${i}: net pay must be > 0 for a credit, got ${amtMinor}`);
     }
     totalMinor += amtMinor;
     hashTotal += accountHash(account);
@@ -287,5 +329,7 @@ function isoPeriodCode(payRun) {
 module.exports = {
   generateEmploymentInformation,
   generateBankBatch,
+  collectBankBatchIssues,
+  isValidNzAccount,
   _internals: { dollars2, accountHash, NZ_ACCOUNT_RE, EI_HEADER, DC_FIELD_MAX },
 };

@@ -50,7 +50,9 @@ router.post(
   c.revisions.create,
 );
 
-// ── Maker-checker: approve/reject a PROPOSED revision (SoD fail-closed). ──
+// ── Maker-checker: the proposals queue + approve/reject (SoD fail-closed). ──
+// The queue is checker-facing (canApproveCompensation); each row is masked.
+router.get('/revisions/proposed', requirePermission('canApproveCompensation'), c.revisions.listProposed);
 router.post('/revisions/:id/approve', requirePermission('canApproveCompensation'), c.revisions.approve);
 router.post('/revisions/:id/reject', requirePermission('canApproveCompensation'), c.revisions.reject);
 
