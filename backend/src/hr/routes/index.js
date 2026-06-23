@@ -15,6 +15,7 @@ router.use('/documents', require('./documents.routes'));
 router.use('/assets', require('./assets.routes'));
 router.use('/expenses', require('./expenses.routes'));
 router.use('/loans', require('./loans.routes'));
+router.use('/letters/templates', require('../letters/routes/templates.routes'));
 
 // Employee lifecycle (Feature 4) — onboarding pipeline + checklist tasks. RBAC:
 // reads/task actions are F1-scoped (canViewEmployees; manager sees only sub-tree
