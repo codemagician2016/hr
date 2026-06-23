@@ -6663,6 +6663,9 @@ model Employee {
   @@index([businessId, status])
   @@index([businessId, managerEmployeeId])
   @@index([businessId, workEmail])
+  // Feature 19 — scalable org chart: keep the lazy-tree API index-only at 1000+.
+  @@index([businessId, managerEmployeeId, lastName, firstName]) // ordered child pages (sibling sort) without a sort step
+  @@index([businessId, lastName, firstName])                    // tenant-wide name sort + search prefix
 }
 
 enum Gender {

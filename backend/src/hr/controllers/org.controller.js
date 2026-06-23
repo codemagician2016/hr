@@ -4,6 +4,8 @@
 // req.user.businessId and uses soft-delete (deletedAt). A small CRUD factory
 // keeps the six resources consistent; bespoke logic lives in employee.controller.
 const prisma = require('../../core/lib/prisma');
+const orgTree = require('../lib/orgTree');
+const { resolveAccessibleEmployeeIds, scopeAllows } = require('../lib/scopeResolver');
 
 /**
  * Build a tenant-scoped CRUD handler set for a Prisma model.
@@ -150,14 +152,88 @@ async function tree(req, res, next) {
       const me = nodeById.get(selfId) || null;
       return res.json({ items: me ? [me] : [], root: selfId });
     }
+    // Feature 19 — soft-cap the whole-tree reader so an OLD client degrades gracefully
+    // instead of OOMing at 1000+. The redesigned client uses the lazy /tree/roots API;
+    // for a small tenant the legacy nested forest is still returned as-is.
+    if (employees.length > 500) {
+      return res.json({ items: roots, root: null, truncated: true, total: employees.length, hint: 'use /api/hr/org/tree/roots (lazy)' });
+    }
     res.json({ items: roots, root: null });
   } catch (e) {
     next(e);
   }
 }
 
+// ── Feature 19 — lazy per-node org-tree (operator session) ───────────────────
+// Scope is the F1 band resolved ONCE here (resolveAccessibleEmployeeIds over
+// canViewEmployees) and handed to the shared orgTree lib. A manager band is an
+// IDS scope clamped to their own sub-tree; an Owner/HR-Admin is ALL. Every :id is
+// re-validated with scopeAllows → 404 out-of-scope (IDOR-safe, identical to F1
+// withEmployeeScope). The hierarchy anchor (req.user.employeeId) seeds ?root=me.
+
+async function resolveOperatorScope(req) {
+  const scope = await resolveAccessibleEmployeeIds(req.user, 'canViewEmployees');
+  return { scope, selfId: req.user.employeeId || null };
+}
+
+// GET /org/tree/roots?cursor&limit&root=<id>
+// Tenant roots (scope-clamped). An admin may re-root the viewport at any in-scope
+// node via ?root=<id> (validated by scopeAllows). A manager (IDS) gets their own
+// node as the single root regardless.
+async function treeRoots(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const { scope, selfId } = await resolveOperatorScope(req);
+    const rootId = req.query.root && req.query.root !== 'me' ? String(req.query.root) : null;
+    if (rootId && !scopeAllows(scope, rootId)) return res.status(404).json({ message: 'Not found' });
+    const out = await orgTree.getRoots({
+      businessId, scope, cursor: req.query.cursor, limit: req.query.limit, rootId, isSelfId: selfId,
+    });
+    res.json(out);
+  } catch (e) { next(e); }
+}
+
+// GET /org/tree/nodes/:id/children?cursor&limit
+async function treeChildren(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const { scope, selfId } = await resolveOperatorScope(req);
+    if (!scopeAllows(scope, req.params.id)) return res.status(404).json({ message: 'Not found' });
+    const out = await orgTree.getChildren({
+      businessId, scope, parentId: req.params.id, cursor: req.query.cursor, limit: req.query.limit, isSelfId: selfId,
+    });
+    res.json(out);
+  } catch (e) { next(e); }
+}
+
+// GET /org/tree/nodes/:id/ancestors
+async function treeAncestors(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const { scope, selfId } = await resolveOperatorScope(req);
+    if (!scopeAllows(scope, req.params.id)) return res.status(404).json({ message: 'Not found' });
+    const out = await orgTree.getAncestors({ businessId, scope, nodeId: req.params.id, isSelfId: selfId });
+    res.json(out);
+  } catch (e) { next(e); }
+}
+
+// GET /org/tree/search?q&limit
+async function treeSearch(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const { scope, selfId } = await resolveOperatorScope(req);
+    const out = await orgTree.searchNodes({ businessId, scope, q: req.query.q, limit: req.query.limit, isSelfId: selfId });
+    res.json(out);
+  } catch (e) { next(e); }
+}
+
 module.exports = {
   tree,
+  // Feature 19 — lazy per-node org-tree (operator session)
+  treeRoots,
+  treeChildren,
+  treeAncestors,
+  treeSearch,
   entities: crud('entity', {
     fields: ['code', 'legalName', 'tradeName', 'countryCode', 'payCurrency', 'timezone', 'taxYearStartMonth',
       'addressLine1', 'addressLine2', 'city', 'stateCode', 'postalCode',

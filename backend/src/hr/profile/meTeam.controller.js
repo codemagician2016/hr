@@ -22,6 +22,8 @@ const prisma = require('../../core/lib/prisma');
 const { resolveCustomerScope } = require('../lib/customerScope');
 const { scopeWhere, scopeAllows } = require('../lib/scopeResolver');
 const engine = require('../approvals/engine');
+const orgTree = require('../lib/orgTree');
+const { essOrgPolicy, isExpandable, isEssVisibleStatus } = require('../lib/orgVisibility');
 
 const EMPTY = (res) => res.json({ items: [], total: 0 });
 
@@ -341,7 +343,136 @@ async function org(req, res, next) {
   } catch (e) { next(e); }
 }
 
+// ── Feature 19 — lazy, employee-centric org chart (ESS / customer session) ───
+// One engine (orgTree lib), the SAME F1 customer scope (resolveCustomerScope over
+// canViewEmployees) the legacy org() uses, plus the §3.3 visibility policy layered
+// on top. The scope id-set = the actor's OWN reporting sub-tree (self + reports);
+// ancestors above self + the tenant top are visible as read-only CARDS but
+// `expandable:false` (lateralDepth: 0 default). No compensation, ever — the node DTO
+// carries only directory fields (identical masking to /me/team/directory).
+
+// Resolve { businessId, scope, employee, scopeIds (own sub-tree, incl self), policy }.
+async function essOrgContext(req) {
+  const { businessId } = req.customer;
+  const { scope, employee } = await resolveCustomerScope(req.customer, 'canViewEmployees');
+  const policy = essOrgPolicy(businessId);
+  // The drillable set = the actor's own sub-tree. For an IDS band that's scope.ids ∪
+  // self; for the (rare) ALL band there is no in-list — everything is in their own
+  // company and drillable. NONE → empty (no employee linked).
+  let scopeIds = null; // null ⇒ ALL (no restriction)
+  if (!employee) scopeIds = new Set(); // no linked employee → see nothing
+  else if (scope.kind === 'IDS') scopeIds = new Set([...scope.ids, employee.id]);
+  else if (scope.kind === 'NONE') scopeIds = new Set();
+  return { businessId, scope, employee, scopeIds, policy };
+}
+
+// Filter inactive nodes for ESS (default policy hides TERMINATED/PRE_HIRE/RETIRED).
+function essVisible(nodes, policy) {
+  return nodes.filter((n) => isEssVisibleStatus(n.status, policy));
+}
+
+// GET /me/team/org/self — the viewer's node + its ancestor path to the top, in ONE
+// call (renders the breadcrumb + the focused node immediately). Ancestors above self
+// are flagged expandable:false per policy.
+async function orgSelf(req, res, next) {
+  try {
+    const { businessId, employee, scopeIds, policy } = await essOrgContext(req);
+    if (!employee) return res.json({ self: null, ancestors: [] });
+    // Self node (via the projector, so reportsCount etc. match the lazy DTO).
+    const selfRows = await prisma.employee.findMany({
+      where: { businessId, deletedAt: null, id: employee.id },
+      select: { id: true, code: true, firstName: true, lastName: true, photoUrl: true, managerEmployeeId: true, status: true },
+      take: 1,
+    });
+    const [selfNode] = await orgTree.projectNodes(businessId, selfRows, { isSelfId: employee.id });
+    // Ancestor chain (root → … → me). expandable per policy (above self → card-only),
+    // unless the tenant opens the directory (lateralDepth Infinity).
+    let ancestors = [];
+    if (policy.canSeeAncestorsToTop) {
+      const { path } = await orgTree.getAncestors({ businessId, scope: null, nodeId: employee.id, isSelfId: employee.id });
+      ancestors = essVisible(path, policy).map((n) => ({ ...n, expandable: isExpandable(n.id, scopeIds, policy) }));
+    }
+    res.json({ self: selfNode || null, ancestors });
+  } catch (e) { next(e); }
+}
+
+// GET /me/team/org/nodes/:id/children — drill DOWN. Expand gate: :id must be inside
+// the actor's own sub-tree (or a policy-allowed lateral when lateralDepth>0) else 404.
+async function orgChildren(req, res, next) {
+  try {
+    const { businessId, scope, employee, scopeIds, policy } = await essOrgContext(req);
+    if (!employee) return res.status(404).json({ message: 'Not found' });
+    const id = req.params.id;
+    // Drill is allowed only into expandable nodes (own sub-tree by default).
+    if (!isExpandable(id, scopeIds, policy)) return res.status(404).json({ message: 'Not found' });
+    // Children are themselves scope-restricted via the lib (so even an in-sub-tree
+    // node only ever yields in-sub-tree reports under the default policy).
+    const childScope = policy.lateralDepth === Infinity ? { kind: 'ALL' } : scope;
+    const out = await orgTree.getChildren({
+      businessId, scope: childScope, parentId: id, cursor: req.query.cursor, limit: req.query.limit, isSelfId: employee.id,
+    });
+    out.nodes = essVisible(out.nodes, policy).map((n) => ({ ...n, expandable: isExpandable(n.id, scopeIds, policy) }));
+    res.json(out);
+  } catch (e) { next(e); }
+}
+
+// GET /me/team/org/nodes/:id/ancestors — root→:id chain, ancestors above self flagged
+// expandable:false. :id must be visible to the actor (in own sub-tree OR on their own
+// ancestor chain) — we confirm by checking it appears on a path the actor may see.
+async function orgAncestors(req, res, next) {
+  try {
+    const { businessId, employee, scopeIds, policy } = await essOrgContext(req);
+    if (!employee) return res.status(404).json({ message: 'Not found' });
+    const id = req.params.id;
+    // The actor may request ancestors of a node in their own sub-tree, or of a node on
+    // their OWN ancestor chain (so a breadcrumb segment can be re-rooted upward).
+    const myPath = (await orgTree.getAncestors({ businessId, scope: null, nodeId: employee.id, isSelfId: employee.id })).path;
+    const onMyChain = myPath.some((n) => n.id === id);
+    const inMySubtree = scopeIds ? scopeIds.has(id) : true;
+    if (!inMySubtree && !onMyChain && policy.lateralDepth !== Infinity) {
+      return res.status(404).json({ message: 'Not found' });
+    }
+    const { path } = await orgTree.getAncestors({ businessId, scope: null, nodeId: id, isSelfId: employee.id });
+    const out = essVisible(path, policy).map((n) => ({ ...n, expandable: isExpandable(n.id, scopeIds, policy) }));
+    res.json({ path: out });
+  } catch (e) { next(e); }
+}
+
+// GET /me/team/org/top — the tenant root(s) as cards (so an employee can "see the top
+// of the org"). Each non-own-subtree root is expandable:false by default.
+async function orgTop(req, res, next) {
+  try {
+    const { businessId, employee, scopeIds, policy } = await essOrgContext(req);
+    if (!employee) return res.json({ nodes: [], nextCursor: null });
+    if (!policy.canSeeTop) return res.status(403).json({ message: 'Org top view is not enabled.' });
+    // Roots under the WHOLE tenant (ALL) — the employee may see the org's shape; the
+    // policy gates which roots are drillable.
+    const out = await orgTree.getRoots({
+      businessId, scope: { kind: 'ALL' }, cursor: req.query.cursor, limit: req.query.limit, isSelfId: employee.id,
+    });
+    out.nodes = essVisible(out.nodes, policy).map((n) => ({ ...n, expandable: isExpandable(n.id, scopeIds, policy) }));
+    res.json(out);
+  } catch (e) { next(e); }
+}
+
+// GET /me/team/org/search — scope + policy filtered matches with ancestorIds. Search
+// is clamped to the actor's own sub-tree (the directory already exposes tenant-wide
+// names elsewhere; here search-to-locate is for the employee's drillable tree).
+async function orgSearch(req, res, next) {
+  try {
+    const { businessId, scope, employee, scopeIds, policy } = await essOrgContext(req);
+    if (!employee) return res.json({ results: [] });
+    const out = await orgTree.searchNodes({ businessId, scope, q: req.query.q, limit: req.query.limit, isSelfId: employee.id });
+    out.results = out.results
+      .filter((r) => isEssVisibleStatus(r.node.status, policy))
+      .map((r) => ({ ...r, node: { ...r.node, expandable: isExpandable(r.node.id, scopeIds, policy) } }));
+    res.json(out);
+  } catch (e) { next(e); }
+}
+
 module.exports = {
   roster, attendance, directory, leavePending, reimbursementsPending,
   approvalsInbox, leaveDecide, reimbursementDecide, org,
+  // Feature 19 — employee-centric lazy org chart
+  orgSelf, orgChildren, orgAncestors, orgTop, orgSearch,
 };
