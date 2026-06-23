@@ -1096,6 +1096,46 @@ function initScheduler() {
       console.error('[Scheduler] account deletion sweep failed:', err.message);
     }
   });
+
+  // HR Leave Management (Feature 6) — nightly accrual. For each active employee
+  // × assigned policy, post a due ACCRUAL tick (idempotent on lastAccrualAt).
+  // Pure math in leave/accrual.js; the runner writes the append-only ledger.
+  cron.schedule('0 1 * * *', async () => {
+    try {
+      const { runNightlyAccrual } = require('../../hr/leave/accrualRunner');
+      const r = await runNightlyAccrual({ asOf: new Date() });
+      if (r.accrued > 0 || r.errors > 0) {
+        console.log(`[Scheduler] leave accrual: ${JSON.stringify(r)}`);
+      }
+    } catch (err) {
+      console.error('[Scheduler] leave accrual failed:', err.message);
+    }
+  });
+
+  // HR Leave Management (Feature 6) — year-end / anniversary roll. Gated to roll
+  // dates (IN financial-year start 1 Apr; NZ anniversaries handled per-employee
+  // by the manual /runs/carry-forward endpoint). Runs daily at 02:00 and self-
+  // gates: only fires the IN FY roll on 1 April. Carry-forward + lapse, append-only.
+  cron.schedule('0 2 * * *', async () => {
+    try {
+      const now = new Date();
+      const isInFyRollDay = now.getUTCMonth() === 3 && now.getUTCDate() === 1; // 1 April
+      if (!isInFyRollDay) return;
+      const { runCarryForward } = require('../../hr/leave/accrualRunner');
+      // Closing period is last financial year, e.g. on 2027-04-01 we roll "2026-27".
+      const startY = now.getUTCFullYear() - 1;
+      const periodCode = `${startY}-${String((startY + 1) % 100).padStart(2, '0')}`;
+      const businesses = await prisma.business.findMany({ select: { id: true }, take: 5000 });
+      let carried = 0; let lapsed = 0;
+      for (const b of businesses) {
+        const r = await runCarryForward({ businessId: b.id, periodCode, dryRun: false });
+        carried += r.carriedTotal; lapsed += r.lapsedTotal;
+      }
+      console.log(`[Scheduler] leave year-end roll ${periodCode}: carried ${carried}, lapsed ${lapsed}`);
+    } catch (err) {
+      console.error('[Scheduler] leave year-end roll failed:', err.message);
+    }
+  });
 }
 
 // Find PENDING orders older than `maxAgeMinutes` (default 30) and cancel

@@ -1,0 +1,125 @@
+'use strict';
+
+/**
+ * leaveContext.js — DB-thin loader that assembles the {employee, shift,
+ * holidays, policy, balance, overlapping} context the pure leave engines
+ * (calendar.js / validators.js / policyResolver.js) need. Mirrors how
+ * attendance/service.js resolves an employee's entity/location, shift pattern
+ * and holiday calendar so leave and attendance agree on a working day.
+ *
+ * All math stays in the pure modules; this only reads.
+ */
+
+const prisma = require('../../core/lib/prisma');
+const { resolveSchedule } = require('../attendance/derive');
+const { resolvePolicy } = require('./policyResolver');
+
+function utcDay(d) {
+  const x = d instanceof Date ? d : new Date(d);
+  return new Date(Date.UTC(x.getUTCFullYear(), x.getUTCMonth(), x.getUTCDate()));
+}
+function addDays(d, n) { return new Date(utcDay(d).getTime() + n * 86400000); }
+
+/**
+ * loadApplyContext({ businessId, employeeId, leaveTypeId, startDate, endDate, asOf, tx })
+ * Returns {
+ *   employee,        // { id, businessId, gender, hireDate, employmentType, entityId, locationId, countryCode }
+ *   leaveType,
+ *   weeklyOffDays,   // CSV from the effective shift (null when open-attendance)
+ *   holidays,        // [{ date, entityId, locationId, isRestricted, ... }]
+ *   policy, accrualRules, assignment,   // from policyResolver (may be null)
+ *   balance,         // current-period LeaveBalance (or null)
+ *   overlapping,     // existing PENDING/APPROVED APPLICATION rows that may clash
+ * }
+ */
+async function loadApplyContext({ businessId, employeeId, leaveTypeId, startDate, endDate, asOf, tx } = {}) {
+  const db = tx || prisma;
+  const from = utcDay(startDate);
+  const to = utcDay(endDate);
+  const winStart = from;
+  const winEnd = addDays(to, 1);
+
+  const empRow = await db.employee.findFirst({
+    where: { id: employeeId, businessId, deletedAt: null },
+    select: {
+      id: true, businessId: true, gender: true, hireDate: true,
+      countryCode: true, managerEmployeeId: true,
+    },
+  });
+  if (!empRow) return { employee: null };
+
+  // entity/location/department/grade/employmentType live on the CURRENT
+  // EmploymentRecord (there are no such columns on Employee) — mirror
+  // attendance/service.js. Used for holiday-scope matching + policy resolution.
+  const employment = await db.employmentRecord.findFirst({
+    where: { businessId, employeeId, isCurrent: true },
+    select: { entityId: true, locationId: true, departmentId: true, gradeId: true, employmentType: true },
+  });
+  const employee = {
+    ...empRow,
+    entityId: employment ? employment.entityId : null,
+    locationId: employment ? employment.locationId : null,
+    departmentId: employment ? employment.departmentId : null,
+    gradeId: employment ? employment.gradeId : null,
+    employmentType: employment ? employment.employmentType : null,
+  };
+
+  const leaveType = await db.leaveType.findFirst({
+    where: { id: leaveTypeId, businessId, deletedAt: null },
+  });
+
+  // Effective shift for the window's first day → its weeklyOffDays drive netting.
+  const defaultPatternWhere = employee.entityId
+    ? { OR: [{ entityId: employee.entityId }, { entityId: null }] }
+    : { entityId: null };
+  const [assignments, defaultPatterns, holidays, balance, overlapping] = await Promise.all([
+    db.shiftAssignment.findMany({
+      where: { businessId, employeeId, effectiveFrom: { lt: winEnd } },
+      include: { shiftPattern: true },
+      orderBy: { effectiveFrom: 'desc' },
+    }),
+    db.shiftPattern.findMany({
+      where: { businessId, deletedAt: null, isActive: true, ...defaultPatternWhere },
+      orderBy: { createdAt: 'asc' },
+    }),
+    db.holiday.findMany({ where: { businessId, date: { gte: winStart, lte: winEnd } } }),
+    db.leaveBalance.findFirst({
+      where: { businessId, employeeId, leaveTypeId },
+      orderBy: { createdAt: 'desc' },
+    }),
+    db.leaveTransaction.findMany({
+      where: {
+        businessId, employeeId, txnType: 'APPLICATION',
+        status: { in: ['PENDING', 'APPROVED', 'AVAILED'] },
+        startDate: { lte: winEnd }, endDate: { gte: winStart },
+      },
+      select: { id: true, startDate: true, endDate: true, status: true },
+    }),
+  ]);
+
+  const defaultPattern = defaultPatterns.sort((a, b) => {
+    const rank = (p) => (p.entityId === employee.entityId ? 1 : 0);
+    return rank(b) - rank(a);
+  })[0] || null;
+  const schedule = resolveSchedule(from, (assignments || []).map((a) => ({
+    effectiveFrom: a.effectiveFrom, effectiveTo: a.effectiveTo, shiftPattern: a.shiftPattern,
+  })), defaultPattern);
+
+  const resolved = leaveType
+    ? await resolvePolicy(employee, leaveTypeId, asOf || new Date(), { tx: db })
+    : null;
+
+  return {
+    employee,
+    leaveType,
+    weeklyOffDays: schedule ? schedule.weeklyOffDays : null,
+    holidays,
+    policy: resolved ? resolved.policy : null,
+    accrualRules: resolved ? resolved.accrualRules : [],
+    assignment: resolved ? resolved.assignment : null,
+    balance,
+    overlapping,
+  };
+}
+
+module.exports = { loadApplyContext, _internals: { utcDay, addDays } };
