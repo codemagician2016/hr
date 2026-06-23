@@ -49,6 +49,11 @@ const esign = require('../lifecycle/esign'); // registers BUILTIN; exposes getPr
 const { resolveMergeData, renderMerge } = require('./mergeFields');
 const { renderLetter } = require('./renderLetter');
 const { renderLetterFallback } = require('./letterPdfFallback');
+const { fulfilLetterRequest } = require('./controllers/meLetters.controller');
+
+// Bounded retry budget for the ref-no resync loop (cross-entity / fell-behind
+// sequence collision recovery — finding #4).
+const MAX_REFNO_RETRIES = 6;
 
 // ── bundled Unicode TTF (₹/non-Latin safe), loaded once ──────────────────────
 const FONT_DIR = path.join(__dirname, 'fonts');
@@ -93,6 +98,10 @@ function sha256(buf) {
   return crypto.createHash('sha256').update(buf).digest('hex');
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => { setTimeout(resolve, ms); });
+}
+
 /** Tax year string from a date + entity fiscal start month (Apr default). */
 function taxYearFor(date, startMonth = 4) {
   const d = date instanceof Date ? date : new Date(date);
@@ -101,6 +110,39 @@ function taxYearFor(date, startMonth = 4) {
   const startY = m >= startMonth ? y : y - 1;
   const endY = (startY + 1) % 100;
   return `${startY}-${String(endY).padStart(2, '0')}`;
+}
+
+// A short, ref-safe entity segment for the human referenceNo (finding #1). The
+// per-entity sequence + per-TENANT @@unique([businessId, referenceNo]) mean two
+// different entities under one tenant that share prefix + period + tail mint the
+// SAME string → an unrecoverable P2002. Embedding the entity code disambiguates
+// them so the per-tenant unique can never collide across entities, while the
+// per-entity sequence resync (scoped on the same key set) converges. Strip to
+// [A-Z0-9-], collapse separators, cap length. Empty/unsafe → null (omit segment),
+// keeping single-entity / no-entity tenants clean (`${prefix}/${year}/${num}`).
+//
+// CRITICAL: the segment must be COLLISION-FREE across entities. A naive front
+// truncation collides when two codes share a long common prefix (e.g.
+// "ACME-LONGTENANT-HQ" vs "ACME-LONGTENANT-BR2" both truncate to the same 12
+// chars). So when the cleaned code exceeds the cap we keep a readable head AND
+// append a short hash of the FULL entity id/code — guaranteeing distinctness even
+// for codes that differ only past the cap.
+const ENTITY_SEG_CAP = 16;
+function entityRefSegment(entity) {
+  const codeRaw = entity && (entity.code || entity.id);
+  if (!codeRaw) return null;
+  const clean = String(codeRaw)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  if (!clean) return null;
+  if (clean.length <= ENTITY_SEG_CAP) return clean;
+  // Truncated → append a deterministic 4-char hash of the full distinguishing key
+  // (prefer the entity id, which is globally unique) so distinct entities never
+  // share a segment.
+  const hashKey = String((entity && entity.id) || codeRaw);
+  const h = crypto.createHash('sha256').update(hashKey).digest('hex').slice(0, 4).toUpperCase();
+  return `${clean.slice(0, ENTITY_SEG_CAP - 5)}-${h}`;
 }
 
 // `prisma.$transaction` clients expose the same model API as the base client; a
@@ -459,6 +501,15 @@ async function issueLetter(client, args = {}) {
   const prefix = (ctx.template.refNoPrefix || 'LTR').replace(/\/+$/, '');
   const periodKey = taxYearFor(now, ctx.entity ? (ctx.entity.taxYearStartMonth || 4) : 4);
   const issueEntityId = forcedEntityId || (ctx.entity ? ctx.entity.id : null);
+  // Entity segment for the human ref string (finding #1). Only when the letter is
+  // actually entity-scoped — i.e. the entity we'll key the sequence on is the one
+  // we resolved. A forcedEntityId without a matching ctx.entity falls back to the
+  // entity id so disambiguation still holds.
+  const refEntitySeg = issueEntityId
+    ? (ctx.entity && ctx.entity.id === issueEntityId
+      ? entityRefSegment(ctx.entity)
+      : entityRefSegment({ id: issueEntityId }))
+    : null;
   const requiresSignature = !!ctx.template.requiresSignature;
   const docCategory = CATEGORY_TO_DOC[ctx.template.category] || 'OTHER';
 
@@ -472,12 +523,18 @@ async function issueLetter(client, args = {}) {
       const code = await allocateCode(tx, {
         businessId, entityId: issueEntityId, scope: 'LETTER', prefix, padding: 4, periodKey,
       });
-      // code is "<prefix>NNNN"; we want "<prefix>/<year>/NNNN". Extract the
-      // padded numeric tail the allocator produced, re-format with the year.
+      // code is "<prefix>NNNN"; extract the padded numeric tail the allocator
+      // produced and re-format the human ref string. We use the FULL TAX-YEAR
+      // token (periodKey, e.g. "2026-27") — NOT the calendar year — so the visible
+      // segment and the sequence's reset boundary agree (finding #2: no cross-tax-
+      // year collisions, no mid-stream year flip). When the letter is entity-
+      // scoped we embed the entity segment (finding #1) so two entities sharing
+      // prefix + period + tail can't collide on @@unique([businessId, referenceNo]).
       const tail = String(code).replace(/^.*?(\d+)$/, '$1');
       seqValue = parseInt(tail, 10);
-      const year = String(now.getUTCFullYear());
-      referenceNo = `${prefix}/${year}/${tail}`;
+      referenceNo = refEntitySeg
+        ? `${prefix}/${refEntitySeg}/${periodKey}/${tail}`
+        : `${prefix}/${periodKey}/${tail}`;
     }
 
     // Render with the (possibly null) ref-no baked into the body/fields.
@@ -548,6 +605,12 @@ async function issueLetter(client, args = {}) {
       const envSigners = Array.isArray(signers) && signers.length
         ? signers
         : defaultContractSigners(ctx);
+      // SoD (finding #13/§9): a CONTRACT must NOT collapse into a self-approve
+      // loop. Reject when an EMPLOYER/APPROVER signer is the subject employee
+      // (same email / employeeId / userId), and require at least one DISTINCT
+      // non-subject employer/approver. Applies to BOTH caller-supplied signers
+      // and the defaults.
+      assertSignerDistinctness(envSigners, ctx);
       const out = await provider.createEnvelope({
         businessId,
         subject: render.subject || `${ctx.template.name} — ${ctx.mergeEmployee ? ctx.mergeEmployee.name : ''}`.trim(),
@@ -566,15 +629,19 @@ async function issueLetter(client, args = {}) {
       });
     }
 
-    // Best-effort link the ESS DocumentRequest's generatedDocumentId (status flip
-    // to FULFILLED is owned by 9F; RequestStatus has no FULFILLED in v1 enum).
-    if (documentRequestId && employeeDocumentId) {
-      try {
-        await tx.documentRequest.updateMany({
-          where: { id: documentRequestId, businessId },
-          data: { generatedDocumentId: employeeDocumentId },
-        });
-      } catch (_e) { /* non-fatal */ }
+    // Fulfil the ESS DocumentRequest through the purpose-built hook (finding #6,
+    // §3.6). It advances the request status AND enforces the (businessId,
+    // employeeId) match inside this SAME tx — so a maker can't attach employee A's
+    // letter to employee B's request, and the request no longer stays PENDING
+    // forever. A missing/foreign request is a no-op (returns fulfilled:false).
+    if (documentRequestId && employeeDocumentId && ctx.employee) {
+      await fulfilLetterRequest(tx, {
+        businessId,
+        documentRequestId,
+        issuedLetterId: letter.id,
+        employeeDocumentId,
+        employeeId: ctx.employee.id,
+      });
     }
 
     return {
@@ -590,38 +657,63 @@ async function issueLetter(client, args = {}) {
     };
   });
 
-  // Mint with a bounded retry: if the ref-no collides on @@unique(businessId,
+  // Mint with a BOUNDED retry: if the ref-no collides on @@unique(businessId,
   // referenceNo) — a sequence that fell behind reality (out-of-band insert/restore,
   // or a concurrent issuance that won the row-lock) — re-sync the LETTER sequence
-  // past the highest existing letter for this (entity, period) key, then retry.
-  // (Spec §6: "caller retries on P2002.") Only attempted when `db` is a real client
-  // (issueLetter opens its own tx per attempt); never for deferred-ref drafts.
+  // past the highest existing letter for THIS (entity, period) key (now the same
+  // key set the entity-disambiguated ref string + uniqueness use, so the resync
+  // can converge), then retry. (Spec §6: "caller retries on P2002.") Only attempted
+  // when `db` is a real client; never for deferred-ref drafts.
   let result;
-  for (let attempt = 0; ; attempt += 1) {
+  let attempt = 0;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
     try { result = await runIssueTx(); break; }
     catch (e) {
-      const refDup = e && e.code === 'P2002'
-        && String((e.meta && e.meta.target) || '').toLowerCase().includes('referenceno');
-      if (refDup && !requiresSignature && attempt < 6 && typeof db.$transaction === 'function') {
-        const agg = await db.issuedLetter.aggregate({
-          where: { businessId, entityId: issueEntityId, seqScope: 'LETTER', seqPeriodKey: periodKey },
-          _max: { seqValue: true },
-        });
-        const nextVal = ((agg._max && agg._max.seqValue) || 0) + 1;
-        const existing = await db.numberSequence.findFirst({
-          where: { businessId, entityId: issueEntityId, scope: 'LETTER', periodKey },
-          select: { id: true },
-        });
-        if (existing) {
-          await db.numberSequence.update({ where: { id: existing.id }, data: { nextValue: nextVal } });
-        } else {
-          await db.numberSequence.create({
-            data: { businessId, entityId: issueEntityId, scope: 'LETTER', prefix, padding: 4, nextValue: nextVal, periodKey },
-          });
-        }
-        continue;
+      const target = String((e && e.meta && e.meta.target) || '').toLowerCase();
+      const isP2002 = e && e.code === 'P2002';
+      // Two retryable collisions (finding #3):
+      //  (a) referenceNo dup → the sequence fell behind reality; resync past it.
+      //  (b) the NumberSequence (businessId,entityId,scope,periodKey) dup → a
+      //      first-creation thundering herd inside allocateCode (codes.js, out of
+      //      scope to change): N concurrent issuers all find no row then all try to
+      //      CREATE it; the losers get this P2002. The row now EXISTS, so a plain
+      //      retry (NO resync) will find it and proceed. Without this branch the
+      //      loser bubbles a raw 500 (the exact gap finding #3 flagged).
+      const refDup = isP2002 && target.includes('referenceno');
+      const seqDup = isP2002 && target.includes('businessid') && target.includes('scope')
+        && target.includes('periodkey') && !target.includes('referenceno');
+      // Fail fast (no spin) when: not a retryable collision, deferred-ref draft, no
+      // real client to open a resync tx, or the retry budget is spent (finding #4).
+      if ((!refDup && !seqDup) || requiresSignature || typeof db.$transaction !== 'function'
+        || attempt >= MAX_REFNO_RETRIES) {
+        throw e;
       }
-      throw e;
+      attempt += 1;
+      if (refDup) {
+        // Atomically advance the sequence past the observed collision (finding #3).
+        let advanced;
+        try {
+          advanced = await resyncLetterSequence(db, {
+            businessId, entityId: issueEntityId, prefix, periodKey,
+          });
+        } catch (resyncErr) {
+          // A create-side P2002 (another thread created the sequence row in the
+          // gap) is benign — retry the mint, which will now find that row.
+          if (resyncErr && resyncErr.code === 'P2002') { /* fall through to retry */ }
+          else throw resyncErr;
+        }
+        // Only retry if the resync actually moved nextValue PAST the colliding
+        // tail; otherwise we'd burn the budget re-minting the identical ref → fail
+        // fast with the original error instead of spinning (finding #4).
+        if (advanced === null) throw e;
+      }
+      // Jittered backoff so a batch of concurrent losers don't re-collide in
+      // lockstep — they spread out and each reads a freshly-committed nextValue,
+      // letting the bounded retry actually converge under contention. (allocateCode
+      // itself is read-then-increment in codes.js — out of scope to change here —
+      // so the @@unique backstop + this resync/backoff is the convergence path.)
+      await sleep(5 + Math.floor(Math.random() * 15 * attempt));
     }
   }
 
@@ -645,6 +737,52 @@ async function issueLetter(client, args = {}) {
   return result;
 }
 
+// Atomically resync the LETTER NumberSequence past the highest existing letter
+// for this (entity, period) key after a ref-no collision (findings #3/#4). Runs
+// in ONE transaction with a SELECT … FOR UPDATE row-lock so concurrent issuers
+// can't both read-modify-write the same nextValue and re-collide. Computes the
+// target as max(seqValue)+1 over the SAME key set the uniqueness uses, then bumps
+// nextValue to GREATEST(nextValue, target). Returns the advanced nextValue, or
+// null if it could not move past the collision (caller then fails fast, no spin).
+// A create-side P2002 (sequence row created in the gap by another thread) is
+// re-thrown for the caller to treat as a retry.
+async function resyncLetterSequence(db, { businessId, entityId, prefix, periodKey }) {
+  return db.$transaction(async (tx) => {
+    const agg = await tx.issuedLetter.aggregate({
+      where: { businessId, entityId: entityId || null, seqScope: 'LETTER', seqPeriodKey: periodKey },
+      _max: { seqValue: true },
+    });
+    const target = ((agg._max && agg._max.seqValue) || 0) + 1;
+
+    // Row-lock the sequence row (NULL-safe on entityId/periodKey) so the bump is
+    // serialized against concurrent resyncs.
+    const locked = await tx.$queryRaw`
+      SELECT "id", "nextValue" FROM "NumberSequence"
+      WHERE "businessId" = ${businessId}
+        AND "entityId" IS NOT DISTINCT FROM ${entityId || null}
+        AND "scope" = 'LETTER'
+        AND "periodKey" IS NOT DISTINCT FROM ${periodKey || null}
+      FOR UPDATE`;
+
+    if (Array.isArray(locked) && locked.length) {
+      const row = locked[0];
+      const current = Number(row.nextValue) || 0;
+      const next = Math.max(current, target);
+      if (next <= current) return null; // already at/past target — can't advance
+      await tx.numberSequence.update({ where: { id: row.id }, data: { nextValue: next } });
+      return next;
+    }
+
+    // No sequence row yet → create it at the target. A concurrent create races on
+    // @@unique([businessId, entityId, scope, periodKey]) → P2002, which we let
+    // propagate so the caller retries the mint (it'll then find the row).
+    await tx.numberSequence.create({
+      data: { businessId, entityId: entityId || null, scope: 'LETTER', prefix, padding: 4, nextValue: target, periodKey },
+    });
+    return target;
+  }, { timeout: 20000 });
+}
+
 // A placeholder reference for a DRAFT/PENDING_SIGNATURE row that has not yet
 // minted its human ref-no (still unique per tenant via the uuid suffix). Burned
 // once the real ref-no is minted at COMPLETED.
@@ -664,6 +802,63 @@ function defaultContractSigners(ctx) {
       employeeId: ctx.employee ? ctx.employee.id : null,
     },
   ];
+}
+
+// Identity keys a signer can match the subject employee on (case-folded email,
+// employeeId, userId). Used by the SoD distinctness check below.
+function subjectIdentity(ctx) {
+  const emp = ctx.employee || {};
+  const email = (emp.workEmail || emp.personalEmail || '').toLowerCase().trim();
+  return { email: email || null, employeeId: emp.id || null };
+}
+function signerMatchesSubject(signer, subj) {
+  if (!signer) return false;
+  const sEmail = (signer.email || '').toLowerCase().trim();
+  if (subj.email && sEmail && sEmail === subj.email) return true;
+  if (subj.employeeId && signer.employeeId && signer.employeeId === subj.employeeId) return true;
+  // a signer carrying the subject's id via userId is also the subject
+  if (subj.employeeId && signer.userId && signer.userId === subj.employeeId) return true;
+  return false;
+}
+
+// SoD guard for CONTRACT e-sign (finding #13, §9): the employer/approver party
+// must be a DISTINCT person from the subject employee — otherwise the two-party
+// agreement collapses into a self-approve loop. Throws a 422 ServiceError on
+// violation. Roles other than EMPLOYER/APPROVER (i.e. the EMPLOYEE/subject
+// signer) are expected to be the subject and are not flagged.
+function assertSignerDistinctness(signers, ctx) {
+  if (!Array.isArray(signers) || !signers.length) {
+    throw new ServiceError('CONTRACT requires at least one authorising signer', 422, {
+      code: 'SIGNER_REQUIRED',
+    });
+  }
+  const subj = subjectIdentity(ctx);
+  const approvers = signers.filter((s) => {
+    const role = String((s && s.role) || '').toUpperCase();
+    return role === 'EMPLOYER' || role === 'APPROVER';
+  });
+  if (!approvers.length) {
+    throw new ServiceError('CONTRACT requires an EMPLOYER/APPROVER signer', 422, {
+      code: 'APPROVER_REQUIRED',
+    });
+  }
+  // No employer/approver may BE the subject (self-approve loop).
+  if (approvers.some((s) => signerMatchesSubject(s, subj))) {
+    throw new ServiceError(
+      'CONTRACT signer conflict: the authorising signer cannot be the subject employee',
+      422,
+      { code: 'SIGNER_SELF_APPROVE' },
+    );
+  }
+  // At least one employer/approver must be a real distinct party (non-subject).
+  const distinct = approvers.some((s) => !signerMatchesSubject(s, subj));
+  if (!distinct) {
+    throw new ServiceError(
+      'CONTRACT requires at least one distinct non-subject authorising signer',
+      422,
+      { code: 'SIGNER_NOT_DISTINCT' },
+    );
+  }
 }
 
 // Store the rendered PDF. S3 when configured; else an inline data URL (dev/test)
@@ -700,32 +895,49 @@ async function reissueLetter(client, args = {}) {
     throw new ServiceError('Cannot re-issue a voided letter', 409);
   }
 
-  // Issue a fresh letter from the source's provenance + any overrides.
-  const issued = await issueLetter(db, {
-    businessId,
-    entityId: source.entityId || undefined,
-    actorUserId,
-    perms,
-    templateId: source.templateId,
-    employeeId: source.employeeId || undefined,
-    overrides: {
-      subject: source.subject || undefined,
-      letterheadId: source.letterheadId || undefined,
-      ...overrides,
-    },
-    mode: 'issue',
-  });
+  // ATOMIC (finding #5): the fresh issue AND both supersede links commit or roll
+  // back together. We open ONE interactive tx and pass it into issueLetter — a
+  // partial failure (e.g. the link write throws) no longer orphans a fully-ISSUED
+  // new letter with no chain. Source status is re-checked inside the tx (guards a
+  // concurrent void between the read above and the link). NOTE: passing a tx into
+  // issueLetter disables its ref-no resync/retry; a P2002 here rolls the whole
+  // reissue back, and the caller may retry — correct for an atomic operation.
+  const issued = await inTx(db, async (tx) => {
+    const fresh = await issueLetter(tx, {
+      businessId,
+      entityId: source.entityId || undefined,
+      actorUserId,
+      perms,
+      templateId: source.templateId,
+      employeeId: source.employeeId || undefined,
+      overrides: {
+        subject: source.subject || undefined,
+        letterheadId: source.letterheadId || undefined,
+        ...overrides,
+      },
+      mode: 'issue',
+    });
 
-  // Link the supersede chain (source retained as ISSUED).
-  await inTx(db, async (tx) => {
+    // Re-read the source INSIDE the tx and refuse if it was voided concurrently.
+    const live = await tx.issuedLetter.findFirst({
+      where: { id: source.id, businessId },
+      select: { status: true },
+    });
+    if (!live) throw new ServiceError('Letter not found', 404);
+    if (live.status === 'VOIDED') {
+      throw new ServiceError('Cannot re-issue a voided letter', 409);
+    }
+
+    // Link the supersede chain (source retained as ISSUED) — same tx as the issue.
     await tx.issuedLetter.update({
-      where: { id: issued.issuedLetterId },
+      where: { id: fresh.issuedLetterId },
       data: { supersedesLetterId: source.id },
     });
     await tx.issuedLetter.update({
       where: { id: source.id },
-      data: { supersededByLetterId: issued.issuedLetterId },
+      data: { supersededByLetterId: fresh.issuedLetterId },
     });
+    return fresh;
   });
 
   await writeAudit({

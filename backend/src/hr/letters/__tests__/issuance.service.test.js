@@ -92,7 +92,12 @@ async function makeA4LetterheadDataUrl() {
 
 async function seed() {
   const biz = await prisma.business.create({
-    data: { name: `Letters Co ${TAG}`, slug: `letters-${TAG}`, region: 'IN', country: 'IN' },
+    data: {
+      name: `Letters Co ${TAG}`, slug: `letters-${TAG}`, region: 'IN', country: 'IN',
+      // Distinct employer email so the default CONTRACT EMPLOYER signer is NOT the
+      // subject employee (the SoD self-approve guard rejects same-email signers).
+      email: `hr@${TAG}.test`,
+    },
   });
   const businessId = biz.id;
 
@@ -183,7 +188,54 @@ async function seed() {
     },
   });
 
-  return { businessId, entity, employee, otherEmp, letterhead, tpl, contractTpl, reqTpl };
+  // ── A SECOND entity + employee + template sharing the SAME refNoPrefix as the
+  // first (proves the cross-entity ref-no collision fix: two entities, same prefix,
+  // same period, both naturally start at 0001 → must NOT collide on the per-tenant
+  // @@unique([businessId, referenceNo])).
+  const entity2 = await prisma.entity.create({
+    data: {
+      businessId, code: `${TAG}-BR2`, legalName: 'Letters Co Branch 2 Pvt Ltd', tradeName: 'Letters Co B2',
+      countryCode: 'IN', payCurrency: 'INR', timezone: 'Asia/Kolkata',
+      taxYearStartMonth: 4, activeFrom: new Date('2026-04-01'),
+    },
+  });
+  const emp2 = await prisma.employee.create({
+    data: {
+      businessId, code: `${TAG}-E3`, firstName: 'Priya', lastName: 'Verma',
+      workEmail: `priya@${TAG}.test`, status: 'ACTIVE', hireDate: new Date('2023-06-01'),
+    },
+  });
+  const tpl2 = await prisma.letterTemplate.create({
+    data: {
+      businessId, entityId: entity2.id, code: `${TAG}-EXP2`, name: 'Experience Certificate B2',
+      category: 'EXPERIENCE', countryCode: 'IN', locale: 'en-IN', subject: 'Experience Certificate',
+      bodyMarkdown: 'This certifies {{employee.name}} ({{employee.code}}) of {{company.legalName}}.',
+      mergeFieldsJson: { 'employee.name': { type: 'string', required: true } },
+      defaultLetterheadId: letterhead.id,
+      refNoPrefix: `${TAG}/HR`, // SAME prefix as tpl → forces a cross-entity name clash absent disambiguation
+      isSystem: false, isActive: true, version: 1,
+    },
+  });
+
+  // An ESS DocumentRequest belonging to `employee` (for the fulfilment test) and a
+  // second one belonging to `emp2` (to prove cross-employee fulfilment is rejected).
+  const reqForEmp1 = await prisma.documentRequest.create({
+    data: {
+      businessId, employeeId: employee.id, templateKind: 'EXPERIENCE_LETTER',
+      purpose: 'Need an experience letter', status: 'PENDING',
+    },
+  });
+  const reqForEmp2 = await prisma.documentRequest.create({
+    data: {
+      businessId, employeeId: emp2.id, templateKind: 'EXPERIENCE_LETTER',
+      purpose: 'Branch 2 experience letter', status: 'PENDING',
+    },
+  });
+
+  return {
+    businessId, entity, entity2, employee, emp2, otherEmp, letterhead,
+    tpl, tpl2, contractTpl, reqTpl, reqForEmp1, reqForEmp2,
+  };
 }
 
 async function cleanup(businessId) {
@@ -191,6 +243,7 @@ async function cleanup(businessId) {
   await prisma.signatureSigner.deleteMany({ where: { businessId } }).catch(() => {});
   await prisma.signatureEnvelope.deleteMany({ where: { businessId } }).catch(() => {});
   await prisma.issuedLetter.deleteMany({ where: { businessId } }).catch(() => {});
+  await prisma.documentRequest.deleteMany({ where: { businessId } }).catch(() => {});
   await prisma.employeeDocument.deleteMany({ where: { businessId } }).catch(() => {});
   await prisma.letterTemplate.deleteMany({ where: { businessId } }).catch(() => {});
   await prisma.companyLetterhead.deleteMany({ where: { businessId } }).catch(() => {});
@@ -212,7 +265,10 @@ async function main() {
   let s;
   try {
     s = await seed();
-    const { businessId, employee, otherEmp, tpl, contractTpl, reqTpl } = s;
+    const {
+      businessId, entity, entity2, employee, emp2, otherEmp,
+      tpl, tpl2, contractTpl, reqTpl, reqForEmp1, reqForEmp2,
+    } = s;
     const user = { id: `${TAG}-user`, businessId, role: 'BUSINESS_ADMIN' };
 
     // ── (1) PREVIEW — watermarked PDF, no persistence, no ref-no ──────────────
@@ -245,8 +301,14 @@ async function main() {
       assert(res.statusCode === 201, 'issue → 201');
       const out = res.body;
       issuedId = out.issuedLetterId; issuedRef = out.referenceNo;
-      assert(/\/2026\/0001$/.test(out.referenceNo), `first ref-no ends /2026/0001 (got ${out.referenceNo})`);
+      // Format (post-fix): `${prefix}/${entitySeg}/${taxYear}/0001`. The visible
+      // year token is now the FULL TAX-YEAR (2026-27, == periodKey) — NOT the bare
+      // calendar year — and an entity segment disambiguates per-tenant uniqueness.
+      assert(/\/2026-27\/0001$/.test(out.referenceNo), `first ref-no ends /2026-27/0001 (got ${out.referenceNo})`);
       assert(out.referenceNo.startsWith(`${TAG}/HR/`), 'ref-no uses the template refNoPrefix');
+      assert(!/\/2026\/0001$/.test(out.referenceNo), 'ref-no no longer uses the bare calendar year');
+      // ref-string year token MUST match the persisted periodKey (finding #2).
+      assert(out.referenceNo.includes(`/${'2026-27'}/`), 'ref-string year token == periodKey tax year');
       assert(out.status === 'ISSUED', 'status ISSUED');
       assert(typeof out.fileHash === 'string' && out.fileHash.length === 64, 'fileHash is a SHA-256 hex');
 
@@ -271,7 +333,7 @@ async function main() {
       const res2 = await callController(controller.issue, reqFor({
         user, body: { templateId: tpl.id, employeeId: employee.id },
       }));
-      assert(/\/2026\/0002$/.test(res2.body.referenceNo), 'second issue increments to /2026/0002');
+      assert(/\/2026-27\/0002$/.test(res2.body.referenceNo), 'second issue increments to /2026-27/0002');
     }
 
     // ── (2b) download streams the stored flattened PDF ───────────────────────
@@ -313,7 +375,7 @@ async function main() {
       const res = await callController(controller.reissue, reqFor({ user, params: { id: issuedId } }));
       assert(res.statusCode === 201, 'reissue → 201');
       const newId = res.body.issuedLetterId;
-      assert(res.body.referenceNo !== issuedRef && /\/2026\/000\d$/.test(res.body.referenceNo),
+      assert(res.body.referenceNo !== issuedRef && /\/2026-27\/000\d$/.test(res.body.referenceNo),
         'reissue mints a NEW ref-no');
       const src = await prisma.issuedLetter.findUnique({ where: { id: issuedId } });
       const neu = await prisma.issuedLetter.findUnique({ where: { id: newId } });
@@ -385,6 +447,181 @@ async function main() {
       const otherUser = { id: 'x', businessId: `${businessId}-nope`, role: 'BUSINESS_ADMIN' };
       const res = await callController(controller.getOne, reqFor({ user: otherUser, params: { id: issuedId } }));
       assert(res.statusCode === 404, 'GET /:id for a different tenant → 404');
+    }
+
+    // ── (10) cross-entity ref-no: two entities, same prefix, NO collision ─────
+    log('(10) cross-entity ref-no disambiguation (findings #1/#2):');
+    {
+      // Issue for entity2's employee via tpl2 (SAME prefix `${TAG}/HR` as tpl). The
+      // OLD code would mint an identical string to entity1's first letter and throw
+      // an unrecoverable P2002; the fix embeds an entity segment so they differ.
+      const r2 = await service.issueLetter(prisma, {
+        businessId, entityId: entity2.id, actorUserId: user.id, perms: ALL_PERMS,
+        templateId: tpl2.id, employeeId: emp2.id, mode: 'issue',
+      });
+      assert(r2.status === 'ISSUED' && typeof r2.referenceNo === 'string', 'entity2 issue succeeds (no P2002)');
+      assert(r2.referenceNo.startsWith(`${TAG}/HR/`), 'entity2 ref uses the shared prefix');
+      assert(/\/2026-27\/0001$/.test(r2.referenceNo), 'entity2 sequence is its OWN per-entity 0001');
+
+      // The two entities' first letters share prefix + period + tail but the full
+      // referenceNo strings MUST differ (entity segment).
+      const e1first = await prisma.issuedLetter.findFirst({
+        where: { businessId, entityId: entity.id, seqValue: 1, seqPeriodKey: '2026-27' },
+        orderBy: { createdAt: 'asc' },
+      });
+      assert(e1first && e1first.referenceNo !== r2.referenceNo,
+        `cross-entity refs differ (${e1first && e1first.referenceNo} vs ${r2.referenceNo})`);
+      // and both are genuinely persisted (no swallowed collision)
+      const both = await prisma.issuedLetter.findMany({
+        where: { businessId, referenceNo: { in: [e1first.referenceNo, r2.referenceNo] } },
+      });
+      assert(both.length === 2, 'both cross-entity letters persisted under distinct ref-nos');
+      // ref-string year token matches periodKey on BOTH (finding #2)
+      assert(r2.referenceNo.includes('/2026-27/') && e1first.referenceNo.includes('/2026-27/'),
+        'both ref strings carry the tax-year token matching periodKey');
+    }
+
+    // ── (11) concurrent issuance does NOT double-consume (best-effort) ────────
+    // The hard guarantee (spec §6, finding #3): under concurrency the per-tenant
+    // @@unique([businessId, referenceNo]) NEVER admits a duplicate, and no slot is
+    // double-consumed. allocateCode (codes.js) is a non-atomic read-then-increment
+    // that we MUST NOT change, so under a thundering herd some losers exhaust the
+    // bounded retry and fail with a benign P2002 — that's acceptable; what is NOT
+    // acceptable is a duplicate ref-no, a raw NumberSequence-create 500, or a
+    // double-consumed number. We assert the invariants, not zero failures.
+    log('(11) concurrent issuance — no duplicate / no double-consume:');
+    {
+      const N = 6;
+      const results = await Promise.allSettled(Array.from({ length: N }, () =>
+        service.issueLetter(prisma, {
+          businessId, entityId: entity.id, actorUserId: user.id, perms: ALL_PERMS,
+          templateId: tpl.id, employeeId: employee.id, mode: 'issue',
+        })));
+      const ok = results.filter((r) => r.status === 'fulfilled').map((r) => r.value.referenceNo);
+      const fail = results.filter((r) => r.status === 'rejected');
+      assert(ok.length >= 1, `at least one concurrent issue succeeded (${ok.length}/${N})`);
+      const uniq = new Set(ok);
+      assert(uniq.size === ok.length, `no duplicate ref-no across successes (${ok.length} unique)`);
+      // every failure is a benign P2002 (retry-exhaustion), NOT a corrupt 500 — and
+      // crucially never a raw NumberSequence-create error bubbling out.
+      assert(fail.every((r) => r.reason && r.reason.code === 'P2002'),
+        `every concurrent failure is a benign P2002 (got ${fail.map((r) => r.reason && r.reason.code).join(',') || 'none'})`);
+      // DB-level: no two rows share a referenceNo in this tenant (the real invariant)
+      const dupes = await prisma.$queryRawUnsafe(
+        `SELECT "referenceNo", COUNT(*) c FROM "IssuedLetter" WHERE "businessId" = $1 GROUP BY "referenceNo" HAVING COUNT(*) > 1`,
+        businessId,
+      );
+      assert(Array.isArray(dupes) && dupes.length === 0, 'DB has zero duplicate referenceNo rows in the tenant');
+    }
+
+    // ── (12) reissue is ATOMIC: a forced failure rolls back the new letter ────
+    log('(12) reissue atomicity (finding #5):');
+    {
+      // Issue a fresh source to reissue from.
+      const src = await service.issueLetter(prisma, {
+        businessId, entityId: entity.id, actorUserId: user.id, perms: ALL_PERMS,
+        templateId: tpl.id, employeeId: employee.id, mode: 'issue',
+      });
+      const beforeCount = await prisma.issuedLetter.count({ where: { businessId } });
+
+      // Force a failure INSIDE the reissue tx, AFTER the new letter + supersede
+      // links are written but BEFORE commit, by patching $transaction to throw once
+      // its callback resolves. Because issue + links now share ONE tx, this must
+      // roll the whole thing back — no orphan ISSUED letter, source not marked.
+      const realTx = prisma.$transaction.bind(prisma);
+      let armed = true;
+      prisma.$transaction = (arg, opts) => {
+        if (armed && typeof arg === 'function') {
+          armed = false;
+          return realTx(async (tx) => {
+            await arg(tx);                       // run issue + both supersede links
+            throw new Error('FORCED post-link failure (pre-commit)');
+          }, opts);
+        }
+        return realTx(arg, opts);
+      };
+      let threw = false;
+      try {
+        await service.reissueLetter(prisma, {
+          businessId, actorUserId: user.id, perms: ALL_PERMS, sourceId: src.issuedLetterId,
+        });
+      } catch (_e) { threw = true; }
+      prisma.$transaction = realTx; // restore
+
+      assert(threw, 'forced in-tx failure propagates (reissue throws)');
+      const afterCount = await prisma.issuedLetter.count({ where: { businessId } });
+      assert(afterCount === beforeCount, 'NO orphan letter persisted — reissue rolled back fully (atomic)');
+      const srcAfter = await prisma.issuedLetter.findUnique({ where: { id: src.issuedLetterId } });
+      assert(srcAfter.supersededByLetterId === null, 'source NOT marked superseded (rollback clean)');
+
+      // and a normal reissue still works end-to-end
+      const reok = await service.reissueLetter(prisma, {
+        businessId, actorUserId: user.id, perms: ALL_PERMS, sourceId: src.issuedLetterId,
+      });
+      const srcLive = await prisma.issuedLetter.findUnique({ where: { id: src.issuedLetterId } });
+      assert(reok.issuedLetterId && srcLive.supersededByLetterId === reok.issuedLetterId,
+        'a clean reissue still links the supersede chain atomically');
+    }
+
+    // ── (13) DocumentRequest fulfilment flips status + employeeId-scoped ──────
+    log('(13) DocumentRequest fulfilment (finding #6/#15):');
+    {
+      // Fulfil employee's OWN request → status advances + generatedDocumentId set.
+      const fr = await service.issueLetter(prisma, {
+        businessId, entityId: entity.id, actorUserId: user.id, perms: ALL_PERMS,
+        templateId: tpl.id, employeeId: employee.id, mode: 'issue',
+        documentRequestId: reqForEmp1.id,
+      });
+      const reqAfter = await prisma.documentRequest.findUnique({ where: { id: reqForEmp1.id } });
+      assert(reqAfter.status !== 'PENDING', `request status advanced past PENDING (now ${reqAfter.status})`);
+      assert(reqAfter.generatedDocumentId === fr.employeeDocumentId, 'generatedDocumentId == issued letter doc');
+
+      // Attempt to fulfil emp2's request while issuing a letter to `employee`
+      // (cross-employee) → must NOT touch reqForEmp2 (employeeId scope enforced).
+      const cross = await service.issueLetter(prisma, {
+        businessId, entityId: entity.id, actorUserId: user.id, perms: ALL_PERMS,
+        templateId: tpl.id, employeeId: employee.id, mode: 'issue',
+        documentRequestId: reqForEmp2.id, // belongs to emp2, NOT employee
+      });
+      const req2After = await prisma.documentRequest.findUnique({ where: { id: reqForEmp2.id } });
+      assert(req2After.status === 'PENDING', 'foreign-employee request left PENDING (no cross-employee fulfilment)');
+      assert(req2After.generatedDocumentId === null, 'foreign request NOT linked to the issued letter');
+      assert(cross.status === 'ISSUED', 'the issuance itself still succeeds (foreign request is a no-op)');
+    }
+
+    // ── (14) CONTRACT self-signer (employer == subject) is rejected ───────────
+    log('(14) CONTRACT e-sign self-approve guard (finding #13):');
+    {
+      // employer signer email == the subject employee's email → self-approve loop.
+      const selfSigners = [
+        { signerOrder: 1, role: 'EMPLOYER', name: 'Self', email: employee.workEmail },
+        { signerOrder: 2, role: 'EMPLOYEE', name: 'Aarav', email: employee.workEmail, employeeId: employee.id },
+      ];
+      const res = await callController(controller.issue, reqFor({
+        user, body: { templateId: contractTpl.id, employeeId: employee.id, signers: selfSigners },
+      }));
+      assert(res.statusCode === 422, `self-signer CONTRACT rejected with 422 (got ${res.statusCode})`);
+
+      // employer matching by employeeId is also rejected
+      const selfById = [
+        { signerOrder: 1, role: 'EMPLOYER', name: 'Self', email: `boss@${TAG}.test`, employeeId: employee.id },
+        { signerOrder: 2, role: 'EMPLOYEE', name: 'Aarav', email: employee.workEmail, employeeId: employee.id },
+      ];
+      const res2 = await callController(controller.issue, reqFor({
+        user, body: { templateId: contractTpl.id, employeeId: employee.id, signers: selfById },
+      }));
+      assert(res2.statusCode === 422, 'self-signer by employeeId also rejected with 422');
+
+      // a DISTINCT employer is accepted (PENDING_SIGNATURE)
+      const goodSigners = [
+        { signerOrder: 1, role: 'EMPLOYER', name: 'HR Head', email: `hrhead@${TAG}.test` },
+        { signerOrder: 2, role: 'EMPLOYEE', name: 'Aarav', email: employee.workEmail, employeeId: employee.id },
+      ];
+      const ok = await callController(controller.issue, reqFor({
+        user, body: { templateId: contractTpl.id, employeeId: employee.id, signers: goodSigners },
+      }));
+      assert(ok.statusCode === 201 && ok.body.status === 'PENDING_SIGNATURE',
+        'a distinct non-subject employer signer is accepted');
     }
   } catch (err) {
     failures += 1;
