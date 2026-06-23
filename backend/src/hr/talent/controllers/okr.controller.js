@@ -162,21 +162,31 @@ async function createCheckIn(req, res, next) {
     if (req.body.newValue === undefined) return res.status(400).json({ message: 'newValue is required' });
 
     const author = (req.user.employeeId) || kr.objective.ownerEmployeeId;
-    const out = await prisma.$transaction(async (tx) => {
-      const checkIn = await tx.goalCheckIn.create({
-        data: {
-          businessId, keyResultId: kr.id, authorEmployeeId: author,
-          previousValue: kr.currentValue, newValue: req.body.newValue,
-          confidence: req.body.confidence || kr.confidence, note: req.body.note || null,
-        },
+    try {
+      const out = await prisma.$transaction(async (tx) => {
+        const checkIn = await tx.goalCheckIn.create({
+          data: {
+            businessId, keyResultId: kr.id, authorEmployeeId: author,
+            previousValue: kr.currentValue, newValue: req.body.newValue,
+            confidence: req.body.confidence || kr.confidence, note: req.body.note || null,
+          },
+        });
+        const data = { currentValue: req.body.newValue };
+        if (req.body.confidence) data.confidence = req.body.confidence;
+        // Branch on the optimistic-lock result: lockedUpdate returns null when the
+        // version predicate matched nothing (a concurrent check-in already moved
+        // currentValue). Throw so the $transaction (incl. the ledger insert) rolls
+        // back and the client gets a 409 — never a silent lost update.
+        const moved = await lockedUpdate(tx, 'keyResult', kr.id, kr.version, data);
+        if (!moved) { const err = new Error(STALE_MSG); err.stale = true; throw err; }
+        await rollupObjective(tx, kr.objective.id);
+        return checkIn;
       });
-      const data = { currentValue: req.body.newValue };
-      if (req.body.confidence) data.confidence = req.body.confidence;
-      await lockedUpdate(tx, 'keyResult', kr.id, kr.version, data);
-      await rollupObjective(tx, kr.objective.id);
-      return checkIn;
-    });
-    res.status(201).json(out);
+      res.status(201).json(out);
+    } catch (e) {
+      if (e && e.stale) return res.status(409).json({ message: STALE_MSG });
+      throw e;
+    }
   } catch (e) { next(e); }
 }
 

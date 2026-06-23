@@ -15,6 +15,7 @@
 const prisma = require('../../../core/lib/prisma');
 const okr = require('../controllers/okr.controller');
 const perf = require('../controllers/performance.controller');
+const ess = require('../controllers/essPerformance.controller');
 const { resolveAccessibleEmployeeIds } = require('../../lib/scopeResolver');
 
 let failures = 0;
@@ -99,6 +100,80 @@ async function main() {
     assert(near(objAfter.progress, 50), `objective progress rolled up to 50% (=${objAfter.progress})`);
     const ledger = await prisma.goalCheckIn.count({ where: { keyResultId: kr1Res.body.id } });
     assert(ledger === 1, 'exactly one ledger entry for the check-in');
+
+    // ── (1b) FINDING 3 — operator check-in honors the optimistic lock ──────────
+    // Two concurrent check-ins reading the same KR version: the lock must let ONE
+    // commit and 409 the other (no silent lost update / clobber). Use KR-B (still
+    // at base) so both read the same fresh version.
+    log('(1b) Operator OKR check-in optimistic lock (finding 3):');
+    {
+      const krB = kr2Res.body.id;
+      // Deterministic lost-update: the controller reads version N, then a CONCURRENT
+      // writer commits (version→N+1) before the controller's guarded updateMany
+      // runs. We simulate that exact interleave by stubbing the KR read to return a
+      // snapshot pinned at the now-stale version, while the DB has already advanced.
+      const before = await prisma.keyResult.findUnique({ where: { id: krB } });
+      // A real concurrent check-in commits first (advances version + currentValue).
+      const winReq = await withScope(manager, 'canViewTeamPerformance', { params: { id: krB }, body: { newValue: 40 } });
+      const winRes = await call(okr.createCheckIn, winReq);
+      assert(winRes.statusCode === 201, 'first (winning) check-in → 201');
+      // Stub the handler's KR read to hand back the PRE-commit (stale) version.
+      const realFindFirst = prisma.keyResult.findFirst.bind(prisma.keyResult);
+      prisma.keyResult.findFirst = async (args) => {
+        const fresh = await realFindFirst(args);
+        return fresh ? { ...fresh, version: before.version } : fresh; // pin stale version
+      };
+      let staleRes;
+      try {
+        const staleReq = await withScope(manager, 'canViewTeamPerformance', { params: { id: krB }, body: { newValue: 90 } });
+        staleRes = await call(okr.createCheckIn, staleReq);
+      } finally {
+        prisma.keyResult.findFirst = realFindFirst; // restore
+      }
+      assert(staleRes.statusCode === 409, `stale-version check-in → 409 (not a silent lost update) (got ${staleRes.statusCode})`);
+      // currentValue stays the WINNER's (40), never clobbered to the stale write (90).
+      const krAfter = await prisma.keyResult.findUnique({ where: { id: krB } });
+      assert(Number(krAfter.currentValue) === 40, `KR currentValue = winning check-in (40), not clobbered to 90 (=${krAfter.currentValue})`);
+      // The 409'd writer's ledger insert rolled back → only the winner's row exists.
+      const krBLedger = await prisma.goalCheckIn.count({ where: { keyResultId: krB } });
+      assert(krBLedger === 1, 'stale check-in rolled back its ledger row (no orphan / no lost update)');
+    }
+
+    // ── (1c) FINDING 2 — ESS goal check-in honors the optimistic lock ──────────
+    // The ESS self-service check-in resolves the subject from the CUSTOMER session.
+    // It previously wrote currentValue with NO version predicate (lost-update). Two
+    // concurrent self check-ins on the same KR must now → one 201, one 409.
+    log('(1c) ESS goal check-in optimistic lock (finding 2):');
+    {
+      // A DEDICATED self-service employee (own workEmail) so the extra objective
+      // never becomes a weight-sum sibling of the (2) fixture owned by IC.
+      const essEmail = `${PREFIX.toLowerCase()}-ess@example.test`;
+      const essEmp = await mkEmp('ESS', { workEmail: essEmail, isActive: true });
+      const essObj = await prisma.objective.create({ data: { businessId, ownerEmployeeId: essEmp.id, level: 'INDIVIDUAL', title: `${PREFIX} ESS goal`, weight: 100, dueDate: new Date('2026-12-31'), status: 'ACTIVE' } });
+      const essKr = await prisma.keyResult.create({ data: { businessId, objectiveId: essObj.id, title: 'ESS-KR', metricType: 'NUMERIC', startValue: 0, targetValue: 100, currentValue: 0, weight: 100, direction: 'INCREASE', confidence: 'ON_TRACK', status: 'ACTIVE' } });
+      const customer = { businessId, email: essEmail };
+      const before = await prisma.keyResult.findUnique({ where: { id: essKr.id } });
+      // Winner commits first (advances version + currentValue=30).
+      const winRes = await call(ess.createCheckIn, { customer, params: { id: essKr.id }, body: { newValue: 30 } });
+      assert(winRes.statusCode === 201, 'first (winning) ESS check-in → 201');
+      // Stub the ESS handler's KR read to a PRE-commit (stale) version snapshot.
+      const realFindFirst = prisma.keyResult.findFirst.bind(prisma.keyResult);
+      prisma.keyResult.findFirst = async (args) => {
+        const fresh = await realFindFirst(args);
+        return fresh && fresh.id === essKr.id ? { ...fresh, version: before.version } : fresh;
+      };
+      let staleRes;
+      try {
+        staleRes = await call(ess.createCheckIn, { customer, params: { id: essKr.id }, body: { newValue: 80 } });
+      } finally {
+        prisma.keyResult.findFirst = realFindFirst;
+      }
+      assert(staleRes.statusCode === 409, `stale-version ESS check-in → 409 (no lost update) (got ${staleRes.statusCode})`);
+      const krAfter = await prisma.keyResult.findUnique({ where: { id: essKr.id } });
+      assert(Number(krAfter.currentValue) === 30, `ESS KR currentValue = winning check-in (30), not clobbered to 80 (=${krAfter.currentValue})`);
+      const essLedger = await prisma.goalCheckIn.count({ where: { keyResultId: essKr.id } });
+      assert(essLedger === 1, 'stale ESS check-in rolled back its ledger row (no lost update)');
+    }
 
     // ── (2) Weight invariant validate ─────────────────────────────────────────
     log('(2) Weight Σ=100 invariant:');

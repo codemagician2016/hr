@@ -6,10 +6,21 @@
 // by the review controller's calibrateReview (append-only CalibrationAdjustment).
 const prisma = require('../../../core/lib/prisma');
 const { writeAudit } = require('../../../core/lib/audit');
-const { resolveAccessibleEmployeeIds } = require('../../lib/scopeResolver');
+const { resolveAccessibleEmployeeIds, scopeAllows } = require('../../lib/scopeResolver');
+const { effectivePermissions } = require('../../../core/lib/rbac');
+const { ROLES } = require('../../../core/lib/roles');
 const { distribution, distributionWarning } = require('../performance/calibration');
 
 const STALE_MSG = 'This record was updated elsewhere — reload and try again';
+
+// HR (canManagePerformanceCycle) sees the whole tenant; every other calibrator is
+// bound to their OWN canCalibrateRatings sub-tree. SUPER_ADMIN bypasses scope
+// (still tenant-bound by businessId on every where).
+function isHr(req) {
+  if (req.user && req.user.role === ROLES.SUPER_ADMIN) return true;
+  const perms = effectivePermissions(req.user) || {};
+  return !!perms.canManagePerformanceCycle;
+}
 
 async function listSessions(req, res, next) {
   try {
@@ -29,6 +40,13 @@ async function createSession(req, res, next) {
     if (!cycleId || !skipLevelEmployeeId) return res.status(400).json({ message: 'cycleId and skipLevelEmployeeId are required' });
     const cycle = await prisma.reviewCycle.findFirst({ where: { id: cycleId, businessId }, select: { id: true } });
     if (!cycle) return res.status(404).json({ message: 'Review cycle not found' });
+    // F1: a non-HR calibrator may only root a session at an employee inside their
+    // OWN canCalibrateRatings sub-tree. Out-of-scope skip-level → 404 (IDOR-safe;
+    // never confirm the existence of an out-of-band employee).
+    if (!isHr(req)) {
+      const actorScope = await resolveAccessibleEmployeeIds(req.user, 'canCalibrateRatings');
+      if (!scopeAllows(actorScope, skipLevelEmployeeId)) return res.status(404).json({ message: 'Not found' });
+    }
     const item = await prisma.calibrationSession.create({ data: { businessId, cycleId, skipLevelEmployeeId, status: 'OPEN' } });
     await writeAudit({ businessId, actorId: req.user.id, action: 'calibration.open', entityType: 'CalibrationSession', entityId: item.id, meta: { cycleId, skipLevelEmployeeId } });
     res.status(201).json(item);
@@ -47,7 +65,22 @@ async function sessionRoster(req, res, next) {
       { ...req.user, employeeId: session.skipLevelEmployeeId, businessRole: { defaultScope: 'TEAM' }, role: 'STAFF' },
       'canCalibrateRatings',
     );
-    const ids = scope.kind === 'IDS' ? [...scope.ids] : null;
+    let groupIds = scope.kind === 'IDS' ? [...scope.ids] : null;
+    // F1 intersection: a non-HR calibrator must NEVER read pre-release ratings for a
+    // sub-tree they don't own. Resolve the REAL actor's scope and (a) reject the
+    // session if its root is out of band (404), (b) intersect the group ids with the
+    // actor's own scope so a skip-level group spanning beyond the actor is trimmed.
+    if (!isHr(req)) {
+      const actorScope = await resolveAccessibleEmployeeIds(req.user, 'canCalibrateRatings');
+      if (!scopeAllows(actorScope, session.skipLevelEmployeeId)) return res.status(404).json({ message: 'Not found' });
+      if (actorScope.kind === 'IDS') {
+        const allowed = actorScope.ids;
+        groupIds = (groupIds || [...allowed]).filter((id) => allowed.has(id));
+      } else if (actorScope.kind === 'NONE') {
+        groupIds = [];
+      }
+    }
+    const ids = groupIds;
     const where = { businessId, reviewCycleId: session.cycleId };
     if (ids) where.employeeId = { in: ids };
     const instances = await prisma.performanceReview.findMany({
