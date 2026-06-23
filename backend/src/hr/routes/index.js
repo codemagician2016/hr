@@ -24,6 +24,13 @@ router.use('/onboarding', require('../lifecycle/routes/onboarding.routes'));
 router.use('/separations', require('../lifecycle/routes/offboarding.routes'));
 router.use('/esign', require('../lifecycle/routes/esign.routes'));
 
+// Letters & Communication (Feature 9) — issue/preview/re-issue/revoke + register.
+// RBAC: issuance/register/download gate on canGenerateLetters (+withEmployeeScope
+// for a named subject → out-of-band 404); revoke on canManageLetters (SoD). The
+// letterheads/templates config routers (9C/9D) and ESS /me/letters (9F) mount
+// separately as those slices land.
+router.use('/letters', require('../letters/routes/issuance.routes'));
+
 // Talent (recruitment/ATS + performance). RBAC: recruitment -> canManageEmployees;
 // performance -> canViewEmployees (read) / canManageEmployees (write). The offer
 // pre-flight reuses the payroll engine's India 50% wage check.

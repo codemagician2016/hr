@@ -32,6 +32,17 @@ export const NAV_ITEMS = [
   { key: 'performance', label: 'Performance', href: '/performance', feature: 'hr', permission: 'canViewTeamPerformance' },
   { key: 'payroll', label: 'Payroll', href: '/payroll', feature: 'payroll', permission: 'canRunPayroll' },
   { key: 'reports', label: 'Reports', href: '/reports', feature: 'payroll', permission: 'canViewPayrollReports' },
+  // Letters & Communication (Feature 9). One nav group gated on EITHER key:
+  // canGenerateLetters (the maker/issue key) OR canManageLetters (the config/
+  // checker/revoke key). The group header + its four sub-links (Templates +
+  // Letterheads are built by 9C/9D; Issue + Register by 9E) all use `anyPermission`
+  // so a maker-only HR-Admin and a config-only checker both see Letters. The
+  // server is the real enforcement boundary; this just shows the section.
+  { key: 'letters', label: 'Letters', href: '/letters', feature: 'hr', anyPermission: ['canGenerateLetters', 'canManageLetters'], group: true },
+  { key: 'letters-templates', label: 'Templates', href: '/letters/templates', feature: 'hr', anyPermission: ['canGenerateLetters', 'canManageLetters'], parent: 'letters' },
+  { key: 'letters-letterheads', label: 'Letterheads', href: '/letters/letterheads', feature: 'hr', anyPermission: ['canGenerateLetters', 'canManageLetters'], parent: 'letters' },
+  { key: 'letters-issue', label: 'Issue', href: '/letters/issue', feature: 'hr', anyPermission: ['canGenerateLetters', 'canManageLetters'], parent: 'letters' },
+  { key: 'letters-register', label: 'Register', href: '/letters/register', feature: 'hr', anyPermission: ['canGenerateLetters', 'canManageLetters'], parent: 'letters' },
   { key: 'settings', label: 'Settings', href: '/settings', permission: 'canEditBranding' },
 ];
 
@@ -44,6 +55,8 @@ const PERMISSION_KEYS = [
   'canEditBilling', 'canEditDomain', 'canEditBranding',
   // Feature 8
   'canManagePerformanceCycle', 'canCalibrateRatings', 'canViewTeamPerformance',
+  // Feature 9 — Letters
+  'canGenerateLetters', 'canManageLetters',
 ];
 const ALL_TRUE = Object.fromEntries(PERMISSION_KEYS.map((k) => [k, true]));
 
@@ -79,9 +92,22 @@ export function hasPermission(permissions, permission) {
 
 // `permissions` may be a resolved rbac permission map (preferred), or undefined
 // (allow-all). Pass `session` to have it resolved here from the raw /me payload.
+// True when ANY of the listed permission keys is granted (OR-gate). Used by the
+// Letters group, which is visible to a maker (canGenerateLetters) OR a config/
+// checker (canManageLetters). Mirrors hasPermission's null/undefined = allow-all
+// posture so the section stays visible before the session resolves.
+export function hasAnyPermission(permissions, keys) {
+  if (!Array.isArray(keys) || keys.length === 0) return true;
+  if (!permissions) return true; // session not yet resolved → allow
+  return keys.some((k) => hasPermission(permissions, k));
+}
+
 export function visibleNavItems({ features, permissions, session } = {}) {
   const perms = permissions !== undefined ? permissions : permissionsFromSession(session);
   return NAV_ITEMS.filter(
-    (item) => hasFeature(features, item.feature) && hasPermission(perms, item.permission)
+    (item) =>
+      hasFeature(features, item.feature)
+      && hasPermission(perms, item.permission)
+      && hasAnyPermission(perms, item.anyPermission)
   );
 }
