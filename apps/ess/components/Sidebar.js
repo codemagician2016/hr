@@ -41,6 +41,8 @@ const ICONS = {
   onboarding: 'M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11',
   // Feature 10 — approvals inbox (checklist + tick)
   approvals: 'M4 6h10M4 12h7M4 18h10M16 14l2 2 4-4',
+  // Feature 13 — My Team (Manager Self-Service): two figures
+  team: 'M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75',
 };
 
 function Icon({ name, className }) {
@@ -125,6 +127,13 @@ export default function Sidebar({ onNavigate }) {
   // Feature 10: show the Approvals inbox item only to people who actually have
   // something to approve (the tasks feed includes APPROVAL kinds for approvers).
   const hasApprovals = Array.isArray(tasks) && tasks.some((t) => t.kind === 'APPROVAL');
+  // FLAG (Feature 13): show "My Team" (Manager Self-Service) ONLY when the employee
+  // has reports — the team roster is scoped server-side, so a non-manager gets [].
+  // Best-effort: any error omits the entry, never breaks the rail.
+  const { data: teamRoster } = useApi('/api/hr/me/team/roster', {
+    select: (b) => (Array.isArray(b) ? b : b?.items || []),
+  });
+  const hasTeam = Array.isArray(teamRoster) && teamRoster.length > 0;
 
   const fullName = profile?.name || nameFromSession(me);
   const emp = me?.employee || me?.customer || me || {};
@@ -149,6 +158,12 @@ export default function Sidebar({ onNavigate }) {
       // Insert "Approvals" right after Dashboard (and after Onboarding if present).
       const at = hasOnboarding ? 2 : 1;
       items = [...items.slice(0, at), { type: 'item', href: '/approvals', label: 'Approvals', icon: 'approvals' }, ...items.slice(at)];
+    }
+    if (hasTeam) {
+      // Insert "My Team" right after Personal Information (managers only).
+      const idx = items.findIndex((n) => n.href === '/profile');
+      const at = idx >= 0 ? idx + 1 : 1;
+      items = [...items.slice(0, at), { type: 'item', href: '/team', label: 'My Team', icon: 'team' }, ...items.slice(at)];
     }
     return items;
   })();

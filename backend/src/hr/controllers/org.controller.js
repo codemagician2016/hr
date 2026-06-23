@@ -100,6 +100,7 @@ async function tree(req, res, next) {
         code: true,
         firstName: true,
         lastName: true,
+        photoUrl: true, // FLAG (Feature 13): org card is Photo | Name | Position
         managerEmployeeId: true,
         employmentRecords: {
           where: { isCurrent: true },
@@ -123,6 +124,7 @@ async function tree(req, res, next) {
         id: e.id,
         code: e.code,
         name,
+        photoUrl: e.photoUrl || null,
         designation: rec && rec.designation ? rec.designation.title : null,
         departmentName: rec && rec.department ? rec.department.name : null,
         managerEmployeeId: e.managerEmployeeId,

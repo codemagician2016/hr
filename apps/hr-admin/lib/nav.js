@@ -19,6 +19,11 @@ export const NAV_ITEMS = [
   { key: 'onboarding', label: 'Onboarding', href: '/onboarding', feature: 'hr', permission: 'canViewEmployees', icon: 'onboarding' },
   { key: 'separations', label: 'Separations', href: '/separations', feature: 'hr', permission: 'canRunSeparation', icon: 'exit' },
   { key: 'org', label: 'Org', href: '/org', feature: 'hr', permission: 'canViewEmployees', icon: 'org' },
+  // FLAG (Feature 13): the profile change-request approval queue (governed-field
+  // edits awaiting HR) + the read-only field-policy view. The queue is gated on
+  // canManageEmployees (the approver key); the policy view on canViewEmployees.
+  { key: 'profile-changes', label: 'Profile changes', href: '/profile/change-requests', feature: 'hr', permission: 'canManageEmployees', icon: 'people' },
+  { key: 'profile-policy', label: 'Field policy', href: '/profile/policy', feature: 'hr', permission: 'canViewEmployees', icon: 'shield' },
   { key: 'leave', label: 'Leave', href: '/leave', feature: 'leave', permission: 'canApproveLeave', icon: 'leaf' },
   { key: 'attendance', label: 'Attendance', href: '/attendance', feature: 'attendance', permission: 'canManageAttendance', icon: 'clock' },
   { key: 'compensation', label: 'Compensation', href: '/compensation', feature: 'hr', permission: 'canViewCompensation', icon: 'coin' },
@@ -88,7 +93,7 @@ export const NAV_ITEMS = [
 // own native parent/child structure (group:true + parent:'letters') and is
 // emitted as its own expandable section, so it is intentionally omitted here.
 export const NAV_GROUPS = [
-  { key: 'people-org', label: 'People & Org', icon: 'people', items: ['people', 'org'] },
+  { key: 'people-org', label: 'People & Org', icon: 'people', items: ['people', 'org', 'profile-changes', 'profile-policy'] },
   { key: 'talent', label: 'Talent', icon: 'onboarding', items: ['onboarding', 'separations', 'performance'] },
   { key: 'time', label: 'Time', icon: 'calendar', items: ['leave', 'attendance'] },
   { key: 'pay', label: 'Pay', icon: 'wallet', items: ['compensation', 'payroll', 'expenses', 'loans', 'reports'] },

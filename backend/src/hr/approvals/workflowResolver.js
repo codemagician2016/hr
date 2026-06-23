@@ -63,6 +63,13 @@ const BUILT_IN_DEFAULT = Object.freeze({
     step(1, 'REPORTING_MANAGER', { name: 'Manager', approverRefId: '1', slaHours: 48, onTimeoutAction: 'ESCALATE' }),
     step(2, 'HR', { name: 'HR (over threshold)', conditionJson: { amount: { '>': EXPENSE_HR_THRESHOLD } }, slaHours: 72, onTimeoutAction: 'ESCALATE' }),
   ],
+  // FLAG (Feature 13 — shared edit): a gated profile-field change (name/DOB/bank/
+  // statutory ID) routes to a SINGLE HR step. HR — not the reporting manager — owns
+  // identity/statutory/money changes (docs/features/13 §3.5). A tenant can override
+  // by publishing a real PROFILE_CHANGE WorkflowDefinition.
+  PROFILE_CHANGE: [
+    step(1, 'HR', { name: 'HR', slaHours: 72, onTimeoutAction: 'ESCALATE' }),
+  ],
 });
 
 // Generic fallback for any module without a bespoke built-in: manager approves,

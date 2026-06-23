@@ -441,6 +441,8 @@ model Business {
   bankAccounts             BankAccount[]
   emergencyContacts        EmergencyContact[]
   dependants               Dependant[]
+  employeeEducations       EmployeeEducation[]
+  employeeAddresses        EmployeeAddress[]
   statutoryProfiles        StatutoryProfile[]
   statutoryRegistrations   StatutoryRegistration[]
   // Compensation
@@ -6569,6 +6571,27 @@ model Employee {
   // Sensitive — @pii:sensitive (consent-gated, country-config driven)
   disabilityStatus String?
   bloodGroup    String?
+  // ── Feature 13: rich Personal Information (Figma §Personal) ──
+  // Co-located identity attributes read on every profile render (keeps the ESS
+  // self-card a single-row read). All nullable/optional (additive migration).
+  // @pii:sensitive for religion/community — returned only on the SELF read or to
+  // an in-scope operator (masked otherwise), per docs/features/13 §9.
+  religion          String?   // @pii:sensitive
+  community         String?   // @pii:sensitive
+  motherTongue      String?
+  placeOfBirth      String?
+  stateOfBirthCode  String?   @db.Char(2) // ISO-3166-2 subdivision suffix / free state code
+  identificationMark String?              // "ID mark" on the Figma
+  heightCm          Decimal?  @db.Decimal(5, 1)
+  weightKg          Decimal?  @db.Decimal(5, 1)
+  fatherName        String?
+  fatherOccupation  String?
+  motherName        String?
+  motherOccupation  String?
+  // Contact (Figma §Contact — official vs personal split + landlines).
+  // officialEmail == existing workEmail; personalEmail/phone already exist above.
+  homePhone         String?
+  officePhone       String?
   // Reused-auth columns (conceptually from Customer, per reuse-map §12.2)
   preferredLanguage String? // BCP-47; payslip/letter locale
   isActive      Boolean  @default(true)
@@ -6624,6 +6647,9 @@ model Employee {
   regularizationRequests AttendanceRegularizationRequest[]
   // Letters & Communication (Feature 9) — letters issued to this employee
   issuedLetters     IssuedLetter[]
+  // Feature 13 — rich profile sub-models (Education + typed Addresses)
+  educations        EmployeeEducation[]
+  addresses         EmployeeAddress[]
 
   @@unique([businessId, code])
   @@index([businessId, status])
@@ -6791,6 +6817,67 @@ enum DependantRelation {
   PARENT
   SIBLING
   OTHER
+}
+
+// ── Feature 13 — Education (Figma §Education). Self-service rows the employee
+// manages from ESS; `isHighest` flags the qualifying highest degree.
+model EmployeeEducation {
+  id           String   @id @default(uuid())
+  businessId   String
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId   String
+  employee     Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  level        EducationLevel
+  institution  String
+  fieldOfStudy String?
+  startYear    Int?
+  endYear      Int?
+  grade        String? // GPA / % / class
+  isHighest    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  @@index([businessId, employeeId])
+}
+
+enum EducationLevel {
+  SCHOOL
+  DIPLOMA
+  BACHELORS
+  MASTERS
+  DOCTORATE
+  CERTIFICATION
+  OTHER
+}
+
+// ── Feature 13 — typed Address rows (Figma §Address: correspondence / permanent /
+// office + the "same as" toggle). `sameAsType` stores a POINTER (not a copy) so a
+// later edit to the source propagates and we never persist drift (§9 "same as"
+// integrity). The flat addressLine* columns on Employee remain the back-compat
+// correspondence address.
+model EmployeeAddress {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  type        AddressType
+  sameAsType  AddressType? // when set, this address mirrors another (UI "same as")
+  line1       String?
+  line2       String?
+  city        String?
+  stateCode   String?
+  postalCode  String?
+  countryCode String?  @db.Char(2)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@unique([businessId, employeeId, type])
+  @@index([businessId, employeeId])
+}
+
+enum AddressType {
+  CORRESPONDENCE
+  PERMANENT
+  OFFICE
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
