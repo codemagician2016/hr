@@ -106,12 +106,16 @@ function computeLeaveUnits(req, ctx = {}) {
     let kind; let fraction = 0;
 
     if (d.working) {
-      // half-day only on the actual boundary days of the request
-      const startHalf = d.ms === startMs && r.startHalf;
-      const endHalf = d.ms === endMs && r.endHalf;
+      // Half-day lands on the actually-charged BOUNDARY working day, not the raw
+      // request endpoint. When the request starts/ends on a leading/trailing
+      // non-working day (a weekoff/holiday), the first/last WORKING day
+      // (firstWork/lastWork) is the charged boundary — tying the half to
+      // startMs/endMs would silently no-op and over-charge a full day (finding #6).
+      const startHalf = i === firstWork && !!r.startHalf;
+      const endHalf = i === lastWork && !!r.endHalf;
+      // A single-day (firstWork === lastWork) request is half whenever EITHER half
+      // is set (incl. both-halves), so it stays 0.5 rather than 1.0.
       fraction = (startHalf || endHalf) ? 0.5 : 1.0;
-      // a single-day request with BOTH halves set is still 0.5
-      if (d.ms === startMs && d.ms === endMs && r.startHalf && r.endHalf) fraction = 0.5;
       kind = fraction === 0.5 ? 'HALF' : 'WORKING';
       workingDays += fraction === 0.5 ? 0.5 : 1;
     } else if (isLeading || isTrailing) {

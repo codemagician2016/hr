@@ -13,6 +13,7 @@
 const prisma = require('../../core/lib/prisma');
 const { resolveSchedule } = require('../attendance/derive');
 const { resolvePolicy } = require('./policyResolver');
+const { fyPeriodCode } = require('./periodCode');
 
 function utcDay(d) {
   const x = d instanceof Date ? d : new Date(d);
@@ -28,7 +29,8 @@ function addDays(d, n) { return new Date(utcDay(d).getTime() + n * 86400000); }
  *   weeklyOffDays,   // CSV from the effective shift (null when open-attendance)
  *   holidays,        // [{ date, entityId, locationId, isRestricted, ... }]
  *   policy, accrualRules, assignment,   // from policyResolver (may be null)
- *   balance,         // current-period LeaveBalance (or null)
+ *   balance,         // LeaveBalance for the request's period (or null)
+ *   periodCode,      // FY period the request falls in (drives the balance scope)
  *   overlapping,     // existing PENDING/APPROVED APPLICATION rows that may clash
  * }
  */
@@ -53,8 +55,17 @@ async function loadApplyContext({ businessId, employeeId, leaveTypeId, startDate
   // attendance/service.js. Used for holiday-scope matching + policy resolution.
   const employment = await db.employmentRecord.findFirst({
     where: { businessId, employeeId, isCurrent: true },
-    select: { entityId: true, locationId: true, departmentId: true, gradeId: true, employmentType: true },
+    select: {
+      entityId: true, locationId: true, departmentId: true, gradeId: true, employmentType: true,
+      entity: { select: { taxYearStartMonth: true } },
+    },
   });
+  // Period for the request: derived from startDate using the entity's tax-year
+  // start (Apr default) — the SAME scheme provision/accrualRunner mint balances
+  // under. We scope the balance load to this period so soft-hold/validation
+  // operate on the correct period's row, not the arbitrary newest one (finding #2).
+  const taxYearStartMonth = (employment && employment.entity && employment.entity.taxYearStartMonth) || 4;
+  const periodCode = fyPeriodCode(from, taxYearStartMonth);
   const employee = {
     ...empRow,
     entityId: employment ? employment.entityId : null,
@@ -72,7 +83,7 @@ async function loadApplyContext({ businessId, employeeId, leaveTypeId, startDate
   const defaultPatternWhere = employee.entityId
     ? { OR: [{ entityId: employee.entityId }, { entityId: null }] }
     : { entityId: null };
-  const [assignments, defaultPatterns, holidays, balance, overlapping] = await Promise.all([
+  const [assignments, defaultPatterns, holidays, periodBalance, newestBalance, overlapping] = await Promise.all([
     db.shiftAssignment.findMany({
       where: { businessId, employeeId, effectiveFrom: { lt: winEnd } },
       include: { shiftPattern: true },
@@ -83,6 +94,12 @@ async function loadApplyContext({ businessId, employeeId, leaveTypeId, startDate
       orderBy: { createdAt: 'asc' },
     }),
     db.holiday.findMany({ where: { businessId, date: { gte: winStart, lte: winEnd } } }),
+    // Period-scoped balance for the request's period (finding #2).
+    db.leaveBalance.findFirst({
+      where: { businessId, employeeId, leaveTypeId, periodCode },
+    }),
+    // Fallback only: legacy/anniversary-scheme rows that don't match the FY period
+    // (so a single-period tenant still resolves a balance rather than null).
     db.leaveBalance.findFirst({
       where: { businessId, employeeId, leaveTypeId },
       orderBy: { createdAt: 'desc' },
@@ -96,6 +113,9 @@ async function loadApplyContext({ businessId, employeeId, leaveTypeId, startDate
       select: { id: true, startDate: true, endDate: true, status: true },
     }),
   ]);
+  // Prefer the period-scoped row; fall back to the newest only when no row exists
+  // for this period (never silently target a different period's balance).
+  const balance = periodBalance || newestBalance;
 
   const defaultPattern = defaultPatterns.sort((a, b) => {
     const rank = (p) => (p.entityId === employee.entityId ? 1 : 0);
@@ -118,6 +138,7 @@ async function loadApplyContext({ businessId, employeeId, leaveTypeId, startDate
     accrualRules: resolved ? resolved.accrualRules : [],
     assignment: resolved ? resolved.assignment : null,
     balance,
+    periodCode,
     overlapping,
   };
 }
