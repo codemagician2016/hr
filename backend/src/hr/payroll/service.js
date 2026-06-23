@@ -1171,11 +1171,11 @@ async function getMyPayslipPdfContext({ businessId, customer, payslipId }) {
       orderBy: { effectiveFrom: 'desc' },
       select: {
         department: { select: { name: true } },
-        designation: { select: { name: true } },
+        designation: { select: { title: true } }, // Designation uses `title`, not `name`
       },
     });
     department = cer && cer.department ? cer.department.name : null;
-    designation = cer && cer.designation ? cer.designation.name : null;
+    designation = cer && cer.designation ? cer.designation.title : null;
   }
 
   const business = await prisma.business.findUnique({
