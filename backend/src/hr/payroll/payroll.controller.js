@@ -20,6 +20,9 @@ function handleError(res, err) {
     : 500;
   const body = { message: err && err.message ? err.message : 'Internal error' };
   if (err && err.code) body.code = err.code;
+  // Surface the structured bank-detail offender list so the operator UI can show
+  // exactly which employees to fix (finding #22) — never a bare 500.
+  if (err && Array.isArray(err.offenders)) body.offenders = err.offenders;
   if (status === 500) {
     // eslint-disable-next-line no-console
     console.error('[payroll.controller]', err && err.stack ? err.stack : err);
@@ -44,6 +47,8 @@ const CODE_STATUS = {
   IMMUTABLE_RUN_VIOLATION: 409,
   UNKNOWN_FILE_KIND: 400,
   COUNTRY_MISMATCH: 400,
+  MISSING_BANK_DETAILS: 422,
+  BANK_FIELD_TOO_LONG: 422,
 };
 
 // ── Operator: runs ──────────────────────────────────────────────────────────
@@ -223,6 +228,39 @@ async function getPayslip(req, res) {
   } catch (err) { handleError(res, err); }
 }
 
+/**
+ * getPayslipPdf — operator payslip as a branded `application/pdf` (finding #23).
+ *
+ * The operator "View" used to open the raw JSON API in a new tab. This renders
+ * the SAME branded PDF the employee sees, from the payslip's frozen snapshotJson
+ * (immutable source of truth) — no stored blob, a fresh render per request.
+ * Scoping is by req.user.businessId via service.getPayslipPdfContext, behind the
+ * canViewPayrollReports route gate. The bytes' SHA-256 is recorded best-effort
+ * as tamper evidence (mirrors the ESS path) and never blocks the download.
+ */
+async function getPayslipPdf(req, res) {
+  try {
+    const { businessId } = req.user;
+    const { payslip, employee, business } = await service.getPayslipPdfContext({
+      businessId, payslipId: req.params.id,
+    });
+
+    const pdf = await renderPayslipPdf({ payslip, employee, business });
+
+    try {
+      const pdfHash = crypto.createHash('sha256').update(pdf).digest('hex');
+      await service.recordPayslipPdfHash({ businessId, payslipId: payslip.id, pdfHash });
+    } catch (_e) { /* non-fatal */ }
+
+    const fileName = `${payslip.code || 'payslip'}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    // inline so the operator's "View" opens the PDF in the browser tab.
+    res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+    res.setHeader('Content-Length', pdf.length);
+    res.status(200).send(pdf);
+  } catch (err) { handleError(res, err); }
+}
+
 async function getFile(req, res) {
   try {
     const { businessId } = req.user;
@@ -296,6 +334,7 @@ module.exports = {
   getRun,
   getRunPayslips,
   getPayslip,
+  getPayslipPdf,
   getFile,
   getMyPayslips,
   getMyPayslip,

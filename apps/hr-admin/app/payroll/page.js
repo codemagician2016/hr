@@ -26,7 +26,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Spinner, ErrorBanner, PrimaryButton, TextInput, DateField, Modal, ModalActions, formatAdminDate } from '@hr/ui';
-import { get, post } from '@/lib/api';
+import { get, post, downloadFile } from '@/lib/api';
 import { DataTable, PageHeader, StatusBadge, ActionButton, employeeLabel, moneyish } from '@/lib/ui';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
 
@@ -285,6 +285,172 @@ function RunsList({ onOpen }) {
   );
 }
 
+// One-time input kinds (mirror the backend PayRunInputKind enum + friendly copy).
+const ONE_TIME_KINDS = [
+  { value: 'OTE', label: 'One-time earning (bonus, incentive)' },
+  { value: 'OTD', label: 'One-time deduction (recovery, fine)' },
+  { value: 'ARREAR', label: 'Arrear (back-pay)' },
+  { value: 'REIMBURSEMENT', label: 'Reimbursement' },
+];
+const KIND_LABEL = Object.fromEntries(ONE_TIME_KINDS.map((k) => [k.value, k.label.split(' (')[0]]));
+
+// Compact employee search picker for the one-time editor (debounced).
+function MiniEmployeePicker({ selected, onSelect }) {
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState([]);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!q.trim()) { setResults([]); return undefined; }
+    let alive = true;
+    const t = setTimeout(() => {
+      get('/api/hr/employees', { q: q.trim(), pageSize: 8 })
+        .then((res) => { if (alive) setResults((res?.items || res || []).slice(0, 8)); })
+        .catch(() => { if (alive) setResults([]); });
+    }, 250);
+    return () => { alive = false; clearTimeout(t); };
+  }, [q]);
+
+  if (selected) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="px-2 py-1 rounded-lg bg-gray-100 text-xs font-medium text-gray-800">{employeeLabel(selected)}</span>
+        <button type="button" onClick={() => onSelect(null)} className="text-xs text-gray-400 hover:text-gray-700">Change</button>
+      </div>
+    );
+  }
+  return (
+    <div className="relative">
+      <input
+        value={q}
+        onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        placeholder="Search employee…"
+        autoComplete="off"
+        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+      />
+      {open && results.length > 0 && (
+        <ul className="absolute z-20 mt-1 w-full max-h-52 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg text-sm">
+          {results.map((emp) => (
+            <li key={emp.id}>
+              <button type="button" onClick={() => { onSelect(emp); setOpen(false); setQ(''); }}
+                className="w-full text-left px-3 py-2 hover:bg-gray-50">{employeeLabel(emp)}</button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ── One-time / ad-hoc inputs editor (DRAFT only) — finding #25 ────────────────
+function OneTimeInputsEditor({ runId, items, onChanged }) {
+  const [emp, setEmp] = useState(null);
+  const [kind, setKind] = useState('OTE');
+  const [componentCode, setComponentCode] = useState('');
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState('');
+  const [error, setError] = useState('');
+
+  const amountNum = Number(amount);
+  const valid = emp && kind && Number.isFinite(amountNum) && amountNum > 0;
+
+  async function add(e) {
+    e.preventDefault();
+    if (!valid) return;
+    setSaving(true); setError('');
+    try {
+      // amountMinor is integer minor units (paise/cents) — convert the major-unit input.
+      await post(`/api/hr/payroll/runs/${runId}/inputs/one-time`, {
+        employeeId: emp.id,
+        kind,
+        componentCode: componentCode.trim() || undefined,
+        amountMinor: Math.round(amountNum * 100),
+        note: note.trim() || undefined,
+      });
+      setEmp(null); setAmount(''); setComponentCode(''); setNote(''); setKind('OTE');
+      onChanged && onChanged();
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Failed to add one-time input.');
+    } finally { setSaving(false); }
+  }
+
+  async function remove(item) {
+    setRemoving(item.id); setError('');
+    try {
+      await post(`/api/hr/payroll/runs/${runId}/inputs/one-time`, { id: item.id, _delete: true });
+      onChanged && onChanged();
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Failed to remove item.');
+    } finally { setRemoving(''); }
+  }
+
+  return (
+    <div className="space-y-3">
+      {error && <ErrorBanner message={error} />}
+      <form onSubmit={add} className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-3">
+        <div className="grid sm:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Employee</label>
+            <MiniEmployeePicker selected={emp} onSelect={setEmp} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Type</label>
+            <select value={kind} onChange={(e) => setKind(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+              {ONE_TIME_KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="grid sm:grid-cols-3 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Amount</label>
+            <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" placeholder="0.00"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+            {amount !== '' && !(amountNum > 0) && <p className="text-[11px] text-red-600 mt-0.5">Enter a positive amount.</p>}
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Component code <span className="text-gray-400">(optional)</span></label>
+            <input value={componentCode} onChange={(e) => setComponentCode(e.target.value)} placeholder="e.g. BONUS"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Note <span className="text-gray-400">(optional)</span></label>
+            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Reason / reference"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+          </div>
+        </div>
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] text-gray-400">Editable while the run is in Draft. Items apply at compute.</p>
+          <PrimaryButton type="submit" loading={saving} disabled={!valid}>Add input</PrimaryButton>
+        </div>
+      </form>
+
+      {items.length > 0 ? (
+        <ul className="divide-y divide-gray-100 rounded-xl border border-gray-200 overflow-hidden">
+          {items.map((it) => (
+            <li key={it.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm bg-white">
+              <div className="min-w-0">
+                <span className="font-medium text-gray-900">{it.employeeName || it.employeeCode || it.employeeId}</span>
+                <span className="ml-2 inline-block px-1.5 py-0.5 rounded bg-gray-100 text-[10px] font-semibold text-gray-700">{KIND_LABEL[it.kind] || it.kind}</span>
+                {it.componentCode && <span className="ml-2 text-xs text-gray-500">→ {it.componentCode}</span>}
+                {it.note && <span className="ml-2 text-xs text-gray-400 truncate">· {it.note}</span>}
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                <span className="font-semibold text-gray-900">{(it.amountMinor / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                <button type="button" disabled={removing === it.id} onClick={() => remove(it)} className="text-xs text-red-500 hover:text-red-700 disabled:opacity-40">Remove</button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-xs text-gray-400">No one-time items staged yet.</p>
+      )}
+    </div>
+  );
+}
+
 // ── Inputs checklist (DRAFT) ──────────────────────────────────────────────────
 function InputsChecklist({ runId, onChanged }) {
   const [data, setData] = useState(null);
@@ -305,10 +471,11 @@ function InputsChecklist({ runId, onChanged }) {
 
   if (!data) return <Spinner />;
   const tone = { OK: 'text-emerald-600', WARN: 'text-amber-600', PARTIAL: 'text-amber-600', INFO: 'text-blue-600' };
+  const oneTimeRow = data.rows.find((r) => r.key === 'oneTime');
   return (
     <div className="space-y-3">
       {error && <ErrorBanner message={error} />}
-      {data.rows.map((row) => (
+      {data.rows.filter((r) => r.key !== 'oneTime').map((row) => (
         <div key={row.key} className="rounded-2xl border border-gray-200 bg-white p-4 flex items-start justify-between gap-4">
           <div>
             <div className="text-sm font-semibold text-gray-900">{row.label} <span className={`text-xs font-medium ${tone[row.status] || 'text-gray-400'}`}>· {row.status}</span></div>
@@ -319,6 +486,34 @@ function InputsChecklist({ runId, onChanged }) {
           )}
         </div>
       ))}
+
+      {/* One-time / ad-hoc inputs — interactive editor (finding #25) */}
+      <div className="rounded-2xl border border-gray-200 bg-white p-4">
+        <div className="flex items-start justify-between gap-4 mb-3">
+          <div>
+            <div className="text-sm font-semibold text-gray-900">One-time inputs <span className="text-xs font-medium text-gray-400">· {(oneTimeRow?.items || []).length} staged</span></div>
+            <div className="text-xs text-gray-500 mt-0.5">Bonuses, one-off deductions, arrears and reimbursements applied to this run only.</div>
+          </div>
+        </div>
+        {oneTimeRow?.editable
+          ? <OneTimeInputsEditor runId={runId} items={oneTimeRow.items || []} onChanged={() => { load(); onChanged && onChanged(); }} />
+          : (
+            <div className="text-xs text-gray-500">
+              Inputs are frozen — the run has moved past Draft.
+              {(oneTimeRow?.items || []).length > 0 && (
+                <ul className="mt-2 divide-y divide-gray-100 rounded-xl border border-gray-200 overflow-hidden">
+                  {oneTimeRow.items.map((it) => (
+                    <li key={it.id} className="flex items-center justify-between px-3 py-2 bg-white">
+                      <span className="font-medium text-gray-900">{it.employeeName || it.employeeId} <span className="ml-1 text-[10px] text-gray-500">{KIND_LABEL[it.kind] || it.kind}</span></span>
+                      <span className="font-semibold text-gray-900">{(it.amountMinor / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+      </div>
+
       <p className="text-xs text-gray-400">Compute is enabled even with warnings; blockers from variance disable submit downstream.</p>
     </div>
   );
@@ -519,6 +714,8 @@ function DecisionBar({ run, runId, me, perms, onChanged }) {
 function DisbursementPanel({ run, runId, perms, onChanged }) {
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  const [dlBusy, setDlBusy] = useState('');
+  const [offenders, setOffenders] = useState(null); // { kind, items } for the 422 banner
   const status = run?.status;
   const country = run?.entity?.countryCode;
   const fileKinds = FILE_KINDS_BY_COUNTRY[country] || [];
@@ -530,6 +727,24 @@ function DisbursementPanel({ run, runId, perms, onChanged }) {
     try { await post(`/api/hr/payroll/runs/${runId}/${action}`); onChanged(); }
     catch (e) { setError(e.data?.message || e.message || `Failed to ${action}.`); }
     finally { setBusy(''); }
+  }
+
+  // Download a filing export with structured-error handling. A 422
+  // MISSING_BANK_DETAILS returns an offender list (which employees to fix) that
+  // we render as an actionable banner instead of opening a raw error tab.
+  async function downloadExport(f) {
+    setDlBusy(f.kind); setError(''); setOffenders(null);
+    try {
+      await downloadFile(`/api/hr/payroll/runs/${runId}/files/${f.kind}`);
+    } catch (e) {
+      if (e.status === 422 && Array.isArray(e.data?.offenders)) {
+        setOffenders({ label: f.label, items: e.data.offenders, message: e.data.message });
+      } else {
+        setError(e.data?.message || e.message || `Failed to download ${f.label}.`);
+      }
+    } finally {
+      setDlBusy('');
+    }
   }
 
   const closed = status === 'FILED' && run?.closedAt;
@@ -547,11 +762,40 @@ function DisbursementPanel({ run, runId, perms, onChanged }) {
           <div className="text-xs font-semibold text-gray-700 mb-1">Filing exports ({country})</div>
           <div className="flex flex-wrap gap-2">
             {fileKinds.map((f) => (
-              <a key={f.kind} href={`/api/hr/payroll/runs/${runId}/files/${f.kind}`} target="_blank" rel="noreferrer"
-                className="px-2.5 py-1 text-xs font-medium border border-gray-300 rounded-md hover:bg-gray-50">{f.label}</a>
+              <button
+                key={f.kind}
+                type="button"
+                disabled={dlBusy === f.kind}
+                onClick={() => downloadExport(f)}
+                className="px-2.5 py-1 text-xs font-medium border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 inline-flex items-center gap-1.5"
+              >
+                {dlBusy === f.kind && <span className="inline-block w-3 h-3 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />}
+                {f.label}
+              </button>
             ))}
           </div>
           <p className="text-xs text-gray-400 mt-1">Bank-file total ties to run net {moneyish(run?.totalNet, run?.currencyCode)}.</p>
+          {offenders && (
+            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-semibold text-amber-800">
+                  {offenders.label} blocked — {offenders.items.length} employee(s) need attention
+                </div>
+                <button type="button" onClick={() => setOffenders(null)} className="text-amber-500 hover:text-amber-700 text-xs">Dismiss</button>
+              </div>
+              <p className="text-[11px] text-amber-700 mt-0.5">{offenders.message || 'Fix the bank details below, then re-export.'}</p>
+              <ul className="mt-2 space-y-1 text-xs text-amber-900">
+                {offenders.items.map((o, i) => (
+                  <li key={i} className="flex flex-wrap items-center gap-1.5">
+                    <span className="font-medium">{o.employee || o.code || `Row ${o.index + 1}`}</span>
+                    {o.code && o.employee && <span className="text-amber-500">· {o.code}</span>}
+                    <span className="inline-block px-1.5 py-0.5 rounded bg-amber-100 text-[10px] font-semibold">{o.reason}</span>
+                    <span className="text-amber-700">{o.detail}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -730,7 +974,7 @@ function RunDetail({ runId, onBack, tab, setTab, me, perms }) {
                 { key: 'employee', header: 'Employee', render: (r) => employeeLabel(r.employee || r) },
                 { key: 'net', header: 'Net pay', render: (r) => moneyish(r.netPay, r.currencyCode || run?.currencyCode) },
                 { key: 'status', header: 'Status', render: (r) => <StatusBadge status={r.status} /> },
-                { key: 'view', header: '', render: (r) => <a href={`/api/hr/payroll/payslips/${r.id}`} target="_blank" rel="noreferrer" className="text-xs font-medium hover:underline" style={{ color: 'var(--theme-primary)' }}>View</a> },
+                { key: 'view', header: '', render: (r) => <a href={`/api/hr/payroll/payslips/${r.id}/pdf`} target="_blank" rel="noreferrer" className="text-xs font-medium hover:underline" style={{ color: 'var(--theme-primary)' }}>View PDF</a> },
               ]}
               rows={slipRows} loading={false} emptyText="No payslips — compute the run first." />
           </div>

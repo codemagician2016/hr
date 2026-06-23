@@ -242,8 +242,22 @@ async function listReviews(req, res, next) {
     if (req.query.reviewCycleId) where.reviewCycleId = req.query.reviewCycleId;
     if (req.query.status) where.status = req.query.status;
     // reviewerId=me is SERVER-derived, never query-trusted.
-    if (req.query.reviewerId === 'me') where.reviewerId = actorEmployeeId(req);
-    const items = await prisma.performanceReview.findMany({ where, orderBy: { createdAt: 'desc' } });
+    // FIX (#31): an admin without a linked employee record has actorEmployeeId===null.
+    // Setting where.reviewerId=null filters a non-nullable column to NULL — at best
+    // an empty result, at worst a 500. When "me" resolves to no employee, the actor
+    // reviews nobody: short-circuit to an empty list instead of building a null filter.
+    if (req.query.reviewerId === 'me') {
+      const meId = actorEmployeeId(req);
+      if (!meId) return res.json({ items: [] });
+      where.reviewerId = meId;
+    }
+    // Join the subject employee so the console renders NAMES, not raw UUIDs
+    // (premium UX). Read-only identity fields only — no sensitive data widened.
+    const items = await prisma.performanceReview.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: { employee: { select: { id: true, code: true, firstName: true, lastName: true } } },
+    });
     const me = actorEmployeeId(req);
     const viewerIsHr = hasPerm(req, 'canManagePerformanceCycle');
     res.json({ items: items.map((it) => serializeReviewInstance(it, viewerIsHr ? 'HR' : (it.employeeId === me ? 'SELF' : 'MANAGER'))) });

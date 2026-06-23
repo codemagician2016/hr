@@ -58,9 +58,14 @@ class DeriveError extends Error {
  */
 function passFor(line) {
   const comp = line.component || {};
-  if (Number.isInteger(comp.derivationPass)) return comp.derivationPass;
   const method = (line.calcMethod || comp.calcMethod || CALC.FLAT);
+  // FIX (#30): an EXPLICIT per-line BALANCING method always resolves in pass 3
+  // (the residual fill), even when the component carries a stored derivationPass
+  // for a different role. Without this, a BALANCING line on a component whose
+  // stored derivationPass is 0/1/2 ran in the wrong pass and the residual never
+  // filled — the balancing component resolved to 0. The per-line rule wins.
   if (method === CALC.BALANCING) return 3;
+  if (Number.isInteger(comp.derivationPass)) return comp.derivationPass;
   if (method === CALC.PERCENT_OF) {
     const base = comp.calcBaseScope;
     if (base === 'GROSS' || base === 'CTC') return 2;

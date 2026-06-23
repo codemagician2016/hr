@@ -60,5 +60,39 @@ export function del(path) {
   return request(path, { method: 'DELETE' });
 }
 
-export const api = { request, get, post, patch, del, qs };
+/**
+ * downloadFile — GET a binary/attachment endpoint and save it to disk. On a
+ * non-2xx response it parses the JSON error body (so callers can surface a
+ * structured failure such as payroll's 422 MISSING_BANK_DETAILS with the
+ * offender list) and throws the same Error shape as request() (.status/.data).
+ */
+export async function downloadFile(path, { filename } = {}) {
+  const res = await fetch(resolveUrl(path), { credentials: 'include' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const err = new Error(body.message || `${res.status} ${res.statusText}`);
+    err.status = res.status;
+    err.data = body;
+    throw err;
+  }
+  const blob = await res.blob();
+  // Honour the server's filename (Content-Disposition) when present.
+  let name = filename;
+  if (!name) {
+    const cd = res.headers.get('Content-Disposition') || '';
+    const m = /filename="?([^"]+)"?/.exec(cd);
+    name = m ? m[1] : 'download';
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  return true;
+}
+
+export const api = { request, get, post, patch, del, qs, downloadFile };
 export default api;
