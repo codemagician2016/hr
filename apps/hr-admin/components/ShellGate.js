@@ -8,7 +8,10 @@
 import { usePathname } from 'next/navigation';
 import AdminShell from '@/components/AdminShell';
 
-const PUBLIC_PREFIXES = ['/login', '/forgot-password', '/reset-password'];
+// /careers/* is the UNAUTHENTICATED public careers board + apply page (Feature 12)
+// — it must render bare (no admin sidebar / session gate) so a candidate with no
+// account can view a job and apply directly.
+const PUBLIC_PREFIXES = ['/login', '/forgot-password', '/reset-password', '/careers'];
 
 function isPublic(pathname) {
   return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));

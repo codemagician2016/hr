@@ -46,11 +46,17 @@ const canView = [
 // ── Jobs ─────────────────────────────────────────────────────────────────────
 router.get('/jobs', canView, c.listJobs);
 router.get('/jobs/:id', canView, c.getJob);
+// Share / public link + per-job funnel summary (read-scoped).
+router.get('/jobs/:id/share', canView, c.shareJob);
+router.get('/jobs/:id/summary', canView, c.jobSummary);
 router.post('/jobs', canManage, c.createJob);
 router.patch('/jobs/:id', canManage, c.updateJob);
 router.delete('/jobs/:id', canManage, c.removeJob);
 router.post('/jobs/:id/publish', canManage, c.publishJob);
-router.post('/jobs/:id/close', canManage, c.closeJob);
+// Prominent Publish/Unpublish-to-careers toggle (auto-derives the public slug).
+router.post('/jobs/:id/set-public', canManage, c.setJobPublic);
+// Close needs read-scope resolved so a recruiter can only close a job they own.
+router.post('/jobs/:id/close', [canManage, ...attachRecruitmentScope('canViewHiring')], c.closeJob);
 
 // ── Job pipeline stages ──────────────────────────────────────────────────────
 router.get('/jobs/:jobId/stages', canView, c.listStages);
@@ -83,6 +89,10 @@ router.get('/applications/:id', canView, c.getApplication);
 router.post('/applications', canManage, c.createApplication);
 router.post('/applications/:id/move', canManage, c.moveApplication);
 router.post('/applications/:id/recompute-score', canManage, s.recomputeScore);
+// Bulk reject / shortlist / set-status over the CURRENT FILTER (scoped + audited).
+// Needs the F1 read-scope resolved so the server can intersect the target set with
+// the caller's reachable requisitions — a client can never act out of scope.
+router.post('/applications/bulk-action', [canManage, ...attachRecruitmentScope('canViewHiring')], c.bulkApplicationAction);
 
 // ── Merit list ───────────────────────────────────────────────────────────────
 router.get('/jobs/:jobId/merit-list', canView, s.meritList);
