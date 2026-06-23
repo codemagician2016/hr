@@ -31,6 +31,11 @@ const { ROLES } = require('../../core/lib/roles');
 const APPROVAL_ACTIONS = new Set([
   'canApproveLeave', 'canApprovePayroll', 'canApproveRegularization',
   'review.submitMgr', 'review.calibrate', 'review.signOff',
+  // Feature 12 — recruitment SoD: an interviewer who SUBMITTED a scorecard on a
+  // candidate's application may not be the sole offer approver/extender for that
+  // candidate. The action key drops `selfId` from the resolved set, so a scorer is
+  // structurally absent from the approver scope (fail-closed, same as own-leave).
+  'offer.approve',
 ]);
 
 const ALL = { kind: 'ALL' };

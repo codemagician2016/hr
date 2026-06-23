@@ -6,4 +6,7 @@ module.exports = {
   recruitment: require('./recruitment.routes'),
   performance: require('./performance.routes'),
   essPerformance: require('./ess-performance.routes'),
+  // Feature 12 — UNAUTHENTICATED public careers board + apply. Mounted at
+  // /api/public/careers in backend/src/index.js (NOT under /api/hr).
+  publicCareers: require('./publicCareers.routes'),
 };

@@ -60,6 +60,15 @@ const PERMISSIONS = Object.freeze({
   canManageApprovalWorkflows: 'Build approval chains (create/edit/publish workflows)',
   canManageRoles:             'Create/edit roles & permissions',
   canManageHierarchy:         'Edit the reporting tree (re-parent employees)',
+  // Recruitment / ATS (Feature 12) — additive; no migration. canManageHiring is the
+  // recruiter/HR write key (jobs, screening, scorecards, scheduling, offers);
+  // canViewHiring is the TEAM/req-scoped read key (hiring managers, recruiters);
+  // canScoreInterview gates the interviewer self-service scorecard submit (an
+  // employee on a panel gets it scope-bound to THEIR interviews, not tenant-wide).
+  // canManageEmployees remains a super-set (back-compat with the existing routes).
+  canManageHiring:   'Create/configure jobs, screening, scorecards, schedule interviews, manage offers',
+  canViewHiring:     'View jobs, candidates, applications, merit lists (TEAM/req-scoped)',
+  canScoreInterview: 'Submit interview scorecards for assigned panels (interviewer self-service)',
 });
 
 const PERMISSION_KEYS = Object.freeze(Object.keys(PERMISSIONS));
@@ -91,6 +100,8 @@ const SYSTEM_ROLES = Object.freeze({
     canManagePerformanceCycle: true, canCalibrateRatings: true, canViewTeamPerformance: true,
     // Feature 10 — HR-Admin owns approval-chain config, role management + the org tree.
     canManageApprovalWorkflows: true, canManageRoles: true, canManageHierarchy: true,
+    // Feature 12 — HR-Admin owns the full recruitment/ATS surface.
+    canManageHiring: true, canViewHiring: true, canScoreInterview: true,
     // No canEditBilling / canEditDomain / canApprovePayroll — Owner/Finance only
   },
   // Finance — payroll + compensation + statutory + billing.
@@ -116,6 +127,18 @@ const SYSTEM_ROLES = Object.freeze({
     // sub-tree scope); calibration/cycle-config stay HR-only. Manager review-submit is
     // gated by canViewTeamPerformance + the reviewer≠reviewee SoD (APPROVAL_ACTIONS).
     canViewTeamPerformance: true,
+    // Feature 12 — a Manager who is also a hiring manager scores interviews for their
+    // panels (scope-bound) and views their requisitions' pipelines/merit lists.
+    canViewHiring: true, canScoreInterview: true,
+  },
+  // Recruiter — Feature 12 preset. Owns the recruitment/ATS surface (jobs,
+  // screening, scorecards, scheduling, offers) and the read keys, but nothing
+  // else (no comp/payroll/org). TEAM band keeps a recruiter scoped to their reqs.
+  Recruiter: {
+    canViewEmployees: true,
+    canManageHiring: true,
+    canViewHiring: true,
+    canScoreInterview: true,
   },
 });
 

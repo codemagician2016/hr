@@ -528,6 +528,9 @@ model Business {
   applications             Application[]
   interviews               Interview[]
   offers                   Offer[]
+  // Recruitment / ATS — Feature 12 (configurable scoring + merit list)
+  screeningQuestions       ScreeningQuestion[]
+  scorecardTemplates       ScorecardTemplate[]
   // Helpdesk
   helpdeskCategories       HelpdeskCategory[]
   helpdeskTickets          HelpdeskTicket[]
@@ -9668,13 +9671,22 @@ model Job {                                             // requisition
   status      JobStatus @default(DRAFT)
   publishedAt DateTime?
   closedAt    DateTime?
+  // Feature 12 — public posting + configurable merit-blend + scoring config.
+  publicSlug  String?                                  // careers URL token (unique per business when set)
+  isPublic    Boolean  @default(false)                 // appears on the public careers board
+  applicationWeightPct Decimal @db.Decimal(5, 2) @default(40)
+  interviewWeightPct   Decimal @db.Decimal(5, 2) @default(60) // app% + interview% must sum to 100 (validated)
+  scorecardTemplateId  String?                          // default interview scorecard for this job
+  hideCandidatePiiUntilStage StageKind?                 // optional blind-screening mask point
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   deletedAt   DateTime?
   version     Int      @default(0)
   stages      JobStage[]
   applications Application[]
+  screeningQuestions ScreeningQuestion[]
   @@unique([businessId, code])
+  @@unique([businessId, publicSlug])
   @@index([businessId, status])
 }
 
@@ -9746,13 +9758,31 @@ model Application {
   rating      Decimal? @db.Decimal(4, 2)
   rejectReason String?
   convertedEmployeeId String?                           // set on hire -> onboarding
+  // Feature 12 — the three score components + explainable snapshot (audit).
+  screeningScore    Decimal? @db.Decimal(7, 2)          // auto from screening answers
+  screeningMaxScore Decimal? @db.Decimal(7, 2)          // denominator for the % display
+  knockedOut        Boolean  @default(false)            // failed a knockout question -> auto-REJECTED
+  interviewScore    Decimal? @db.Decimal(7, 2)          // aggregated weighted interview total (0–100)
+  meritScore        Decimal? @db.Decimal(7, 2)          // blended rank score (the merit-list sort key)
+  scoreSnapshot     Json?                               // frozen breakdown for the "Why this rank?" panel
+  appliedSource     ApplicationSource @default(MANUAL)  // PUBLIC | REFERRAL | AGENCY | MANUAL | IMPORT
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   version     Int      @default(0)
   interviews  Interview[]
   offers      Offer[]
+  screeningAnswers ScreeningAnswer[]
   @@unique([businessId, jobId, candidateId])
   @@index([businessId, status])
+  @@index([businessId, jobId, meritScore])
+}
+
+enum ApplicationSource {
+  PUBLIC
+  REFERRAL
+  AGENCY
+  MANUAL
+  IMPORT
 }
 
 enum ApplicationStatus {
@@ -9780,8 +9810,16 @@ model Interview {
   feedbackJson Json?
   recommendation InterviewRecommendation?
   status      InterviewStatus @default(SCHEDULED)
+  // Feature 12 — scorecard template + slot/invitation details.
+  scorecardTemplateId String?                          // which skill set this round uses
+  durationMins      Int?     @default(45)
+  locationText      String?                            // room / address (ONSITE)
+  videoUrl          String?  @db.Text                  // meeting link (VIDEO)
+  candidateInviteSentAt DateTime?
+  panelInviteSentAt DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  scorecards  Scorecard[]
   @@index([businessId, applicationId])
 }
 
@@ -9822,6 +9860,8 @@ model Offer {
   respondedAt DateTime?
   expiresAt   DateTime?
   approvalRequestId String?
+  // Feature 12 — optional offer-letter e-signature (built-in e-sign provider).
+  signatureEnvelopeId String?                          // FK-by-id to SignatureEnvelope
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   version     Int      @default(0)
@@ -9837,6 +9877,146 @@ enum OfferStatus {
   DECLINED
   EXPIRED
   REVOKED
+}
+
+// ── §15.1 Recruitment / ATS — Feature 12 (configurable scoring + merit list) ──
+// Three-part scoring engine: (1) screening questions that auto-score on apply
+// (knockout + qualification points), (2) interview scorecards (HR-defined N
+// weighted skills rated 1–10; one card per interviewer), (3) a merit list that
+// auto-ranks by a transparent blend of application + interview score. Child
+// answer/rating models are APPEND-ONLY ledgers (no version). All tenant-scoped
+// on businessId.
+
+model ScreeningQuestion {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  jobId       String
+  job         Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  prompt      String                                   // "Do you have a CS engineering degree?"
+  kind        ScreeningKind                            // BOOLEAN | SINGLE_CHOICE | MULTI_CHOICE | NUMBER | TEXT | QUALIFICATION
+  required    Boolean  @default(true)
+  isKnockout  Boolean  @default(false)                 // a failing answer auto-rejects
+  knockoutValue Json?                                  // the value(s) that PASS (knockout fails if not matched)
+  maxPoints   Decimal? @db.Decimal(7, 2)               // cap for NUMBER / QUALIFICATION
+  sortOrder   Int
+  options     ScreeningOption[]                        // for *_CHOICE / QUALIFICATION (degree levels)
+  createdAt   DateTime @default(now())
+  deletedAt   DateTime?
+  @@unique([businessId, jobId, sortOrder])
+  @@index([businessId, jobId])
+}
+
+enum ScreeningKind {
+  BOOLEAN
+  SINGLE_CHOICE
+  MULTI_CHOICE
+  NUMBER
+  TEXT
+  QUALIFICATION
+}
+
+model ScreeningOption {
+  id          String   @id @default(uuid())
+  businessId  String
+  questionId  String
+  question    ScreeningQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  label       String                                   // "Master's degree" / "Yes" / "B.Tech CS"
+  value       String                                   // canonical value matched against answers / knockoutValue
+  points      Decimal  @db.Decimal(7, 2) @default(0)   // Master=6, Bachelor=4, "CS engineering"=20
+  sortOrder   Int
+  @@index([businessId, questionId])
+}
+
+model ScreeningAnswer {
+  id            String   @id @default(uuid())
+  businessId    String
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  questionId    String
+  questionPrompt String                                // snapshot (the question may be edited later)
+  answerValue   Json                                   // bool / chosen value(s) / number / text
+  pointsAwarded Decimal  @db.Decimal(7, 2) @default(0)
+  knockoutFailed Boolean @default(false)
+  createdAt     DateTime @default(now())
+  @@index([businessId, applicationId])
+}
+
+model ScorecardTemplate {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name        String                                   // "Backend Engineer — Tech Round"
+  description String?
+  aggregation ScorecardAggregation @default(MEAN)      // how multi-interviewer rows combine
+  isActive    Boolean  @default(true)
+  skills      ScorecardSkill[]
+  createdAt   DateTime @default(now())
+  deletedAt   DateTime?
+  version     Int      @default(0)
+  @@unique([businessId, name])
+  @@index([businessId, isActive])
+}
+
+enum ScorecardAggregation {
+  MEAN
+  TRIMMED_MEAN
+  MAX
+  MEDIAN
+}
+
+model ScorecardSkill {
+  id          String   @id @default(uuid())
+  businessId  String
+  templateId  String
+  template    ScorecardTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  name        String                                   // "Data Structures", "System Design"
+  description String?
+  weight      Decimal  @db.Decimal(5, 2) @default(1)   // relative weight; Σ normalised at compute time
+  scaleMin    Int      @default(1)
+  scaleMax    Int      @default(10)
+  sortOrder   Int
+  @@unique([businessId, templateId, sortOrder])
+  @@index([businessId, templateId])
+}
+
+model Scorecard {
+  id            String   @id @default(uuid())
+  businessId    String
+  interviewId   String
+  interview     Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  interviewerEmployeeId String                         // bound to the caller's own Employee (SoD)
+  templateId    String                                 // snapshot of which template was used
+  status        ScorecardStatus @default(DRAFT)        // DRAFT | SUBMITTED
+  weightedTotal Decimal? @db.Decimal(7, 2)             // this interviewer's normalised 0–100
+  recommendation InterviewRecommendation?              // reuse the existing enum
+  notes         String?  @db.Text
+  submittedAt   DateTime?
+  ratings       ScorecardRating[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  version       Int      @default(0)
+  @@unique([businessId, interviewId, interviewerEmployeeId]) // one card per interviewer per interview
+  @@index([businessId, interviewId])
+}
+
+enum ScorecardStatus {
+  DRAFT
+  SUBMITTED
+}
+
+model ScorecardRating {
+  id          String   @id @default(uuid())
+  businessId  String
+  scorecardId String
+  scorecard   Scorecard @relation(fields: [scorecardId], references: [id], onDelete: Cascade)
+  skillId     String                                   // FK-by-id to ScorecardSkill (snapshot below)
+  skillName   String                                   // snapshot
+  weight      Decimal  @db.Decimal(5, 2)               // snapshot of the skill weight at submit
+  score       Int                                      // the 1–10 mark
+  comment     String?
+  @@unique([businessId, scorecardId, skillId])
+  @@index([businessId, scorecardId])
 }
 
 // ── §16 Helpdesk (HR case management) ──

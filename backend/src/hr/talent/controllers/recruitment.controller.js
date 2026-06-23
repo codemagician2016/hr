@@ -46,9 +46,35 @@ const JOB_FIELDS = [
   'entityId', 'code', 'title', 'departmentId', 'designationId', 'locationId',
   'countryCode', 'employmentType', 'openings', 'description',
   'minSalary', 'maxSalary', 'currencyCode', 'hiringManagerId', 'status',
+  // Feature 12 — public posting + merit-blend + scoring config.
+  'publicSlug', 'isPublic', 'applicationWeightPct', 'interviewWeightPct',
+  'scorecardTemplateId', 'hideCandidatePiiUntilStage',
 ];
 const JOB_REQUIRED = ['code', 'title', 'countryCode', 'employmentType'];
 const pickJob = picker(JOB_FIELDS);
+
+// Feature 12 — the application/interview merit weights must sum to 100 (§4.1).
+// Returns an error message if a supplied pair is invalid, else null.
+function validateMeritWeights(body) {
+  const hasA = body.applicationWeightPct !== undefined && body.applicationWeightPct !== null;
+  const hasB = body.interviewWeightPct !== undefined && body.interviewWeightPct !== null;
+  if (!hasA && !hasB) return null; // unchanged → keep DB defaults (40/60)
+  const a = Number(hasA ? body.applicationWeightPct : 40);
+  const b = Number(hasB ? body.interviewWeightPct : 60);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || a < 0 || b < 0) {
+    return 'applicationWeightPct and interviewWeightPct must be non-negative numbers';
+  }
+  if (Math.round((a + b) * 100) / 100 !== 100) {
+    return `applicationWeightPct (${a}) + interviewWeightPct (${b}) must total 100`;
+  }
+  return null;
+}
+
+// Slugify a public careers token (lowercase, hyphenated, ascii).
+function slugify(s) {
+  return String(s || '').toLowerCase().trim()
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || null;
+}
 
 async function listJobs(req, res, next) {
   try {
@@ -80,7 +106,12 @@ async function createJob(req, res, next) {
         return res.status(400).json({ message: `${r} is required` });
       }
     }
-    const item = await prisma.job.create({ data: { ...pickJob(req.body), businessId } });
+    const weightErr = validateMeritWeights(req.body);
+    if (weightErr) return res.status(400).json({ message: weightErr });
+    const data = { ...pickJob(req.body), businessId };
+    // auto-derive a public careers slug when made public without one
+    if (data.isPublic && !data.publicSlug) data.publicSlug = slugify(`${data.title}-${data.code}`);
+    const item = await prisma.job.create({ data });
     res.status(201).json(item);
   } catch (e) { if (e.code === 'P2002') return res.status(409).json({ message: DUP_MSG }); next(e); }
 }
@@ -90,7 +121,11 @@ async function updateJob(req, res, next) {
     const { businessId } = req.user;
     const existing = await prisma.job.findFirst({ where: { id: req.params.id, businessId, deletedAt: null } });
     if (!existing) return res.status(404).json({ message: 'Not found' });
-    const item = await prisma.job.update({ where: { id: req.params.id }, data: pickJob(req.body) });
+    const weightErr = validateMeritWeights(req.body);
+    if (weightErr) return res.status(400).json({ message: weightErr });
+    const data = pickJob(req.body);
+    if (data.isPublic && !data.publicSlug && !existing.publicSlug) data.publicSlug = slugify(`${existing.title}-${existing.code}`);
+    const item = await prisma.job.update({ where: { id: req.params.id }, data });
     res.json(item);
   } catch (e) { if (e.code === 'P2002') return res.status(409).json({ message: DUP_MSG }); next(e); }
 }
@@ -346,9 +381,17 @@ async function moveApplication(req, res, next) {
 const INTERVIEW_FIELDS = [
   'round', 'scheduledAt', 'mode', 'interviewerIds', 'feedbackJson',
   'recommendation', 'status',
+  // Feature 12 — scorecard template + slot/invitation details.
+  'scorecardTemplateId', 'durationMins', 'locationText', 'videoUrl',
 ];
 const INTERVIEW_DATES = ['scheduledAt'];
 const pickInterview = picker(INTERVIEW_FIELDS, INTERVIEW_DATES);
+
+// Normalise a CSV / array of interviewer ids to a clean array.
+function parsePanel(v) {
+  if (Array.isArray(v)) return v.map((s) => String(s).trim()).filter(Boolean);
+  return String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
+}
 
 async function listInterviews(req, res, next) {
   try {
@@ -367,10 +410,33 @@ async function createInterview(req, res, next) {
     if (!applicationId || round === undefined || round === null || !mode) {
       return res.status(400).json({ message: 'applicationId, round and mode are required' });
     }
-    const app = await prisma.application.findFirst({ where: { id: applicationId, businessId }, select: { id: true } });
+    const app = await prisma.application.findFirst({ where: { id: applicationId, businessId, job: { deletedAt: null } }, include: { job: { select: { scorecardTemplateId: true } } } });
     if (!app) return res.status(404).json({ message: 'Application not found' });
-    const item = await prisma.interview.create({
-      data: { ...pickInterview(req.body), applicationId, businessId },
+
+    const data = pickInterview(req.body);
+    // normalise the panel to a clean CSV
+    if (req.body.interviewerIds !== undefined) data.interviewerIds = parsePanel(req.body.interviewerIds).join(',');
+    // default the round's scorecard template to the job's default if unset
+    if (!data.scorecardTemplateId && app.job && app.job.scorecardTemplateId) {
+      data.scorecardTemplateId = app.job.scorecardTemplateId;
+    }
+    // validate the chosen template belongs to this tenant
+    if (data.scorecardTemplateId) {
+      const tpl = await prisma.scorecardTemplate.findFirst({ where: { id: data.scorecardTemplateId, businessId, deletedAt: null }, select: { id: true } });
+      if (!tpl) return res.status(404).json({ message: 'Scorecard template not found' });
+    }
+
+    const panel = parsePanel(data.interviewerIds);
+    const item = await prisma.$transaction(async (tx) => {
+      const iv = await tx.interview.create({ data: { ...data, applicationId, businessId } });
+      // pre-create one blank DRAFT scorecard per interviewer (the "remember each
+      // candidate" cards) — bound to each panellist's own Employee id (SoD).
+      for (const empId of panel) {
+        try {
+          await tx.scorecard.create({ data: { businessId, interviewId: iv.id, interviewerEmployeeId: empId, templateId: data.scorecardTemplateId || '', status: 'DRAFT' } });
+        } catch (err) { if (err.code !== 'P2002') throw err; }
+      }
+      return iv;
     });
     res.status(201).json(item);
   } catch (e) { next(e); }
@@ -571,6 +637,56 @@ async function declineOffer(req, res, next) {
   } catch (e) { next(e); }
 }
 
+// POST /offers/:id/render-letter — render the offer-letter PDF via the Letters
+// service (Feature 9 issueLetter) → Offer.letterUrl. A candidate is not yet an
+// Employee, so we render in a template-only mode using merge overrides; when a
+// templateId is not supplied (or the Letters service cannot render without an
+// employee context) we surface a clear 422 rather than 500. This is the optional
+// slice-12e seam — the e-sign request reads Offer.letterUrl.
+async function renderOfferLetter(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const offer = await prisma.offer.findFirst({
+      where: { id: req.params.id, businessId },
+      include: { application: { include: { candidate: true, job: true } } },
+    });
+    if (!offer) return res.status(404).json({ message: 'Not found' });
+    const { templateId } = req.body || {};
+    if (!templateId) {
+      return res.status(422).json({ message: 'A Letters templateId is required to render the offer letter.' });
+    }
+    let letters;
+    try { letters = require('../../letters/letters.service'); } catch { letters = null; }
+    if (!letters || !letters.issueLetter) {
+      return res.status(501).json({ message: 'Letters service unavailable' });
+    }
+    const cand = offer.application && offer.application.candidate;
+    const job = offer.application && offer.application.job;
+    try {
+      const result = await letters.issueLetter(prisma, {
+        businessId, actorUserId: req.user.id, templateId, employeeId: null,
+        perms: { canGenerateLetters: true },
+        mode: 'issue',
+        overrides: {
+          // candidate merge context for the offer letter
+          candidateName: cand ? `${cand.firstName || ''} ${cand.lastName || ''}`.trim() : '',
+          candidateEmail: cand ? cand.email : '',
+          jobTitle: job ? job.title : '',
+          joiningDate: offer.joiningDate ? new Date(offer.joiningDate).toISOString().slice(0, 10) : '',
+          ctcAnnual: offer.ctcAnnual ? String(offer.ctcAnnual) : '',
+        },
+      });
+      const url = (result && (result.fileUrl || result.url)) || (result && result.document && result.document.fileUrl) || null;
+      const updated = await prisma.offer.update({ where: { id: offer.id }, data: { letterUrl: url, version: { increment: 1 } } });
+      return res.json({ letterUrl: updated.letterUrl, referenceNo: result && result.referenceNo });
+    } catch (err) {
+      // The Letters template likely requires an employee context the candidate
+      // lacks — return a clear, non-500 error so the UI can guide the user.
+      return res.status(422).json({ message: `Could not render the offer letter from this template: ${err.message || 'template requires an employee context'}.` });
+    }
+  } catch (e) { next(e); }
+}
+
 module.exports = {
   // jobs
   listJobs, getJob, createJob, updateJob, removeJob, publishJob, closeJob,
@@ -582,7 +698,7 @@ module.exports = {
   // interviews
   listInterviews, createInterview, updateInterview,
   // offers
-  listOffers, getOffer, createOffer, sendOffer, acceptOffer, declineOffer,
+  listOffers, getOffer, createOffer, sendOffer, acceptOffer, declineOffer, renderOfferLetter,
   // exported for unit-testing the pure 50% pre-flight
-  _internals: { offerWageCheck, toMinor },
+  _internals: { offerWageCheck, toMinor, validateMeritWeights, slugify, parsePanel },
 };
