@@ -22,6 +22,7 @@ const { computeLeaveUnits, consecutiveCalendarDays } = require('../leave/calenda
 const { validateRequest } = require('../leave/validators');
 const { loadApplyContext } = require('../leave/leaveContext');
 const ledger = require('../leave/ledger');
+const { buildHistory } = require('../leave/history');
 
 // 409 reason codes that map to a conflict rather than a 400 (balance/overlap).
 const CONFLICT_CODES = new Set(['INSUFFICIENT_BALANCE', 'NEGATIVE_CAP_EXCEEDED', 'OVERLAPPING_LEAVE']);
@@ -254,10 +255,46 @@ async function cancelRequest(req, res, next) {
   }
 }
 
+// ── GET /me/leave/history — own leave history (every movement + request) ──────
+// SELF_ONLY: the subject is resolved from the session, never the client. Returns
+// the employee's ENTIRE LeaveTransaction ledger (applications AND accrual / lapse
+// / encashment / adjustment movements), shaped into a chronological, plain-English
+// feed with signed deltas + a running balance. Optional ?leaveTypeId / ?periodCode
+// narrows the feed; a terminated/inactive employee gets an empty feed (lockout).
+async function listHistory(req, res, next) {
+  try {
+    const employeeId = await resolveActiveSelfId(req);
+    if (!employeeId) return res.json({ items: [] });
+    const { businessId } = req.customer;
+
+    const where = { businessId, employeeId };
+    if (req.query.leaveTypeId) where.leaveTypeId = req.query.leaveTypeId;
+    // periodCode scopes via the bound balance lot (movements carry leaveBalanceId).
+    if (req.query.periodCode) {
+      const lots = await prisma.leaveBalance.findMany({
+        where: { businessId, employeeId, periodCode: req.query.periodCode },
+        select: { id: true },
+      });
+      where.leaveBalanceId = { in: lots.map((l) => l.id) };
+    }
+
+    const rows = await prisma.leaveTransaction.findMany({
+      where,
+      orderBy: { createdAt: 'asc' },
+      take: 1000,
+      include: { leaveType: { select: { id: true, code: true, name: true, color: true, unit: true } } },
+    });
+    // newest-first for display; the running balance is computed oldest→newest inside.
+    const items = buildHistory(rows).reverse();
+    res.json({ items });
+  } catch (e) { next(e); }
+}
+
 module.exports = {
   listTypes,
   listBalances,
   listRequests,
+  listHistory,
   applyForLeave,
   cancelRequest,
 };

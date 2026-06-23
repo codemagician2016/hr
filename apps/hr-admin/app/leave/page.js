@@ -30,6 +30,8 @@ import { useTenantCountries } from '@/lib/useTenantCountries';
 const TABS = [
   { key: 'requests', label: 'Requests' },
   { key: 'balances', label: 'Balances' },
+  { key: 'history', label: 'History' },
+  { key: 'reconciliation', label: 'Reconciliation' },
   { key: 'calendar', label: 'Calendar' },
   { key: 'reports', label: 'Reports' },
   { key: 'carryforward', label: 'Year-end' },
@@ -401,6 +403,261 @@ function BalancesTab() {
             load();
           }}
         />
+      )}
+    </div>
+  );
+}
+
+// ─── History (employee picker → chronological leave history) ─────────────────
+// Every request decision AND every ledger movement (accrued/taken/encashed/
+// lapsed/adjusted), plain-English-labelled with a signed delta + running balance.
+// Reads GET /employees/:id/history (F1 scope-guarded server-side; 404 out of tree).
+
+function unitWord(u) {
+  const x = String(u || 'DAYS').toLowerCase();
+  return x === 'weeks' ? 'weeks' : x === 'hours' ? 'hours' : 'days';
+}
+function dirColor(dir) {
+  if (dir === 'credit') return 'text-emerald-700';
+  if (dir === 'debit') return 'text-red-700';
+  return 'text-gray-500';
+}
+
+function HistoryTab() {
+  const [employee, setEmployee] = useState(null);
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(() => {
+    if (!employee?.id) {
+      setRows(null);
+      return;
+    }
+    setLoading(true);
+    setError('');
+    get(`/api/hr/leave/employees/${employee.id}/history`)
+      .then((r) => setRows(asList(r)))
+      .catch((e) => {
+        setError(e.data?.message || e.message || 'Failed to load leave history.');
+        setRows([]);
+      })
+      .finally(() => setLoading(false));
+  }, [employee]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const columns = [
+    {
+      key: 'when',
+      header: 'When',
+      cellClassName: 'whitespace-nowrap text-gray-500',
+      render: (r) => formatAdminDate(r.appliedAt || r.createdAt),
+    },
+    {
+      key: 'type',
+      header: 'Leave type',
+      render: (r) => (
+        <span className="inline-flex items-center gap-2 font-medium text-gray-900">
+          {r.leaveType?.color && <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: r.leaveType.color }} aria-hidden="true" />}
+          {r.leaveType?.name || '—'}
+        </span>
+      ),
+    },
+    { key: 'label', header: 'Movement', render: (r) => <span className="text-gray-700">{r.label}</span> },
+    {
+      key: 'dates',
+      header: 'Dates',
+      render: (r) => (r.startDate ? `${r.startDate}${r.endDate && r.endDate !== r.startDate ? ` → ${r.endDate}` : ''}` : '—'),
+    },
+    {
+      key: 'delta',
+      header: 'Change',
+      className: 'text-right',
+      cellClassName: 'text-right tabular-nums',
+      render: (r) => (
+        <span className={`font-semibold ${dirColor(r.direction)}`}>
+          {r.delta ? `${r.delta > 0 ? '+' : '−'}${qty(Math.abs(r.delta))} ${unitWord(r.unit)}` : '—'}
+        </span>
+      ),
+    },
+    {
+      key: 'balanceAfter',
+      header: 'Balance after',
+      className: 'text-right',
+      cellClassName: 'text-right tabular-nums text-gray-700',
+      render: (r) => (r.balanceAfter != null ? qty(r.balanceAfter) : '—'),
+    },
+    { key: 'status', header: 'Status', render: (r) => <StatusBadge status={r.status} /> },
+    { key: 'reason', header: 'Reason', render: (r) => <span className="text-gray-500">{r.reason || '—'}</span> },
+  ];
+
+  return (
+    <div className="space-y-5">
+      <div className="max-w-md">
+        <EmployeePicker value={employee} onChange={setEmployee} />
+      </div>
+
+      {error && <ErrorBanner message={error} />}
+
+      {!employee ? (
+        <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-10 text-center">
+          <p className="text-sm font-medium text-gray-900">Pick an employee to see their leave history.</p>
+          <p className="text-sm text-gray-500 mt-1">
+            Every request and every balance movement (earned, taken, lapsed, encashed, adjusted), newest first.
+            Green adds to the balance, red takes away.
+          </p>
+        </div>
+      ) : (
+        <DataTable
+          columns={columns}
+          rows={rows}
+          loading={loading}
+          emptyText="No leave history for this employee yet."
+          rowKey={(r) => r.id}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Reconciliation (employee + period + type → a statement that balances) ───
+// GET /employees/:id/reconciliation?periodCode=&leaveTypeId= returns one lot per
+// leave type. The closing identity is laid out as line items that visibly sum to
+// the closing balance; drift against the persisted projection is flagged.
+
+function ReconLine({ label, sign, value, kind, unit }) {
+  const tone =
+    kind === 'credit' ? 'text-emerald-700' :
+    kind === 'debit' ? 'text-red-700' :
+    'text-gray-800';
+  const display = `${sign > 0 ? '+' : '−'} ${qty(Math.abs(Number(value)))} ${unit}`;
+  return (
+    <div className="flex items-center justify-between py-1.5 border-b border-gray-100 last:border-0">
+      <span className="text-sm text-gray-600">{label}</span>
+      <span className={`text-sm tabular-nums font-medium ${tone}`}>{value === 0 ? `· 0 ${unit}` : display}</span>
+    </div>
+  );
+}
+
+function ReconCard({ group }) {
+  const unit = unitWord(group.unit || group.leaveType?.unit);
+  const balances = group.reconciled;
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+      <div className="mb-3 flex items-center justify-between">
+        <span className="inline-flex items-center gap-2 text-sm font-semibold text-gray-900">
+          {group.leaveType?.color && <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: group.leaveType.color }} aria-hidden="true" />}
+          {group.leaveType?.name || group.leaveTypeId}
+        </span>
+        <span
+          className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${balances ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}
+          title={balances ? 'Ledger matches the persisted balance' : `Drift of ${qty(group.drift)} vs the persisted balance`}
+        >
+          {balances ? 'Balances ✓' : `Drift ${qty(group.drift)}`}
+        </span>
+      </div>
+
+      <div className="rounded-xl bg-gray-50 px-3 py-2">
+        {group.lines.map((ln) => (
+          <ReconLine key={ln.key} {...ln} unit={unit} />
+        ))}
+        <div className="mt-1 flex items-center justify-between border-t-2 border-gray-300 pt-2">
+          <span className="text-sm font-semibold text-gray-900">= Closing balance</span>
+          <span className="text-base font-bold tabular-nums text-gray-900">{qty(group.closing)} {unit}</span>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-[12px] text-gray-500">
+        <span>Available now (closing − on hold): <span className="font-medium text-gray-800 tabular-nums">{qty(group.available)} {unit}</span></span>
+        {Number(group.pendingApproval) > 0 && (
+          <span>On hold for pending requests: <span className="font-medium text-amber-700 tabular-nums">{qty(group.pendingApproval)} {unit}</span></span>
+        )}
+        {group.persistedClosing != null && (
+          <span>Recorded balance: <span className="font-medium text-gray-800 tabular-nums">{qty(group.persistedClosing)} {unit}</span></span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ReconciliationTab() {
+  const defaultPeriod = useMemo(() => {
+    // India FY "YYYY-YY" for the current year (the most common period code shape).
+    const now = new Date();
+    const y = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+    return `${y}-${String((y + 1) % 100).padStart(2, '0')}`;
+  }, []);
+  const [employee, setEmployee] = useState(null);
+  const [periodCode, setPeriodCode] = useState(defaultPeriod);
+  const [groups, setGroups] = useState(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(() => {
+    if (!employee?.id || !periodCode.trim()) {
+      setGroups(null);
+      return;
+    }
+    setLoading(true);
+    setError('');
+    get(`/api/hr/leave/employees/${employee.id}/reconciliation`, { periodCode: periodCode.trim() })
+      .then((r) => setGroups(asList(r)))
+      .catch((e) => {
+        setError(e.data?.message || e.message || 'Failed to load the reconciliation.');
+        setGroups([]);
+      })
+      .finally(() => setLoading(false));
+  }, [employee, periodCode]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  return (
+    <div className="space-y-5">
+      <p className="text-sm text-gray-500 max-w-3xl">
+        A line-by-line statement per leave type for one period:{' '}
+        <span className="font-medium text-gray-700">Opening + Accrued − Taken − Encashed − Lapsed + Adjusted = Closing</span>.
+        Recomputed from the ledger and cross-checked against the recorded balance — any drift is flagged.
+      </p>
+
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="max-w-md flex-1 min-w-[240px]">
+          <EmployeePicker value={employee} onChange={setEmployee} />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="recon-period">Period code</label>
+          <input
+            id="recon-period"
+            type="text"
+            value={periodCode}
+            onChange={(e) => setPeriodCode(e.target.value)}
+            placeholder='e.g. "2026-27"'
+            className="w-44 px-4 py-2.5 border border-gray-300 rounded-lg text-sm"
+          />
+        </div>
+      </div>
+
+      {error && <ErrorBanner message={error} />}
+
+      {!employee ? (
+        <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-10 text-center">
+          <p className="text-sm font-medium text-gray-900">Pick an employee and a period to see the reconciliation.</p>
+          <p className="text-sm text-gray-500 mt-1">Each leave type gets its own statement that visibly balances to the closing figure.</p>
+        </div>
+      ) : loading ? (
+        <Spinner />
+      ) : !groups || groups.length === 0 ? (
+        <Empty text="No leave balances for this employee in that period." />
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {groups.map((g) => (
+            <ReconCard key={g.leaveTypeId} group={g} />
+          ))}
+        </div>
       )}
     </div>
   );
@@ -908,6 +1165,8 @@ function LeaveInner() {
       <Tabs tabs={TABS} active={tab} onChange={setTab} />
       {tab === 'requests' && <RequestsTab />}
       {tab === 'balances' && <BalancesTab />}
+      {tab === 'history' && <HistoryTab />}
+      {tab === 'reconciliation' && <ReconciliationTab />}
       {tab === 'calendar' && <CalendarTab />}
       {tab === 'reports' && <ReportsTab />}
       {tab === 'carryforward' && <CarryForwardTab />}
