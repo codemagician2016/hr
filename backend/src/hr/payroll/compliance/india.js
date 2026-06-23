@@ -977,6 +977,9 @@ function compute(ctx = {}) {
       code: 'EPF',
       label: 'Employee Provident Fund (A/c 1)',
       amountMinor: epf.epfEeMinor,
+      // Carry the ACTUAL PF wage base (post-cap) the contribution was computed on
+      // so filing reads the real wage rather than reconstructing it from the rate.
+      baseMinor: epf.pfWageUsedMinor,
       explain: `12% of PF wage ₹${(epf.pfWageUsedMinor / PAISE).toFixed(2)} (${capAtCeiling ? 'capped at ₹15,000' : 'full wage'})`,
     });
 
@@ -984,18 +987,23 @@ function compute(ctx = {}) {
       code: 'EPF_ER',
       label: 'Employer EPF (A/c 1, 3.67% balance)',
       amountMinor: epf.epfErMinor,
+      baseMinor: epf.pfWageUsedMinor,
       explain: `12% of PF wage minus EPS ₹${(epf.epsMinor / PAISE).toFixed(2)} (balance method)`,
     });
     employerContributions.push({
       code: 'EPS_ER',
       label: 'Employer Pension Scheme (A/c 10, 8.33%)',
       amountMinor: epf.epsMinor,
+      // EPS wage base is min(wage, ₹15,000) — the engine-derived epsBaseMinor.
+      baseMinor: epf.epsBaseMinor,
       explain: `8.33% of min(wage, ₹15,000), hard-capped at ₹1,250`,
     });
     employerContributions.push({
       code: 'EDLI',
       label: 'EDLI Insurance (A/c 21, 0.50%)',
       amountMinor: epf.edliMinor,
+      // EDLI wage base is the same min(wage, ₹15,000) base as EPS.
+      baseMinor: epf.epsBaseMinor,
       explain: `0.50% of min(wage, ₹15,000), capped ₹75`,
     });
     employerContributions.push({

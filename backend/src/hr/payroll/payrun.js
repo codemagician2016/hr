@@ -415,6 +415,9 @@ async function persistTransition({ prisma, payRunId, from, to, ctx = {} }) {
     data.approvedBy = ctx.actorId ?? null;
     data.reviewedBy = ctx.actorId ?? null;
     data.reviewedAt = ctx.at ?? new Date();
+    // Persist the reviewed-totals anchor (set on the direct no-submit path so the
+    // STALE_TOTALS invariant always has a stored hash even without a submit step).
+    if (ctx.totalsHash != null) data.totalsHash = ctx.totalsHash;
   }
   if (to === STATE.INPUTS_LOCKED) {
     data.lockedAt = ctx.at ?? new Date();

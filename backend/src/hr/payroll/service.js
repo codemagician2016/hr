@@ -821,10 +821,23 @@ function toDec(minor) {
 /** Map known statutory codes to PayRunLine rollup columns (Decimal). */
 function statutoryRollups(r) {
   const byCode = {};
-  for (const d of r.employeeDeductions || []) byCode[d.code] = d.amountMinor;
-  for (const c of r.employerContributions || []) byCode[c.code] = c.amountMinor;
+  const baseByCode = {};
+  for (const d of r.employeeDeductions || []) {
+    byCode[d.code] = d.amountMinor;
+    if (d.baseMinor != null) baseByCode[d.code] = d.baseMinor;
+  }
+  for (const c of r.employerContributions || []) {
+    byCode[c.code] = c.amountMinor;
+    if (c.baseMinor != null) baseByCode[c.code] = c.baseMinor;
+  }
   const pick = (...codes) => {
     for (const c of codes) if (byCode[c] != null) return toDec(byCode[c]);
+    return null;
+  };
+  // Pick the actual statutory WAGE BASE the engine computed a component on (the
+  // real ECR/24Q wage), NOT a contribution back-derived by dividing by a rate.
+  const pickBase = (...codes) => {
+    for (const c of codes) if (baseByCode[c] != null) return toDec(baseByCode[c]);
     return null;
   };
   return {
@@ -840,6 +853,10 @@ function statutoryRollups(r) {
     esct: pick('ESCT'),
     accLevy: pick('ACC'),
     studentLoan: pick('SLOAN', 'STUDENT_LOAN'),
+    // Persist the real PF/EPS/EDLI wage bases so filing reads them straight through.
+    pfWagesBase: pickBase('EPF', 'EPF_EE', 'EPF_ER'),
+    epsWagesBase: pickBase('EPS_ER', 'EPS'),
+    edliWagesBase: pickBase('EDLI'),
   };
 }
 
@@ -890,15 +907,17 @@ function buildPayslipSnapshot(r, payRun, ln) {
 }
 
 /**
- * approveRun — maker-checker. Approver must differ from EVERY maker on the run
- * (the preparer/computer AND, when a review gate was used, the submitter).
- * Transitions COMPUTED|REVIEW -> APPROVED via persistTransition. Blocking
- * anomalies (engine + variance) gate approval; STALE_TOTALS rejects an approve
- * whose reviewed totals no longer match (silent recompute since review).
+ * approveRun — maker-checker. ALL integrity gates are SERVER-SIDE; the caller
+ * supplies only { businessId, actorId, payRunId } — there is NO client-supplied
+ * fourEyes/totalsHash that can weaken separation-of-duties or the staleness gate:
+ *   - variance BLOCKERs are materialised FRESH here, then counted (fail-closed);
+ *   - four-eyes is derived from tenant policy (maker≠checker, server-enforced);
+ *   - STALE_TOTALS is recomputed from persisted totals vs the reviewed anchor.
+ * Transitions COMPUTED|REVIEW -> APPROVED via persistTransition.
  *
- * @param {Object} args { businessId, actorId, payRunId, fourEyes?, totalsHash? }
+ * @param {Object} args { businessId, actorId, payRunId }
  */
-async function approveRun({ businessId, actorId, payRunId, fourEyes = true, totalsHash }) {
+async function approveRun({ businessId, actorId, payRunId }) {
   const payRun = await prisma.payRun.findFirst({ where: { id: payRunId, businessId } });
   if (!payRun) throw notFound('Pay run not found');
 
@@ -906,23 +925,49 @@ async function approveRun({ businessId, actorId, payRunId, fourEyes = true, tota
     throw badRequest('NOT_CALCULATED', `Approval requires a COMPUTED or REVIEW run (current: ${payRun.status})`);
   }
 
-  // Re-evaluate blocking anomalies from persisted line errors + run-level variance.
+  // (1) FAIL-CLOSED variance gate (finding #1): materialise the BLOCKER set FRESH
+  // from the current persisted lines AT APPROVE — never trust that the operator
+  // (or submit) already ran variance. An unreviewed run with blockers cannot be
+  // approved even on the direct CALCULATED→APPROVED path.
+  await computeVariance({ businessId, payRunId });
   const blockingAnomalies = await recountBlockers(businessId, payRunId);
 
-  // Pure state-machine guard (NOT_CALCULATED, MAKER_CHECKER, STALE_TOTALS, OPEN_BLOCKERS).
+  // (2) Four-eyes is a SERVER-SIDE invariant (finding #2): derived from tenant
+  // policy, NEVER from the request. {fourEyes:false} in a body is ignored.
+  const fourEyes = await resolveFourEyesPolicy(businessId);
+
+  // (3) STALE_TOTALS server-side (finding #3): recompute the CURRENT totals hash
+  // from the persisted run and compare to the hash captured at submit/compute.
+  // A silent recompute since review changes the hash → reject, independent of any
+  // client-echoed value. Re-read the run so the totals reflect any recompute.
+  const fresh = await prisma.payRun.findFirst({ where: { id: payRunId, businessId } });
+  const currentTotalsHash = totalsHashOf(fresh);
+  if (fresh.totalsHash != null && currentTotalsHash !== fresh.totalsHash) {
+    throw badRequest(
+      'STALE_TOTALS',
+      'Totals changed since review — re-open and re-review before approving.',
+    );
+  }
+  // Anchor the reviewed-totals invariant on the direct (no-submit) path, where no
+  // totalsHash was ever stored, so the artifact the checker approves is pinned.
+  const anchoredHash = fresh.totalsHash != null ? fresh.totalsHash : currentTotalsHash;
+
+  // Pure state-machine guard (NOT_CALCULATED, MAKER_CHECKER, OPEN_BLOCKERS). The
+  // identity check is unconditional when fourEyes is on (server-resolved); we pass
+  // the server-resolved hash so an internal STALE check stays consistent.
   const from = payRun.status === 'REVIEW' ? STATE.IN_REVIEW : STATE.CALCULATED;
   const runState = {
     id: payRun.id,
     status: from,
     preparerId: payRun.computedBy || payRun.lockedBy,
     submittedBy: payRun.submittedBy || null,
-    totalsHash: payRun.totalsHash || null,
+    totalsHash: anchoredHash,
     blockingAnomalies,
     fourEyes,
   };
-  transition(runState, STATE.APPROVED, { actorId, at: new Date(), blockingAnomalies, fourEyes, totalsHash });
+  transition(runState, STATE.APPROVED, { actorId, at: new Date(), blockingAnomalies, fourEyes, totalsHash: anchoredHash });
 
-  await persistTransition({ prisma, payRunId, from, to: STATE.APPROVED, ctx: { actorId } });
+  await persistTransition({ prisma, payRunId, from, to: STATE.APPROVED, ctx: { actorId, totalsHash: anchoredHash } });
 
   // Sensitive action — audit the approval (best-effort, tenant-scoped).
   await writeAudit({
@@ -940,7 +985,7 @@ async function approveRun({ businessId, actorId, payRunId, fourEyes = true, tota
       preparerId: payRun.computedBy || payRun.lockedBy || null,
       submitterId: payRun.submittedBy || null,
       reviewerId: actorId,
-      totalsHash: payRun.totalsHash || null,
+      totalsHash: anchoredHash,
     },
   });
 
@@ -995,6 +1040,9 @@ async function getRun({ businessId, payRunId }) {
   for (const l of payRun.lines) {
     const errs = Array.isArray(l.errorJson) ? l.errorJson : [];
     for (const e of errs) anomalies.push({ employeeId: l.employeeId, ...e });
+    // Variance findings live in a separate column (finding #7) — surface both.
+    const varns = Array.isArray(l.varianceJson) ? l.varianceJson : [];
+    for (const v of varns) anomalies.push({ employeeId: l.employeeId, ...v });
   }
 
   return {
@@ -1301,13 +1349,45 @@ async function resolveThresholds(businessId) {
 }
 
 /**
+ * resolveFourEyesPolicy — derive the four-eyes (maker≠checker) requirement
+ * SERVER-SIDE from persisted tenant config, NOT from the request body (finding
+ * #2). Four-eyes is ON by default and can ONLY be relaxed by an explicitly-
+ * persisted tenant flag `allowSingleOperator:true` (a deliberate single-operator
+ * tenant) — never by anything the approver can set on their own request. A
+ * client-supplied {fourEyes:false} CANNOT disable separation of duties.
+ *
+ * @returns {boolean} true => enforce maker≠checker.
+ */
+async function resolveFourEyesPolicy(businessId) {
+  const row = await prisma.varianceThreshold.findUnique({ where: { businessId } }).catch(() => null);
+  const cfg = row && row.config && typeof row.config === 'object' ? row.config : {};
+  // Only an explicit, persisted single-operator opt-in relaxes four-eyes.
+  return cfg.allowSingleOperator === true ? false : true;
+}
+
+/**
  * computeVariance — fetch the prior period (same entity+calendar+type, the
  * immediately-lower sequenceInYear), run the PURE variance engine, persist the
  * per-line findings to PayRunLine.errorJson (BLOCKER/WARNING only) and the
  * run-level roll-up to PayRun.varianceReport. Returns the report.
  */
+// Statuses on which computeVariance may mutate findings. Variance is a
+// PRE-APPROVAL tool; once APPROVED/PAID/FILED/CLOSED the reviewed/closed artifact
+// is immutable — refuse to overwrite varianceJson/varianceReport (finding #4).
+const VARIANCE_MUTABLE_STATUSES = new Set(['DRAFT', 'INPUTS_LOCKED', 'COMPUTED', 'REVIEW']);
+
 async function computeVariance({ businessId, payRunId }) {
   const payRun = await loadRun(businessId, payRunId, true);
+
+  // Immutability guard — never recompute/overwrite variance on a run that is
+  // APPROVED or past, or already CLOSED. (Mirrors persistComputedRun's
+  // IMMUTABLE_RUN_VIOLATION; variance is read-only once approved.)
+  if (!VARIANCE_MUTABLE_STATUSES.has(payRun.status) || payRun.closedAt) {
+    throw badRequest(
+      'IMMUTABLE_RUN_VIOLATION',
+      `Variance is read-only once a run is approved/closed (current: ${payRun.closedAt ? 'CLOSED' : payRun.status})`,
+    );
+  }
 
   const curLines = await prisma.payRunLine.findMany({
     where: { businessId, payRunId },
@@ -1366,7 +1446,10 @@ async function computeVariance({ businessId, payRunId }) {
     } : null,
   };
 
-  // Persist: per-line errorJson (BLOCKER/WARNING) + run-level varianceReport.
+  // Persist: per-line VARIANCE findings to varianceJson (NOT errorJson — engine
+  // anomalies own errorJson; keeping them separate means neither writer clobbers
+  // the other's BLOCKERs, finding #7) + run-level varianceReport. We null
+  // varianceJson when there are no findings so a recompute clears stale findings.
   const { byEmployee } = variance.findingsByEmployee(result.findings);
   await prisma.$transaction(async (tx) => {
     for (const line of curLines) {
@@ -1375,7 +1458,7 @@ async function computeVariance({ businessId, payRunId }) {
       );
       await tx.payRunLine.update({
         where: { id: line.id },
-        data: { errorJson: findings.length ? findings : undefined },
+        data: { varianceJson: findings.length ? findings : null },
       });
     }
     await tx.payRun.update({
@@ -1399,19 +1482,23 @@ async function computeVariance({ businessId, payRunId }) {
 }
 
 /**
- * recountBlockers — sum BLOCKER findings persisted across all line errorJson +
- * the run-level varianceReport. Feeds the submit/approve gate (the same array
- * approveRun already reads, now also carrying variance BLOCKERs).
+ * recountBlockers — sum BLOCKER findings from a DETERMINISTIC union of sources:
+ * per-line ENGINE anomalies (errorJson) + per-line VARIANCE findings (varianceJson)
+ * + the run-level varianceReport (e.g. RECONCILIATION_MISMATCH). The two per-line
+ * columns are written by different stages (compute vs computeVariance) and NEVER
+ * clobber each other, so the count no longer depends on call ordering (finding #7).
  */
 async function recountBlockers(businessId, payRunId) {
   const lines = await prisma.payRunLine.findMany({
-    where: { businessId, payRunId, errorJson: { not: null } },
-    select: { errorJson: true },
+    where: { businessId, payRunId },
+    select: { errorJson: true, varianceJson: true },
   });
   let blockers = 0;
   for (const l of lines) {
-    const errs = Array.isArray(l.errorJson) ? l.errorJson : [];
-    for (const e of errs) if (e.severity === 'BLOCKER') blockers += 1;
+    const engine = Array.isArray(l.errorJson) ? l.errorJson : [];
+    for (const e of engine) if (e && e.severity === 'BLOCKER') blockers += 1;
+    const varns = Array.isArray(l.varianceJson) ? l.varianceJson : [];
+    for (const v of varns) if (v && v.severity === 'BLOCKER') blockers += 1;
   }
   // Run-level (e.g. RECONCILIATION_MISMATCH) lives only in varianceReport.
   const run = await prisma.payRun.findFirst({ where: { id: payRunId, businessId }, select: { varianceReport: true } });
@@ -1443,6 +1530,12 @@ function totalsHashOf(payRun) {
 async function submitRun({ businessId, actorId, payRunId }) {
   const payRun = await loadRun(businessId, payRunId);
   if (payRun.status !== 'COMPUTED') throw badRequest('BAD_STATE', `Submit requires a COMPUTED run (current: ${payRun.status})`);
+
+  // FAIL-CLOSED variance gate (finding #1): materialise the variance findings
+  // FRESH from the current persisted lines here — do NOT rely on the operator
+  // having hit the /variance endpoint first. Only then count blockers, so every
+  // period-over-period BLOCKER the engine raises gates submit.
+  await computeVariance({ businessId, payRunId });
   const blockingAnomalies = await recountBlockers(businessId, payRunId);
 
   const from = STATE.CALCULATED;
@@ -1563,6 +1656,23 @@ const FILING_PLAN = Object.freeze({
   ],
 });
 
+/**
+ * resolveFilingPlan — return the filing obligations for a SUPPORTED country, or
+ * throw COUNTRY_MISMATCH for an UNKNOWN one (finding #6). This distinguishes a
+ * supported country with an intentionally-empty plan from an unconfigured/third
+ * country — the latter must NOT silently file nothing and close clean.
+ */
+function resolveFilingPlan(country) {
+  const plan = FILING_PLAN[country];
+  if (plan === undefined) {
+    throw badRequest(
+      'COUNTRY_MISMATCH',
+      `No statutory filing plan for country "${country}". Supported: ${Object.keys(FILING_PLAN).join(', ')}.`,
+    );
+  }
+  return plan;
+}
+
 /** Compute a due date (Date) for a remittance kind from the run period. */
 function remittanceDueDate(plan, payRun) {
   const end = new Date(isoDate(payRun.periodEnd) + 'T00:00:00Z');
@@ -1595,7 +1705,8 @@ async function fileRun({ businessId, actorId, payRunId }) {
   const payRun = await loadRun(businessId, payRunId, true);
   if (payRun.status !== 'PAID') throw badRequest('BAD_STATE', `Filing requires a PAID run (current: ${payRun.status})`);
   const country = payRun.entity.countryCode;
-  const plan = FILING_PLAN[country] || [];
+  // Reject an unsupported country (finding #6) rather than filing nothing silently.
+  const plan = resolveFilingPlan(country);
 
   const lines = await prisma.payRunLine.findMany({ where: { businessId, payRunId } });
   const sumDec = (field) => lines.reduce((s, l) => s + decimalToMinor(l[field]), 0);
@@ -1657,7 +1768,9 @@ async function closeRun({ businessId, actorId, payRunId }) {
   if (payRun.closedAt) return getRun({ businessId, payRunId }); // already closed → idempotent
 
   const country = payRun.entity.countryCode;
-  const plan = FILING_PLAN[country] || [];
+  // Reject an unsupported country (finding #6) — its "no missing remittances"
+  // close guard would otherwise be vacuously satisfied (plan = []).
+  const plan = resolveFilingPlan(country);
   const remittances = await prisma.statutoryRemittance.findMany({ where: { businessId, payRunId } });
   const haveKinds = new Set(remittances.map((r) => r.kind));
   const missing = plan.map((p) => p.kind).filter((k) => !haveKinds.has(k));
@@ -1797,9 +1910,14 @@ function buildFilingAggregate(payRun, lines, country) {
         return {
           employee: { uan: sp.uan || '', name: empName(l.employee), esicIp: sp.esicIp || '', pan: sp.pan || '', code: l.employee.code },
           grossWagesMinor: decimalToMinor(l.grossEarnings),
-          epfWagesMinor: decimalToMinor(l.pfEmployee) ? Math.round(decimalToMinor(l.pfEmployee) / 0.12) : 0,
-          epsWagesMinor: 0,
-          edliWagesMinor: 0,
+          // Read the ACTUAL persisted statutory wage bases (finding #5). NEVER
+          // back-derive the wage by dividing the contribution by a hardcoded rate
+          // (float reconstruction corrupts paise once the wage is capped / on full
+          // wage / VPF-adjusted). pfWagesBase/epsWagesBase/edliWagesBase are written
+          // at compute time straight from the engine-derived bases.
+          epfWagesMinor: decimalToMinor(l.pfWagesBase),
+          epsWagesMinor: decimalToMinor(l.epsWagesBase),
+          edliWagesMinor: decimalToMinor(l.edliWagesBase),
           epfEeMinor: decimalToMinor(l.pfEmployee),
           epfErMinor: decimalToMinor(l.pfEmployer),
           epsMinor: 0,
@@ -1900,5 +2018,6 @@ module.exports = {
     taxYearFor, buildFilingAggregate, statutoryRollups, buildPayslipSnapshot,
     resolveCurrentCompensation, resolveBalancingTarget, varianceLineFromRow,
     totalsHashOf, remittanceDueDate, remittanceTaxPeriod, FILING_PLAN,
+    resolveFourEyesPolicy, resolveFilingPlan,
   },
 };

@@ -252,6 +252,10 @@ function computePayslip(args) {
       code: d.code,
       label: d.label || d.code,
       amountMinor: d.amountMinor,
+      // Pass through the statutory WAGE BASE the module computed this contribution
+      // on (e.g. the capped PF wage) so persistence/filing read the real base
+      // rather than reconstructing it from a rate. Optional; null when absent.
+      ...(d.baseMinor != null ? { baseMinor: d.baseMinor } : {}),
       explain: d.explain || null,
       statutory: true,
     });
@@ -268,6 +272,8 @@ function computePayslip(args) {
       code: c.code,
       label: c.label || c.code,
       amountMinor: c.amountMinor,
+      // Pass through the statutory wage base (e.g. EPS/EDLI capped base) — see above.
+      ...(c.baseMinor != null ? { baseMinor: c.baseMinor } : {}),
       explain: c.explain || null,
     });
     trace({

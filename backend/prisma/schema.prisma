@@ -7443,9 +7443,18 @@ model PayRunLine {
   esct              Decimal? @db.Decimal(15, 2)
   accLevy           Decimal? @db.Decimal(15, 2)
   studentLoan       Decimal? @db.Decimal(15, 2)
+  // Statutory WAGE BASES (not contributions) — the actual base the engine
+  // computed each statutory deduction on, persisted so filing reads the real
+  // wage figure straight through (NO float reconstruction by dividing a
+  // contribution by a hardcoded rate). IN: PF/EPS/EDLI wage bases (post-cap).
+  pfWagesBase       Decimal? @db.Decimal(15, 2)
+  epsWagesBase      Decimal? @db.Decimal(15, 2)
+  edliWagesBase     Decimal? @db.Decimal(15, 2)
   // Status
   status        PayRunLineStatus @default(PENDING)
-  errorJson     Json? // validation/compute errors for this employee
+  errorJson     Json? // ENGINE per-line anomalies (compute/validation). Written ONLY by compute.
+  varianceJson  Json? // VARIANCE per-line findings (period-over-period). Written ONLY by computeVariance.
+                       // Kept SEPARATE from errorJson so neither writer clobbers the other's BLOCKERs.
   computeTrace  Json? // optional engine trace (debug)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
