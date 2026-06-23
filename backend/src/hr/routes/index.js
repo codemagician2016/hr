@@ -63,6 +63,10 @@ router.use('/ess/performance', talent.essPerformance);
 //                        (leave/expense wire onto the engine in 10c).
 router.use('/approvals', require('./approvals.routes'));
 router.use('/rbac', require('./rbac.routes'));
+// FLAG (Feature 13 — shared edit): HR-admin profile surface — the field-policy map,
+// the profile change-request approval queue (F1-scoped + SoD, drives the F10
+// PROFILE_CHANGE engine), and the rich sectioned profile for any in-scope employee.
+router.use('/profile', require('../profile/profile.routes'));
 
 // Payroll orchestration — operator API (RBAC: canRunPayroll / canApprovePayroll
 // / canViewPayrollReports) and the ESS payslip API (customer session). The
@@ -98,6 +102,11 @@ router.use('/me/delegations', require('./meDelegations.routes'));
 // protect-gated and unreachable from ESS, so this mirrors it for req.customer,
 // reusing the same engine.recordDecision (SoD/version/active-step guards intact).
 router.use('/me/approvals', require('./meApprovals.routes'));
+// FLAG (Feature 13 — shared edit): Manager Self-Service. The customer session is given
+// the F1 TEAM band (resolveCustomerScope) — roster/attendance/directory/org reads +
+// the merged leave+reimbursement approval inbox + decide, all scoped to the manager's
+// reporting sub-tree (self excluded for approvals, SoD). A non-manager gets [].
+router.use('/me/team', require('../profile/meTeam.routes'));
 
 // Reports / analytics — read-only payroll register, statutory summary,
 // headcount & attrition, leave liability. RBAC: canViewPayrollReports.

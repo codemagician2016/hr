@@ -78,6 +78,109 @@ function Section({ title, action, children }) {
   );
 }
 
+// ── Feature 13: the rich, sectioned profile for this employee (scoped read of
+// GET /api/hr/profile/employees/:id/full). Lazy-loaded + collapsible so the detail
+// page stays light; shows the extra Figma sections HR cares about (extended personal,
+// bank, education, family, addresses, statutory IDs).
+function RichProfileSection({ employeeId }) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!open || data) return undefined;
+    let aborted = false;
+    setLoading(true);
+    get(`/api/hr/profile/employees/${employeeId}/full`)
+      .then((res) => { if (!aborted) { setData(res); setLoading(false); } })
+      .catch((e) => { if (!aborted) { setError(e); setLoading(false); } });
+    return () => { aborted = true; };
+  }, [open, data, employeeId]);
+
+  const e = data?.employee;
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-5">
+      <button type="button" onClick={() => setOpen((o) => !o)} className="flex w-full items-center justify-between">
+        <h2 className="text-sm font-semibold text-gray-900">Full profile (rich)</h2>
+        <span className="text-sm text-[color:var(--theme-primary)]">{open ? 'Hide' : 'Show'}</span>
+      </button>
+      {open && (
+        loading ? <div className="mt-4"><Spinner /></div> : error ? <div className="mt-4"><ErrorBanner message={error.message || 'Could not load'} /></div> : data ? (
+          <div className="mt-4 space-y-5">
+            <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+              <Field label="Father's name" value={e.fatherName} />
+              <Field label="Mother's name" value={e.motherName} />
+              <Field label="Date of birth" value={e.dateOfBirth} />
+              <Field label="Gender" value={e.gender} />
+              <Field label="Marital status" value={e.maritalStatus} />
+              <Field label="Blood group" value={e.bloodGroup} />
+              <Field label="Religion" value={e.religion} />
+              <Field label="Mother tongue" value={e.motherTongue} />
+              <Field label="Personal email" value={e.personalEmail} />
+              <Field label="Home phone" value={e.homePhone} />
+              <Field label="Office phone" value={e.officePhone} />
+              <Field label="Place of birth" value={e.placeOfBirth} />
+            </dl>
+
+            {data.bank && (
+              <div>
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Bank</h3>
+                <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+                  <Field label="Account name" value={data.bank.accountName} />
+                  <Field label="Account number" value={data.bank.accountNumber} />
+                  <Field label="IFSC" value={data.bank.ifsc} />
+                  <Field label="NZ account" value={data.bank.nzBankAccount} />
+                  <Field label="Bank" value={data.bank.bankName} />
+                </dl>
+              </div>
+            )}
+
+            {data.statutory && (
+              <div>
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Statutory ({data.statutory.countryCode})</h3>
+                <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+                  <Field label="PAN" value={data.statutory.pan} />
+                  <Field label="UAN" value={data.statutory.uan} />
+                  <Field label="IRD number" value={data.statutory.irdNumber} />
+                  <Field label="Aadhaar verified" value={data.statutory.aadhaarVerified ? 'Yes' : 'No'} />
+                </dl>
+              </div>
+            )}
+
+            {data.education?.length > 0 && (
+              <div>
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Education</h3>
+                <ul className="space-y-1 text-sm text-gray-900">
+                  {data.education.map((ed) => <li key={ed.id}>{ed.level} · {ed.institution}{ed.fieldOfStudy ? ` · ${ed.fieldOfStudy}` : ''}{ed.endYear ? ` (${ed.endYear})` : ''}</li>)}
+                </ul>
+              </div>
+            )}
+
+            {data.family?.length > 0 && (
+              <div>
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Family / nominees</h3>
+                <ul className="space-y-1 text-sm text-gray-900">
+                  {data.family.map((d) => <li key={d.id}>{d.name} · {d.relationship}{d.isNominee ? ` · nominee ${d.nomineePercent || 0}%` : ''}</li>)}
+                </ul>
+              </div>
+            )}
+
+            {data.addresses?.length > 0 && (
+              <div>
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Addresses</h3>
+                <ul className="space-y-1 text-sm text-gray-900">
+                  {data.addresses.map((a) => <li key={a.id}>{a.type}: {a.sameAsType ? `same as ${a.sameAsType}` : [a.line1, a.city, a.stateCode, a.postalCode].filter(Boolean).join(', ') || '—'}</li>)}
+                </ul>
+              </div>
+            )}
+          </div>
+        ) : null
+      )}
+    </div>
+  );
+}
+
 function SelectField({ label, value, onChange, options, placeholder = 'Unassigned' }) {
   return (
     <div>
@@ -518,6 +621,9 @@ export default function EmployeeDetailPage() {
       </Section>
 
       <ManagerSection employee={emp} onSaved={(u) => applyUpdate(u)} />
+
+      {/* Feature 13 — the rich, sectioned profile (lazy + scoped). */}
+      <RichProfileSection employeeId={emp.id} />
 
       {modal === 'profile' && (
         <EditProfileModal employee={emp} onClose={() => setModal(null)} onSaved={(u) => applyUpdate(u)} />

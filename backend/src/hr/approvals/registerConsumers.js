@@ -13,6 +13,10 @@
 
 const { registerLeaveConsumer } = require('./consumers.leave');
 const { registerExpenseConsumer } = require('./consumers.expense');
+// FLAG (Feature 13 — shared edit): the PROFILE_CHANGE consumer (rich-profile gated
+// field → HR approval). Self-registers on load like leave/expense; wired here too so
+// the explicit boot path stays the single source of truth.
+const { registerProfileChangeConsumer } = require('./consumers.profileChange');
 
 let done = false;
 
@@ -20,6 +24,7 @@ function registerConsumers() {
   if (done) return;
   registerLeaveConsumer();
   registerExpenseConsumer();
+  registerProfileChangeConsumer();
   done = true;
 }
 
