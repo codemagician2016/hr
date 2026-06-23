@@ -6415,6 +6415,13 @@ model Entity {
   status            EntityStatus @default(ACTIVE)
   activeFrom        DateTime
   activeTo          DateTime?
+  // Feature 16 — the salary-proration denominator policy for this entity
+  // (what "standardDays" payroll prorates a monthly salary against). India
+  // default = CALENDAR_DAYS (per-month length); FIXED_30 / WORKING_DAYS are the
+  // other industry conventions. Frozen into the AttendancePayInput at run time so
+  // the denominator is immutable + auditable (part of inputHash). NULL = engine
+  // default (CALENDAR_DAYS).
+  prorationBasis    ProrationMethod?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
   deletedAt         DateTime?
@@ -7598,6 +7605,14 @@ model AttendancePayInput {
   weeklyOffDays Decimal  @db.Decimal(8, 4) @default(0)
   holidayDays   Decimal  @db.Decimal(8, 4) @default(0)
   overtimeHours Decimal  @db.Decimal(8, 2) @default(0)
+  // Feature 16 — LOP provenance split (pure; payableDays/lopDays math unchanged).
+  // lwpDays   = approved Leave-Without-Pay days (ON_LEAVE + affectsLOP) — a subset of lopDays.
+  // absentDays= AWOL / unauthorised LOP days (status ABSENT) — also a subset of lopDays.
+  // standardDays = the frozen proration denominator (entity prorationBasis) so the
+  //   denominator is immutable + part of the input hash, not re-derived at compute time.
+  lwpDays       Decimal  @db.Decimal(8, 4) @default(0)
+  absentDays    Decimal  @db.Decimal(8, 4) @default(0)
+  standardDays  Decimal  @db.Decimal(8, 4) @default(0)
   frozenAt      DateTime @default(now())
   sourceJson    Json? // provenance: attendance/leave txn ids rolled up
   createdAt     DateTime @default(now())
@@ -7620,6 +7635,8 @@ model PayRunLine {
   // Period attendance inputs (snapshot)
   payableDays   Decimal  @db.Decimal(8, 4)
   lopDays       Decimal  @db.Decimal(8, 4) @default(0)
+  // Feature 16 — approved Leave-Without-Pay days (subset of lopDays) for payslip/run-review provenance.
+  lwpDays       Decimal  @db.Decimal(8, 4) @default(0)
   overtimeHours Decimal  @db.Decimal(8, 2) @default(0)
   // Totals
   grossEarnings   Decimal @db.Decimal(15, 2) @default(0)
@@ -7877,6 +7894,11 @@ model LeavePolicy {
   // Entitlement
   accrualMethod         AccrualMethod
   entitlementPerYear    Decimal? @db.Decimal(8, 4) // 18 EL days, or 4 weeks (NZ)
+  // Feature 16 — the India statutory floor (EL/SL/CL minimum days/yr) resolved at
+  // author time for audit. The LIVE gate re-resolves the floor from
+  // india.leaveStatutoryFramework on every save so a floor change re-validates;
+  // this column is the as-authored stamp. NULL for non-floored types (LWP, NZ).
+  statutoryFloorPerYear Decimal? @db.Decimal(8, 4)
   accrualFrequency      AccrualFrequency @default(MONTHLY)
   accrualProrateOnJoin  Boolean @default(true)
   // Carry-forward & expiry
@@ -7915,6 +7937,7 @@ enum AccrualMethod {
   ANNIVERSARY_GRANT
   WORKED_HOURS_RATIO
   CONTINUOUS_NZ
+  NONE // Feature 16 — LWP / no-accrual types: never grants a LeaveBalance row
 }
 enum AccrualFrequency {
   MONTHLY

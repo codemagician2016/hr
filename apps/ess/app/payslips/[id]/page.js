@@ -166,6 +166,28 @@ function PayslipDetailInner() {
           </header>
 
           <Section title="Earnings" lines={earnings} currency={currency} total={gross} />
+          {/* Feature 16 — Loss-of-Pay (LOP) informational block. The net ALREADY
+              reflects the reduction (earnings were prorated down); this only EXPLAINS it. */}
+          {snap.attendance && Number(snap.attendance.lopDays) > 0 && (
+            <section className="rounded-2xl border bg-white p-4 shadow-sm" style={{ borderColor: 'var(--theme-border)' }}>
+              <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--theme-muted)' }}>Loss of Pay</h2>
+              {snap.attendance.lop && (
+                <Row
+                  label={snap.attendance.lop.label || `Loss of Pay — ${snap.attendance.lopDays} day(s)`}
+                  value={<span style={{ color: '#b91c1c' }}>−{money(snap.attendance.lop.amount, currency)}</span>}
+                />
+              )}
+              <div className="mt-2 grid grid-cols-2 gap-1 text-xs" style={{ color: 'var(--theme-muted)' }}>
+                <span>Payable days: <b style={{ color: 'var(--theme-text)' }}>{snap.attendance.payableDays}</b> / {snap.attendance.standardDays}</span>
+                <span>LOP days: <b style={{ color: 'var(--theme-text)' }}>{snap.attendance.lopDays}</b></span>
+                {Number(snap.attendance.lwpDays) > 0 && <span>Leave Without Pay: <b style={{ color: 'var(--theme-text)' }}>{snap.attendance.lwpDays}</b></span>}
+                {Number(snap.attendance.absentDays) > 0 && <span>Absent: <b style={{ color: 'var(--theme-text)' }}>{snap.attendance.absentDays}</b></span>}
+              </div>
+              <p className="mt-1 text-[11px]" style={{ color: 'var(--theme-muted)' }}>
+                Your net pay already reflects this reduction; this line explains why your pay changed.
+              </p>
+            </section>
+          )}
           <Section title="Deductions" lines={deductions} currency={currency} total={sumOf(deductions, currency)} />
           {employer.length > 0 && (
             <Section title="Employer contributions" lines={employer} currency={currency} total={sumOf(employer, currency)} />

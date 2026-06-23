@@ -272,7 +272,8 @@ async function main() {
   // ═════════════════════════════════════════════════════════════════════════
   const inEntity = await prisma.entity.upsert({
     where: { businessId_code: { businessId, code: 'IN-HQ' } },
-    update: {},
+    // Feature 16 — ensure the proration basis is stamped even on an existing entity.
+    update: { prorationBasis: 'CALENDAR_DAYS' },
     create: {
       businessId,
       code: 'IN-HQ',
@@ -292,6 +293,8 @@ async function main() {
       cin: 'U72900KA2020PTC100001',
       status: 'ACTIVE',
       activeFrom: d('2020-04-01'),
+      // Feature 16 — salary prorates against calendar days of the month (India default).
+      prorationBasis: 'CALENDAR_DAYS',
     },
   });
 
@@ -504,6 +507,26 @@ async function main() {
       unit: 'DAYS', isPaid: true, color: '#f59e0b',
     },
   });
+  // Feature 16 — Casual Leave (CL): paid, lapses at year end (use-it-or-lose-it).
+  const ltCL = await prisma.leaveType.upsert({
+    where: { businessId_code: { businessId, code: 'CL' } },
+    update: {},
+    create: {
+      businessId, code: 'CL', name: 'Casual Leave', countryCode: 'IN', category: 'CASUAL',
+      unit: 'DAYS', isPaid: true, affectsLOP: false, color: '#06b6d4',
+    },
+  });
+  // Feature 16 — Leave Without Pay (LWP): UNPAID, affectsLOP, no balance, no accrual.
+  // EXCLUSIVE sandwich so a holiday inside an LWP block stays a paid holiday.
+  const ltLWP = await prisma.leaveType.upsert({
+    where: { businessId_code: { businessId, code: 'LWP' } },
+    update: {},
+    create: {
+      businessId, code: 'LWP', name: 'Leave Without Pay', countryCode: 'IN', category: 'UNPAID',
+      unit: 'DAYS', isPaid: false, isStatutory: false, affectsLOP: true, isEncashable: false,
+      requiresReason: true, sandwichPolicy: 'EXCLUSIVE', color: '#9CA3AF',
+    },
+  });
   const ltNZAnnual = await prisma.leaveType.upsert({
     where: { businessId_code: { businessId, code: 'ANNUAL' } },
     update: {},
@@ -530,6 +553,28 @@ async function main() {
       accrualMethod: 'UPFRONT_ANNUAL', entitlementPerYear: '12.0000', accrualFrequency: 'ANNUAL', isActive: true,
     },
   });
+  // Feature 16 — CL: upfront annual, use-it-or-lose-it (carryForwardCap=0 → lapses),
+  // max 3 consecutive days (classic India casual-leave rule).
+  await prisma.leavePolicy.upsert({
+    where: { businessId_code: { businessId, code: 'CL-STD' } },
+    update: {},
+    create: {
+      businessId, leaveTypeId: ltCL.id, entityId: inEntity.id, code: 'CL-STD', name: 'Casual Leave (Standard)',
+      accrualMethod: 'UPFRONT_ANNUAL', entitlementPerYear: '12.0000', accrualFrequency: 'ANNUAL',
+      carryForwardCap: '0.0000', maxConsecutive: 3, isActive: true,
+    },
+  });
+  // Feature 16 — LWP policy: accrualMethod=NONE (never mints a balance), NO
+  // entitlement (LWP_NO_ENTITLEMENT-safe), requires a reason, routed for approval.
+  await prisma.leavePolicy.upsert({
+    where: { businessId_code: { businessId, code: 'LWP-STD' } },
+    update: {},
+    create: {
+      businessId, leaveTypeId: ltLWP.id, entityId: inEntity.id, code: 'LWP-STD', name: 'Leave Without Pay',
+      accrualMethod: 'NONE', accrualFrequency: 'ANNUAL', accrualProrateOnJoin: false,
+      minNoticeDays: 1, isActive: true,
+    },
+  });
   const polNZ = await prisma.leavePolicy.upsert({
     where: { businessId_code: { businessId, code: 'NZ-ANNUAL' } },
     update: {},
@@ -539,7 +584,7 @@ async function main() {
       minTenureMonths: 12, isActive: true,
     },
   });
-  console.log('✓ Leave types (EL/SL/ANNUAL) + policies');
+  console.log('✓ Leave types (EL/SL/CL/LWP/ANNUAL) + policies (incl. Feature 16 LWP NONE-accrual)');
 
   // ═════════════════════════════════════════════════════════════════════════
   // 7. PAY RUNS (DRAFT) — one per entity, so AttendancePayInputs attach and a

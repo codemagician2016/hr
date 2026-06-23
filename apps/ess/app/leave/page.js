@@ -248,6 +248,8 @@ function LeaveInner() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(false);
+  // Feature 16 — LWP pay-reduction estimate returned by the apply response (labelled an estimate).
+  const [payEstimate, setPayEstimate] = useState(null);
 
   const selectedType = useMemo(() => typeOptions.find((t) => t.id === typeId) || null, [typeOptions, typeId]);
   const reasonRequired = !!selectedType?.requiresReason;
@@ -258,7 +260,7 @@ function LeaveInner() {
     setError(null);
     setSuccess(false);
     try {
-      await apiPost('/api/hr/me/leave/requests', {
+      const res = await apiPost('/api/hr/me/leave/requests', {
         leaveTypeId: typeId,
         startDate,
         endDate,
@@ -267,6 +269,7 @@ function LeaveInner() {
         reason,
       });
       setSuccess(true);
+      setPayEstimate(res && res.payEstimate ? res.payEstimate : null);
       setReason(''); setStartDate(''); setEndDate(''); setTypeId(''); setStartHalf(''); setEndHalf('');
       reloadBalances();
       reloadReqs();
@@ -415,6 +418,25 @@ function LeaveInner() {
                   {typeOptions.map((t) => (<option key={t.id} value={t.id}>{t.name || t.label}</option>))}
                 </select>
               </label>
+
+              {/* Feature 16 — Leave Without Pay (LWP) banner: an authorised UNPAID
+                  absence that reduces salary for the days taken and needs no balance. */}
+              {selectedType && (selectedType.category === 'UNPAID' || selectedType.affectsLOP === true || selectedType.isPaid === false) && (
+                <div className="rounded-lg border px-3 py-2 text-xs"
+                     style={{ borderColor: 'var(--theme-border)', background: 'rgba(245, 158, 11, 0.08)', color: 'var(--theme-text)' }}>
+                  <span className="font-semibold">Leave Without Pay.</span>{' '}
+                  This reduces your salary for the days taken. You do not need a leave balance.
+                </div>
+              )}
+              {/* Post-submit pay-reduction estimate for an LWP application (estimate only). */}
+              {success && payEstimate && payEstimate.reductionAmount != null && (
+                <div className="rounded-lg border px-3 py-2 text-xs"
+                     style={{ borderColor: 'var(--theme-border)', background: 'rgba(245, 158, 11, 0.08)', color: 'var(--theme-text)' }}>
+                  Estimated pay reduction: <span className="font-semibold">{payEstimate.currency ? `${payEstimate.currency} ` : ''}{payEstimate.reductionAmount}</span>{' '}
+                  ({payEstimate.days} day(s) × {payEstimate.currency ? `${payEstimate.currency} ` : ''}{payEstimate.perDayAmount}/day).{' '}
+                  <span style={{ color: 'var(--theme-muted)' }}>Estimate only — your payslip is authoritative.</span>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <label className="block text-sm">

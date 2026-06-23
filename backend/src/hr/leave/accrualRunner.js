@@ -82,6 +82,10 @@ async function runNightlyAccrual({ businessId = null, asOf = new Date(), dryRun 
       const resolved = await resolvePolicy(empCtx, bal.leaveTypeId, asOf);
       if (!resolved || !resolved.policy) { summary.skipped += 1; continue; }
       const policy = resolved.policy;
+      // Feature 16 — NONE-accrual types (LWP / no-balance) NEVER accrue a balance.
+      // (An LWP type has no LeaveBalance row at all, so it should never be scanned;
+      // this guard is belt-and-braces so a mis-seeded balance can't grow one.)
+      if (policy.accrualMethod === 'NONE') { summary.skipped += 1; continue; }
       // UPFRONT policies grant at the opening, not per-tick — skip the nightly accrual.
       if (policy.accrualMethod === 'UPFRONT_ANNUAL' || policy.accrualMethod === 'ANNIVERSARY_GRANT') {
         summary.skipped += 1; continue;

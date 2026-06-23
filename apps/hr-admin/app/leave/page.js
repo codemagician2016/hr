@@ -26,6 +26,7 @@ import {
 import { get, post } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, employeeLabel, ServerPagination } from '@/lib/ui';
 import { useTenantCountries } from '@/lib/useTenantCountries';
+import { InfoTip } from '@/lib/widgets';
 
 const TABS = [
   { key: 'requests', label: 'Requests' },
@@ -933,7 +934,7 @@ const UNIT_OPTS = ['DAYS', 'HOURS', 'WEEKS'];
 const NZ_BASIS_OPTS = ['', 'RDP', 'ADP', 'AWE_8PCT', 'OWP'];
 const SANDWICH_OPTS = ['', 'INCLUSIVE', 'EXCLUSIVE'];
 const COUNTRY_OPTS = ['', 'IN', 'NZ'];
-const ACCRUAL_METHOD_OPTS = ['UPFRONT_ANNUAL', 'MONTHLY_ACCRUAL', 'ANNIVERSARY_GRANT', 'WORKED_HOURS_RATIO', 'CONTINUOUS_NZ'];
+const ACCRUAL_METHOD_OPTS = ['UPFRONT_ANNUAL', 'MONTHLY_ACCRUAL', 'ANNIVERSARY_GRANT', 'WORKED_HOURS_RATIO', 'CONTINUOUS_NZ', 'NONE'];
 const ACCRUAL_FREQ_OPTS = ['MONTHLY', 'QUARTERLY', 'ANNUAL', 'PER_PAY_PERIOD'];
 const GENDER_OPTS = ['', 'MALE', 'FEMALE', 'OTHER'];
 
@@ -1037,7 +1038,7 @@ function ConfigTab({ resource, title, fields, columns }) {
           if (f.type === 'select') {
             return (
               <label key={f.key} className="block text-sm">
-                <span className="mb-1 block font-medium text-gray-700">{f.label}{f.required ? ' *' : ''}</span>
+                <span className="mb-1 flex items-center font-medium text-gray-700">{f.label}{f.required ? ' *' : ''}{f.hint ? <InfoTip text={f.hint} /> : null}</span>
                 <select
                   value={draft[f.key]} required={f.required} onChange={(e) => set(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
@@ -1055,15 +1056,20 @@ function ConfigTab({ resource, title, fields, columns }) {
               <label key={f.key} className="flex items-center gap-2 text-sm text-gray-700">
                 <input type="checkbox" checked={draft[f.key] === true || draft[f.key] === 'true'}
                   onChange={(e) => set(e.target.checked)} />
-                {f.label}
+                {f.label}{f.hint ? <InfoTip text={f.hint} /> : null}
               </label>
             );
           }
           return (
-            <TextInput
-              key={f.key} label={f.label} type={f.type === 'number' ? 'number' : undefined}
-              value={draft[f.key]} onChange={set} required={f.required}
-            />
+            <div key={f.key} className="flex items-end gap-1">
+              <div className="flex-1">
+                <TextInput
+                  label={f.label} type={f.type === 'number' ? 'number' : undefined}
+                  value={draft[f.key]} onChange={set} required={f.required}
+                />
+              </div>
+              {f.hint ? <span className="pb-2"><InfoTip text={f.hint} /></span> : null}
+            </div>
           );
         })}
         <PrimaryButton type="submit" loading={saving}>
@@ -1087,7 +1093,7 @@ function typeFields(countries) {
   const fields = [
     { key: 'name', label: 'Name', required: true },
     { key: 'code', label: 'Code', required: true },
-    { key: 'category', label: 'Category', type: 'select', options: CATEGORY_OPTS, required: true },
+    { key: 'category', label: 'Category', type: 'select', options: CATEGORY_OPTS, required: true, hint: 'Choose UNPAID for Leave Without Pay (LWP): it applies with no balance and reduces pay for the days taken. CASUAL = Casual Leave (paid, lapses at year-end). India statutory floors apply to EL/SL/CL policies.' },
     { key: 'unit', label: 'Unit', type: 'select', options: UNIT_OPTS },
     { key: 'countryCode', label: single ? 'Country' : 'Country (blank = both)', type: 'select', options: countryOpts },
   ];
@@ -1102,7 +1108,7 @@ function typeFields(countries) {
     { key: 'isPaid', label: 'Paid', type: 'checkbox' },
     { key: 'isStatutory', label: 'Statutory', type: 'checkbox' },
     { key: 'requiresReason', label: 'Requires reason', type: 'checkbox' },
-    { key: 'affectsLOP', label: 'Affects LOP (unpaid)', type: 'checkbox' },
+    { key: 'affectsLOP', label: 'Affects LOP (unpaid)', type: 'checkbox', hint: 'When on, the days taken are Loss-of-Pay and reduce salary pro-rata (an authorised unpaid absence, not a balance deduction). A paid type cannot also affect LOP. UNPAID-category types force this on automatically.' },
     { key: 'isEncashable', label: 'Encashable', type: 'checkbox' },
   );
   return fields;
@@ -1114,8 +1120,8 @@ function policyFields(typeOptions) {
     { key: 'leaveTypeId', label: 'Leave type', type: 'select', required: true, options: (typeOptions || []).map((t) => ({ value: t.id, label: `${t.name} (${t.code})` })) },
     { key: 'name', label: 'Policy name', required: true },
     { key: 'code', label: 'Code', required: true },
-    { key: 'accrualMethod', label: 'Accrual method', type: 'select', options: ACCRUAL_METHOD_OPTS, required: true },
-    { key: 'entitlementPerYear', label: 'Entitlement / year', type: 'number' },
+    { key: 'accrualMethod', label: 'Accrual method', type: 'select', options: ACCRUAL_METHOD_OPTS, required: true, hint: 'How the balance grows. Choose NONE for Leave Without Pay (LWP): it never creates a balance and must have no entitlement.' },
+    { key: 'entitlementPerYear', label: 'Entitlement / year', type: 'number', hint: 'Days granted per year. For India EL/SL/CL this must be at or above the state statutory floor (e.g. Maharashtra EL ≥ 21/yr) — saving below the floor is blocked. Leave blank for LWP.' },
     { key: 'accrualFrequency', label: 'Accrual frequency', type: 'select', options: ACCRUAL_FREQ_OPTS },
     { key: 'accrualProrateOnJoin', label: 'Pro-rate on join', type: 'checkbox' },
     { key: 'carryForwardCap', label: 'Carry-forward cap (blank = unbounded)', type: 'number' },

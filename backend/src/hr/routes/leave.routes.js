@@ -24,6 +24,10 @@ function mountConfig(path, ctrl) {
 mountConfig('types', c.leaveTypes);
 mountConfig('policies', c.leavePolicies);
 
+// Feature 16 — resolved India statutory-leave floors (EL/SL/CL) for the admin
+// "Statutory framework" panel. Read-only for any config-manager; India-only.
+router.get('/statutory-framework', requirePermission('canManageOrg'), c.getStatutoryFramework);
+
 // ── (b) Leave request flow ──────────────────────────────────────────────────
 // Reads are filtered to the actor's reporting sub-tree (canViewEmployees scope);
 // decisions resolve the canApproveLeave scope (which excludes self — SoD) and the

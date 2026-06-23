@@ -138,7 +138,7 @@ function isoDate(value) {
  * to; it is threaded onto BALANCING (special-allowance) earnings so the engine
  * can compute the residual. Falls back to the seeded line amount if absent.
  */
-function mapComponentLine(line, order, targetGrossMinor = null) {
+function mapComponentLine(line, order, targetGrossMinor = null, entityProrationBasis = null) {
   const comp = line.component || {};
   const calcMethod = line.calcMethod || comp.calcMethod;
   // Statutory + slab components are computed by the compliance module, not the
@@ -149,9 +149,14 @@ function mapComponentLine(line, order, targetGrossMinor = null) {
   if (!engineCalc) return null;
 
   const category = comp.category || 'EARNING';
-  const prorationPolicy = PRORATION_MAP[comp.prorationMethod || 'CALENDAR_DAYS'] || PRORATION.CALENDAR_DAYS;
+  // Feature 16 — proration policy precedence: the COMPONENT's own prorationMethod
+  // wins (a statutory-floor allowance can pin NONE), else the ENTITY basis
+  // (Entity.prorationBasis), else CALENDAR_DAYS. So a tenant on FIXED_30 prorates
+  // every REDUCES_WITH_LOP earning over 30 days without per-component config.
+  const resolvedProrationMethod = comp.prorationMethod || entityProrationBasis || 'CALENDAR_DAYS';
+  const prorationPolicy = PRORATION_MAP[resolvedProrationMethod] || PRORATION.CALENDAR_DAYS;
   const lopBehavior =
-    (comp.prorationMethod === 'NONE' || comp.isRecurring === false)
+    (resolvedProrationMethod === 'NONE' || comp.isRecurring === false)
       ? LOP_BEHAVIOR.FIXED_REGARDLESS
       : LOP_BEHAVIOR.REDUCES_WITH_LOP;
 
@@ -262,11 +267,18 @@ function buildEmployeePayInput(rows) {
   // to the seeded flat amount for the balancing line).
   const targetGrossMinor = resolveBalancingTarget(compensation, period);
 
+  // Feature 16 — the entity's salary-proration basis (CALENDAR_DAYS default for
+  // India). Every REDUCES_WITH_LOP earning inherits the ENTITY policy unless the
+  // component itself pins a different prorationMethod (a statutory-floor allowance
+  // may still override to NONE/FIXED_REGARDLESS). This makes the denominator a
+  // tenant/entity decision, not an implicit per-component default.
+  const entityProrationBasis = entity.prorationBasis || null;
+
   const compLines = Array.isArray(compensation.lines) ? compensation.lines : [];
   const componentsForEngine = [];
   let order = 0;
   for (const line of compLines) {
-    const def = mapComponentLine(line, order, targetGrossMinor);
+    const def = mapComponentLine(line, order, targetGrossMinor, entityProrationBasis);
     if (def) {
       componentsForEngine.push(def);
       order += 1;
@@ -284,6 +296,14 @@ function buildEmployeePayInput(rows) {
     if (attendance.payableDays != null) inputs.payableDays = toNum(attendance.payableDays);
     if (attendance.lopDays != null) inputs.lopDays = toNum(attendance.lopDays);
     if (attendance.overtimeHours != null) inputs.otHours = toNum(attendance.overtimeHours);
+    // Feature 16 — the FROZEN proration denominator (entity prorationBasis applied
+    // at freeze time). Setting it explicitly means the engine prorates over the
+    // immutable, auditable standardDays rather than re-deriving the month length,
+    // so a FIXED_30 / WORKING_DAYS basis is honoured and can't drift post-freeze.
+    // Gate on `> 0` (a defaulted 0 = "use the engine's calendar fallback").
+    if (attendance.standardDays != null && toNum(attendance.standardDays) > 0) {
+      inputs.standardDays = toNum(attendance.standardDays);
+    }
   }
 
   // ── period (engine + compliance module both key off this) ──
@@ -361,6 +381,13 @@ function buildEmployeePayInput(rows) {
     compensationId: compensation.id,
     payableDays: attendance ? toNum(attendance.payableDays) : 0,
     lopDays: attendance ? toNum(attendance.lopDays) : 0,
+    // Feature 16 — LOP provenance (pure passthrough; persisted to PayRunLine +
+    // surfaced on the payslip provenance block so an auditor sees WHY pay dropped).
+    lwpDays: attendance ? toNum(attendance.lwpDays) : 0,
+    absentDays: attendance ? toNum(attendance.absentDays) : 0,
+    standardDays: attendance && toNum(attendance.standardDays) > 0
+      ? toNum(attendance.standardDays)
+      : (attendance ? toNum(attendance.calendarDays) : 0),
     overtimeHours: attendance ? toNum(attendance.overtimeHours) : 0,
     preAnomalies,
   };
@@ -658,11 +685,24 @@ async function computeRun({ businessId, actorId, payRunId, freezeAttendance: doF
         if (a.employeeId === meta.employeeId) { const { employeeId: _e, ...rest } = a; pushAnom(rest); } // H3
       }
       for (const a of result.anomalies || []) pushAnom(a);
+      // Feature 16 — surface an INFO anomaly per employee carrying LOP so the
+      // run-review checker sees it (not a blocker). Authorised LWP vs AWOL absent
+      // are distinguished by the lwp/absent split.
+      if ((meta.lopDays || 0) > 0) {
+        pushAnom({
+          code: 'LWP_LOP_APPLIED',
+          severity: 'INFO',
+          message: `Loss of Pay applied: ${meta.lopDays} day(s) LOP (${meta.lwpDays || 0} approved LWP, ${meta.absentDays || 0} absent) on ${meta.standardDays || meta.payableDays} standard days; pay prorated to ${meta.payableDays} payable days.`,
+        });
+      }
       lines.push({
         employeeId: meta.employeeId,
         compensationId: meta.compensationId,
         payableDays: meta.payableDays,
         lopDays: meta.lopDays,
+        lwpDays: meta.lwpDays,
+        absentDays: meta.absentDays,
+        standardDays: meta.standardDays,
         overtimeHours: meta.overtimeHours,
         employeeCode: bundle.employee.code,
         result,
@@ -697,8 +737,11 @@ async function computeRun({ businessId, actorId, payRunId, freezeAttendance: doF
       const pre = await loadRunRowBundles(businessId, payRun, tx);
       const freezeIds = pre.bundles.map((b) => b.employee.id);
       if (freezeIds.length) {
+        // Feature 16 — freeze the entity's proration basis into the inputs so the
+        // proration denominator (standardDays) is immutable + part of the inputHash.
         freezeResult = await freezeAttendance(
           payRun.id, businessId, payRun.periodStart, payRun.periodEnd, freezeIds, tx,
+          { prorationBasis: pre.entity && pre.entity.prorationBasis },
         );
       }
       await loadAndCompute(tx);
@@ -767,6 +810,7 @@ async function persistComputedRun(tx, { businessId, payRun, actorId, now, inputH
         compensationId: ln.compensationId,
         payableDays: ln.payableDays || 0,
         lopDays: ln.lopDays || 0,
+        lwpDays: ln.lwpDays || 0, // Feature 16 — approved LWP days provenance
         overtimeHours: ln.overtimeHours || 0,
         grossEarnings: toDec(r.grossMinor),
         totalDeductions: toDec(r.totalEmployeeDeductionsMinor),
@@ -911,7 +955,71 @@ function buildPayslipSnapshot(r, payRun, ln) {
     net: toMajor(r.netMinor),
     bases: r.bases || null,
     anomalies: r.anomalies || [],
+    // Feature 16 — LOP attendance provenance + an INFORMATIONAL Loss-of-Pay line.
+    // The net ALREADY reflects the reduction (the engine prorated earnings down);
+    // this block only EXPLAINS it. `lop.amount` is NOT summed into deductions/net —
+    // it is the days × per-day-rate figure shown so an employee/auditor sees why pay
+    // dropped. Per-day rate = full (unprorated) gross ÷ standardDays.
+    attendance: buildLopProvenance(r, ln),
   };
+}
+
+/**
+ * buildLopProvenance(r, ln) — the payslip's attendance/LOP provenance block.
+ * Returns null when there is no LOP (clean payslip, nothing to explain).
+ * PURE: no DB.
+ *   standardDays / payableDays / lopDays / lwpDays / absentDays — frozen inputs.
+ *   perDayRate = gross ÷ payableDays   (the rate that, × payableDays, equals the
+ *                prorated gross — the value an employee intuitively reads); falls
+ *                back to gross ÷ standardDays when payableDays is 0.
+ *   lop.amount = lopDays × (full-gross ÷ standardDays)  (informational only).
+ */
+function buildLopProvenance(r, ln) {
+  const toMajor = (m) => money.fromMinor(m, 2);
+  const lopDays = Number(ln && ln.lopDays) || 0;
+  const standardDays = Number(ln && ln.standardDays) || 0;
+  const payableDays = Number(ln && ln.payableDays) || 0;
+  const lwpDays = Number(ln && ln.lwpDays) || 0;
+  const absentDays = Number(ln && ln.absentDays) || 0;
+  const prov = {
+    standardDays,
+    payableDays,
+    lopDays,
+    lwpDays,
+    absentDays,
+    // half-day / other LOP that is neither approved-LWP nor full-day-absent
+    otherLopDays: Math.round((lopDays - lwpDays - absentDays) * 1e4) / 1e4,
+  };
+  if (lopDays <= 0 || standardDays <= 0) return prov;
+
+  // Full (unprorated) gross = prorated gross × standard / payable. Recover it so the
+  // per-day rate matches what payroll prorated against (exact rational, paise-safe).
+  const grossMinor = r.grossMinor || 0;
+  let fullGrossMinor = grossMinor;
+  if (payableDays > 0 && payableDays < standardDays) {
+    fullGrossMinor = money.roundRational(
+      grossMinor * Math.round(standardDays * 10000),
+      Math.round(payableDays * 10000),
+      money.RoundingMode.HALF_UP,
+    );
+  }
+  const perDayMinor = money.roundRational(
+    fullGrossMinor * 10000, Math.round(standardDays * 10000), money.RoundingMode.HALF_UP,
+  );
+  const lopMinor = money.roundRational(
+    fullGrossMinor * Math.round(lopDays * 10000),
+    Math.round(standardDays * 10000),
+    money.RoundingMode.HALF_UP,
+  );
+  prov.perDayRate = toMajor(perDayMinor);
+  prov.lop = {
+    code: 'LOP',
+    label: `Loss of Pay — ${lopDays} day(s) (${lwpDays} LWP, ${absentDays} absent)`,
+    amount: toMajor(lopMinor), // shown as a reduction; NOT summed into deductions/net
+    days: lopDays,
+    informational: true,
+  };
+  return prov;
 }
 
 /**
@@ -1337,15 +1445,24 @@ async function getInputsChecklist({ businessId, payRunId }) {
   };
 
   // Leave / LOP — surfaced from frozen lopDays (drawer detail in the UI).
+  // Feature 16 — also expose the lwp/absent split + the proration denominator so the
+  // checker reads "3 LWP-approved, 1 absent on 31 standard days", not an opaque "4 LOP".
   const lopRows = await prisma.attendancePayInput.findMany({
     where: { businessId, payRunId, lopDays: { gt: 0 } },
-    select: { employeeId: true, lopDays: true },
+    select: { employeeId: true, lopDays: true, lwpDays: true, absentDays: true, payableDays: true, standardDays: true },
   });
   const leaveRow = {
     key: 'leave', label: 'Leave / LOP',
     status: lopRows.length ? 'INFO' : 'OK',
     detail: lopRows.length ? `${lopRows.length} employee(s) carry loss-of-pay days.` : 'No loss-of-pay this period.',
-    items: lopRows.map((r) => ({ employeeId: r.employeeId, lopDays: Number(r.lopDays) })),
+    items: lopRows.map((r) => ({
+      employeeId: r.employeeId,
+      lopDays: Number(r.lopDays),
+      lwpDays: Number(r.lwpDays || 0),
+      absentDays: Number(r.absentDays || 0),
+      payableDays: Number(r.payableDays || 0),
+      standardDays: Number(r.standardDays || 0),
+    })),
   };
 
   // Pending comp revisions effective in-period but not yet current.
