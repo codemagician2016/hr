@@ -12,7 +12,14 @@ const LIST_SELECT = {
   principal: true, currencyCode: true, tenureMonths: true, emiAmount: true,
   startDate: true, status: true, amountRepaid: true, outstanding: true,
   createdAt: true,
+  // Embed the person so the admin list shows a real name, not a raw UUID.
+  employee: { select: { id: true, firstName: true, lastName: true, code: true } },
 };
+
+// LoanType enum (mirrors prisma/schema.prisma). We validate against this before
+// hitting Prisma so a bad value returns a clean 422 instead of leaking a raw
+// Prisma validation string through the 500 handler.
+const LOAN_TYPES = ['LOAN', 'ADVANCE'];
 
 // Allow-list of directly-assignable Loan fields (never trust the body wholesale).
 const WRITABLE = [
@@ -69,6 +76,19 @@ function buildSchedule(loan) {
     });
   }
   return { rows, totalPayableC: principalC + totalInterestC };
+}
+
+// Generate a human-friendly, per-tenant sequential loan reference (LOAN-0001).
+// loanNumber is nullable and not DB-unique, so we derive the next ordinal from
+// the highest existing LOAN-#### for this tenant and retry on the rare race.
+async function nextLoanNumber(businessId) {
+  const last = await prisma.loan.findFirst({
+    where: { businessId, loanNumber: { startsWith: 'LOAN-' } },
+    orderBy: { loanNumber: 'desc' },
+    select: { loanNumber: true },
+  });
+  const n = last ? (parseInt(String(last.loanNumber).slice(5), 10) || 0) : 0;
+  return `LOAN-${String(n + 1).padStart(4, '0')}`;
 }
 
 // Confirm an employee belongs to this tenant before linking a loan to it.
@@ -165,6 +185,11 @@ async function create(req, res, next) {
     if (!Number.isInteger(tenure) || tenure < 1) {
       return res.status(400).json({ message: 'tenureMonths must be a positive integer' });
     }
+    // Validate the enum before Prisma sees it — a bad loanType would otherwise
+    // surface as a raw Prisma validation string via the 500 handler.
+    if (req.body.loanType !== undefined && !LOAN_TYPES.includes(req.body.loanType)) {
+      return res.status(422).json({ message: 'Invalid loanType', allowed: LOAN_TYPES });
+    }
     if (!(await employeeInTenant(businessId, employeeId))) {
       return res.status(400).json({ message: 'employeeId does not reference an employee in this business' });
     }
@@ -182,7 +207,22 @@ async function create(req, res, next) {
     const data = { ...pickWritable(req.body), businessId, status: 'DRAFT' };
     if (interestRate != null) data.interestRate = interestRate;
 
-    const loan = await prisma.loan.create({ data });
+    // Auto-assign a sequential reference (LOAN-####) unless one was supplied.
+    // Retry a couple of times in case two loans race onto the same ordinal.
+    let loan;
+    for (let attempt = 0; ; attempt += 1) {
+      if (!data.loanNumber) data.loanNumber = await nextLoanNumber(businessId);
+      try {
+        loan = await prisma.loan.create({ data });
+        break;
+      } catch (err) {
+        if (err.code === 'P2002' && !req.body.loanNumber && attempt < 3) {
+          data.loanNumber = null; // recompute the next ordinal and retry
+          continue;
+        }
+        throw err;
+      }
+    }
     res.status(201).json(loan);
   } catch (e) {
     if (e.code === 'P2002') return res.status(409).json({ message: 'A loan with that number already exists' });
@@ -201,6 +241,9 @@ async function update(req, res, next) {
     }
     // Re-validate employee/scheme ownership if either is being reassigned.
     const data = pickWritable(req.body);
+    if (req.body.loanType !== undefined && !LOAN_TYPES.includes(req.body.loanType)) {
+      return res.status(422).json({ message: 'Invalid loanType', allowed: LOAN_TYPES });
+    }
     if (data.employeeId && !(await employeeInTenant(businessId, data.employeeId))) {
       return res.status(400).json({ message: 'employeeId does not reference an employee in this business' });
     }

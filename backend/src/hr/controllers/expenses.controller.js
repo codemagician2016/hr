@@ -43,6 +43,19 @@ function canTransition(from, to) {
   return (TRANSITIONS[from] || []).includes(to);
 }
 
+// Generate a human-friendly, per-tenant sequential claim reference (EXP-0001).
+// claimNumber is nullable and not DB-unique, so we derive the next ordinal from
+// the highest existing EXP-#### for this tenant and retry on the rare race.
+async function nextClaimNumber(businessId) {
+  const last = await prisma.expenseClaim.findFirst({
+    where: { businessId, claimNumber: { startsWith: 'EXP-' } },
+    orderBy: { claimNumber: 'desc' },
+    select: { claimNumber: true },
+  });
+  const n = last ? (parseInt(String(last.claimNumber).slice(4), 10) || 0) : 0;
+  return `EXP-${String(n + 1).padStart(4, '0')}`;
+}
+
 // ── Category handlers ────────────────────────────────────────────────────────
 
 async function listCategories(req, res, next) {
@@ -107,7 +120,18 @@ async function list(req, res, next) {
     if (categoryId) where.categoryId = categoryId;
 
     const [items, total] = await Promise.all([
-      prisma.expenseClaim.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take }),
+      prisma.expenseClaim.findMany({
+        where,
+        // Embed the person + category so the admin list renders real names
+        // instead of raw UUIDs (the table falls back to employeeId otherwise).
+        include: {
+          employee: { select: { id: true, firstName: true, lastName: true, code: true } },
+          category: { select: { id: true, name: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take,
+      }),
       prisma.expenseClaim.count({ where }),
     ]);
     res.json({ items, total, page: Math.max(parseInt(page, 10) || 1, 1), pageSize: take });
@@ -151,7 +175,22 @@ async function create(req, res, next) {
     }
 
     const data = { ...pickClaim(req.body), businessId, status: 'DRAFT' };
-    const claim = await prisma.expenseClaim.create({ data });
+    // Auto-assign a sequential reference (EXP-####) unless one was supplied.
+    // Retry a couple of times in case two claims race onto the same ordinal.
+    let claim;
+    for (let attempt = 0; ; attempt += 1) {
+      if (!data.claimNumber) data.claimNumber = await nextClaimNumber(businessId);
+      try {
+        claim = await prisma.expenseClaim.create({ data });
+        break;
+      } catch (err) {
+        if (err.code === 'P2002' && !req.body.claimNumber && attempt < 3) {
+          data.claimNumber = null; // recompute the next ordinal and retry
+          continue;
+        }
+        throw err;
+      }
+    }
     res.status(201).json(claim);
   } catch (e) {
     if (e.code === 'P2002') return res.status(409).json({ message: 'A claim with that number already exists' });
