@@ -59,7 +59,11 @@ function AuthPage() {
   const cfg = PROVIDERS[provider];
 
   const host = searchParams.get('host') || '';
-  const redirect = searchParams.get('redirect') || '/dashboard';
+  // Default landing after OAuth. `/dashboard` exists ONLY on the unified admin
+  // host — on the marketing host it 404s — so fall back to the tenant home "/".
+  // The backend resolves the real per-tenant destination from the `host` param;
+  // this is only the tail-end default appended to that tenant redirect.
+  const redirect = searchParams.get('redirect') || '/';
 
   const [status, setStatus] = useState('loading'); // loading|ready|processing|success|error
   const [error, setError] = useState('');

@@ -133,6 +133,14 @@ const DEFAULT_STATE = {
   logoDataUrl: '',
 };
 
+// `/dashboard` is the JWT-scoped admin that exists ONLY on the unified admin
+// host (app.*). On the marketing host the tenant admin is /<slug>/admin, which
+// middleware bounces to the hr-admin app. Mirror the login flow's helper so
+// signup→onboarding and login agree on where an already-set-up user lands.
+function isUnifiedAdminHost() {
+  return typeof window !== 'undefined' && window.location.hostname.startsWith('app.');
+}
+
 function slugify(value, max = 60) {
   return String(value || '')
     .toLowerCase()
@@ -203,8 +211,17 @@ export default function OnboardingPage() {
           try {
             const { data: ctx } = await axios.get('/api/business/context', { withCredentials: true });
             if (ctx?.billingState === 'onboarding' || ctx?.billingState === 'expired') return;
-            // Already fully set up → into the admin.
-            window.location.href = '/dashboard';
+            // Already fully set up → into the admin. Mirror the login flow:
+            // `/dashboard` exists ONLY on the unified admin host (app.*). On the
+            // marketing host we send them to /<slug>/admin (same-origin so the
+            // auth cookie rides along; middleware bounces that to the hr-admin
+            // app), falling back to /onboarding when the slug can't be resolved.
+            if (isUnifiedAdminHost()) {
+              window.location.href = '/dashboard';
+              return;
+            }
+            const slug = ctx?.business?.slug || data?.user?.businessSlug || null;
+            window.location.href = slug ? `/${slug}/admin` : '/onboarding';
           } catch { /* allow onboarding recovery */ }
         }
       })
@@ -820,6 +837,13 @@ function StepFinish({ s, country, error }) {
 // Completion + loaders
 // --------------------------------------------------------------------------
 function CompletionScreen({ done }) {
+  // Where "Go to your dashboard" points. `/dashboard` is valid ONLY on the
+  // unified admin host (app.*); on the marketing host we use the freshly
+  // created tenant's /<slug>/admin (middleware bounces it to the hr-admin app).
+  // Fall back to "/" rather than a guaranteed-404 /dashboard if no slug.
+  const adminHref = isUnifiedAdminHost()
+    ? '/dashboard'
+    : (done.slug ? `/${done.slug}/admin` : '/');
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#f6f7f9] px-4">
       <div className="w-full max-w-lg rounded-2xl border border-gray-200 bg-white p-8 text-center shadow-sm">
@@ -847,7 +871,7 @@ function CompletionScreen({ done }) {
           </li>
         </ul>
 
-        <a href="/dashboard"
+        <a href={adminHref}
           className="mt-7 inline-flex w-full items-center justify-center rounded-xl bg-indigo-600 px-6 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-700">
           Go to your dashboard
         </a>
