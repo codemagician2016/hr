@@ -22,7 +22,16 @@ const { ROLES } = require('../../core/lib/roles');
 
 // Approval actions exclude the actor themselves (separation of duties — a manager
 // cannot approve their own leave/regularization; it escalates up the chain).
-const APPROVAL_ACTIONS = new Set(['canApproveLeave', 'canApprovePayroll', 'canApproveRegularization']);
+//
+// Feature 8 adds the performance review *acting* steps (reviewer ≠ reviewee): a
+// manager may never submit/calibrate/sign-off their OWN review instance. Because
+// the resolved id-set drops `selfId` for these actions, a manager who is somehow
+// the subject of their own instance is structurally absent from the scope — the
+// instance 404s for them, fail-closed (identical to "cannot approve own leave").
+const APPROVAL_ACTIONS = new Set([
+  'canApproveLeave', 'canApprovePayroll', 'canApproveRegularization',
+  'review.submitMgr', 'review.calibrate', 'review.signOff',
+]);
 
 const ALL = { kind: 'ALL' };
 const NONE = { kind: 'NONE' };

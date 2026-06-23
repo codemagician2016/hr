@@ -10,6 +10,8 @@ const TABS = [
   { href: '/payslips', label: 'Payslips', icon: 'M6 2h9l5 5v15H6zM15 2v5h5' },
   { href: '/attendance', label: 'Clock', icon: 'M12 8v4l3 2M12 3a9 9 0 100 18 9 9 0 000-18z' },
   { href: '/leave', label: 'Leave', icon: 'M7 3v4M17 3v4M3 9h18M5 5h14v16H5z' },
+  // Feature 8 — performance & goals self-service.
+  { href: '/performance', label: 'Growth', icon: 'M3 17l6-6 4 4 8-8M14 7h7v7' },
   { href: '/profile', label: 'Profile', icon: 'M12 12a4 4 0 100-8 4 4 0 000 8zM4 21a8 8 0 0116 0' },
 ];
 

@@ -30,6 +30,8 @@ router.use('/esign', require('../lifecycle/routes/esign.routes'));
 const talent = require('../talent/routes');
 router.use('/recruitment', talent.recruitment);
 router.use('/performance', talent.performance);
+// Feature 8 ESS — employee self-service performance (customer session, self-only).
+router.use('/ess/performance', talent.essPerformance);
 
 // Payroll orchestration — operator API (RBAC: canRunPayroll / canApprovePayroll
 // / canViewPayrollReports) and the ESS payslip API (customer session). The

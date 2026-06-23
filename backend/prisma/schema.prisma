@@ -498,6 +498,12 @@ model Business {
   performanceReviews       PerformanceReview[]
   goals                    Goal[]
   employeeSkills           EmployeeSkill[]
+  // Performance — Feature 8
+  objectives               Objective[]
+  reviewTemplates          ReviewTemplate[]
+  ratingScales             RatingScale[]
+  oneOnOnes                OneOnOne[]
+  meritRecommendations     MeritRecommendation[]
   // Recruitment
   jobs                     Job[]
   jobStages                JobStage[]
@@ -6584,6 +6590,10 @@ model Employee {
   reviewsGiven      PerformanceReview[]   @relation("ReviewerReviews")
   goals             Goal[]
   skills            EmployeeSkill[]
+  // Performance — Feature 8
+  objectivesOwned   Objective[]           @relation("ObjectiveOwner")
+  oneOnOnesAsManager  OneOnOne[]          @relation("OneOnOneManager")
+  oneOnOnesAsEmployee OneOnOne[]          @relation("OneOnOneEmployee")
   payRunLines       PayRunLine[]
   payslips          Payslip[]
   helpdeskTickets   HelpdeskTicket[]
@@ -6974,6 +6984,8 @@ model CompensationRevision {
   version        Int      @default(0)
 
   lines          SalaryComponentLine[]
+  // Feature 8: reviews whose merit hike resolved to this revision (loose-coupled).
+  linkedReviews  PerformanceReview[] @relation("ReviewMeritRevision")
 
   @@unique([employeeId, effectiveFrom])
   @@index([businessId, employeeId, isCurrent])
@@ -8868,9 +8880,21 @@ model ReviewCycle {
   periodEnd   DateTime @db.Date
   status      ReviewCycleStatus @default(DRAFT)
   ratingScaleJson Json                                 // fixed scale options (1-5 / labels)
+  // ── Feature 8 additions ──
+  templateId       String?                              // optional ReviewTemplate
+  ratingScaleId    String?                              // optional RatingScale (overrides ratingScaleJson)
+  releasedAt       DateTime?                            // org-wide release gate (no leak pre-release)
+  goalWeightPct        Decimal? @db.Decimal(5, 2)       // composite weighting: goals
+  competencyWeightPct  Decimal? @db.Decimal(5, 2)       // composite weighting: competencies
+  meritMatrixJson      Json?                            // rating→% merit matrix (config; drives MeritRecommendation)
+  hrReviewerEmployeeId String?                          // fallback reviewer for top-of-tree subjects
+  version          Int      @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   reviews     PerformanceReview[]
+  objectives  Objective[]
+  calibrationSessions CalibrationSession[]
+  meritRecommendations MeritRecommendation[]
   @@unique([businessId, code])
   @@index([businessId, status])
 }
@@ -8909,11 +8933,26 @@ model PerformanceReview {
   managerComments String?
   status      ReviewStatus @default(NOT_STARTED)
   outcomeJson Json?                                    // promotion/PIP/hike recommendation
+  // ── Feature 8: linkedCompensationId is now a REAL relation (was a loose String?) ──
   linkedCompensationId String?                          // hike -> CompensationRevision
+  linkedCompensation   CompensationRevision? @relation("ReviewMeritRevision", fields: [linkedCompensationId], references: [id], onDelete: SetNull)
+  // ── Feature 8: ReviewInstance additions ──
+  subjectSnapshot  Json?                                // frozen-on-open {managerId, dept, hireDate, …}
+  proRationFactor  Decimal  @db.Decimal(5, 4) @default(1)   // joiner/transfer tenure factor
+  compositeScore   Decimal? @db.Decimal(6, 3)           // goal×goalW + comp×compW, ×proRation
+  calibratedRating Decimal? @db.Decimal(4, 2)           // skip-level adjustment (≠ finalRating until signOff)
+  meritEligible    Boolean  @default(false)
+  releasedAt       DateTime?                            // per-instance release gate
+  acknowledgedAt   DateTime?
+  rebuttalNote     String?
   submittedAt DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   version     Int      @default(0)
+  responses        ReviewResponse[]
+  peerRequests     PeerFeedbackRequest[]
+  calibrationAdjustments CalibrationAdjustment[]
+  meritRecommendations MeritRecommendation[]
   @@unique([businessId, reviewCycleId, employeeId])
   @@index([businessId, reviewerId, status])
 }
@@ -8978,6 +9017,299 @@ model EmployeeSkill {
   endorsedBy  String?
   createdAt   DateTime @default(now())
   @@index([businessId, employeeId])
+}
+
+// ── §14.1 Performance — Feature 8 additive models (OKRs / cycle config / 360 /
+// calibration / 1:1 / merit hand-off). Tenant-scoped on businessId; mutable models
+// carry `version` for optimistic concurrency; append-only ledgers carry none. ──
+
+// ── OKRs ──
+model Objective {
+  id                String   @id @default(cuid())
+  businessId        String
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  ownerEmployeeId   String
+  owner             Employee @relation("ObjectiveOwner", fields: [ownerEmployeeId], references: [id], onDelete: Cascade)
+  level             ObjectiveLevel
+  parentObjectiveId String?                              // alignment edge (child → parent)
+  parentObjective   Objective?  @relation("ObjectiveTree", fields: [parentObjectiveId], references: [id], onDelete: SetNull)
+  childObjectives   Objective[] @relation("ObjectiveTree")
+  cycleId           String?
+  cycle             ReviewCycle? @relation(fields: [cycleId], references: [id], onDelete: SetNull)
+  title             String
+  description       String?
+  category          GoalCategory @default(INDIVIDUAL)
+  weight            Decimal  @db.Decimal(5, 2)           // Σ within (owner, cycle) = 100
+  startDate         DateTime? @db.Date
+  dueDate           DateTime  @db.Date
+  status            GoalStatus @default(DRAFT)
+  progress          Decimal  @db.Decimal(5, 2) @default(0)   // ROLLED UP from KRs — never authored directly
+  visibility        GoalVisibility @default(PUBLIC)
+  version           Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  keyResults        KeyResult[]
+  alignmentsAsChild  ObjectiveAlignment[] @relation("AlignChild")
+  alignmentsAsParent ObjectiveAlignment[] @relation("AlignParent")
+  @@index([businessId, ownerEmployeeId, status])
+  @@index([businessId, cycleId])
+}
+
+model KeyResult {
+  id           String   @id @default(cuid())
+  businessId   String
+  objectiveId  String
+  objective    Objective @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
+  title        String
+  metricType   KrMetricType
+  startValue   Decimal  @db.Decimal(18, 4)
+  targetValue  Decimal  @db.Decimal(18, 4)
+  currentValue Decimal  @db.Decimal(18, 4)
+  unit         String?
+  direction    KrDirection @default(INCREASE)
+  weight       Decimal  @db.Decimal(5, 2)                // Σ within objective = 100
+  confidence   RagStatus @default(ON_TRACK)
+  status       GoalStatus @default(ACTIVE)
+  version      Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  checkIns     GoalCheckIn[]
+  @@index([businessId, objectiveId])
+}
+
+model GoalCheckIn {                                      // append-only progress ledger (no version)
+  id               String   @id @default(cuid())
+  businessId       String
+  keyResultId      String
+  keyResult        KeyResult @relation(fields: [keyResultId], references: [id], onDelete: Cascade)
+  authorEmployeeId String
+  previousValue    Decimal  @db.Decimal(18, 4)
+  newValue         Decimal  @db.Decimal(18, 4)
+  confidence       RagStatus
+  note             String?
+  createdAt        DateTime @default(now())
+  @@index([businessId, keyResultId, createdAt])
+}
+
+model ObjectiveAlignment {                               // denormalized cascade edge for the tree view
+  id                String   @id @default(cuid())
+  businessId        String
+  childObjectiveId  String
+  childObjective    Objective @relation("AlignChild", fields: [childObjectiveId], references: [id], onDelete: Cascade)
+  parentObjectiveId String
+  parentObjective   Objective @relation("AlignParent", fields: [parentObjectiveId], references: [id], onDelete: Cascade)
+  alignmentWeight   Decimal  @db.Decimal(5, 2)
+  createdAt         DateTime @default(now())
+  @@unique([businessId, childObjectiveId, parentObjectiveId])
+  @@index([businessId, parentObjectiveId])
+}
+
+// ── Review config ──
+model ReviewTemplate {
+  id            String   @id @default(cuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name          String
+  ratingScaleId String?
+  sectionsJson  Json     // [{key:'competencies',items:[...]},{key:'goals',sourcedFrom:'OKR'},{key:'narrative',prompts[]}]
+  version       Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  @@index([businessId])
+}
+
+model RatingScale {
+  id                     String   @id @default(cuid())
+  businessId             String
+  business               Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name                   String
+  pointsJson             Json     // [{value:5,label:'Exceptional',numeric:5.0,anchor:'...'}]
+  allowsHalfPoints       Boolean  @default(true)
+  forcedDistributionJson Json?    // optional target curve, soft guardrail only
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  @@index([businessId])
+}
+
+// ── Review responses / 360 ──
+model ReviewResponse {                                   // self vs manager etc. are separate rows
+  id               String   @id @default(cuid())
+  businessId       String
+  reviewInstanceId String
+  reviewInstance   PerformanceReview @relation(fields: [reviewInstanceId], references: [id], onDelete: Cascade)
+  perspective      ReviewPerspective
+  sectionKey       String
+  itemKey          String
+  ratingValue      Decimal? @db.Decimal(4, 2)
+  comment          String?
+  authorEmployeeId String
+  visibility       ResponseVisibility @default(SHARED)   // SHARED|MANAGER_ONLY|HR_ONLY
+  version          Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  @@index([businessId, reviewInstanceId, perspective])
+}
+
+model PeerFeedbackRequest {
+  id                    String   @id @default(cuid())
+  businessId            String
+  reviewInstanceId      String
+  reviewInstance        PerformanceReview @relation(fields: [reviewInstanceId], references: [id], onDelete: Cascade)
+  requestedByEmployeeId String
+  raterEmployeeId       String
+  status                FeedbackStatus @default(REQUESTED)
+  dueDate               DateTime? @db.Date
+  version               Int      @default(0)
+  createdAt             DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  response              PeerFeedbackResponse?
+  @@index([businessId, reviewInstanceId])
+  @@index([businessId, raterEmployeeId, status])
+}
+
+model PeerFeedbackResponse {
+  id          String   @id @default(cuid())
+  businessId  String
+  requestId   String   @unique
+  request     PeerFeedbackRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  ratingsJson Json?
+  narrative   String?
+  isAnonymous Boolean  @default(true)                    // raterEmployeeId NEVER serialized to subject when true
+  submittedAt DateTime?
+  createdAt   DateTime @default(now())
+}
+
+// ── Calibration ──
+model CalibrationSession {
+  id                   String   @id @default(cuid())
+  businessId           String
+  cycleId              String
+  cycle                ReviewCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  skipLevelEmployeeId  String                            // group root (reviewer's manager)
+  status               CalibrationStatus @default(OPEN)
+  version              Int      @default(0)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  adjustments          CalibrationAdjustment[]
+  @@index([businessId, cycleId])
+}
+
+model CalibrationAdjustment {                            // append-only (no version)
+  id               String   @id @default(cuid())
+  businessId       String
+  sessionId        String
+  session          CalibrationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  reviewInstanceId String
+  reviewInstance   PerformanceReview @relation(fields: [reviewInstanceId], references: [id], onDelete: Cascade)
+  fromRating       Decimal? @db.Decimal(4, 2)
+  toRating         Decimal  @db.Decimal(4, 2)
+  reason           String
+  byEmployeeId     String
+  createdAt        DateTime @default(now())
+  @@index([businessId, sessionId])
+  @@index([businessId, reviewInstanceId])
+}
+
+// ── 1:1 ──
+model OneOnOne {
+  id                  String   @id @default(cuid())
+  businessId          String
+  business            Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  managerEmployeeId   String
+  manager             Employee @relation("OneOnOneManager", fields: [managerEmployeeId], references: [id], onDelete: Cascade)
+  employeeEmployeeId  String
+  employee            Employee @relation("OneOnOneEmployee", fields: [employeeEmployeeId], references: [id], onDelete: Cascade)
+  scheduledAt         DateTime
+  agendaJson          Json?
+  sharedNotes         String?
+  privateNotes        String?                            // NEVER returned to the employee's ESS
+  actionItemsJson     Json?
+  version             Int      @default(0)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  @@index([businessId, managerEmployeeId])
+  @@index([businessId, employeeEmployeeId])
+}
+
+// ── Merit hand-off (this module's OUTPUT; F5 owns the decision) ──
+model MeritRecommendation {
+  id                    String   @id @default(cuid())
+  businessId            String
+  business              Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  reviewInstanceId      String
+  reviewInstance        PerformanceReview @relation(fields: [reviewInstanceId], references: [id], onDelete: Cascade)
+  subjectEmployeeId     String
+  cycleId               String
+  cycle                 ReviewCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  finalRating           Decimal  @db.Decimal(4, 2)
+  compositeScore        Decimal  @db.Decimal(6, 3)
+  proRationFactor       Decimal  @db.Decimal(5, 4)
+  recommendedPct        Decimal  @db.Decimal(5, 2)
+  status                MeritStatus @default(PENDING)     // PENDING|APPROVED|APPLIED|REJECTED
+  compensationRevisionId String?                          // set by F5 when applied
+  version               Int      @default(0)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  @@unique([businessId, reviewInstanceId])
+  @@index([businessId, cycleId, status])
+}
+
+// ── Feature 8 enums ──
+enum ObjectiveLevel {
+  ORG
+  TEAM
+  INDIVIDUAL
+}
+enum KrMetricType {
+  PERCENT
+  NUMERIC
+  CURRENCY
+  BOOLEAN
+  MILESTONE
+}
+enum KrDirection {
+  INCREASE
+  DECREASE
+  MAINTAIN
+}
+enum RagStatus {
+  ON_TRACK
+  AT_RISK
+  OFF_TRACK
+}
+enum GoalVisibility {
+  PUBLIC
+  MANAGER_CHAIN
+  PRIVATE
+}
+enum ReviewPerspective {
+  SELF
+  MANAGER
+  PEER
+  SKIP_LEVEL
+  PRIOR_MANAGER
+}
+enum ResponseVisibility {
+  SHARED
+  MANAGER_ONLY
+  HR_ONLY
+}
+enum FeedbackStatus {
+  REQUESTED
+  DECLINED
+  SUBMITTED
+  EXPIRED
+}
+enum CalibrationStatus {
+  OPEN
+  LOCKED
+  CLOSED
+}
+enum MeritStatus {
+  PENDING
+  APPROVED
+  APPLIED
+  REJECTED
 }
 
 // ── §15 Recruitment (ATS) ──
