@@ -19,6 +19,8 @@
 const SCOPE_DEFAULTS = Object.freeze({
   ONBOARD: { prefix: 'ONB-', padding: 6 },
   OFFBOARD: { prefix: 'OFB-', padding: 6 },
+  // Separation cases (Feature 4 §4.3 / §8 slice 4f) — SEP-000017 etc.
+  SEP: { prefix: 'SEP-', padding: 6 },
 });
 
 function format(prefix, value, padding) {

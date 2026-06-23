@@ -20,7 +20,7 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import AppShell from '@/components/AppShell';
 import BrandHeader from '@/components/BrandHeader';
-import { ErrorBanner, Empty, Spinner, Centered } from '@hr/ui';
+import { ErrorBanner, Empty, Spinner, Centered, ESignPanel } from '@hr/ui';
 import { apiGet, apiSend } from '@/lib/api';
 
 // ─── client-side validator mirror (validators.js) ───────────────────────────
@@ -411,10 +411,8 @@ function Wizard() {
       )}
 
       {step === 'esign' && (
-        <Card title="Sign your documents" subtitle="Your offer, contract and policies will appear here to review and sign.">
-          <div className="rounded-xl border border-dashed p-5 text-center text-sm" style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-muted)' }}>
-            E-signature is being prepared and will be available here shortly.
-          </div>
+        <Card title="Sign your documents" subtitle="Review and sign your offer, contract and policies.">
+          <EsignStep signToken={params.get('signToken')} />
           <NavButtons onBack={back} onNext={next} busy={busy} />
         </Card>
       )}
@@ -483,6 +481,69 @@ function DocUpload({ label, category, onUpload, busy, done }) {
         />
         {busy ? 'Uploading…' : fileName ? `${fileName} ✓` : done ? 'Document received — click to replace' : 'Click to choose a file'}
       </label>
+    </div>
+  );
+}
+
+// E-sign step — loads the sign-page payload for a magic-link sign token (from
+// ?signToken=, minted when HR sends an envelope) and renders <ESignPanel>. The
+// token IS the auth (the public /api/hr/esign/sign/:token routes), so this works
+// for a pre-join candidate with no portal session too. With no token it shows a
+// gentle "nothing to sign yet" note rather than an error.
+function EsignStep({ signToken }) {
+  const [payload, setPayload] = useState(null);
+  const [loading, setLoading] = useState(!!signToken);
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [signed, setSigned] = useState(false);
+
+  async function load() {
+    if (!signToken) return;
+    setLoading(true); setError(null);
+    try {
+      const data = await apiGet(`/api/hr/esign/sign/${encodeURIComponent(signToken)}`);
+      setPayload(data);
+      setSigned(!!(data && (data.alreadySigned || (data.signer && data.signer.status === 'SIGNED'))));
+    } catch (e) {
+      setError(e.status === 401 ? 'This signing link is invalid or has expired.' : (e.message || 'Could not load the document.'));
+    } finally {
+      setLoading(false);
+    }
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [signToken]);
+
+  async function onSubmit({ signatureImageDataUrl, consent }) {
+    setBusy(true); setError(null);
+    try {
+      await apiSend(`/api/hr/esign/sign/${encodeURIComponent(signToken)}`, 'POST', { signatureImageDataUrl, consent });
+      setSigned(true);
+      await load();
+    } catch (e) {
+      setError(e.message || 'Could not record your signature. Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!signToken) {
+    return (
+      <div className="rounded-xl border border-dashed p-5 text-center text-sm" style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-muted)' }}>
+        There is nothing for you to sign yet. If HR sends you a document to sign, open it from the link in your email.
+      </div>
+    );
+  }
+  if (loading) return <Centered><Spinner /></Centered>;
+  return (
+    <div className="space-y-3">
+      {error && <ErrorBanner message={error} />}
+      {signed ? (
+        <div className="rounded-xl border p-4 text-center" style={{ borderColor: '#059669' }}>
+          <p className="text-base font-semibold" style={{ color: '#059669' }}>Signed ✓</p>
+          <p className="mt-1 text-sm" style={{ color: 'var(--theme-muted)' }}>Thank you — your signature has been recorded.</p>
+        </div>
+      ) : (
+        payload && <ESignPanel payload={payload} onSubmit={onSubmit} busy={busy} />
+      )}
     </div>
   );
 }

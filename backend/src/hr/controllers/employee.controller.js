@@ -106,34 +106,74 @@ async function update(req, res, next) {
   }
 }
 
-// Soft separation: flip lifecycle status + termination date. Full-and-final
-// settlement and the EmploymentRecord end-date are handled by the payroll/service
-// layer (see docs/03 SeparationCase) — this is the directory-level action.
+/**
+ * settleEmployeeTermination(client, { businessId, employeeId, actorId, terminationDate,
+ *   status }) — the INTERNAL settle helper (Feature 4 §4.3). DEMOTED from the
+ * user-facing `terminate` endpoint: the lifecycle exit path is now
+ * `POST /api/hr/separations/:id/settle` (offboarding.controller), which runs the
+ * full SeparationCase / FnF machine and calls THIS helper at the end to flip the
+ * directory status + close the current EmploymentRecord. Accepts a prisma client
+ * or a `$transaction` tx handle so the caller can settle atomically.
+ *
+ * Sets Employee.status (TERMINATED by default, or RETIRED) + terminationDate +
+ * isActive=false, closes the current EmploymentRecord (effectiveTo = terminationDate,
+ * isCurrent=false — EmploymentChangeReason has no SEPARATION value, so we end-date
+ * the segment per the append-only convention), and audits. Idempotent: an already-
+ * TERMINATED/RETIRED employee is a no-op.
+ */
+async function settleEmployeeTermination(client, { businessId, employeeId, actorId, terminationDate, status = 'TERMINATED' } = {}) {
+  const db = client || prisma;
+  const existing = await db.employee.findFirst({ where: { id: employeeId, businessId, deletedAt: null } });
+  if (!existing) return { changed: false, notFound: true };
+  if (existing.status === 'TERMINATED' || existing.status === 'RETIRED') {
+    return { employee: existing, changed: false };
+  }
+  const termDate = terminationDate ? new Date(terminationDate) : new Date();
+  const termDateOnly = new Date(Date.UTC(termDate.getUTCFullYear(), termDate.getUTCMonth(), termDate.getUTCDate()));
+
+  // Close the current EmploymentRecord segment (end-date it; append-only history).
+  await db.employmentRecord.updateMany({
+    where: { businessId, employeeId, isCurrent: true },
+    data: { isCurrent: false, effectiveTo: termDateOnly },
+  });
+
+  const emp = await db.employee.update({
+    where: { id: employeeId },
+    data: { status, terminationDate: termDate, isActive: false, version: { increment: 1 } },
+  });
+  await writeAudit({
+    businessId,
+    actorId,
+    action: 'employee.settle',
+    entityType: 'Employee',
+    entityId: emp.id,
+    meta: {
+      code: emp.code,
+      previousStatus: existing.status,
+      newStatus: status,
+      terminationDate: termDate.toISOString().slice(0, 10),
+    },
+  });
+  return { employee: emp, changed: true };
+}
+
+// DEPRECATED user-facing termination (Feature 4 §4.3): kept for backward-compat on
+// the directory route, but the proper lifecycle exit is the separation→FnF→settle
+// flow (offboarding.controller). This is now a thin wrapper over the internal
+// settle helper — it does NO SeparationCase / FnF work.
 async function terminate(req, res, next) {
   try {
     const { businessId } = req.user;
-    const existing = await prisma.employee.findFirst({ where: { id: req.params.id, businessId, deletedAt: null } });
-    if (!existing) return res.status(404).json({ message: 'Employee not found' });
-    const terminationDate = req.body.terminationDate ? new Date(req.body.terminationDate) : new Date();
-    const emp = await prisma.employee.update({
-      where: { id: req.params.id },
-      data: { status: 'TERMINATED', terminationDate, isActive: false },
-    });
-    // Sensitive action — audit the termination (best-effort, tenant-scoped).
-    await writeAudit({
+    const out = await settleEmployeeTermination(prisma, {
       businessId,
+      employeeId: req.params.id,
       actorId: req.user.id,
-      action: 'employee.terminate',
-      entityType: 'Employee',
-      entityId: emp.id,
-      meta: {
-        code: emp.code,
-        previousStatus: existing.status,
-        terminationDate: terminationDate.toISOString().slice(0, 10),
-      },
+      terminationDate: req.body.terminationDate,
+      status: 'TERMINATED',
     });
-    res.json(emp);
+    if (out.notFound) return res.status(404).json({ message: 'Employee not found' });
+    res.json(out.employee);
   } catch (e) { next(e); }
 }
 
-module.exports = { list, get, create, update, terminate };
+module.exports = { list, get, create, update, terminate, settleEmployeeTermination };

@@ -7,9 +7,21 @@
 // A tenant-wide "expiring soon" report (GET /expiring) anchors the top.
 
 import { useCallback, useEffect, useState } from 'react';
-import { ErrorBanner, PrimaryButton, TextInput, DateField, formatAdminDate } from '@hr/ui';
-import { get, post } from '@/lib/api';
+import { ErrorBanner, PrimaryButton, TextInput, DateField, formatAdminDate, DocumentDropzone, maskDocumentNumber } from '@hr/ui';
+import { get, post, del } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton } from '@/lib/ui';
+
+// DocumentCategory enum (mirrors prisma/schema.prisma) for the upload picker.
+const DOC_CATEGORIES = [
+  'ID_PROOF', 'ADDRESS_PROOF', 'PAN', 'AADHAAR', 'PASSPORT', 'VISA', 'WORK_PERMIT',
+  'EDUCATION', 'EXPERIENCE', 'OFFER_LETTER', 'CONTRACT', 'PAYSLIP_COPY',
+  'TAX_DECLARATION', 'FORM16', 'BANK_PROOF', 'MEDICAL', 'POLICY_ACK', 'OTHER',
+];
+const VISIBILITIES = [
+  ['HR_ONLY', 'HR only'],
+  ['MANAGER_AND_HR', 'Manager & HR'],
+  ['EMPLOYEE_VISIBLE', 'Employee visible'],
+];
 
 function ExpiringPanel() {
   const [data, setData] = useState(null);
@@ -25,9 +37,9 @@ function ExpiringPanel() {
   }, []);
 
   const columns = [
-    { key: 'name', header: 'Document', render: (r) => <span className="font-medium text-gray-900">{r.name || r.type}</span> },
+    { key: 'name', header: 'Document', render: (r) => <span className="font-medium text-gray-900">{r.name || r.category}</span> },
     { key: 'employee', header: 'Employee', render: (r) => r.employee ? [r.employee.firstName, r.employee.lastName].filter(Boolean).join(' ') : r.employeeId || '—' },
-    { key: 'type', header: 'Type', render: (r) => r.type || '—' },
+    { key: 'category', header: 'Category', render: (r) => r.category || '—' },
     { key: 'expiresAt', header: 'Expires', render: (r) => formatAdminDate(r.expiresAt) },
   ];
 
@@ -43,8 +55,8 @@ function ExpiringPanel() {
 function DocumentsTab({ employeeId }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [draft, setDraft] = useState({ type: '', name: '', url: '', expiresAt: '' });
+  const [busy, setBusy] = useState(false);
+  const [meta, setMeta] = useState({ category: 'ID_PROOF', name: '', visibility: 'HR_ONLY', expiresAt: '' });
 
   const load = useCallback(() => {
     if (!employeeId) return;
@@ -62,28 +74,64 @@ function DocumentsTab({ employeeId }) {
     load();
   }, [load]);
 
-  async function onCreate(e) {
-    e.preventDefault();
-    setSaving(true);
+  // Upload a real EmployeeDocument: the dropzone hands us the base64 + client
+  // hash; the server re-hashes + stores via s3.uploadDataUrl.
+  async function onUpload(file) {
+    setBusy(true);
     setError('');
     try {
-      const payload = Object.fromEntries(Object.entries(draft).filter(([, v]) => v !== ''));
-      await post(`/api/hr/documents/employees/${employeeId}/documents`, payload);
-      setDraft({ type: '', name: '', url: '', expiresAt: '' });
+      await post(`/api/hr/documents/employees/${employeeId}/documents`, {
+        category: meta.category,
+        name: meta.name || file.name,
+        visibility: meta.visibility,
+        expiresAt: meta.expiresAt || undefined,
+        mimeType: file.mimeType,
+        sizeBytes: file.sizeBytes,
+        fileHash: file.fileHash,
+        fileBase64: file.fileBase64,
+      });
+      setMeta((m) => ({ ...m, name: '', expiresAt: '' }));
       load();
     } catch (e) {
-      setError(e.data?.message || e.message || 'Failed to add document.');
+      setError(e.data?.message || e.message || 'Upload failed.');
     } finally {
-      setSaving(false);
+      setBusy(false);
     }
+  }
+
+  async function onVerify(id) {
+    setBusy(true); setError('');
+    try { await post(`/api/hr/documents/employees/${employeeId}/documents/${id}/verify`); load(); }
+    catch (e) { setError(e.data?.message || e.message || 'Verify failed.'); }
+    finally { setBusy(false); }
+  }
+
+  async function onDelete(id) {
+    setBusy(true); setError('');
+    try { await del(`/api/hr/documents/employees/${employeeId}/documents/${id}`); load(); }
+    catch (e) { setError(e.data?.message || e.message || 'Delete failed.'); }
+    finally { setBusy(false); }
   }
 
   const columns = [
     { key: 'name', header: 'Document', render: (r) => <span className="font-medium text-gray-900">{r.name}</span> },
-    { key: 'type', header: 'Type', render: (r) => r.type || '—' },
-    { key: 'url', header: 'File', render: (r) => (r.url ? <a href={r.url} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline" style={{ color: 'var(--theme-primary)' }}>Open</a> : '—') },
-    { key: 'issuedAt', header: 'Issued', render: (r) => formatAdminDate(r.issuedAt) },
+    { key: 'category', header: 'Category', render: (r) => r.category || '—' },
+    { key: 'documentNumber', header: 'Number', render: (r) => (r.documentNumber ? maskDocumentNumber(r.documentNumber) : '—') },
+    { key: 'fileUrl', header: 'File', render: (r) => (r.fileUrl ? <a href={r.fileUrl} target="_blank" rel="noreferrer" className="hover:underline" style={{ color: 'var(--theme-primary)' }}>Open</a> : '—') },
+    { key: 'integrity', header: 'Integrity', render: (r) => (r.fileHash ? <span title={r.fileHash} className="text-xs text-emerald-600">✓ hashed</span> : <span className="text-xs text-gray-400">—</span>) },
+    { key: 'signatureStatus', header: 'Signature', render: (r) => (r.signatureStatus ? <StatusBadge status={r.signatureStatus} /> : '—') },
+    { key: 'verifiedAt', header: 'Verified', render: (r) => (r.verifiedAt ? formatAdminDate(r.verifiedAt) : '—') },
     { key: 'expiresAt', header: 'Expires', render: (r) => formatAdminDate(r.expiresAt) },
+    {
+      key: 'actions',
+      header: '',
+      render: (r) => (
+        <div className="flex gap-2">
+          {!r.verifiedAt && <ActionButton tone="positive" disabled={busy} onClick={() => onVerify(r.id)}>Verify</ActionButton>}
+          <ActionButton tone="danger" disabled={busy} onClick={() => onDelete(r.id)}>Delete</ActionButton>
+        </div>
+      ),
+    },
   ];
 
   return (
@@ -92,16 +140,24 @@ function DocumentsTab({ employeeId }) {
         {error && <ErrorBanner message={error} />}
         <DataTable columns={columns} rows={rows} loading={rows === null} emptyText="No documents on file." />
       </div>
-      <form onSubmit={onCreate} className="rounded-2xl border border-gray-200 bg-white p-5 space-y-3 h-fit">
-        <h2 className="text-sm font-semibold text-gray-900">Add document</h2>
-        <TextInput label="Type" value={draft.type} onChange={(v) => setDraft((d) => ({ ...d, type: v }))} placeholder="ID_PROOF / CONTRACT" required />
-        <TextInput label="Name" value={draft.name} onChange={(v) => setDraft((d) => ({ ...d, name: v }))} required />
-        <TextInput label="File URL" value={draft.url} onChange={(v) => setDraft((d) => ({ ...d, url: v }))} required />
-        <DateField label="Expires at" value={draft.expiresAt} onChange={(v) => setDraft((d) => ({ ...d, expiresAt: v }))} />
-        <PrimaryButton type="submit" loading={saving}>
-          Save document
-        </PrimaryButton>
-      </form>
+      <div className="rounded-2xl border border-gray-200 bg-white p-5 space-y-3 h-fit">
+        <h2 className="text-sm font-semibold text-gray-900">Upload document</h2>
+        <label className="block text-sm font-medium text-gray-700">
+          Category
+          <select value={meta.category} onChange={(e) => setMeta((m) => ({ ...m, category: e.target.value }))} className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+            {DOC_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </label>
+        <TextInput label="Name (optional)" value={meta.name} onChange={(v) => setMeta((m) => ({ ...m, name: v }))} placeholder="Defaults to file name" />
+        <label className="block text-sm font-medium text-gray-700">
+          Visibility
+          <select value={meta.visibility} onChange={(e) => setMeta((m) => ({ ...m, visibility: e.target.value }))} className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+            {VISIBILITIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        </label>
+        <DateField label="Expires at (optional)" value={meta.expiresAt} onChange={(v) => setMeta((m) => ({ ...m, expiresAt: v }))} />
+        <DocumentDropzone category={meta.category} busy={busy} onFile={onUpload} label="" />
+      </div>
     </div>
   );
 }
@@ -141,7 +197,7 @@ function RequestsTab({ employeeId }) {
   }
 
   const columns = [
-    { key: 'type', header: 'Request', render: (r) => <span className="font-medium text-gray-900">{r.subject || r.type}</span> },
+    { key: 'templateKind', header: 'Request', render: (r) => <span className="font-medium text-gray-900">{r.templateKind}</span> },
     { key: 'purpose', header: 'Purpose', render: (r) => r.purpose || '—' },
     { key: 'created', header: 'Raised', render: (r) => formatAdminDate(r.createdAt) },
     { key: 'status', header: 'Status', render: (r) => <StatusBadge status={r.status} /> },
@@ -150,22 +206,14 @@ function RequestsTab({ employeeId }) {
       header: '',
       render: (r) => {
         const s = String(r.status || '').toUpperCase();
+        // Letter GENERATION (fulfilment → EmployeeDocument) lands in slice 4f; here
+        // a PENDING request can be cancelled.
         return (
           <div className="flex gap-2">
             {s === 'PENDING' && (
-              <ActionButton disabled={busyId === r.id} onClick={() => act(r.id, 'start')}>
-                Start
+              <ActionButton tone="danger" disabled={busyId === r.id} onClick={() => act(r.id, 'cancel')}>
+                Cancel
               </ActionButton>
-            )}
-            {(s === 'PENDING' || s === 'IN_PROGRESS') && (
-              <>
-                <ActionButton tone="positive" disabled={busyId === r.id} onClick={() => act(r.id, 'fulfil')}>
-                  Fulfil
-                </ActionButton>
-                <ActionButton tone="danger" disabled={busyId === r.id} onClick={() => act(r.id, 'reject')}>
-                  Reject
-                </ActionButton>
-              </>
             )}
           </div>
         );

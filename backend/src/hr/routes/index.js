@@ -21,6 +21,8 @@ router.use('/loans', require('./loans.routes'));
 // hires), HR pipeline actions require canManageOnboarding. Separation/e-sign land
 // in later slices (4d/4f).
 router.use('/onboarding', require('../lifecycle/routes/onboarding.routes'));
+router.use('/separations', require('../lifecycle/routes/offboarding.routes'));
+router.use('/esign', require('../lifecycle/routes/esign.routes'));
 
 // Talent (recruitment/ATS + performance). RBAC: recruitment -> canManageEmployees;
 // performance -> canViewEmployees (read) / canManageEmployees (write). The offer
@@ -35,6 +37,8 @@ router.use('/performance', talent.performance);
 router.use('/payroll', require('../payroll/payroll.routes'));
 router.use('/me/payslips', require('../payroll/mePayslips.routes'));
 router.use('/me/onboarding', require('../lifecycle/routes/meOnboarding.routes'));
+router.use('/me/separation', require('../lifecycle/routes/meSeparation.routes'));
+router.use('/me/documents', require('./meDocuments.routes'));
 
 // Reports / analytics — read-only payroll register, statutory summary,
 // headcount & attrition, leave liability. RBAC: canViewPayrollReports.

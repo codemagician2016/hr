@@ -99,6 +99,82 @@ function onboardingTaskBlueprint(countryCode) {
   ];
 }
 
+// Default starter OFFBOARDING task blueprint (Feature 4 §4.3, §8 slice 4e/4f).
+// The offboarding flow: SEPARATION_INITIATED → NOTICE → CLEARANCE → ASSET_RETURN
+// → FNF → EXIT_DOCS → POST_EXIT. Owners drive the clearance lanes:
+//   MANAGER → knowledge transfer + asset-return sign-off (the only lanes a manager
+//             may clear for their reports, §6); IT/FINANCE/ADMIN → their own lanes;
+//   HR      → compute/approve FnF + generate letters + revoke access.
+// Due dates anchor on NOTICE_START / LWD / RELIEVING. `assetCategory` on the
+// RETURN_ASSET task binds the asset-return lane to the checklist (slice 4e).
+function offboardingTaskBlueprint(countryCode) {
+  const isIN = countryCode === 'IN';
+  return [
+    // ── SEPARATION_INITIATED — HR accepts the resignation / opens the case ──
+    { stageKey: 'SEPARATION_INITIATED', taskKey: 'ACCEPT_RESIGNATION',
+      title: 'Accept resignation / confirm separation', ownerRole: 'HR', taskOrder: 0,
+      dueAnchor: 'NOTICE_START', dueOffsetDays: 0, isBlocking: true, isMandatory: true },
+
+    // ── NOTICE — knowledge transfer during the notice period (manager-owned) ──
+    { stageKey: 'NOTICE', taskKey: 'KNOWLEDGE_TRANSFER',
+      title: 'Complete knowledge transfer & handover', ownerRole: 'MANAGER', taskOrder: 0,
+      dueAnchor: 'LWD', dueOffsetDays: -3, isBlocking: true, isMandatory: true },
+
+    // ── CLEARANCE — per-lane sign-offs (each lane only its owner can clear) ──
+    { stageKey: 'CLEARANCE', taskKey: 'CLEARANCE_IT',
+      title: 'IT clearance (accounts, devices, access)', ownerRole: 'IT', taskOrder: 0,
+      dueAnchor: 'LWD', dueOffsetDays: -1, isBlocking: true, isMandatory: true },
+    { stageKey: 'CLEARANCE', taskKey: 'CLEARANCE_FINANCE',
+      title: 'Finance clearance (advances, reimbursements)', ownerRole: 'FINANCE', taskOrder: 1,
+      dueAnchor: 'LWD', dueOffsetDays: -1, isBlocking: true, isMandatory: true },
+    { stageKey: 'CLEARANCE', taskKey: 'CLEARANCE_ADMIN',
+      title: 'Admin clearance (ID card, library, premises)', ownerRole: 'ADMIN', taskOrder: 2,
+      dueAnchor: 'LWD', dueOffsetDays: -1, isBlocking: true, isMandatory: true },
+
+    // ── ASSET_RETURN — return company assets (manager signs off, slice 4e) ──
+    { stageKey: 'ASSET_RETURN', taskKey: 'RETURN_ASSET',
+      title: 'Return company assets (laptop, access, devices)', ownerRole: 'MANAGER', taskOrder: 0,
+      dueAnchor: 'LWD', dueOffsetDays: 0, isBlocking: true, isMandatory: true,
+      assetCategory: 'LAPTOP' },
+
+    // ── FNF — HR computes + approves the settlement ──
+    { stageKey: 'FNF', taskKey: 'COMPUTE_FNF',
+      title: 'Compute full-and-final settlement', ownerRole: 'HR', taskOrder: 0,
+      dueAnchor: 'LWD', dueOffsetDays: 3, isBlocking: true, isMandatory: true },
+
+    // ── EXIT_DOCS — relieving + experience letters (HR, gated on SETTLED) ──
+    { stageKey: 'EXIT_DOCS', taskKey: 'GENERATE_RELIEVING',
+      title: 'Generate relieving letter', ownerRole: 'HR', taskOrder: 0,
+      dueAnchor: 'RELIEVING', dueOffsetDays: 0, isBlocking: false, isMandatory: true,
+      esignTemplateKind: 'RELIEVING_LETTER' },
+    { stageKey: 'EXIT_DOCS', taskKey: 'GENERATE_EXPERIENCE',
+      title: 'Generate experience / service certificate', ownerRole: 'HR', taskOrder: 1,
+      dueAnchor: 'RELIEVING', dueOffsetDays: 0, isBlocking: false, isMandatory: isIN,
+      esignTemplateKind: 'EXPERIENCE_LETTER' },
+    { stageKey: 'EXIT_DOCS', taskKey: 'EXIT_INTERVIEW',
+      title: 'Conduct exit interview', ownerRole: 'HR', taskOrder: 2,
+      dueAnchor: 'LWD', dueOffsetDays: 0, isBlocking: false, isMandatory: false },
+
+    // ── POST_EXIT — revoke access (system task, on settle) ──
+    { stageKey: 'POST_EXIT', taskKey: 'REVOKE_ACCESS',
+      title: 'Revoke system access & deactivate accounts', ownerRole: 'HR', taskOrder: 0,
+      dueAnchor: 'RELIEVING', dueOffsetDays: 0, isBlocking: true, isMandatory: true },
+  ];
+}
+
+function offboardingTemplateDescriptor(countryCode) {
+  const cc = countryCode === 'NZ' ? 'NZ' : 'IN';
+  return {
+    code: `OFBT-${cc}`,
+    name: `Default Offboarding (${cc})`,
+    direction: 'OFFBOARDING',
+    countryCode: cc,
+    isDefault: true,
+    isActive: true,
+    taskDefs: offboardingTaskBlueprint(cc),
+  };
+}
+
 // Build the full template descriptor for one country (code is stable & idempotent).
 function onboardingTemplateDescriptor(countryCode) {
   const cc = countryCode === 'NZ' ? 'NZ' : 'IN';
@@ -123,8 +199,13 @@ function onboardingTemplateDescriptor(countryCode) {
 async function seedOnboardingTemplates(prisma, businessId, { entityId = null } = {}) {
   if (!prisma || !businessId) throw new Error('seedOnboardingTemplates requires (prisma, businessId)');
   const out = [];
+  // Both directions: IN + NZ onboarding AND offboarding starter templates.
+  const descriptors = [];
   for (const cc of ['IN', 'NZ']) {
-    const desc = onboardingTemplateDescriptor(cc);
+    descriptors.push(onboardingTemplateDescriptor(cc));
+    descriptors.push(offboardingTemplateDescriptor(cc));
+  }
+  for (const desc of descriptors) {
     const { taskDefs, ...templateData } = desc;
 
     const template = await prisma.lifecycleTemplate.upsert({
@@ -142,6 +223,32 @@ async function seedOnboardingTemplates(prisma, businessId, { entityId = null } =
     out.push(template);
   }
   return out;
+}
+
+/**
+ * getDefaultOffboardingTemplate(prisma, businessId, countryCode) — the default
+ * active OFFBOARDING template for a country, with its task defs loaded. Falls
+ * back to the IN template if the country has no specific one. Returns
+ * { template, taskDefs } or null. Mirrors getDefaultOnboardingTemplate.
+ */
+async function getDefaultOffboardingTemplate(prisma, businessId, countryCode) {
+  const cc = countryCode === 'NZ' ? 'NZ' : 'IN';
+  let template = await prisma.lifecycleTemplate.findFirst({
+    where: { businessId, direction: 'OFFBOARDING', countryCode: cc, isDefault: true, isActive: true, deletedAt: null },
+    orderBy: { createdAt: 'desc' },
+  });
+  if (!template) {
+    template = await prisma.lifecycleTemplate.findFirst({
+      where: { businessId, direction: 'OFFBOARDING', isDefault: true, isActive: true, deletedAt: null },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+  if (!template) return null;
+  const taskDefs = await prisma.lifecycleTaskDef.findMany({
+    where: { businessId, templateId: template.id },
+    orderBy: [{ stageKey: 'asc' }, { taskOrder: 'asc' }],
+  });
+  return { template, taskDefs };
 }
 
 /**
@@ -173,7 +280,10 @@ async function getDefaultOnboardingTemplate(prisma, businessId, countryCode) {
 module.exports = {
   seedOnboardingTemplates,
   getDefaultOnboardingTemplate,
+  getDefaultOffboardingTemplate,
   // exported pure for unit tests
   onboardingTaskBlueprint,
   onboardingTemplateDescriptor,
+  offboardingTaskBlueprint,
+  offboardingTemplateDescriptor,
 };
