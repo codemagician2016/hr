@@ -32,6 +32,10 @@ const STATE = Object.freeze({
   DRAFT: 'DRAFT',
   INPUTS_LOCKED: 'INPUTS_LOCKED',
   CALCULATED: 'CALCULATED',
+  // Feature 7 — the maker→checker review gate. A computed run the maker SUBMITS
+  // sits here until the checker approves (forward) or sends it back (→CALCULATED,
+  // editable). Maps to the reserved PayRunStatus.REVIEW member.
+  IN_REVIEW: 'IN_REVIEW',
   APPROVED: 'APPROVED',
   PAID: 'PAID',
   FILED: 'FILED',
@@ -46,7 +50,13 @@ const TERMINAL = new Set([STATE.CLOSED, STATE.CANCELLED]);
 const TRANSITIONS = Object.freeze({
   [STATE.DRAFT]: new Set([STATE.INPUTS_LOCKED, STATE.CANCELLED]),
   [STATE.INPUTS_LOCKED]: new Set([STATE.CALCULATED, STATE.DRAFT, STATE.CANCELLED]),
-  [STATE.CALCULATED]: new Set([STATE.APPROVED, STATE.INPUTS_LOCKED, STATE.DRAFT, STATE.CANCELLED]),
+  // A computed run can be SUBMITTED for review (maker), re-locked, re-opened to
+  // DRAFT, or cancelled. Direct CALCULATED→APPROVED is retained so the existing
+  // approveRun path (and tests) keep working when no review gate is used.
+  [STATE.CALCULATED]: new Set([STATE.IN_REVIEW, STATE.APPROVED, STATE.INPUTS_LOCKED, STATE.DRAFT, STATE.CANCELLED]),
+  // In review: checker APPROVES (forward), SENDS BACK (→CALCULATED, editable), or
+  // the run is cancelled pre-approval.
+  [STATE.IN_REVIEW]: new Set([STATE.APPROVED, STATE.CALCULATED, STATE.CANCELLED]),
   [STATE.APPROVED]: new Set([STATE.PAID, STATE.CALCULATED]),
   [STATE.PAID]: new Set([STATE.FILED]),
   [STATE.FILED]: new Set([STATE.CLOSED]),
@@ -62,11 +72,26 @@ const STATE_TO_PRISMA = Object.freeze({
   [STATE.DRAFT]: 'DRAFT',
   [STATE.INPUTS_LOCKED]: 'INPUTS_LOCKED',
   [STATE.CALCULATED]: 'COMPUTED',
+  [STATE.IN_REVIEW]: 'REVIEW',
   [STATE.APPROVED]: 'APPROVED',
   [STATE.PAID]: 'PAID',
   [STATE.FILED]: 'FILED',
   [STATE.CLOSED]: 'FILED',
   [STATE.CANCELLED]: 'CANCELLED',
+});
+
+// Reverse map: prisma PayRunStatus -> engine STATE (CLOSED is FILED+closedAt, so
+// it cannot be reconstructed from status alone — callers resolve closed via the
+// closedAt flag). Used by the orchestrator to seed the in-memory `from` state.
+const PRISMA_TO_STATE = Object.freeze({
+  DRAFT: STATE.DRAFT,
+  INPUTS_LOCKED: STATE.INPUTS_LOCKED,
+  COMPUTED: STATE.CALCULATED,
+  REVIEW: STATE.IN_REVIEW,
+  APPROVED: STATE.APPROVED,
+  PAID: STATE.PAID,
+  FILED: STATE.FILED,
+  CANCELLED: STATE.CANCELLED,
 });
 
 class PayRunError extends Error {
@@ -113,6 +138,10 @@ const GUARDS = {
     }
   },
   [STATE.CALCULATED](run, ctx) {
+    // Send-back (IN_REVIEW -> CALCULATED): the run is already computed; this is the
+    // checker returning it to the maker, not a fresh compute, so the lock/hash
+    // checks below do not apply.
+    if (run.status === STATE.IN_REVIEW) return;
     if (!run.inputHash) {
       throw new PayRunError('NOT_LOCKED', 'Cannot compute before inputs are locked');
     }
@@ -124,21 +153,48 @@ const GUARDS = {
       );
     }
   },
-  [STATE.APPROVED](run, ctx) {
+  // Submit-for-review (maker). A computed run with no open blockers moves to
+  // IN_REVIEW; the submitting maker is recorded so the checker can be enforced
+  // distinct. Submit is itself gated by OPEN_BLOCKERS (mirrors the approve gate
+  // so a blocked run never even reaches a checker's queue).
+  [STATE.IN_REVIEW](run, ctx) {
     if (run.status !== STATE.CALCULATED) {
-      throw new PayRunError('NOT_CALCULATED', 'Approval requires a CALCULATED run (no skipping VALIDATED/compute)');
+      throw new PayRunError('NOT_CALCULATED', 'Submit-for-review requires a CALCULATED run');
+    }
+    const blockers = ctx.blockingAnomalies ?? run.blockingAnomalies ?? 0;
+    if (blockers > 0) {
+      throw new PayRunError('OPEN_BLOCKERS', `Cannot submit with ${blockers} open blocking anomalies`);
+    }
+  },
+  [STATE.APPROVED](run, ctx) {
+    // Approve is reachable from a directly-computed run OR a submitted (IN_REVIEW)
+    // run. Both are honoured so the simple path and the maker→checker path coexist.
+    if (run.status !== STATE.CALCULATED && run.status !== STATE.IN_REVIEW) {
+      throw new PayRunError('NOT_CALCULATED', 'Approval requires a CALCULATED or IN_REVIEW run (no skipping compute)');
     }
     const fourEyes = ctx.fourEyes ?? run.fourEyes ?? true;
     if (fourEyes) {
       if (!ctx.actorId) {
         throw new PayRunError('APPROVER_REQUIRED', 'Approver identity required');
       }
-      if (ctx.actorId === run.preparerId) {
+      // Maker-checker: the approver must differ from EVERY maker identity on the
+      // run — the preparer/computer AND the submitter (if a review gate was used).
+      const makers = [run.preparerId, run.submittedBy].filter(Boolean);
+      if (makers.includes(ctx.actorId)) {
         throw new PayRunError(
           'MAKER_CHECKER',
-          'Maker-checker: approver must differ from preparer'
+          'Maker-checker: approver must differ from the preparer/submitter'
         );
       }
+    }
+    // STALE_TOTALS — the checker must approve the totals they reviewed. If the run
+    // carries a totalsHash (set at submit/compute) and the caller passes the one
+    // they saw, they must match (a silent recompute changes the hash → reject).
+    if (run.totalsHash != null && ctx.totalsHash != null && ctx.totalsHash !== run.totalsHash) {
+      throw new PayRunError(
+        'STALE_TOTALS',
+        'Totals changed since review — re-open and re-review before approving'
+      );
     }
     const blockers = ctx.blockingAnomalies ?? run.blockingAnomalies ?? 0;
     if (blockers > 0) {
@@ -227,11 +283,27 @@ function transition(run, to, ctx = {}) {
     next.lockedInputsAt = ctx.at ?? null;
   }
   if (to === STATE.CALCULATED) {
-    next.computedInputHash = run.inputHash;
-    next.computedAt = ctx.at ?? null;
+    // Reached either by a fresh compute OR a send-back from IN_REVIEW. A send-back
+    // clears the prior submission so the next submit records a fresh maker, and
+    // carries the checker's reason for the audit trail.
+    if (from === STATE.IN_REVIEW) {
+      next.submittedBy = null;
+      next.submittedAt = null;
+      next.reviewedBy = ctx.actorId ?? null;
+      next.sendBackReason = ctx.reason ?? null;
+    } else {
+      next.computedInputHash = run.inputHash;
+      next.computedAt = ctx.at ?? null;
+    }
+  }
+  if (to === STATE.IN_REVIEW) {
+    next.submittedBy = ctx.actorId;
+    next.submittedAt = ctx.at ?? null;
+    next.totalsHash = ctx.totalsHash ?? next.totalsHash ?? null;
   }
   if (to === STATE.APPROVED) {
     next.approverId = ctx.actorId;
+    next.reviewedBy = ctx.actorId;
     next.approvedAt = ctx.at ?? null;
     next.totalsHash = ctx.totalsHash ?? next.totalsHash ?? null;
   }
@@ -319,18 +391,53 @@ async function persistTransition({ prisma, payRunId, from, to, ctx = {} }) {
 
   const data = { status };
   if (to === STATE.CALCULATED) {
-    data.computedAt = ctx.at ?? new Date();
-    data.computedBy = ctx.actorId ?? null;
+    if (from === STATE.IN_REVIEW) {
+      // Send-back: clear the submission, record reviewer + reason.
+      data.submittedAt = null;
+      data.submittedBy = null;
+      data.reviewedBy = ctx.actorId ?? null;
+      data.reviewedAt = ctx.at ?? new Date();
+      data.sendBackReason = ctx.reason ?? null;
+    } else {
+      data.computedAt = ctx.at ?? new Date();
+      data.computedBy = ctx.actorId ?? null;
+    }
+  }
+  if (to === STATE.IN_REVIEW) {
+    data.submittedAt = ctx.at ?? new Date();
+    data.submittedBy = ctx.actorId ?? null;
+    if (ctx.totalsHash != null) data.totalsHash = ctx.totalsHash;
+    // A fresh submission supersedes any prior send-back reason.
+    data.sendBackReason = null;
   }
   if (to === STATE.APPROVED) {
     data.approvedAt = ctx.at ?? new Date();
     data.approvedBy = ctx.actorId ?? null;
+    data.reviewedBy = ctx.actorId ?? null;
+    data.reviewedAt = ctx.at ?? new Date();
   }
   if (to === STATE.INPUTS_LOCKED) {
     data.lockedAt = ctx.at ?? new Date();
     data.lockedBy = ctx.actorId ?? null;
   }
   if (to === STATE.PAID) data.paidAt = ctx.at ?? new Date();
+  if (to === STATE.FILED) data.filedAt = ctx.at ?? new Date();
+  // CLOSED maps to prisma FILED — distinguished by the closedAt flag.
+  if (to === STATE.CLOSED) data.closedAt = ctx.at ?? new Date();
+  if (to === STATE.CANCELLED) {
+    if (ctx.reason != null) data.notes = ctx.reason;
+  }
+  if (to === STATE.DRAFT) {
+    // Reopen discards the compute fingerprint so inputs are editable again and a
+    // later recompute is not short-circuited as an idempotent no-op.
+    data.complianceVersionId = null;
+    data.computedAt = null;
+    data.computedBy = null;
+    data.submittedAt = null;
+    data.submittedBy = null;
+    data.reviewedBy = null;
+    data.totalsHash = null;
+  }
   data.version = { increment: 1 };
 
   // Optimistic concurrency: only update if still in `from` (guards races).
@@ -490,6 +597,7 @@ module.exports = {
   STATE,
   TRANSITIONS,
   STATE_TO_PRISMA,
+  PRISMA_TO_STATE,
   PayRunError,
   canTransition,
   nextStates,

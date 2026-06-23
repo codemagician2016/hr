@@ -456,6 +456,8 @@ model Business {
   attendancePayInputs      AttendancePayInput[]
   payslips                 Payslip[]
   statutoryRemittances     StatutoryRemittance[]
+  payRunInputItems         PayRunInputItem[]
+  varianceThreshold        VarianceThreshold?
   // Leave
   leaveTypes               LeaveType[]
   leavePolicies            LeavePolicy[]
@@ -7278,6 +7280,21 @@ model PayRun {
   approvedAt    DateTime?
   approvedBy    String?
   paidAt        DateTime?
+  // Feature 7 — review-gate sub-state + close/totals fingerprint (all additive).
+  // The reserved REVIEW PayRunStatus member carries the maker→checker gate; these
+  // flags record WHO submitted/reviewed and the totalsHash the checker saw (the
+  // STALE_TOTALS guard rejects approve-after-silent-recompute). closedAt models
+  // CLOSED as FILED+flag (schema has no CLOSED member). varianceReport is the
+  // run-level period-over-period roll-up persisted by computeVariance.
+  submittedAt   DateTime?
+  submittedBy   String?
+  reviewedBy    String?
+  reviewedAt    DateTime?
+  sendBackReason String?
+  closedAt      DateTime?
+  totalsHash    String?
+  varianceReport Json?
+  filedAt       DateTime?
   approvalRequestId String?
   parentPayRunId String? // OFF_CYCLE/CORRECTION linked to a regular run
   notes         String?
@@ -7290,6 +7307,7 @@ model PayRun {
   payslips      Payslip[]
   remittances   StatutoryRemittance[]
   attendanceInputs AttendancePayInput[]
+  inputItems    PayRunInputItem[]
 
   @@unique([businessId, code])
   @@index([businessId, entityId, payCalendarId, periodStart, type])
@@ -7317,6 +7335,48 @@ enum PayRunStatus {
   PAID
   FILED
   CANCELLED
+}
+
+/// Feature 7 — one-time / ad-hoc inputs for a run (bonus, ad-hoc deduction,
+/// arrear, reimbursement). Editable only while the run is DRAFT; frozen into the
+/// run inputHash at INPUTS_LOCKED. ADDITIVE; no FK constraints beyond payRun so a
+/// historical run replays identically.
+model PayRunInputItem {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  payRunId      String
+  payRun        PayRun   @relation(fields: [payRunId], references: [id], onDelete: Cascade)
+  employeeId    String
+  kind          PayRunInputKind
+  componentCode String? // target component (null = ad-hoc line)
+  amountMinor   BigInt // integer minor units (paise/cents)
+  sourcePeriod  String? // "YYYY-MM" for arrears
+  taxable       Boolean  @default(true)
+  note          String?
+  createdBy     String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  version       Int      @default(0)
+
+  @@index([businessId, payRunId, employeeId])
+}
+
+enum PayRunInputKind {
+  OTE
+  OTD
+  ARREAR
+  REIMBURSEMENT
+}
+
+/// Feature 7 — per-tenant variance tolerances (overrides DEFAULT_THRESHOLDS in
+/// variance.js). One row per business; absent ⇒ engine defaults.
+model VarianceThreshold {
+  id         String   @id @default(uuid())
+  businessId String   @unique
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  config     Json // { softNetPct, hardNetPct, grossPct, componentPct, lopSpikeDays, absMinFloorMinor, statutoryRateTolerance }
+  updatedAt  DateTime @updatedAt
 }
 
 /// Frozen attendance/leave feed for a (payRun, employee). The "AttendancePayInput"
