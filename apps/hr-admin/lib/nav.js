@@ -32,15 +32,18 @@ export const NAV_ITEMS = [
   { key: 'performance', label: 'Performance', href: '/performance', feature: 'hr', permission: 'canViewTeamPerformance' },
   { key: 'payroll', label: 'Payroll', href: '/payroll', feature: 'payroll', permission: 'canRunPayroll' },
   { key: 'reports', label: 'Reports', href: '/reports', feature: 'payroll', permission: 'canViewPayrollReports' },
-  // Letters & Communication (Feature 9). One nav group gated on EITHER key:
+  // Letters & Communication (Feature 9). The group header is gated on EITHER key:
   // canGenerateLetters (the maker/issue key) OR canManageLetters (the config/
-  // checker/revoke key). The group header + its four sub-links (Templates +
-  // Letterheads are built by 9C/9D; Issue + Register by 9E) all use `anyPermission`
-  // so a maker-only HR-Admin and a config-only checker both see Letters. The
-  // server is the real enforcement boundary; this just shows the section.
+  // checker/revoke key), so both a maker-only HR-Admin and a config-only checker
+  // see the section. The sub-links mirror the SERVER's per-route guard so the nav
+  // never offers a link that 403s:
+  //   - Templates + Letterheads routes are `requirePermission('canManageLetters')`
+  //     → gate the nav on canManageLetters (a maker-only user would 403 there).
+  //   - Issue + Register are `canGenerateLetters` → keep the maker-OR-checker gate.
+  // The server is the real enforcement boundary; this just shows the right links.
   { key: 'letters', label: 'Letters', href: '/letters', feature: 'hr', anyPermission: ['canGenerateLetters', 'canManageLetters'], group: true },
-  { key: 'letters-templates', label: 'Templates', href: '/letters/templates', feature: 'hr', anyPermission: ['canGenerateLetters', 'canManageLetters'], parent: 'letters' },
-  { key: 'letters-letterheads', label: 'Letterheads', href: '/letters/letterheads', feature: 'hr', anyPermission: ['canGenerateLetters', 'canManageLetters'], parent: 'letters' },
+  { key: 'letters-templates', label: 'Templates', href: '/letters/templates', feature: 'hr', permission: 'canManageLetters', parent: 'letters' },
+  { key: 'letters-letterheads', label: 'Letterheads', href: '/letters/letterheads', feature: 'hr', permission: 'canManageLetters', parent: 'letters' },
   { key: 'letters-issue', label: 'Issue', href: '/letters/issue', feature: 'hr', anyPermission: ['canGenerateLetters', 'canManageLetters'], parent: 'letters' },
   { key: 'letters-register', label: 'Register', href: '/letters/register', feature: 'hr', anyPermission: ['canGenerateLetters', 'canManageLetters'], parent: 'letters' },
   { key: 'settings', label: 'Settings', href: '/settings', permission: 'canEditBranding' },

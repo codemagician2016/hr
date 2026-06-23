@@ -430,14 +430,16 @@ async function main() {
       assert(res.statusCode === 200 && Array.isArray(res.body.items), 'register → 200 with items[]');
       assert(res.body.items.every((r) => r.category === 'EXPERIENCE'), 'category filter applied');
       assert(typeof res.body.total === 'number' && res.body.page === 1, 'pagination envelope present');
+      // #35: every row carries a human issuedByName (id stays as a secondary field).
+      assert(res.body.items.every((r) => 'issuedByName' in r && r.issuedByName), 'register rows carry issuedByName');
 
       const search = await callController(controller.register, reqFor({ user, query: { search: 'Aarav' } }));
       assert(search.body.items.some((r) => r.employee && /Aarav/.test(r.employee.name)), 'search by employee name hits');
 
       const csv = await callController(controller.register, reqFor({ user, query: { format: 'csv' } }));
       assert(csv.headers['content-type'].startsWith('text/csv'), 'CSV export Content-Type text/csv');
-      assert(typeof csv.sent === 'string' && csv.sent.split('\r\n')[0] === 'referenceNo,category,status,employee,employeeCode,issuedBy,issuedAt',
-        'CSV has the header row');
+      assert(typeof csv.sent === 'string' && csv.sent.split('\r\n')[0] === 'referenceNo,category,status,employee,employeeCode,issuedByName,issuedById,issuedAt',
+        'CSV has the header row (issuedByName + issuedById)');
       assert(/EXPERIENCE/.test(csv.sent), 'CSV body has issued rows');
     }
 

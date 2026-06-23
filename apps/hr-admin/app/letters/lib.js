@@ -13,9 +13,11 @@ function resolveUrl(path) {
   return API_BASE ? `${API_BASE}${rel}` : rel;
 }
 
-// POST a JSON body and return the PDF response as a Blob. On a non-2xx (e.g. a
-// 422 missingRequired) the body is JSON, so we parse + throw with .status/.data
-// so callers can surface the missing-field list.
+// POST a JSON body and return the PDF response as { blob, masked }. The masked
+// list (comp merge-field keys hidden because the caller lacks canViewCompensation)
+// rides on the X-Letter-Masked response header — the body is a binary PDF, so it
+// can't carry JSON. On a non-2xx (e.g. a 422 missingRequired) the body IS JSON, so
+// we parse + throw with .status/.data so callers can surface the missing-field list.
 export async function postForPdf(path, data) {
   const res = await fetch(resolveUrl(path), {
     method: 'POST',
@@ -31,7 +33,10 @@ export async function postForPdf(path, data) {
     err.data = body;
     throw err;
   }
-  return res.blob();
+  const maskedHeader = res.headers.get('X-Letter-Masked') || '';
+  const masked = maskedHeader ? maskedHeader.split(',').map((s) => s.trim()).filter(Boolean) : [];
+  const blob = await res.blob();
+  return { blob, masked };
 }
 
 // GET a stored letter PDF as a Blob (for the register download action).

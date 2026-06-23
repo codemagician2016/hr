@@ -69,6 +69,30 @@ function unknownMergeFields(mergeFieldsJson) {
   return Object.keys(mergeFieldsJson).filter((k) => !(k in CATALOG));
 }
 
+// The {{namespace.field}} token grammar (mirror mergeFields.TOKEN_RE). We extract
+// the same well-formed tokens the renderer substitutes — anything else is literal
+// text and not a merge field.
+const BODY_TOKEN_RE = /\{\{\s*([a-zA-Z][a-zA-Z0-9]*\.[a-zA-Z][a-zA-Z0-9]*)\s*\}\}/g;
+
+// Pull the distinct {{tokens}} referenced anywhere in the supplied text(s).
+function extractBodyTokens(...texts) {
+  const set = new Set();
+  for (const t of texts) {
+    if (typeof t !== 'string' || !t) continue;
+    BODY_TOKEN_RE.lastIndex = 0;
+    let m;
+    while ((m = BODY_TOKEN_RE.exec(t)) !== null) set.add(m[1]);
+  }
+  return [...set];
+}
+
+// Tokens used in the body/subject that the catalog doesn't know. These would be
+// silently stripped at render time (renderMerge drops unknown tokens), so we
+// reject them at save time instead — the editor gets a precise list to fix.
+function unknownBodyTokens({ bodyMarkdown, subject }) {
+  return extractBodyTokens(bodyMarkdown, subject).filter((t) => !(t in CATALOG));
+}
+
 function fail(res, status, message, extra) {
   return res.status(status).json({ message, ...(extra || {}) });
 }
@@ -178,9 +202,20 @@ async function createTemplate(req, res) {
   const bodyMarkdown = typeof b.bodyMarkdown === 'string' ? b.bodyMarkdown : '';
   if (!bodyMarkdown.trim()) return fail(res, 422, 'A template body (bodyMarkdown) is required');
 
+  const subject = typeof b.subject === 'string' ? b.subject : null;
+
   // mergeFieldsJson must reference real catalog tokens (UI palette ↔ renderer agreement).
   const unknown = unknownMergeFields(b.mergeFieldsJson);
   if (unknown.length) return fail(res, 422, 'mergeFieldsJson references unknown merge fields', { unknownMergeFields: unknown });
+
+  // The body/subject themselves must only use catalog tokens. An unknown {{token}}
+  // would be stripped silently at render (renderMerge drops it), so reject it here
+  // with the exact list — the editor highlights the typo before it ships a letter
+  // with a hole where a field should be.
+  const unknownInBody = unknownBodyTokens({ bodyMarkdown, subject });
+  if (unknownInBody.length) {
+    return fail(res, 422, 'The letter body references unknown merge fields', { unknownMergeFields: unknownInBody });
+  }
 
   // code: tenant-unique. Auto-derive from name if not provided; ensure unique.
   let code = typeof b.code === 'string' && b.code.trim() ? b.code.trim() : null;
@@ -197,7 +232,7 @@ async function createTemplate(req, res) {
     name,
     category,
     countryCode,
-    subject: typeof b.subject === 'string' ? b.subject : null,
+    subject,
     bodyMarkdown,
     mergeFieldsJson: b.mergeFieldsJson != null ? b.mergeFieldsJson : undefined,
     defaultLetterheadId: b.defaultLetterheadId || null,
@@ -265,6 +300,18 @@ async function updateTemplate(req, res) {
     const unknown = unknownMergeFields(b.mergeFieldsJson);
     if (unknown.length) return fail(res, 422, 'mergeFieldsJson references unknown merge fields', { unknownMergeFields: unknown });
     data.mergeFieldsJson = b.mergeFieldsJson;
+  }
+
+  // Validate the EFFECTIVE body + subject (new value if supplied, else the stored
+  // one) against the catalog — an edit that introduces an unknown {{token}} is
+  // rejected with the exact list before it's saved + silently stripped at render.
+  if (b.bodyMarkdown !== undefined || b.subject !== undefined) {
+    const effBody = b.bodyMarkdown !== undefined ? b.bodyMarkdown : existing.bodyMarkdown;
+    const effSubject = b.subject !== undefined ? b.subject : existing.subject;
+    const unknownInBody = unknownBodyTokens({ bodyMarkdown: effBody, subject: effSubject });
+    if (unknownInBody.length) {
+      return fail(res, 422, 'The letter body references unknown merge fields', { unknownMergeFields: unknownInBody });
+    }
   }
   if (b.defaultLetterheadId !== undefined) data.defaultLetterheadId = b.defaultLetterheadId || null;
   if (b.requiresSignature !== undefined) data.requiresSignature = !!b.requiresSignature;
@@ -368,5 +415,8 @@ module.exports = {
   archiveTemplate,
   deleteTemplate,
   // exported for tests
-  _internals: { unknownMergeFields, publicTemplate, LETTER_CATEGORIES, COUNTRY_CODES },
+  _internals: {
+    unknownMergeFields, unknownBodyTokens, extractBodyTokens,
+    publicTemplate, LETTER_CATEGORIES, COUNTRY_CODES,
+  },
 };

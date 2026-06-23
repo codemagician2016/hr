@@ -44,10 +44,36 @@ function extractTokens(...texts) {
   return [...set];
 }
 
-/** Build the mergeFieldsJson allow-list for a body: { token: {type,gatedBy} }. */
-function mergeFieldsFor(...texts) {
+// Critical merge tokens per category — when one of these is referenced by a
+// template body it is marked { required:true } in the allow-list, so an issue
+// with the field empty trips missingRequired ⇒ the wizard surfaces the gap and
+// the service returns 422 instead of rendering a letter with a blank where the
+// employee's name / code / salary should be. A MASKED comp value counts as
+// PRESENT (hidden by policy, not missing), so requiring comp.* never false-blocks
+// an issuer who lacks canViewCompensation — it only blocks a genuinely empty CTC.
+// Tokens not in a body are simply not declared, so the require-set is a superset.
+const ALWAYS_REQUIRED = ['employee.name', 'employee.code'];
+const REQUIRED_BY_CATEGORY = {
+  EXPERIENCE: [...ALWAYS_REQUIRED, 'employee.dateOfJoining', 'employee.lastWorkingDay'],
+  BONAFIDE: [...ALWAYS_REQUIRED],
+  EMPLOYMENT_PROOF: [...ALWAYS_REQUIRED, 'employee.designation', 'employee.dateOfJoining'],
+  SALARY_PROOF: [...ALWAYS_REQUIRED, 'comp.ctcAnnual', 'comp.grossMonthly'],
+  BANK: [...ALWAYS_REQUIRED, 'employee.bankName'],
+  CONTRACT: [...ALWAYS_REQUIRED, 'employee.designation', 'employee.dateOfJoining'],
+  CUSTOM: [],
+};
+
+/**
+ * Build the mergeFieldsJson allow-list for a body: { token: {type,gatedBy,required?} }.
+ * `category` selects the required-token set (above); only tokens actually present
+ * in the body are declared, so requiring a field the body doesn't reference is a
+ * no-op.
+ */
+function mergeFieldsFor(texts, { category } = {}) {
   const out = {};
-  for (const token of extractTokens(...texts)) {
+  const requiredSet = new Set(REQUIRED_BY_CATEGORY[category] || []);
+  const bodyTexts = Array.isArray(texts) ? texts : [texts];
+  for (const token of extractTokens(...bodyTexts)) {
     const spec = CATALOG[token];
     // Only declare tokens the catalog actually knows (defensive — all seeds use
     // catalog tokens, so this never drops a real field).
@@ -55,6 +81,7 @@ function mergeFieldsFor(...texts) {
     out[token] = { type: spec.type };
     if (spec.gatedBy) out[token].gatedBy = spec.gatedBy;
     if (spec.country) out[token].country = spec.country;
+    if (requiredSet.has(token)) out[token].required = true;
   }
   return out;
 }
@@ -411,7 +438,7 @@ function systemTemplateDescriptors() {
         countryCode: cc,
         subject: b.subject || null,
         bodyMarkdown: b.body,
-        mergeFieldsJson: mergeFieldsFor(b.body, b.subject),
+        mergeFieldsJson: mergeFieldsFor([b.body, b.subject], { category }),
         requiresSignature: !!b.requiresSignature,
         locale,
         refNoPrefix: null,
@@ -428,7 +455,7 @@ function systemTemplateDescriptors() {
     countryCode: CUSTOM_SCAFFOLD.countryCode,
     subject: CUSTOM_SCAFFOLD.subject,
     bodyMarkdown: CUSTOM_SCAFFOLD.body,
-    mergeFieldsJson: mergeFieldsFor(CUSTOM_SCAFFOLD.body, CUSTOM_SCAFFOLD.subject),
+    mergeFieldsJson: mergeFieldsFor([CUSTOM_SCAFFOLD.body, CUSTOM_SCAFFOLD.subject], { category: CUSTOM_SCAFFOLD.category }),
     requiresSignature: false,
     locale: null,
     refNoPrefix: null,

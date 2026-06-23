@@ -84,16 +84,17 @@ export default function IssueLetterPage() {
     if (!templateId) return;
     setPreviewing(true); setError(''); setMissingRequired([]);
     try {
-      const blob = await postForPdf('/api/hr/letters/preview', {
+      const { blob, masked: maskedKeys } = await postForPdf('/api/hr/letters/preview', {
         templateId, employeeId: employeeId || null, overrides,
       });
       if (previewObjUrl.current) URL.revokeObjectURL(previewObjUrl.current);
       const url = URL.createObjectURL(blob);
       previewObjUrl.current = url;
       setPreviewUrl(url);
-      // The preview body is a PDF, so masked/missing come back via the issue path
-      // only — but a preview that 422s tells us about missing-required up front.
-      setMasked([]);
+      // The preview reports masked comp fields via the X-Letter-Masked header, so
+      // the "salary figures are hidden" notice surfaces LIVE — before issuing — for
+      // a user who lacks canViewCompensation. A 422 (caught below) covers missing-required.
+      setMasked(maskedKeys || []);
     } catch (e) {
       setPreviewUrl('');
       if (e.status === 422 && Array.isArray(e.data?.missingRequired)) {
@@ -223,7 +224,8 @@ export default function IssueLetterPage() {
 
             {masked.length > 0 && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                Salary figures are hidden (you lack canViewCompensation) — they render masked on the issued letter.
+                <span className="font-medium">Salary figures are hidden.</span>{' '}
+                You don’t have permission to view compensation, so {masked.length === 1 ? 'this field renders' : `${masked.length} fields render`} masked (••••) on both the preview and the issued letter. The letter can still be issued.
               </div>
             )}
             {missingRequired.length > 0 && (

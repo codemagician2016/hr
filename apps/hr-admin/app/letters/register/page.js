@@ -98,7 +98,7 @@ export default function RegisterPage() {
     { key: 'category', header: 'Type', render: (r) => <span className="text-gray-700">{r.category}</span> },
     { key: 'employee', header: 'Employee', render: (r) => (r.employee ? <span>{r.employee.name} <span className="text-gray-400">{r.employee.code}</span></span> : <span className="text-gray-400">Company-wide</span>) },
     { key: 'status', header: 'Status', render: (r) => <StatusBadge status={r.status} /> },
-    { key: 'issuedBy', header: 'Issued by', render: (r) => <span className="text-gray-500 text-xs">{r.issuedBy}</span> },
+    { key: 'issuedBy', header: 'Issued by', render: (r) => <span className="text-gray-600 text-xs">{r.issuedByName || r.issuedBy || '—'}</span> },
     { key: 'issuedAt', header: 'Date', render: (r) => <span className="text-gray-500 text-xs">{formatAdminDate(r.issuedAt || r.createdAt)}</span> },
     {
       key: 'actions', header: '', className: 'text-right', cellClassName: 'text-right',
@@ -235,7 +235,7 @@ function DetailDrawer({ id, onClose }) {
           <Row k="Employee" v={data.employee ? `${[data.employee.firstName, data.employee.lastName].filter(Boolean).join(' ')} (${data.employee.code})` : 'Company-wide'} />
           <Row k="Template" v={data.template ? `${data.template.name} v${data.templateVersionAtIssue ?? '—'}` : '—'} />
           <Row k="Letterhead" v={data.letterhead ? data.letterhead.name : 'Branded fallback'} />
-          <Row k="Issued by" v={data.issuedBy} />
+          <Row k="Issued by" v={data.issuedByName || data.issuedBy || '—'} />
           <Row k="Issued at" v={formatAdminDate(data.issuedAt || data.createdAt)} />
           <Row k="File SHA-256" v={<span className="font-mono text-xs break-all">{data.fileHash || '—'}</span>} />
           {data.supersedesLetterId && <Row k="Re-issues" v={<span className="font-mono text-xs">{data.supersedesLetterId}</span>} />}
