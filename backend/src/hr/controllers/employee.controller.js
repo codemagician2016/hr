@@ -10,7 +10,33 @@ const { scopeWhere } = require('../lib/scopeResolver');
 const LIST_SELECT = {
   id: true, code: true, firstName: true, lastName: true, preferredName: true,
   workEmail: true, status: true, hireDate: true, managerEmployeeId: true,
+  // Join the CURRENT employment segment so the directory can render the human
+  // Department / Designation / Location values (not a blank cell or a UUID).
+  employmentRecords: {
+    where: { isCurrent: true },
+    take: 1,
+    orderBy: { effectiveFrom: 'desc' },
+    select: {
+      department: { select: { id: true, name: true } },
+      designation: { select: { id: true, title: true } },
+      location: { select: { id: true, name: true } },
+    },
+  },
 };
+
+// Flatten the joined current-employment segment onto the row so the UI reads a
+// stable shape (department/designation/location + workEmail/hireDate) regardless
+// of how the relation is nested. Keeps the wire contract small and predictable.
+function shapeListRow(emp) {
+  const rec = emp.employmentRecords && emp.employmentRecords[0];
+  const { employmentRecords, ...rest } = emp;
+  return {
+    ...rest,
+    department: rec && rec.department ? { id: rec.department.id, name: rec.department.name } : null,
+    designation: rec && rec.designation ? { id: rec.designation.id, name: rec.designation.title } : null,
+    location: rec && rec.location ? { id: rec.location.id, name: rec.location.name } : null,
+  };
+}
 
 // Allow-list of directly-assignable Employee fields (never trust the body wholesale).
 const WRITABLE = [
@@ -53,10 +79,11 @@ async function list(req, res, next) {
       ];
     }
 
-    const [items, total] = await Promise.all([
+    const [rows, total] = await Promise.all([
       prisma.employee.findMany({ where, select: LIST_SELECT, orderBy: { createdAt: 'desc' }, skip, take }),
       prisma.employee.count({ where }),
     ]);
+    const items = rows.map(shapeListRow);
     res.json({ items, total, page: Math.max(parseInt(page, 10) || 1, 1), pageSize: take });
   } catch (e) { next(e); }
 }
@@ -67,14 +94,89 @@ async function get(req, res, next) {
     const emp = await prisma.employee.findFirst({
       where: { id: req.params.id, businessId, deletedAt: null },
       include: {
-        employmentRecords: { where: { isCurrent: true }, take: 1 },
+        // Current employment segment, fully resolved so the detail page shows real
+        // Department / Designation / Location / Grade / Band values (band via grade).
+        employmentRecords: {
+          where: { isCurrent: true },
+          take: 1,
+          orderBy: { effectiveFrom: 'desc' },
+          include: {
+            department: { select: { id: true, name: true } },
+            designation: { select: { id: true, title: true } },
+            location: { select: { id: true, name: true } },
+            entity: { select: { id: true, legalName: true } },
+          },
+        },
         statutoryProfile: true,
         bankAccounts: true,
       },
     });
     if (!emp) return res.status(404).json({ message: 'Employee not found' });
-    res.json(emp);
+
+    const rec = emp.employmentRecords && emp.employmentRecords[0];
+    // Grade/Band aren't relations off EmploymentRecord (only gradeId is stored), so
+    // resolve them in a small follow-up read when a grade is set. Band hangs off Grade.
+    let grade = null;
+    let band = null;
+    if (rec && rec.gradeId) {
+      const g = await prisma.grade.findFirst({
+        where: { id: rec.gradeId, businessId, deletedAt: null },
+        select: { id: true, name: true, band: { select: { id: true, name: true } } },
+      });
+      if (g) {
+        grade = { id: g.id, name: g.name };
+        band = g.band ? { id: g.band.id, name: g.band.name } : null;
+      }
+    }
+
+    // Surface a flat, predictable employment block alongside the raw record so the
+    // detail page never has to dig through nested relations (or render a dash/UUID).
+    const employment = rec
+      ? {
+          employmentRecordId: rec.id,
+          department: rec.department ? { id: rec.department.id, name: rec.department.name } : null,
+          designation: rec.designation ? { id: rec.designation.id, name: rec.designation.title } : null,
+          location: rec.location ? { id: rec.location.id, name: rec.location.name } : null,
+          entity: rec.entity ? { id: rec.entity.id, name: rec.entity.legalName } : null,
+          grade,
+          band,
+          employmentType: rec.employmentType,
+          effectiveFrom: rec.effectiveFrom,
+        }
+      : null;
+
+    res.json({ ...emp, employment });
   } catch (e) { next(e); }
+}
+
+// @db.Date wants a UTC-midnight instant (mirrors provision.toDateOnly).
+function toDateOnly(x) {
+  if (!x) return null;
+  const d = x instanceof Date ? x : new Date(x);
+  if (Number.isNaN(d.getTime())) return null;
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
+
+/**
+ * Resolve the hiring Entity for the initial EmploymentRecord (which requires a
+ * non-null entityId). Prefer an explicit entityId; else the location's entity;
+ * else the tenant's first ACTIVE entity. Returns null when none can be resolved.
+ */
+async function resolveEntityId(tx, { businessId, entityId, locationId }) {
+  if (entityId) {
+    const e = await tx.entity.findFirst({ where: { id: entityId, businessId, deletedAt: null }, select: { id: true } });
+    if (e) return e.id;
+  }
+  if (locationId) {
+    const loc = await tx.location.findFirst({ where: { id: locationId, businessId, deletedAt: null }, select: { entityId: true } });
+    if (loc && loc.entityId) return loc.entityId;
+  }
+  const active = await tx.entity.findFirst({
+    where: { businessId, status: 'ACTIVE', deletedAt: null },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true },
+  });
+  return active ? active.id : null;
 }
 
 async function create(req, res, next) {
@@ -84,23 +186,215 @@ async function create(req, res, next) {
     if (!code || !firstName || !lastName) {
       return res.status(400).json({ message: 'code, firstName and lastName are required' });
     }
-    const data = { ...pickWritable(req.body), businessId };
-    const emp = await prisma.employee.create({ data });
+
+    // Map the admin form's field names onto the model BEFORE pickWritable runs, so
+    // the create wires the values the operator entered instead of silently dropping
+    // them: email → workEmail, dateOfJoining → hireDate. The org context
+    // (departmentId/designationId/locationId/entityId/managerEmployeeId) is NOT an
+    // Employee column — it lives on the EmploymentRecord segment we create below.
+    const body = { ...req.body };
+    if (body.email !== undefined && body.workEmail === undefined) body.workEmail = body.email;
+    if (body.dateOfJoining !== undefined && body.hireDate === undefined) body.hireDate = body.dateOfJoining;
+
+    const data = { ...pickWritable(body), businessId };
+
+    const departmentId = body.departmentId || null;
+    const designationId = body.designationId || null;
+    const locationId = body.locationId || null;
+    const wantsEmployment = !!(departmentId || designationId || locationId);
+
+    const emp = await prisma.$transaction(async (tx) => {
+      const created = await tx.employee.create({ data });
+
+      // Create the initial HIRE EmploymentRecord so the org context (department /
+      // designation / location) is real and the directory/detail render it — mirror
+      // of lifecycle provisionEmployee STEP 4 (effective-dated, append-only).
+      // An EmploymentRecord requires a non-null entityId; if the tenant has no
+      // entity yet we skip the segment rather than 500 (HR can add it via Edit once
+      // an entity exists). When the operator picked org context but we cannot anchor
+      // an entity, surface a clear 400 instead of dropping their input silently.
+      const entityId = await resolveEntityId(tx, { businessId, entityId: body.entityId, locationId });
+      if (entityId) {
+        const effectiveFrom = toDateOnly(created.hireDate) || toDateOnly(new Date());
+        const rec = await tx.employmentRecord.create({
+          data: {
+            businessId,
+            employeeId: created.id,
+            entityId,
+            locationId,
+            departmentId,
+            designationId,
+            gradeId: null,
+            managerEmployeeId: created.managerEmployeeId || null,
+            employmentType: 'FULL_TIME',
+            workerCategory: 'STAFF',
+            fteRatio: '1.0000',
+            effectiveFrom,
+            changeReason: 'HIRE',
+            isCurrent: true,
+          },
+        });
+        return tx.employee.update({ where: { id: created.id }, data: { currentEmploymentRecordId: rec.id } });
+      }
+      if (wantsEmployment) {
+        // Operator chose dept/designation/location but the tenant has no entity to
+        // anchor employment — fail loudly (rollback) rather than half-create.
+        const err = new Error('NO_ENTITY');
+        err.noEntity = true;
+        throw err;
+      }
+      return created;
+    });
+
     res.status(201).json(emp);
   } catch (e) {
+    if (e && e.noEntity) {
+      return res.status(400).json({
+        message: 'Set up a legal entity under Org structure before assigning a department, designation, or location.',
+      });
+    }
     if (e.code === 'P2002') return res.status(409).json({ message: 'An employee with that code already exists' });
     next(e);
   }
 }
 
+/**
+ * detectReportingCycle(tx, { businessId, employeeId, proposedManagerId }) — walk
+ * the proposed manager chain UPWARD to make sure setting `employeeId`'s manager to
+ * `proposedManagerId` does not create a loop. Returns true if a cycle would form
+ * (the chain leads back to `employeeId`, or is itself already corrupt/too deep).
+ * Self-assignment is rejected by the caller before this is reached.
+ */
+async function detectReportingCycle(tx, { businessId, employeeId, proposedManagerId }) {
+  let cursor = proposedManagerId;
+  const seen = new Set([employeeId]);
+  // Bound the walk so a pre-existing corrupt chain can't spin forever.
+  for (let i = 0; i < 1000 && cursor; i += 1) {
+    if (seen.has(cursor)) return true; // chain loops back to the subject (or itself)
+    seen.add(cursor);
+    const mgr = await tx.employee.findFirst({
+      where: { id: cursor, businessId, deletedAt: null },
+      select: { managerEmployeeId: true },
+    });
+    if (!mgr) return false; // chain ends at an unknown/out-of-tenant node — no loop
+    cursor = mgr.managerEmployeeId;
+  }
+  return false;
+}
+
 async function update(req, res, next) {
   try {
     const { businessId } = req.user;
-    const existing = await prisma.employee.findFirst({ where: { id: req.params.id, businessId, deletedAt: null } });
+    const id = req.params.id;
+    const existing = await prisma.employee.findFirst({ where: { id, businessId, deletedAt: null } });
     if (!existing) return res.status(404).json({ message: 'Employee not found' });
-    const emp = await prisma.employee.update({ where: { id: req.params.id }, data: pickWritable(req.body) });
+
+    // Map the admin form's aliases onto the model (mirror create): email→workEmail,
+    // dateOfJoining→hireDate. The org context is handled on the EmploymentRecord.
+    const body = { ...req.body };
+    if (body.email !== undefined && body.workEmail === undefined) body.workEmail = body.email;
+    if (body.dateOfJoining !== undefined && body.hireDate === undefined) body.hireDate = body.dateOfJoining;
+
+    const data = pickWritable(body);
+
+    // ── Reporting-cycle guard (M5). Only when managerEmployeeId actually changes. ──
+    if ('managerEmployeeId' in data) {
+      const proposed = data.managerEmployeeId || null;
+      if (proposed) {
+        if (proposed === id) {
+          return res.status(400).json({ message: 'An employee cannot report to themselves.' });
+        }
+        const loops = await prisma.$transaction((tx) =>
+          detectReportingCycle(tx, { businessId, employeeId: id, proposedManagerId: proposed }));
+        if (loops) {
+          return res.status(400).json({ message: 'reporting loop: that manager already reports (directly or indirectly) to this employee.' });
+        }
+        // Reject a manager that isn't a real in-tenant employee.
+        const mgr = await prisma.employee.findFirst({ where: { id: proposed, businessId, deletedAt: null }, select: { id: true } });
+        if (!mgr) return res.status(400).json({ message: 'The selected manager is not a valid employee.' });
+      }
+    }
+
+    // Org context (department/designation/location/entity) lives on the current
+    // EmploymentRecord, NOT on Employee. When the form sends any of those, append a
+    // new effective-dated segment (TRANSFER) rather than mutating history in place.
+    const hasOrgEdit = ['departmentId', 'designationId', 'locationId', 'entityId'].some((k) => k in body);
+
+    const emp = await prisma.$transaction(async (tx) => {
+      const updated = await tx.employee.update({ where: { id }, data });
+
+      if (hasOrgEdit) {
+        const current = await tx.employmentRecord.findFirst({
+          where: { businessId, employeeId: id, isCurrent: true },
+          orderBy: { effectiveFrom: 'desc' },
+        });
+        // Resolve the next values, falling back to the current segment for fields
+        // the form did not send (a partial PATCH must not blank the others).
+        const nextDept = 'departmentId' in body ? (body.departmentId || null) : (current ? current.departmentId : null);
+        const nextDesig = 'designationId' in body ? (body.designationId || null) : (current ? current.designationId : null);
+        const nextLoc = 'locationId' in body ? (body.locationId || null) : (current ? current.locationId : null);
+        const entityId = await resolveEntityId(tx, {
+          businessId,
+          entityId: ('entityId' in body ? body.entityId : (current ? current.entityId : null)),
+          locationId: nextLoc,
+        });
+        if (entityId) {
+          const effectiveFrom = toDateOnly(new Date());
+          // Append-only: end-date the current segment, open a new TRANSFER one.
+          // If a segment already starts today (e.g. created moments ago), update it
+          // in place to respect the @@unique([employeeId, effectiveFrom]).
+          const sameDay = current && toDateOnly(current.effectiveFrom)
+            && toDateOnly(current.effectiveFrom).getTime() === effectiveFrom.getTime();
+          let rec;
+          if (sameDay) {
+            rec = await tx.employmentRecord.update({
+              where: { id: current.id },
+              data: { departmentId: nextDept, designationId: nextDesig, locationId: nextLoc, entityId, version: { increment: 1 } },
+            });
+          } else {
+            if (current) {
+              await tx.employmentRecord.updateMany({
+                where: { businessId, employeeId: id, isCurrent: true },
+                data: { isCurrent: false, effectiveTo: effectiveFrom },
+              });
+            }
+            rec = await tx.employmentRecord.create({
+              data: {
+                businessId, employeeId: id, entityId,
+                locationId: nextLoc, departmentId: nextDept, designationId: nextDesig,
+                gradeId: current ? current.gradeId : null,
+                managerEmployeeId: ('managerEmployeeId' in data ? (data.managerEmployeeId || null) : (current ? current.managerEmployeeId : updated.managerEmployeeId)),
+                employmentType: current ? current.employmentType : 'FULL_TIME',
+                workerCategory: current ? current.workerCategory : 'STAFF',
+                payCalendarId: current ? current.payCalendarId : null,
+                noticeDays: current ? current.noticeDays : null,
+                fteRatio: current ? current.fteRatio : '1.0000',
+                effectiveFrom,
+                changeReason: 'TRANSFER_DEPARTMENT',
+                isCurrent: true,
+              },
+            });
+          }
+          return tx.employee.update({ where: { id }, data: { currentEmploymentRecordId: rec.id } });
+        }
+        if (current === null) {
+          // No entity resolvable and no current segment to update → can't persist org
+          // context. Fail loudly so the operator isn't told "saved" while it dropped.
+          const err = new Error('NO_ENTITY');
+          err.noEntity = true;
+          throw err;
+        }
+      }
+      return updated;
+    });
+
     res.json(emp);
   } catch (e) {
+    if (e && e.noEntity) {
+      return res.status(400).json({
+        message: 'Set up a legal entity under Org structure before assigning a department, designation, or location.',
+      });
+    }
     if (e.code === 'P2002') return res.status(409).json({ message: 'An employee with that code already exists' });
     next(e);
   }
