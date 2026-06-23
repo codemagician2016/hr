@@ -168,12 +168,19 @@ async function reimbursementsPending(req, res, next) {
     const where = { businessId, status: 'SUBMITTED', deletedAt: null, ...scopeWhere(scope, 'employeeId') };
     const rows = await prisma.expenseClaim.findMany({
       where, orderBy: { submittedAt: 'desc' }, take: 500,
+      // Feature 11 — surface the policy verdict (the manager's "within / over budget"
+      // banner) + the travel id when the claim is booked against a trip.
       select: { id: true, employeeId: true, amount: true, currencyCode: true, description: true, expenseDate: true, submittedAt: true, claimNumber: true,
+        claimType: true, policyVerdict: true,
+        travelRequest: { select: { travelNumber: true, destCity: true } },
         employee: { select: { firstName: true, lastName: true, code: true, photoUrl: true } } },
     });
     const items = rows.map((c) => ({
       id: c.id, employeeId: c.employeeId, name: fullName(c.employee), code: c.employee.code, photoUrl: c.employee.photoUrl || null,
       amount: Number(c.amount), currencyCode: c.currencyCode, description: c.description, claimNumber: c.claimNumber,
+      claimType: c.claimType, policyVerdict: c.policyVerdict,
+      travelNumber: c.travelRequest ? c.travelRequest.travelNumber : null,
+      destCity: c.travelRequest ? c.travelRequest.destCity : null,
       expenseDate: dateOnly(c.expenseDate), submittedAt: c.submittedAt,
     }));
     res.json({ items, total: items.length });
@@ -232,6 +239,11 @@ async function leaveDecide(req, res, next) {
 }
 
 // ── POST /me/team/reimbursements/:id/decide — approve/decline a report's claim ──
+// FLAG (Feature 11 — shared edit): a manager's decision on a report's claim now drives
+// the F10 EXPENSE engine when the claim is backed by an open ApprovalRequest (the F11
+// submit path opens one), so the admin's configurable chain (manager → finance over
+// threshold) + the engine SoD/version/active-step guards govern it — exactly like
+// leaveDecide. A legacy claim with no open request keeps the direct version-locked flip.
 async function reimbursementDecide(req, res, next) {
   try {
     const { businessId } = req.customer;
@@ -244,6 +256,26 @@ async function reimbursementDecide(req, res, next) {
     if (claim.status !== 'SUBMITTED') return res.status(409).json({ message: `Claim is ${claim.status}, not actionable` });
 
     const userId = await callerUserId(businessId, req.customer.email);
+
+    // Prefer the F10 engine when an open EXPENSE request backs this claim.
+    const open = await prisma.approvalRequest.findFirst({
+      where: { businessId, module: 'EXPENSE', entityType: 'ExpenseClaim', entityId: claim.id, status: { in: ['PENDING', 'ESCALATED'] } },
+      select: { id: true, payloadJson: true },
+    });
+    if (open) {
+      if (!userId) return res.status(403).json({ message: 'No portal user is linked to this account.' });
+      if (decision === 'decline' && req.body && req.body.comment) {
+        await prisma.approvalRequest.update({ where: { id: open.id }, data: { payloadJson: { ...(open.payloadJson || {}), rejectReason: req.body.comment } } });
+      }
+      const result = await engine.recordDecision({
+        approvalRequestId: open.id, actorUserId: userId,
+        decision: decision === 'approve' ? 'APPROVED' : 'REJECTED', comment: req.body && req.body.comment,
+      });
+      const fresh = await prisma.expenseClaim.findUnique({ where: { id: claim.id }, select: { status: true } });
+      return res.json({ id: claim.id, status: fresh ? fresh.status : 'PENDING', terminal: result.terminal });
+    }
+
+    // Legacy direct flip (no engine request).
     const toStatus = decision === 'approve' ? 'APPROVED' : 'REJECTED';
     const flip = await prisma.expenseClaim.updateMany({
       where: { id: claim.id, status: 'SUBMITTED', version: claim.version },
@@ -251,7 +283,12 @@ async function reimbursementDecide(req, res, next) {
     });
     if (flip.count === 0) return res.status(409).json({ message: 'Claim changed concurrently' });
     res.json({ id: claim.id, status: toStatus });
-  } catch (e) { next(e); }
+  } catch (e) {
+    if (e && (e.statusCode || (engine.isConcurrencyError && engine.isConcurrencyError(e)))) {
+      return res.status(e.statusCode || 409).json({ message: e.message, code: e.code });
+    }
+    next(e);
+  }
 }
 
 function decisionOf(req) {

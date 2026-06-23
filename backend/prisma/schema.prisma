@@ -482,6 +482,10 @@ model Business {
   expensePolicies          ExpensePolicy[]
   expenseClaims            ExpenseClaim[]
   expenseClaimLines        ExpenseClaimLine[]
+  // Feature 11 — travel & policy engine
+  cityTiers                CityTier[]
+  travelPolicies           TravelPolicy[]
+  travelRequests           TravelRequest[]
   loanSchemes              LoanScheme[]
   loans                    Loan[]
   loanInstallments         LoanInstallment[]
@@ -6629,6 +6633,7 @@ model Employee {
   attendances       Attendance[]        @relation("EmployeeAttendances")
   attendancePayInputs AttendancePayInput[]
   expenseClaims     ExpenseClaim[]
+  travelRequests    TravelRequest[] // Feature 11
   loans             Loan[]
   documents         EmployeeDocument[]
   assets            AssetAssignment[]
@@ -8214,6 +8219,7 @@ model ExpenseCategory {
   version      Int      @default(0)
   policies     ExpensePolicy[]
   claims       ExpenseClaim[]
+  claimLines   ExpenseClaimLine[] // Feature 11 — per-line category back-relation
 
   @@unique([businessId, code])
   @@index([businessId, isActive])
@@ -8229,6 +8235,9 @@ model ExpensePolicy {
   maxPerClaim   Decimal? @db.Decimal(15, 2)
   maxPerMonth   Decimal? @db.Decimal(15, 2)
   requireReceipt Boolean @default(true)
+  // Feature 11 — fold ExpensePolicy into the policy engine: daily cap + enforcement.
+  dailyCap      Decimal? @db.Decimal(15, 2)
+  enforcement   PolicyEnforcement @default(FLAG)
   isActive      Boolean  @default(true)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -8262,6 +8271,14 @@ model ExpenseClaim {
   reimbursedBy  String?
   paymentRef    String?  // bank/payout reference once reimbursed
   payRunId      String?  // when settled through payroll
+  // Feature 11 — claims + travel + policy engine (additive, all nullable/defaulted).
+  claimType         ClaimType @default(REIMBURSEMENT) // REIMBURSEMENT (standalone) | TRAVEL (bills vs a trip)
+  travelRequestId   String?   // links bills to the travel ID (TRV-####)
+  travelRequest     TravelRequest? @relation(fields: [travelRequestId], references: [id], onDelete: SetNull)
+  approvalRequestId String?   // the EXPENSE ApprovalRequest driving the chain
+  policyVerdict     PolicyVerdict @default(NO_POLICY) // rollup of the worst line verdict
+  policyId          String?   // active TravelPolicy snapshot ref applied at submit
+  policySnapshotJson Json?    // immutable copy of the rules applied at submit (audit)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   deletedAt     DateTime?
@@ -8271,6 +8288,7 @@ model ExpenseClaim {
   @@index([businessId, employeeId])
   @@index([businessId, status])
   @@index([businessId, categoryId])
+  @@index([businessId, travelRequestId])
 }
 
 model ExpenseClaimLine {
@@ -8283,9 +8301,23 @@ model ExpenseClaimLine {
   amount        Decimal  @db.Decimal(15, 2)
   receiptUrl    String?
   expenseDate   DateTime? @db.Date
+  // Feature 11 — per-line category + policy verdict + transport + receipt integrity.
+  categoryId    String?   // per-line category (claim header categoryId stays optional)
+  category      ExpenseCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  policyStatus  PolicyVerdict @default(NO_POLICY)
+  policyReason  String?   // human reason: "Hotel 6500 > TIER_2 L3 cap 5000"
+  appliedCap    Decimal? @db.Decimal(15, 2) // the cap the engine checked against
+  transportMode TransportMode?
+  distanceKm    Decimal? @db.Decimal(8, 2)  // SELF_CAR per-km basis
+  nights        Int?      // HOTEL nights count
+  durationBand  PerDiemBand? // PER_DIEM band on a food/incidental line
+  fileHash      String?   // sha256(receipt) — integrity anchor
+  mimeType      String?
+  receiptOcrJson Json?    // reserved (OCR deferred)
   createdAt     DateTime @default(now())
 
   @@index([businessId, claimId])
+  @@index([businessId, categoryId])
 }
 
 enum ExpenseClaimStatus {
@@ -8295,6 +8327,187 @@ enum ExpenseClaimStatus {
   REJECTED
   REIMBURSED
   CANCELLED
+}
+
+// ── Feature 11 — Reimbursement/Claims + Travel & Outdoor-duty + custom policy ──
+// Additive, non-breaking. Claims keep their EXP-#### id (now via allocateCode);
+// trips mint a TRV-#### travel id and bills link to it; a fully admin-configurable
+// TravelPolicy (per-diem / hotel-by-level×tier / transport rules + city-tier map)
+// drives the pure policyEngine that auto-validates every bill on submit.
+
+enum ClaimType {
+  REIMBURSEMENT // standalone out-of-pocket (no trip)
+  TRAVEL        // bills booked against a TravelRequest (travel ID)
+}
+
+enum TravelStatus {
+  DRAFT        // employee drafting the trip request
+  SUBMITTED    // routed for pre-trip approval
+  APPROVED     // trip green-lit; employee may add bills
+  REJECTED
+  IN_PROGRESS  // travel dates active (derived, optional)
+  COMPLETED    // trip dates passed; claims may still settle
+  CANCELLED
+}
+
+enum TransportMode {
+  PUBLIC_TRANSPORT // bus/metro/auto — receipt, cap
+  SELF_CAR         // own vehicle — per-km × distance
+  TAXI_CAB         // cab/ride-hail — receipt, cap
+  TRAIN            // class gated by level
+  FLIGHT           // gated by journey-duration / level
+  OTHER
+}
+
+enum PolicyVerdict {
+  OK            // within policy
+  FLAGGED       // over a soft limit — approver must decide
+  AUTO_REJECTED // over a hard cap — engine blocks
+  NO_POLICY     // no active policy matched — passes, advisory note
+}
+
+enum PolicyEnforcement {
+  FLAG // soft — over-limit lines are flagged for the approver
+  HARD // over the hard cap → AUTO_REJECTED blocks submit
+}
+
+enum PerDiemBand {
+  FULL_24H // 24h full-day allowance
+  HALF_12H // 12h band
+  HALF_DAY // short/half-day band
+}
+
+// City-tier classification (config). A trip's destination city → CityTier.tier;
+// unmatched cities fall to the policy's defaultTier.
+model CityTier {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  tier        String   // "TIER_1" | "TIER_2" | "TIER_3" | tenant-custom label
+  city        String   // normalized lower-cased match key
+  stateCode   String?
+  countryCode String   @db.Char(2)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  @@unique([businessId, countryCode, city]) // one tier per (tenant, country, city)
+  @@index([businessId, tier])
+}
+
+// The custom Travel & Expense policy (versioned config). Child rule tables let the
+// admin builder edit cells without JSON surgery; a denormalized snapshot is stored
+// on each claim/line at validation time for audit immutability.
+model TravelPolicy {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId      String?  // optional per-legal-entity policy
+  name          String
+  countryCode   String   @db.Char(2) // IN / NZ — currency + defaults
+  currencyCode  String   @db.Char(3)
+  isActive      Boolean  @default(true)
+  effectiveFrom DateTime @db.Date
+  defaultTier   String   @default("TIER_3") // fallback when city unmatched
+  enforcement   PolicyEnforcement @default(FLAG) // FLAG (soft) vs HARD (auto-reject over cap)
+  perDiemRules  TravelPerDiemRule[]
+  hotelRules    TravelHotelRule[]
+  transportRules TravelTransportRule[]
+  travelRequests TravelRequest[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+  version       Int      @default(0)
+
+  @@index([businessId, isActive])
+  @@index([businessId, entityId, countryCode])
+}
+
+// Per-diem caps by trip-duration band (24h full / 12h / half), food + incidentals,
+// optionally varied by level (gradeRank) and city tier.
+model TravelPerDiemRule {
+  id            String   @id @default(uuid())
+  businessId    String
+  policyId      String
+  policy        TravelPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  durationBand  PerDiemBand
+  gradeRank     Int?     // null = applies to all levels
+  cityTier      String?  // null = all tiers
+  foodCap       Decimal  @db.Decimal(15, 2)
+  incidentalCap Decimal  @db.Decimal(15, 2)
+
+  @@index([businessId, policyId])
+}
+
+// Hotel budget by employee LEVEL (gradeRank) × city TIER — the core matrix.
+model TravelHotelRule {
+  id            String   @id @default(uuid())
+  businessId    String
+  policyId      String
+  policy        TravelPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  gradeRank     Int      // employee level
+  cityTier      String
+  nightlyCap    Decimal  @db.Decimal(15, 2)
+
+  @@unique([policyId, gradeRank, cityTier])
+  @@index([businessId, policyId])
+}
+
+// Allowed transport modes + fare/eligibility conditions per level.
+model TravelTransportRule {
+  id            String   @id @default(uuid())
+  businessId    String
+  policyId      String
+  policy        TravelPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  mode          TransportMode
+  gradeRank     Int?     // null = all levels
+  allowed       Boolean  @default(true)
+  perKmRate     Decimal? @db.Decimal(8, 2)  // SELF_CAR: reimbursable per-km
+  fareCap       Decimal? @db.Decimal(15, 2) // per-journey ceiling (taxi/flight)
+  travelClass   String?  // TRAIN: "AC_2T"/"AC_3T"; FLIGHT: "ECONOMY"
+  minJourneyHrs Int?     // FLIGHT allowed only if journey >= N hrs
+  conditionJson Json?    // extensible: {"minDistanceKm":250}
+
+  @@unique([policyId, mode, gradeRank])
+  @@index([businessId, policyId])
+}
+
+// The trip / outdoor-duty record. Mints a TRV-#### travel id; bills link via
+// ExpenseClaim.travelRequestId.
+model TravelRequest {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId    String
+  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  travelNumber  String   // TRV-#### — the "travel ID"
+  purpose       String
+  isOutdoorDuty Boolean  @default(false) // local outdoor/official duty vs out-station
+  originCity    String?
+  destCity      String?
+  destTier      String?  // snapshot of resolved CityTier at submit
+  startAt       DateTime
+  endAt         DateTime
+  durationHours Int?     // derived → per-diem band
+  estimateJson  Json?    // per-diem + hotel + transport estimate vs policy
+  advanceAmount Decimal? @db.Decimal(15, 2) // requested trip advance (netted at settlement)
+  currencyCode  String   @db.Char(3)
+  policyId      String?  // active TravelPolicy applied
+  policy        TravelPolicy? @relation(fields: [policyId], references: [id], onDelete: SetNull)
+  status        TravelStatus @default(DRAFT)
+  approvalRequestId String? // pre-trip approval (TRAVEL workflow)
+  submittedAt   DateTime?
+  decidedAt     DateTime?
+  decidedBy     String?
+  rejectReason  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  version       Int      @default(0)
+  claims        ExpenseClaim[]
+
+  @@unique([businessId, travelNumber])
+  @@index([businessId, employeeId])
+  @@index([businessId, status])
 }
 
 // ── Employee loans / salary advances ──────────────────────────────────────

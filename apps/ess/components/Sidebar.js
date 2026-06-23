@@ -77,6 +77,8 @@ const NAV = [
     children: [
       { href: '/payslips', label: 'Payslips', icon: 'receipt' },
       { href: '/compensation', label: 'Compensation', icon: 'coin' },
+      // Feature 11 — claims (reimbursement) + travel/outdoor-duty.
+      { href: '/reimbursements', label: 'Reimbursements & Travel', icon: 'wallet' },
       { href: '/tax', label: 'Tax', icon: 'tax' },
       { href: '/documents', label: 'Documents', icon: 'doc' },
       { href: '/letters', label: 'My Letters', icon: 'letter' },

@@ -36,6 +36,10 @@ const APPROVAL_ACTIONS = new Set([
   // candidate. The action key drops `selfId` from the resolved set, so a scorer is
   // structurally absent from the approver scope (fail-closed, same as own-leave).
   'offer.approve',
+  // Feature 11 — reimbursement/travel SoD: an approver (manager/finance) may never
+  // approve/reject/reimburse their OWN claim or trip. The key drops `selfId` from the
+  // resolved set, so a maker is structurally absent from the approver scope.
+  'canApproveExpense',
 ]);
 
 const ALL = { kind: 'ALL' };
