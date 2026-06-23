@@ -97,6 +97,29 @@ function fail(res, status, message, extra) {
   return res.status(status).json({ message, ...(extra || {}) });
 }
 
+// ── tenant country resolution (India-first template filter) ───────────────────
+// The Issue/Templates dropdowns must show ONLY the tenant's market (an India
+// tenant must never see NZ templates). We resolve the tenant's country from
+// Business.country, else the first Entity's countryCode, else default IN
+// (India-first). One cheap read per list call.
+async function resolveTenantCountry(businessId) {
+  if (!businessId) return 'IN';
+  const biz = await prisma.business.findFirst({
+    where: { id: businessId },
+    select: { country: true },
+  });
+  let cc = biz && biz.country ? String(biz.country).toUpperCase() : null;
+  if (!cc || !COUNTRY_CODES.has(cc)) {
+    const ent = await prisma.entity.findFirst({
+      where: { businessId, deletedAt: null },
+      orderBy: { createdAt: 'asc' },
+      select: { countryCode: true },
+    });
+    cc = ent && ent.countryCode ? String(ent.countryCode).toUpperCase() : null;
+  }
+  return COUNTRY_CODES.has(cc) ? cc : 'IN'; // India-first default
+}
+
 // ── GET /merge-fields ─────────────────────────────────────────────────────────
 // Returns the §7 placeholder palette for the editor inserter drawer, filtered by
 // ?country (IN | NZ — drops the other market's statutory namespace) and ?category
@@ -140,10 +163,24 @@ async function listTemplates(req, res) {
     if (!LETTER_CATEGORIES.has(cat)) return fail(res, 422, `Unknown category "${cat}".`);
     where.category = cat;
   }
-  if (req.query.country) {
-    const cc = String(req.query.country).toUpperCase();
-    if (!COUNTRY_CODES.has(cc)) return fail(res, 422, `Unknown country "${cc}". Allowed: IN, NZ.`);
-    where.countryCode = cc;
+  // India-first country filter. Precedence:
+  //   - ?country=ALL          → no country filter (Templates-management "see all").
+  //   - ?country=IN|NZ        → that market only (explicit override).
+  //   - (omitted)             → DEFAULT to the TENANT's country so an India tenant
+  //                             never sees NZ templates. We include market-agnostic
+  //                             (countryCode null) templates alongside the tenant's
+  //                             market so universal templates stay available.
+  const rawCountry = req.query.country ? String(req.query.country).toUpperCase() : '';
+  if (rawCountry === 'ALL') {
+    // explicit opt-out — no country constraint
+  } else if (rawCountry) {
+    if (!COUNTRY_CODES.has(rawCountry)) return fail(res, 422, `Unknown country "${rawCountry}". Allowed: IN, NZ.`);
+    where.countryCode = rawCountry;
+  } else {
+    // Default to the tenant's market + market-agnostic templates. Use AND so this
+    // never clashes with the search-`q` OR set below (top-level OR can't co-exist).
+    const tenantCountry = await resolveTenantCountry(businessId);
+    where.AND = (where.AND || []).concat([{ OR: [{ countryCode: tenantCountry }, { countryCode: null }] }]);
   }
   // status filter: PUBLISHED (isActive) | DRAFT (!isActive). Default: all.
   if (req.query.status) {

@@ -19,7 +19,7 @@ import { get, post } from '@/lib/api';
 import {
   PageHeader, DataTable, StatusBadge, ActionButton, asList,
 } from '@/lib/ui';
-import { getPdf, downloadBlob, LETTER_CATEGORIES, LETTER_STATUSES } from '../lib';
+import { getPdf, downloadBlob, LETTER_CATEGORIES, LETTER_STATUSES, InfoTip } from '../lib';
 
 const PAGE_SIZE = 25;
 
@@ -135,7 +135,7 @@ export default function RegisterPage() {
       {/* ── filters ── */}
       <div className="flex flex-wrap items-end gap-3 mb-4">
         <div>
-          <label htmlFor="reg-search" className="block text-xs text-gray-500 mb-1">Search</label>
+          <label htmlFor="reg-search" className="block text-xs text-gray-500 mb-1">Search<InfoTip text="Find a letter by its reference number or the employee's name/code." label="Search" /></label>
           <input
             id="reg-search"
             type="search"
@@ -145,8 +145,8 @@ export default function RegisterPage() {
             className="rounded-lg border border-gray-300 px-3 py-2 text-sm w-64"
           />
         </div>
-        <FilterSelect label="Type" value={filters.category} options={LETTER_CATEGORIES} onChange={(v) => { setPage(1); setFilters((f) => ({ ...f, category: v })); }} />
-        <FilterSelect label="Status" value={filters.status} options={LETTER_STATUSES} onChange={(v) => { setPage(1); setFilters((f) => ({ ...f, status: v })); }} />
+        <FilterSelect label={<>Type <InfoTip text="Filter by letter category (Experience, Bonafide, Contract…)." label="Type" /></>} value={filters.category} options={LETTER_CATEGORIES} onChange={(v) => { setPage(1); setFilters((f) => ({ ...f, category: v })); }} />
+        <FilterSelect label={<>Status <InfoTip text="Filter by lifecycle status: Draft, Pending signature, Issued, Delivered or Voided." label="Status" /></>} value={filters.status} options={LETTER_STATUSES} onChange={(v) => { setPage(1); setFilters((f) => ({ ...f, status: v })); }} />
       </div>
 
       <DataTable
@@ -197,7 +197,7 @@ function RevokeModal({ target, busy, onClose, onConfirm }) {
       <p className="text-sm text-gray-600 mb-4">
         Revoking voids this letter (a legal record — it is never deleted), burns its reference number, and hides it from the employee’s portal. A reason is required and audited.
       </p>
-      <TextArea label="Reason" value={reason} onChange={setReason} rows={3} maxLength={500} />
+      <TextArea label={<>Reason <InfoTip text="Why this letter is being voided. Required and recorded in the audit trail." label="Reason" /></>} value={reason} onChange={setReason} rows={3} maxLength={500} />
       <div className="mt-5">
         <ModalActions>
           <button type="button" onClick={onClose} className="px-3 py-2 text-sm font-medium border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>

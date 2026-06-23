@@ -120,6 +120,34 @@ export default function AdminShell({ children }) {
     return buildNavTree(items);
   }, [session, brand]);
 
+  // ── nav badges: pending letter-request count (Letters ②) ────────────────────
+  // Fetch the open ESS letter-request count once the session is ready AND the
+  // Letters section is visible to this operator. Keyed by nav item so the Sidebar
+  // can render the badge on the Letters group + its Issue link. Cheap, best-effort
+  // (a failure just yields no badge).
+  const [navBadges, setNavBadges] = useState({});
+  const lettersVisible = useMemo(
+    () => navTree.some((n) => n.key === 'letters' || (n.children || []).some((c) => c.parent === 'letters' || c.key === 'letters-issue')),
+    [navTree]
+  );
+  useEffect(() => {
+    if (status !== 'ready' || !lettersVisible) return undefined;
+    let alive = true;
+    const loadCount = () => {
+      get('/api/hr/letters/requests/count')
+        .then((r) => {
+          if (!alive) return;
+          const count = Number(r && r.count) || 0;
+          setNavBadges((prev) => ({ ...prev, letters: count, 'letters-issue': count }));
+        })
+        .catch(() => { /* best-effort — no badge on failure */ });
+    };
+    loadCount();
+    // Light polling so the badge reflects new requests without a reload.
+    const t = setInterval(loadCount, 60000);
+    return () => { alive = false; clearInterval(t); };
+  }, [status, lettersVisible]);
+
   async function handleLogout() {
     try {
       await post('/api/auth/logout');
@@ -162,6 +190,7 @@ export default function AdminShell({ children }) {
             session={session}
             brand={brand}
             theme={theme}
+            badges={navBadges}
             onNavigate={closeDrawer}
           />
         </aside>

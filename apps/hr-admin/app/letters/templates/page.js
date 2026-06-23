@@ -38,6 +38,7 @@ import { get, post, del, request } from '@/lib/api';
 // per the backend, so we issue it through the generic request wrapper).
 const put = (path, data) => request(path, { method: 'PUT', body: JSON.stringify(data ?? {}) });
 import { asList, PageHeader, StatusBadge, ActionButton } from '@/lib/ui';
+import { InfoTip } from '../lib';
 
 const CATEGORIES = [
   ['EXPERIENCE', 'Experience / Service'],
@@ -276,15 +277,15 @@ function TemplateEditor({ template, letterheads, letterheadsAvailable, onClose, 
           {error && <ErrorBanner message={error} />}
 
           <div className="grid grid-cols-2 gap-3">
-            <TextInput label="Name" value={form.name} onChange={(v) => set('name', v)} required />
+            <TextInput label={<>Name <InfoTip text="A friendly name for this template, shown in the Issue dropdown (e.g. 'Experience Certificate')." label="Name" /></>} value={form.name} onChange={(v) => set('name', v)} required />
             {isNew
-              ? <TextInput label="Code (optional)" value={form.code} onChange={(v) => set('code', v)} hint="Auto-generated if blank" />
-              : <TextInput label="Code" value={form.code} onChange={() => {}} hint="Immutable" />}
+              ? <TextInput label={<>Code (optional) <InfoTip text="A short unique code. Auto-generated from the name if you leave it blank." label="Code" /></>} value={form.code} onChange={(v) => set('code', v)} hint="Auto-generated if blank" />
+              : <TextInput label={<>Code <InfoTip text="The template's unique code. It cannot be changed after creation." label="Code" /></>} value={form.code} onChange={() => {}} hint="Immutable" />}
           </div>
 
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Category<InfoTip text="The kind of letter (Experience, Bonafide, Contract…). Drives which letterhead and document folder it uses." label="Category" /></label>
               <select
                 value={form.category}
                 onChange={(e) => set('category', e.target.value)}
@@ -295,7 +296,7 @@ function TemplateEditor({ template, letterheads, letterheadsAvailable, onClose, 
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Country / wording</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Country / wording<InfoTip text="The market this template's wording targets (IN or NZ). Tenants only see their own country's templates when issuing." label="Country" /></label>
               <select
                 value={form.countryCode}
                 onChange={(e) => {
@@ -310,15 +311,15 @@ function TemplateEditor({ template, letterheads, letterheadsAvailable, onClose, 
                 {COUNTRIES.map(([v, l]) => <option key={v || 'any'} value={v}>{l}</option>)}
               </select>
             </div>
-            <TextInput label="Locale" value={form.locale} onChange={(v) => set('locale', v)} hint="e.g. en-IN / en-NZ" />
+            <TextInput label={<>Locale <InfoTip text="Controls date + currency formatting (e.g. en-IN uses ₹ and dd/mm/yyyy)." label="Locale" /></>} value={form.locale} onChange={(v) => set('locale', v)} hint="e.g. en-IN / en-NZ" />
           </div>
 
-          <TextInput label="Subject (optional)" value={form.subject} onChange={(v) => set('subject', v)} hint="Mergeable, e.g. {{letter.subject}}" />
+          <TextInput label={<>Subject (optional) <InfoTip text="The letter's subject line. May contain merge fields like {{letter.subject}}." label="Subject" /></>} value={form.subject} onChange={(v) => set('subject', v)} hint="Mergeable, e.g. {{letter.subject}}" />
 
           {/* body + merge-field drawer side by side */}
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label className="block text-sm font-medium text-gray-700">Body</label>
+              <label className="block text-sm font-medium text-gray-700">Body<InfoTip text="The letter text. Insert merge fields like {{employee.name}} from the palette — they're filled in automatically when you issue. No HTML." label="Body" /></label>
               <span className="text-xs text-gray-400">Merge fields only — no HTML. Click a field to insert at the cursor.</span>
             </div>
             <div className="flex gap-3">
@@ -337,7 +338,7 @@ function TemplateEditor({ template, letterheads, letterheadsAvailable, onClose, 
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Default letterhead</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Default letterhead<InfoTip text="The stationery this template prints on. Leave blank to auto-resolve a letterhead by category when issuing." label="Default letterhead" /></label>
               {letterheadsAvailable ? (
                 <select
                   value={form.defaultLetterheadId}
@@ -353,7 +354,7 @@ function TemplateEditor({ template, letterheads, letterheadsAvailable, onClose, 
                 </p>
               )}
             </div>
-            <TextInput label="Ref-no prefix override" value={form.refNoPrefix} onChange={(v) => set('refNoPrefix', v)} hint="e.g. ACME/HR (else tenant default)" />
+            <TextInput label={<>Ref-no prefix override <InfoTip text="The prefix of the auto-generated reference number (e.g. ACME/HR). Falls back to the tenant default if blank." label="Ref-no prefix" /></>} value={form.refNoPrefix} onChange={(v) => set('refNoPrefix', v)} hint="e.g. ACME/HR (else tenant default)" />
           </div>
 
           <label className="flex items-center gap-2 text-sm text-gray-700">

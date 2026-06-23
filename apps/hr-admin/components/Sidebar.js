@@ -36,7 +36,24 @@ function initialsOf(name) {
 const ACTIVE = { color: 'var(--theme-primary)', background: 'var(--theme-primary-soft)' };
 const IDLE = { color: 'var(--theme-text)' };
 
-export default function Sidebar({ navTree = [], session, brand, theme, onNavigate }) {
+// A small count badge (e.g. "Letters ②" = 2 pending letter requests). Renders
+// nothing for a falsy/zero count; caps the display at 99+.
+function NavBadge({ count }) {
+  const n = Number(count) || 0;
+  if (n <= 0) return null;
+  return (
+    <span
+      className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-full px-1.5 text-xs font-semibold"
+      style={{ background: 'var(--theme-primary-soft)', color: 'var(--theme-primary)' }}
+      aria-label={`${n} pending`}
+      title={`${n} pending`}
+    >
+      {n > 99 ? '99+' : n}
+    </span>
+  );
+}
+
+export default function Sidebar({ navTree = [], session, brand, theme, badges = {}, onNavigate }) {
   const pathname = usePathname() || '/';
 
   // Operator identity for the header — name + role (BusinessRole name preferred,
@@ -110,6 +127,7 @@ export default function Sidebar({ navTree = [], session, brand, theme, onNavigat
                   >
                     <Icon name={n.icon} className="dh-nav-icon" />
                     <span className="truncate">{n.label}</span>
+                    <NavBadge count={badges[n.key]} />
                   </Link>
                 </li>
               );
@@ -128,6 +146,9 @@ export default function Sidebar({ navTree = [], session, brand, theme, onNavigat
                 >
                   <Icon name={n.icon} className="dh-nav-icon" />
                   <span className="truncate flex-1 text-left">{n.label}</span>
+                  {/* Collapsed-group badge (e.g. "Letters ②"). Hidden while open so
+                      it isn't doubled with the child link's badge below. */}
+                  {!isOpen && <NavBadge count={badges[n.key]} />}
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"
                        stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
                        className={`dh-chevron${isOpen ? ' is-open' : ''}`}>
@@ -149,6 +170,7 @@ export default function Sidebar({ navTree = [], session, brand, theme, onNavigat
                           >
                             <Icon name={c.icon} size={16} className="dh-nav-icon" />
                             <span className="truncate">{c.label}</span>
+                            <NavBadge count={badges[c.key]} />
                           </Link>
                         </li>
                       );

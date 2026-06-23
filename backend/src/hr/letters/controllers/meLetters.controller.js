@@ -170,6 +170,88 @@ async function createLetterRequest(req, res, next) {
   } catch (e) { next(e); }
 }
 
+// ── GET /requests — the caller's OWN letter requests (pending/in-progress/done) ─
+// SELF-ONLY (session-derived employee; no id from the client). Surfaces the
+// request lifecycle the employee never used to see: PENDING (with HR), and
+// fulfilled (HR issued the letter → downloadable). A request is "fulfilled" iff
+// generatedDocumentId is set; we resolve the matching ISSUED IssuedLetter so the
+// employee can download it via the existing self-only /me/letters/:id/download.
+const TEMPLATE_KIND_LABELS = {
+  OFFER_LETTER: 'Offer Letter', APPOINTMENT_LETTER: 'Appointment Letter',
+  CONFIRMATION_LETTER: 'Confirmation Letter', PROMOTION_LETTER: 'Promotion Letter',
+  RELIEVING_LETTER: 'Relieving Letter', EXPERIENCE_LETTER: 'Experience Certificate',
+  SALARY_CERTIFICATE: 'Salary Certificate', WARNING_LETTER: 'Warning Letter',
+  PAYSLIP: 'Payslip', FORM16: 'Form 16', FNF_STATEMENT: 'Full & Final Statement',
+  POLICY_ACK: 'Policy Acknowledgement', OTHER: 'Letter',
+};
+
+// Map the DocumentRequest into an ESS-friendly lifecycle status. The live
+// RequestStatus enum is PENDING/APPROVED/REJECTED/CANCELLED and the fulfilment
+// hook uses APPROVED + generatedDocumentId as the "HR issued it" signal — so we
+// derive a clean employee-facing status: FULFILLED (downloadable), REJECTED,
+// CANCELLED, IN_PROGRESS (APPROVED but no doc yet — e.g. routed for signature),
+// else PENDING.
+function essRequestStatus(reqRow) {
+  if (reqRow.generatedDocumentId) return 'FULFILLED';
+  if (reqRow.status === 'REJECTED') return 'REJECTED';
+  if (reqRow.status === 'CANCELLED') return 'CANCELLED';
+  if (reqRow.status === 'APPROVED') return 'IN_PROGRESS';
+  return 'PENDING';
+}
+
+async function listMyLetterRequests(req, res, next) {
+  try {
+    const { businessId } = req.customer;
+    const employee = await resolveSelfEmployee(businessId, req.customer);
+    if (!employee) return res.json({ items: [], total: 0 });
+
+    const rows = await prisma.documentRequest.findMany({
+      where: { businessId, employeeId: employee.id },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+
+    // For fulfilled requests, resolve the downloadable ISSUED letter. We link via
+    // IssuedLetter.documentRequestId (set by the fulfilment hook). Only ISSUED,
+    // non-voided letters are downloadable (mirrors myLetterWhere). Batch the lookup.
+    const fulfilledIds = rows.filter((r) => r.generatedDocumentId).map((r) => r.id);
+    const letterByRequestId = {};
+    if (fulfilledIds.length) {
+      const letters = await prisma.issuedLetter.findMany({
+        where: {
+          businessId, employeeId: employee.id, status: 'ISSUED', voidedAt: null,
+          documentRequestId: { in: fulfilledIds },
+        },
+        select: { id: true, documentRequestId: true, referenceNo: true, subject: true, fileHash: true, issuedAt: true },
+      });
+      for (const l of letters) {
+        if (l.documentRequestId) letterByRequestId[l.documentRequestId] = l;
+      }
+    }
+
+    const items = rows.map((r) => {
+      const letter = letterByRequestId[r.id] || null;
+      return {
+        id: r.id,
+        templateKind: r.templateKind,
+        templateKindLabel: TEMPLATE_KIND_LABELS[r.templateKind] || r.templateKind,
+        purpose: r.purpose || null,
+        status: essRequestStatus(r),
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+        // when fulfilled + downloadable, the employee can pull the PDF via
+        // /me/letters/:letterId/download (self-only). null while pending/in-progress.
+        letterId: letter ? letter.id : null,
+        referenceNo: letter ? letter.referenceNo : null,
+        subject: letter ? letter.subject : null,
+        fileHash: letter ? letter.fileHash : null,
+        issuedAt: letter ? letter.issuedAt : null,
+      };
+    });
+    res.json({ items, total: items.length });
+  } catch (e) { next(e); }
+}
+
 // ── DocumentRequest fulfilment hook (Feature 09 §3.6, §8 slice 9F) ───────────
 //
 // Called by the 9E issuance path when HR issues a letter against an ESS letter
@@ -221,6 +303,7 @@ async function fulfilLetterRequest(db, { businessId, documentRequestId, issuedLe
 module.exports = {
   // ESS self-service (customer session)
   listMyLetters,
+  listMyLetterRequests,
   downloadMyLetter,
   createLetterRequest,
   // DocumentRequest fulfilment hook (called by 9E issuance — see MERGE TODO above)

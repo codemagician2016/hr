@@ -20,6 +20,10 @@ router.use(requireCustomer);
 
 // own ISSUED non-voided letters (with fileHash tamper badge)
 router.get('/', c.listMyLetters);
+// own letter REQUESTS (pending / in-progress / fulfilled — with a downloadable
+// letterId when fulfilled). Placed before /:id so "requests" is never swallowed as
+// an :id download segment.
+router.get('/requests', c.listMyLetterRequests);
 // request a letter into the HR queue (reuses DocumentRequest) — placed before /:id
 // so "requests" can never be swallowed as an :id download segment.
 router.post('/requests', c.createLetterRequest);
