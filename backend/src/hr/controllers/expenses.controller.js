@@ -6,6 +6,17 @@
 // (amount) is a Prisma Decimal and is passed through untouched (never parsed).
 // Approve/reject/reimburse are gated by canManageEmployees at the route layer.
 const prisma = require('../../core/lib/prisma');
+// Feature 10 slice 10c — expense approval now routes through the configurable
+// approval-workflow engine. `submit` opens an engine request (BUILT_IN_DEFAULT
+// EXPENSE chain = manager → HR over threshold; small claims stay manager-only via a
+// conditional-skip step); approve/reject/cancel drive the engine, which fires the
+// EXPENSE consumer (flips ExpenseClaim.status + stamps decidedBy/decidedAt). A claim
+// with no open engine request (submitted before 10c) falls back to the legacy direct
+// flip, so behaviour is preserved either way.
+const engine = require('../approvals/engine');
+// Requiring the consumer self-registers the EXPENSE callback bundle (idempotent), so
+// loading this controller alone (tests/scripts/API) wires onApprove/onReject/onCancel.
+require('../approvals/consumers.expense');
 
 // ── Categories (reference data) ──────────────────────────────────────────────
 const CATEGORY_FIELDS = ['code', 'name', 'glCode', 'isActive'];
@@ -247,25 +258,128 @@ async function transition(req, res, next, target, stampFn) {
   } catch (e) { next(e); }
 }
 
-// Requester submits a DRAFT claim for approval.
-function submit(req, res, next) {
-  return transition(req, res, next, 'SUBMITTED', () => ({ submittedAt: new Date() }));
+// Find the OPEN approval-engine request gating this ExpenseClaim (claims submitted
+// after slice 10c). Null for a pre-10c claim → the controller uses the direct flip.
+async function findOpenApprovalRequest(businessId, claimId) {
+  return prisma.approvalRequest.findFirst({
+    where: { businessId, module: 'EXPENSE', entityType: 'ExpenseClaim', entityId: claimId, status: { in: ['PENDING', 'ESCALATED'] } },
+  });
 }
 
-// Approver action (canManageEmployees).
+// Requester submits a DRAFT claim for approval. Flips DRAFT→SUBMITTED AND opens the
+// approval-engine request in the SAME tx — replacing the bare `canManageEmployees`
+// flip with a real, configurable chain. ctx carries the routing dimensions
+// (amount → the threshold condition; categoryCode/departmentId for scoped defs).
+async function submit(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const claim = await prisma.expenseClaim.findFirst({
+      where: { id: req.params.id, businessId, deletedAt: null },
+      include: { category: { select: { code: true } } },
+    });
+    if (!claim) return res.status(404).json({ message: 'Expense claim not found' });
+    if (claim.status === 'SUBMITTED') return res.status(409).json({ message: 'Claim is already SUBMITTED' });
+    if (!canTransition(claim.status, 'SUBMITTED')) {
+      return res.status(409).json({ message: `Cannot move claim from ${claim.status} to SUBMITTED` });
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const flip = await tx.expenseClaim.updateMany({
+        where: { id: claim.id, status: claim.status },
+        data: { status: 'SUBMITTED', submittedAt: new Date() },
+      });
+      if (flip.count === 0) {
+        const err = new Error('Claim changed concurrently'); err.code = 'DECISION_RACE'; throw err;
+      }
+      await engine.openRequest({
+        businessId,
+        module: 'EXPENSE',
+        entityType: 'ExpenseClaim',
+        entityId: claim.id,
+        requesterEmployeeId: claim.employeeId,
+        payload: {
+          amount: claim.amount != null ? String(claim.amount) : null,
+          category: claim.category ? claim.category.code : null,
+          claimNumber: claim.claimNumber || null,
+        },
+        ctx: {
+          entityId: claim.id,
+          amount: Number(claim.amount),
+          categoryCode: claim.category ? claim.category.code : null,
+          departmentId: null,
+        },
+      }, tx);
+      return tx.expenseClaim.findUnique({ where: { id: claim.id } });
+    });
+    res.json(updated);
+  } catch (e) {
+    if (e && (e.code === 'DECISION_RACE' || e.code === 'P2025' || e.code === 'CONCURRENT_UPDATE')) {
+      return res.status(409).json({ message: 'Claim changed concurrently; please retry', reason: 'CONCURRENT_UPDATE' });
+    }
+    next(e);
+  }
+}
+
+// Shared approve/reject/cancel seam. The route RBAC (canManageEmployees) is the
+// authoritative gate; an open engine request → drive the engine as a trusted
+// systemActor (it fires the EXPENSE consumer that flips the claim); a pre-10c claim
+// with no engine request → the legacy direct flip. Either way the claim lands in the
+// target status with decidedBy/decidedAt stamped.
+async function driveClaimDecision(req, res, next, { decision, target, stampFn }) {
+  try {
+    const { businessId } = req.user;
+    const claim = await prisma.expenseClaim.findFirst({ where: { id: req.params.id, businessId, deletedAt: null } });
+    if (!claim) return res.status(404).json({ message: 'Expense claim not found' });
+    if (claim.status === target) return res.status(409).json({ message: `Claim is already ${target}` });
+    if (!canTransition(claim.status, target)) {
+      return res.status(409).json({ message: `Cannot move claim from ${claim.status} to ${target}` });
+    }
+
+    const open = await findOpenApprovalRequest(businessId, claim.id);
+    if (open) {
+      const decidedBy = req.user.id || null;
+      const reason = (req.body && (req.body.reason || req.body.rejectReason)) || null;
+      if (decision === 'CANCELLED') {
+        await engine.cancel({ approvalRequestId: open.id, actorUserId: decidedBy || 'REQUESTER', comment: reason });
+      } else {
+        await prisma.approvalRequest.update({
+          where: { id: open.id },
+          data: { decidedBy, ...(reason ? { payloadJson: { ...(open.payloadJson || {}), rejectReason: reason } } : {}) },
+        });
+        await engine.recordDecision({ approvalRequestId: open.id, actorUserId: decidedBy || 'SYSTEM', decision, comment: reason, systemActor: true });
+      }
+      const updated = await prisma.expenseClaim.findUnique({ where: { id: claim.id } });
+      return res.json(updated);
+    }
+
+    // Direct path (no engine request) — the legacy guarded flip.
+    const data = { status: target, ...(stampFn ? stampFn(req) : {}) };
+    const updated = await prisma.expenseClaim.update({ where: { id: claim.id }, data });
+    res.json(updated);
+  } catch (e) {
+    if (e && (e.code === 'DECISION_RACE' || e.code === 'P2025' || e.code === 'CONCURRENT_UPDATE')) {
+      return res.status(409).json({ message: 'Claim changed concurrently; please retry', reason: 'CONCURRENT_UPDATE' });
+    }
+    next(e);
+  }
+}
+
+// Approver action (canManageEmployees) — manager/HR per the resolved chain.
 function approve(req, res, next) {
-  return transition(req, res, next, 'APPROVED', (r) => ({ decidedAt: new Date(), decidedBy: r.user.id, rejectReason: null }));
+  return driveClaimDecision(req, res, next, {
+    decision: 'APPROVED', target: 'APPROVED',
+    stampFn: (r) => ({ decidedAt: new Date(), decidedBy: r.user.id, rejectReason: null }),
+  });
 }
 
 function reject(req, res, next) {
-  return transition(req, res, next, 'REJECTED', (r) => ({
-    decidedAt: new Date(),
-    decidedBy: r.user.id,
-    rejectReason: r.body.reason || r.body.rejectReason || null,
-  }));
+  return driveClaimDecision(req, res, next, {
+    decision: 'REJECTED', target: 'REJECTED',
+    stampFn: (r) => ({ decidedAt: new Date(), decidedBy: r.user.id, rejectReason: r.body.reason || r.body.rejectReason || null }),
+  });
 }
 
-// Finance marks an APPROVED claim as paid out.
+// Finance marks an APPROVED claim as paid out (post-approval; not an engine step).
 function reimburse(req, res, next) {
   return transition(req, res, next, 'REIMBURSED', (r) => ({
     reimbursedAt: new Date(),
@@ -275,9 +389,11 @@ function reimburse(req, res, next) {
   }));
 }
 
-// Requester withdraws their own DRAFT/SUBMITTED claim.
+// Requester withdraws their own DRAFT/SUBMITTED claim. A SUBMITTED claim with an open
+// engine request cancels the chain (fires onCancel); a DRAFT claim (no request) flips
+// directly.
 function cancel(req, res, next) {
-  return transition(req, res, next, 'CANCELLED', () => ({}));
+  return driveClaimDecision(req, res, next, { decision: 'CANCELLED', target: 'CANCELLED', stampFn: () => ({}) });
 }
 
 module.exports = {

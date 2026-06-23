@@ -6,6 +6,12 @@
 const express = require('express');
 const router = express.Router();
 
+// Feature 10 slice 10c — register the LEAVE + EXPENSE approval-engine consumers once
+// at boot (idempotent, side-effect-free), so `consumers.get('LEAVE'|'EXPENSE')`
+// resolves when the engine fires onApprove/onReject/onCancel. Required here because
+// this aggregator is loaded exactly once from backend/src/index.js at app start.
+require('../approvals/registerConsumers');
+
 router.use('/employees', require('./employee.routes'));
 router.use('/org', require('./org.routes'));
 router.use('/leave', require('./leave.routes'));

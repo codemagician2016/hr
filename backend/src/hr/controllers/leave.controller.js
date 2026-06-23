@@ -19,6 +19,15 @@ const ledger = require('../leave/ledger');
 const { buildHistory, groupReconciliation } = require('../leave/history');
 const { loadApplyContext } = require('../leave/leaveContext');
 const { runCarryForward } = require('../leave/accrualRunner');
+// Feature 10 slice 10c — leave now routes its terminal decisions through the
+// approval-workflow engine. createRequest opens an engine request after the
+// soft-hold; approve/reject/cancel drive engine.recordDecision/engine.cancel, which
+// fire the LEAVE consumer callbacks (the SAME decideTerminal/soft-hold-release logic,
+// now living in consumers.leave.js). For a directly-created APPLICATION row (e.g.
+// admin/test fixtures with no engine request) the controller falls back to the
+// identical balance-move core directly, so behaviour is byte-identical either way.
+const engine = require('../approvals/engine');
+const leaveConsumer = require('../approvals/consumers.leave');
 
 // ── Config allow-lists (never spread req.body) ──────────────────────────────
 const LEAVE_TYPE_FIELDS = [
@@ -215,6 +224,36 @@ async function createRequest(req, res, next) {
           data: { pendingApproval: { increment: units }, version: { increment: 1 } },
         });
       }
+
+      // Feature 10 §7.5 — open the approval-engine request (after the soft-hold), in
+      // the SAME tx. For a zero-config tenant this resolves the BUILT_IN_DEFAULT LEAVE
+      // chain (manager → escalate@48h) — the SAME approver routing as today — and stays
+      // PENDING until the manager decides. On a tiny tenant where the SoD-collapse
+      // cascade auto-approves on open, the onApprove callback fires here and moves the
+      // balance atomically (the "approved immediately" outcome). ctx carries the
+      // routing dimensions the engine/conditions read; payload is the approver view.
+      await engine.openRequest({
+        businessId,
+        module: 'LEAVE',
+        entityType: 'LeaveTransaction',
+        entityId: created.id,
+        requesterEmployeeId: created.employeeId,
+        payload: {
+          leaveType: ctx.leaveType.code,
+          leaveTypeId,
+          startDate,
+          endDate,
+          days: units,
+          reason: req.body.reason || null,
+        },
+        ctx: {
+          entityId: created.id,
+          days: units,
+          departmentId: (ctx.employee && ctx.employee.departmentId) || null,
+          employeeLevel: (ctx.employee && ctx.employee.gradeId) || null,
+        },
+      }, tx);
+
       return created;
     });
 
@@ -331,51 +370,12 @@ function blockSelfDecision(req, res, txn) {
   return false;
 }
 
-/**
- * decideTerminal(tx, { txn, toStatus, fromStatuses, decidedBy, reason, balanceMove })
- * — the shared guarded terminal transition used by approve/reject/cancel/withdraw.
- *
- * (1) CONDITIONALLY flips the APPLICATION status with `updateMany where status ∈
- *     fromStatuses` — a 0-rowcount means a racing decision already moved it, so we
- *     throw DECISION_RACE (→ 409) and the whole tx rolls back. This closes the
- *     double-decision / double-release window (findings #3, #5): the status flip
- *     and the balance move can only happen together, exactly once.
- * (2) Moves the balance under the version OPTIMISTIC-LOCK (`where { id, version }`
- *     + `version: increment`), mirroring the apply path. A P2025 (the balance
- *     moved under us) bubbles up → 409 CONCURRENT_UPDATE. pendingApproval is
- *     floored so a stale hold can't drive it negative.
- *
- * `balanceMove(currentBalance)` returns the Prisma `data` for the locked update,
- * or null to skip the balance write (e.g. a request with no leaveBalanceId).
- */
-async function decideTerminal(tx, { txn, toStatus, fromStatuses, decidedBy, reason, balanceMove }) {
-  const flip = await tx.leaveTransaction.updateMany({
-    where: { id: txn.id, status: { in: fromStatuses } },
-    data: { status: toStatus, decidedAt: new Date(), decidedBy, ...(reason !== undefined ? { reason } : {}) },
-  });
-  if (flip.count === 0) {
-    const err = new Error('Leave request already decided concurrently');
-    err.code = 'DECISION_RACE';
-    throw err;
-  }
-  if (txn.leaveBalanceId && typeof balanceMove === 'function') {
-    const bal = await tx.leaveBalance.findUnique({
-      where: { id: txn.leaveBalanceId },
-      select: { id: true, version: true, pendingApproval: true, taken: true, closing: true },
-    });
-    if (bal) {
-      const data = balanceMove(bal);
-      if (data) {
-        // version optimistic-lock — P2025 (concurrent move) bubbles to the 409 handler.
-        await tx.leaveBalance.update({
-          where: { id: bal.id, version: bal.version },
-          data: { ...data, version: { increment: 1 } },
-        });
-      }
-    }
-  }
-  return tx.leaveTransaction.findUnique({ where: { id: txn.id } });
-}
+// The shared guarded terminal transition (conditional status flip + version-locked
+// balance move) that approve/reject/cancel apply lives — since slice 10c — in
+// consumers.leave.js#applyLeaveDecision, so the engine consumer and the controller's
+// direct (no-engine-request) path share ONE body and cannot drift. The controller
+// reaches it via driveTerminalDecision (engine path) / leaveConsumer.applyLeaveDecision
+// (direct path).
 
 // pendingApproval can never go below zero — floor the release so a duplicated
 // decision (or a stale hold) cannot over-state `available` (finding #3).
@@ -386,7 +386,69 @@ function flooredRelease(current, qty) {
 
 // Map the guarded-transition races to a 409 the client can retry.
 function isDecisionRace(e) {
-  return e && (e.code === 'DECISION_RACE' || e.code === 'P2025');
+  return e && (e.code === 'DECISION_RACE' || e.code === 'P2025' || e.code === 'CONCURRENT_UPDATE');
+}
+
+// Find the OPEN approval-engine request gating this LeaveTransaction (if leave was
+// applied via createRequest after slice 10c). Returns null for a directly-created
+// APPLICATION row (admin/fixtures) — the controller then uses the legacy direct path.
+async function findOpenApprovalRequest(businessId, txnId, tx) {
+  const db = tx || prisma;
+  return db.approvalRequest.findFirst({
+    where: { businessId, module: 'LEAVE', entityType: 'LeaveTransaction', entityId: txnId, status: { in: ['PENDING', 'ESCALATED'] } },
+  });
+}
+
+/**
+ * driveTerminalDecision — the single seam through which approve/reject/cancel apply
+ * their terminal transition. The route's RBAC + F1 sub-tree scope + SoD self-block
+ * are the AUTHORITATIVE authorization boundary (proven before we get here), exactly
+ * as before slice 10c; this helper only chooses HOW the balance effect is applied:
+ *
+ *   (a) ENGINE PATH — an open ApprovalRequest exists (leave was applied via
+ *       createRequest). Drive engine.recordDecision (APPROVED/REJECTED) or
+ *       engine.cancel (CANCELLED) as a TRUSTED systemActor (the controller already
+ *       authorized the actor; the engine's own approver-membership gate would
+ *       otherwise reject a route-authorized HR/admin actor who isn't literally in the
+ *       resolved set). The engine fires the LEAVE consumer's onApprove/onReject/
+ *       onCancel callback, which carries the SAME decideTerminal/soft-hold-release
+ *       balance move. We then return the freshly-decided LeaveTransaction.
+ *
+ *   (b) DIRECT PATH — no engine request (directly-created row). Run the identical
+ *       balance-move core (leaveConsumer.applyLeaveDecision == the old decideTerminal)
+ *       directly, in one tx. Byte-identical outcome.
+ *
+ * Either way a lost race / concurrent move bubbles a DECISION_RACE / P2025 /
+ * CONCURRENT_UPDATE the caller maps to 409 via isDecisionRace.
+ */
+async function driveTerminalDecision({ businessId, txn, decision, toStatus, decidedBy, reason, balanceMove }) {
+  const open = await findOpenApprovalRequest(businessId, txn.id);
+  if (open) {
+    // Engine path. Stamp decidedBy + (for reject) the reason into the request so the
+    // consumer callback can read them, then drive the matching engine transition.
+    if (decision === 'CANCELLED') {
+      await engine.cancel({ approvalRequestId: open.id, actorUserId: decidedBy || 'REQUESTER', comment: reason || null });
+    } else {
+      if (reason !== undefined && reason !== null) {
+        await prisma.approvalRequest.update({
+          where: { id: open.id },
+          data: { payloadJson: { ...(open.payloadJson || {}), rejectReason: reason }, decidedBy: decidedBy || null },
+        });
+      } else if (decidedBy) {
+        await prisma.approvalRequest.update({ where: { id: open.id }, data: { decidedBy } });
+      }
+      await engine.recordDecision({ approvalRequestId: open.id, actorUserId: decidedBy || 'SYSTEM', decision, comment: reason || null, systemActor: true });
+    }
+    // The consumer flipped the LeaveTransaction inside the engine tx; return it fresh.
+    // For a multi-level chain not yet terminal, the row stays PENDING (the decision
+    // advanced the chain) — the response then reflects the still-open application.
+    return prisma.leaveTransaction.findUnique({ where: { id: txn.id } });
+  }
+
+  // Direct path (no engine request) — identical balance-move core, in one tx.
+  return prisma.$transaction(async (tx) => leaveConsumer.applyLeaveDecision(tx, {
+    txn, toStatus, fromStatuses: ['PENDING'], decidedBy, reason, balanceMove,
+  }));
 }
 
 // POST /requests/:id/approve — PENDING -> APPROVED. Moves the soft-hold into
@@ -416,8 +478,8 @@ async function approveRequest(req, res, next) {
     const heldQty = Math.abs(Number(txn.quantity));
     const decidedBy = req.user.id || req.user.userId || null;
 
-    const updated = await prisma.$transaction(async (tx) => decideTerminal(tx, {
-      txn, toStatus: 'APPROVED', fromStatuses: ['PENDING'], decidedBy,
+    const updated = await driveTerminalDecision({
+      businessId, txn, decision: 'APPROVED', toStatus: 'APPROVED', decidedBy,
       // Release the hold and post the consumption under the version lock. closing
       // is the persisted derived figure (opening+accrued-taken-encashed-lapsed+/-adjusted).
       balanceMove: (bal) => {
@@ -428,7 +490,7 @@ async function approveRequest(req, res, next) {
           closing: { decrement: heldQty },
         };
       },
-    }));
+    });
 
     res.json(updated);
   } catch (e) {
@@ -452,12 +514,12 @@ async function rejectRequest(req, res, next) {
     const heldQty = Math.abs(Number(txn.quantity));
     const decidedBy = req.user.id || req.user.userId || null;
 
-    const updated = await prisma.$transaction(async (tx) => decideTerminal(tx, {
-      txn, toStatus: 'REJECTED', fromStatuses: ['PENDING'], decidedBy,
+    const updated = await driveTerminalDecision({
+      businessId, txn, decision: 'REJECTED', toStatus: 'REJECTED', decidedBy,
       reason: req.body.reason || txn.reason,
       // Release the hold (floored); no units are consumed.
       balanceMove: (bal) => ({ pendingApproval: { decrement: flooredRelease(bal.pendingApproval, heldQty) } }),
-    }));
+    });
 
     res.json(updated);
   } catch (e) {
@@ -479,11 +541,11 @@ async function cancelRequest(req, res, next) {
     const heldQty = Math.abs(Number(txn.quantity));
     const decidedBy = req.user.id || req.user.userId || null;
 
-    const updated = await prisma.$transaction(async (tx) => decideTerminal(tx, {
-      txn, toStatus: 'CANCELLED', fromStatuses: ['PENDING'], decidedBy,
+    const updated = await driveTerminalDecision({
+      businessId, txn, decision: 'CANCELLED', toStatus: 'CANCELLED', decidedBy,
       // Release the soft-hold (floored, version-locked).
       balanceMove: (bal) => ({ pendingApproval: { decrement: flooredRelease(bal.pendingApproval, heldQty) } }),
-    }));
+    });
 
     res.json(updated);
   } catch (e) {
