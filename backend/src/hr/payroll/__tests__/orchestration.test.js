@@ -217,6 +217,61 @@ function amt(arr, code) {
 }
 
 // ===========================================================================
+// SCENARIO 3 — FINDING #5: the engine carries the REAL PF wage base on the EPF
+// component (baseMinor), so filing reads it straight through instead of
+// back-deriving it by dividing the contribution by 0.12. Reuse SCENARIO 1's IN
+// employee (BASIC ₹30,000 wage-for-PF, default cap → PFWage = ₹15,000).
+// ---------------------------------------------------------------------------
+{
+  const inRows = {
+    employee: { id: 'emp-in-1', code: 'EMP-IN-1', gender: 'MALE', dateOfBirth: '1990-01-01', stateCode: null },
+    compensation: {
+      id: 'comp-in-1',
+      lines: [
+        {
+          amountMonthly: '30000.00', sortOrder: 0,
+          component: { id: 'BASIC', code: 'BASIC', name: 'Basic', kind: 'BASIC', category: 'EARNING', calcMethod: 'FLAT', isWageForPF: true, prorationMethod: 'CALENDAR_DAYS', isRecurring: true },
+        },
+        {
+          amountMonthly: '20000.00', sortOrder: 1,
+          component: { id: 'HRA', code: 'HRA', name: 'HRA', kind: 'HRA', category: 'EARNING', calcMethod: 'FLAT', isWageForPF: false, prorationMethod: 'CALENDAR_DAYS', isRecurring: true },
+        },
+      ],
+    },
+    statutory: { countryCode: 'IN', pan: 'ABCDE1234F', uan: '100200300400', esiApplicable: false, ptStateCode: 'MH' },
+    attendance: { calendarDays: '30.0000', payableDays: '30.0000', lopDays: '0.0000', overtimeHours: '0.00' },
+    entity: { countryCode: 'IN', stateCode: 'MH', payCurrency: 'INR', taxYearStartMonth: 4 },
+    period: { start: '2025-06-01', end: '2025-06-30', payDate: '2025-06-30', frequency: 'MONTHLY', taxYear: '2025-26' },
+    ytd: { taxableGrossMinor: 0, tdsDeductedMinor: 0, monthsElapsed: 0, esiLatchedCovered: false },
+  };
+  const { engineArgs } = service.buildEmployeePayInput(inRows);
+  const r = engine.computePayslip(engineArgs);
+  const epf = (r.employeeDeductions || []).find((d) => d.code === 'EPF');
+  // PF wage capped at ₹15,000 — baseMinor must carry the REAL capped base.
+  check('IN-PF EPF component carries real PF wage base ₹15,000', R(15000), epf ? epf.baseMinor : null);
+  // The back-derived figure would be EPF-EE / 0.12 = 1800 / 0.12 = ₹15,000 here,
+  // but for a sub-ceiling / full-wage / VPF case the two diverge; what matters is
+  // the base is now an EXPLICIT engine output, not reconstructed from a rate.
+  check('IN-PF EPF-EE is ₹1,800 (12% of capped base)', R(1800), epf ? epf.amountMinor : null);
+  // statutoryRollups must surface the base on the PayRunLine rollup columns.
+  const rollups = service._internal.statutoryRollups(r);
+  check('IN-PF statutoryRollups.pfWagesBase = "15000.00"', '15000.00', rollups.pfWagesBase);
+}
+
+// ===========================================================================
+// SCENARIO 4 — FINDING #6: resolveFilingPlan rejects an unsupported country
+// rather than returning [] (which would file nothing + close silently).
+// ---------------------------------------------------------------------------
+{
+  const { resolveFilingPlan } = service._internal;
+  check('IN filing plan resolves (4 obligations)', 4, resolveFilingPlan('IN').length);
+  check('NZ filing plan resolves (2 obligations)', 2, resolveFilingPlan('NZ').length);
+  let usCode = null;
+  try { resolveFilingPlan('US'); } catch (e) { usCode = e.code; }
+  check('Unsupported country US → COUNTRY_MISMATCH', 'COUNTRY_MISMATCH', usCode);
+}
+
+// ===========================================================================
 console.log('');
 console.log(`Orchestration test: ${passed} passed, ${failed} failed of ${passed + failed} assertions.`);
 if (failed > 0) {

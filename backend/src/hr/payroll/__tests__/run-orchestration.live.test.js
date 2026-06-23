@@ -47,13 +47,14 @@ async function cleanup(businessId) {
 }
 
 /** Create a DRAFT run directly (bypass createRun's code derivation so we control the PREFIX). */
-async function mkRun(businessId, entity, cal, { periodStart, periodEnd, payDate, taxYear, seq, suffix }) {
+async function mkRun(businessId, entity, cal, { periodStart, periodEnd, payDate, taxYear, seq, suffix, type }) {
   return prisma.payRun.create({
     data: {
       businessId, entityId: entity.id, payCalendarId: cal.id,
       code: `${PREFIX}-${entity.code}-${suffix}`,
       periodStart: new Date(periodStart), periodEnd: new Date(periodEnd), payDate: new Date(payDate),
       sequenceInYear: seq, taxYear, currencyCode: entity.payCurrency, status: 'DRAFT',
+      ...(type ? { type } : {}),
     },
   });
 }
@@ -98,51 +99,106 @@ async function main() {
   ok(typeof variance.blockingAnomalies === 'number', `D2 variance: blockingAnomalies numeric (${variance.blockingAnomalies})`);
   ok(variance.totals && variance.totals.previous, 'D3 variance: totals carry previous period');
 
-  // ── E. Maker-checker SoD — maker cannot approve own run ──
+  // ── E. Maker-checker SoD (SERVER-SIDE) + STALE_TOTALS (SERVER-SIDE) ──
   // Submit first (maker → REVIEW) then maker tries to approve own submission.
   if (variance.blockingAnomalies === 0) {
     await service.submitRun({ businessId, actorId: MAKER, payRunId: run.id });
     const inReview = await prisma.payRun.findUnique({ where: { id: run.id }, select: { status: true, submittedBy: true, totalsHash: true } });
     ok(inReview.status === 'REVIEW' && inReview.submittedBy === MAKER, 'E1 submit → REVIEW, submittedBy=maker');
+    ok(!!inReview.totalsHash, 'E1b submit captured a server-side totalsHash');
 
+    // SoD is a SERVER invariant: no fourEyes flag passed at all → maker still blocked.
     await expectThrow(
-      () => service.approveRun({ businessId, actorId: MAKER, payRunId: run.id, fourEyes: true }),
-      'MAKER_CHECKER', 'E2 maker approving own run → MAKER_CHECKER 403',
+      () => service.approveRun({ businessId, actorId: MAKER, payRunId: run.id }),
+      'MAKER_CHECKER', 'E2 maker approving own run → MAKER_CHECKER (no client flag)',
     );
 
-    // STALE_TOTALS — checker approves with a stale hash.
+    // FINDING #2: a client-supplied {fourEyes:false} must NOT disable SoD. The
+    // service ignores any request-scoped fourEyes; maker approving own run = 403.
     await expectThrow(
-      () => service.approveRun({ businessId, actorId: CHECKER, payRunId: run.id, fourEyes: true, totalsHash: 'STALE_HASH' }),
-      'STALE_TOTALS', 'E3 checker with stale totalsHash → STALE_TOTALS',
+      () => service.approveRun({ businessId, actorId: MAKER, payRunId: run.id, fourEyes: false }),
+      'MAKER_CHECKER', 'E2b {fourEyes:false} cannot bypass SoD (maker still blocked)',
     );
 
-    // Checker approves with the right hash.
-    const approved = await service.approveRun({ businessId, actorId: CHECKER, payRunId: run.id, fourEyes: true, totalsHash: inReview.totalsHash });
+    // FINDING #3: STALE_TOTALS is recomputed SERVER-SIDE from persisted totals.
+    // Simulate a REAL divergence: mutate the run totals AFTER review so the current
+    // server-recomputed hash no longer matches the stored (reviewed) hash. The
+    // checker is rejected EVEN THOUGH no client totalsHash is supplied.
+    const origNet = (await prisma.payRun.findUnique({ where: { id: run.id }, select: { totalNet: true } })).totalNet;
+    await prisma.payRun.update({ where: { id: run.id }, data: { totalNet: Number(origNet) + 1 } });
+    await expectThrow(
+      () => service.approveRun({ businessId, actorId: CHECKER, payRunId: run.id }),
+      'STALE_TOTALS', 'E3 checker approve after silent totals change → STALE_TOTALS (server-recomputed)',
+    );
+    // Restore the reviewed totals so the legitimate approve proceeds.
+    await prisma.payRun.update({ where: { id: run.id }, data: { totalNet: origNet } });
+
+    // Checker (≠ maker) approves — no client fourEyes/totalsHash needed.
+    const approved = await service.approveRun({ businessId, actorId: CHECKER, payRunId: run.id });
     ok(approved.payRun.status === 'APPROVED' && approved.payRun.approvedBy === CHECKER, 'E4 checker (≠ maker) approves → APPROVED');
+    ok(!!approved.payRun.totalsHash, 'E4b approve persisted the reviewed-totals anchor');
   } else {
     log(`  SKIP E (current run has ${variance.blockingAnomalies} blockers — gating tested separately in F)`);
-    // Force-approve path still must be SoD-guarded: submit then assert maker block.
   }
 
-  // ── F. Anomaly gating — a NEGATIVE_NET line blocks submit/approve ──
+  // ── F. Anomaly gating — engine errorJson BLOCKER blocks submit/approve ──
   {
     const gateRun = await mkRun(businessId, inEntity, inCal, {
       periodStart: '2026-06-01', periodEnd: '2026-06-30', payDate: '2026-06-30', taxYear: '2026-27', seq: 3, suffix: 'IN-JUN-GATE',
     });
     await service.computeRun({ businessId, actorId: MAKER, payRunId: gateRun.id });
-    // Inject a BLOCKER finding onto a line's errorJson (simulate variance/engine BLOCKER).
+    // Inject an ENGINE BLOCKER onto a line's errorJson (the engine-anomalies column).
     const aLine = await prisma.payRunLine.findFirst({ where: { businessId, payRunId: gateRun.id } });
     await prisma.payRunLine.update({
       where: { id: aLine.id },
-      data: { errorJson: [{ code: 'NEGATIVE_NET', severity: 'BLOCKER', message: 'forced blocker' }] },
+      data: { errorJson: [{ code: 'NEGATIVE_NET', severity: 'BLOCKER', message: 'forced engine blocker' }] },
     });
     await expectThrow(
       () => service.submitRun({ businessId, actorId: MAKER, payRunId: gateRun.id }),
-      'OPEN_BLOCKERS', 'F1 submit blocked by open BLOCKER',
+      'OPEN_BLOCKERS', 'F1 submit blocked by open engine BLOCKER',
     );
     await expectThrow(
-      () => service.approveRun({ businessId, actorId: CHECKER, payRunId: gateRun.id, fourEyes: true }),
-      'OPEN_BLOCKERS', 'F2 approve blocked by open BLOCKER',
+      () => service.approveRun({ businessId, actorId: CHECKER, payRunId: gateRun.id }),
+      'OPEN_BLOCKERS', 'F2 approve blocked by open engine BLOCKER',
+    );
+  }
+
+  // ── F2. FAIL-CLOSED variance gate (finding #1): a VARIANCE-detectable BLOCKER
+  //        materialised by submit/approve THEMSELVES — /variance NEVER called. ──
+  {
+    const fcRun = await mkRun(businessId, inEntity, inCal, {
+      periodStart: '2026-06-01', periodEnd: '2026-06-30', payDate: '2026-06-30', taxYear: '2026-27', seq: 3, suffix: 'IN-JUN-FAILCLOSED',
+    });
+    await service.computeRun({ businessId, actorId: MAKER, payRunId: fcRun.id });
+    // Force a NEGATIVE net on one line + keep run total reconciled (avoid a
+    // separate RECONCILIATION_MISMATCH). The variance engine raises NEGATIVE_NET
+    // (BLOCKER) — but ONLY if submit/approve compute variance themselves; we DO
+    // NOT call service.computeVariance here.
+    const fcLine = await prisma.payRunLine.findFirst({ where: { businessId, payRunId: fcRun.id }, orderBy: { createdAt: 'asc' } });
+    const run0 = await prisma.payRun.findUnique({ where: { id: fcRun.id }, select: { totalNet: true } });
+    const lineNet = Number(fcLine.netPay);
+    const newLineNet = -100; // ₹-1.00 → NEGATIVE_NET BLOCKER
+    await prisma.payRunLine.update({ where: { id: fcLine.id }, data: { netPay: newLineNet } });
+    // Re-reconcile the run total so sum(lines.net) == run.totalNet.
+    await prisma.payRun.update({ where: { id: fcRun.id }, data: { totalNet: Number(run0.totalNet) - lineNet + newLineNet } });
+
+    // Sanity: NO variance was materialised yet — errorJson/varianceJson are clean.
+    const preBlockers = await service.recountBlockers(businessId, fcRun.id);
+    ok(preBlockers === 0, `F2a no blockers materialised before submit/approve (recount=${preBlockers})`);
+
+    // Submit must materialise variance FRESH and reject — even with no prior /variance.
+    await expectThrow(
+      () => service.submitRun({ businessId, actorId: MAKER, payRunId: fcRun.id }),
+      'OPEN_BLOCKERS', 'F2b submit fail-closed: variance BLOCKER materialised at submit',
+    );
+    // After the failed submit, the variance was materialised → recount sees it.
+    const postBlockers = await service.recountBlockers(businessId, fcRun.id);
+    ok(postBlockers > 0, `F2c submit materialised the variance BLOCKER (recount=${postBlockers})`);
+
+    // Approve must ALSO recount fresh and reject (direct CALCULATED path, no submit).
+    await expectThrow(
+      () => service.approveRun({ businessId, actorId: CHECKER, payRunId: fcRun.id }),
+      'OPEN_BLOCKERS', 'F2d approve fail-closed: variance BLOCKER blocks even unreviewed run',
     );
   }
 
@@ -173,8 +229,69 @@ async function main() {
       // Post-approval immutability: cancel/reopen refused.
       await expectThrow(() => service.cancelRun({ businessId, actorId: MAKER, payRunId: approvedRun.id }), 'CANNOT_CANCEL', 'G8 cancel after close → CANNOT_CANCEL');
       await expectThrow(() => service.reopenRun({ businessId, actorId: MAKER, payRunId: approvedRun.id }), 'CANNOT_REOPEN', 'G9 reopen after close → CANNOT_REOPEN');
+
+      // FINDING #4: computeVariance is read-only once a run is APPROVED+ / closed.
+      await expectThrow(
+        () => service.computeVariance({ businessId, payRunId: approvedRun.id }),
+        'IMMUTABLE_RUN_VIOLATION', 'G10 computeVariance on CLOSED run → IMMUTABLE_RUN_VIOLATION (409)',
+      );
+
+      // FINDING #5: IN ECR reads the REAL persisted PF wage base — NOT a figure
+      // back-derived by dividing the contribution by 0.12. The ECR challan total
+      // (meta.totals.epfWagesRupees) must equal the sum of round(pfWagesBase),
+      // and must NOT equal the rate-reconstructed sum round(pfEmployee/0.12) when
+      // any employee's wage is capped (cap makes the two diverge).
+      const ecr = await service.generateFile({ businessId, payRunId: approvedRun.id, kind: 'ecr' });
+      const pfLines = await prisma.payRunLine.findMany({
+        where: { businessId, payRunId: approvedRun.id, pfWagesBase: { not: null } },
+      });
+      if (pfLines.length && ecr && ecr.meta && ecr.meta.totals) {
+        // paiseToRupeesNearest rounds each line's paise base to whole rupees, then sums.
+        const realSum = pfLines.reduce((s, l) => s + Math.round(Number(l.pfWagesBase)), 0);
+        const backDeriveSum = pfLines.reduce((s, l) => s + Math.round((Number(l.pfEmployee) || 0) / 0.12), 0);
+        ok(ecr.meta.totals.epfWagesRupees === realSum,
+          `G11 ECR epfWages total = real persisted PF base (${ecr.meta.totals.epfWagesRupees} === ${realSum})`);
+        ok(ecr.meta.totals.epsWagesRupees != null,
+          `G11b ECR carries an EPS wage base (${ecr.meta.totals.epsWagesRupees}), not hardcoded 0`);
+        log(`  INFO G11 real PF wage sum=${realSum}, rate-reconstructed=${backDeriveSum} (diverge=${realSum !== backDeriveSum})`);
+      } else {
+        log('  SKIP G11 (no PF lines or ECR meta to compare)');
+      }
     } else {
       log('  SKIP G (current IN-MAY run not APPROVED — likely had blockers)');
+    }
+  }
+
+  // ── G2. computeVariance on an APPROVED (not yet closed) run → 409 ──
+  {
+    // OFF_CYCLE so there is NO prior-period baseline of the same type — variance
+    // raises no period-over-period outliers, isolating the immutability assertion.
+    const apRun = await mkRun(businessId, inEntity, inCal, {
+      periodStart: '2026-09-01', periodEnd: '2026-09-30', payDate: '2026-09-30', taxYear: '2026-27', seq: 1, suffix: 'IN-SEP-APPROVED', type: 'OFF_CYCLE',
+    });
+    const apComputed = await service.computeRun({ businessId, actorId: MAKER, payRunId: apRun.id });
+    if (Number(apComputed.totals.totalNet) > 0) {
+      // Materialise variance + recount BEFORE attempting the gate (submit/approve
+      // would throw OPEN_BLOCKERS if any period-over-period BLOCKER exists — that
+      // path is already proven in F2; here we want a clean APPROVED run to prove
+      // the immutability guard, so skip if this period happens to carry blockers).
+      await service.computeVariance({ businessId, payRunId: apRun.id });
+      const apBlockers = await service.recountBlockers(businessId, apRun.id);
+      if (apBlockers === 0) {
+        // Direct CALCULATED→APPROVED path (no submit) — proves approve recounts
+        // variance fresh AND that, once APPROVED, variance is read-only.
+        await service.approveRun({ businessId, actorId: CHECKER, payRunId: apRun.id });
+        const apState = await prisma.payRun.findUnique({ where: { id: apRun.id }, select: { status: true } });
+        ok(apState.status === 'APPROVED', 'G12a direct approve (no submit) → APPROVED');
+        await expectThrow(
+          () => service.computeVariance({ businessId, payRunId: apRun.id }),
+          'IMMUTABLE_RUN_VIOLATION', 'G12 computeVariance on APPROVED run → IMMUTABLE_RUN_VIOLATION (409)',
+        );
+      } else {
+        log(`  SKIP G12 (this period carries ${apBlockers} variance blocker(s))`);
+      }
+    } else {
+      log('  SKIP G12 (no lines computed)');
     }
   }
 

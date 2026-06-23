@@ -80,9 +80,12 @@ async function freezeRun(req, res) {
 async function approveRun(req, res) {
   try {
     const { businessId, id: actorId } = req.user;
-    const fourEyes = req.body && req.body.fourEyes === false ? false : true;
-    const totalsHash = req.body && req.body.totalsHash ? req.body.totalsHash : undefined;
-    const detail = await service.approveRun({ businessId, actorId, payRunId: req.params.id, fourEyes, totalsHash });
+    // SECURITY (finding #2 + #3): four-eyes and the totals-staleness check are
+    // SERVER-SIDE invariants resolved inside the service from tenant policy +
+    // persisted totals. The request body CANNOT supply fourEyes/totalsHash to
+    // weaken separation-of-duties or the STALE_TOTALS gate. Any such field is
+    // intentionally ignored here.
+    const detail = await service.approveRun({ businessId, actorId, payRunId: req.params.id });
     res.json(detail);
   } catch (err) { handleError(res, err); }
 }
