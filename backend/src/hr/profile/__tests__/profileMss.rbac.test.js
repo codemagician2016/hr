@@ -274,6 +274,80 @@ async function main() {
       const reload = await prisma.profileChangeRequest.findUnique({ where: { id: cr.id } });
       assert(reload.status === 'PENDING', 'the self change request stays PENDING');
     }
+
+    // ═══ (m) MEDIUM — self-set personalEmail colliding with another account is REJECTED ═══
+    // R1 tries to self-set personalEmail to MGR's login/workEmail (a collision that
+    // would poison cross-account ESS resolution). The write must be rejected and the
+    // attacker's resolution identity must NOT be hijack-able.
+    log('(m) colliding personalEmail rejected (cannot poison cross-account resolution):');
+    {
+      // collides with another EMPLOYEE's workEmail (mgr) → rejected. A body with ONLY a
+      // rejected field returns 400 ("Validation failed"); a body that also carries a
+      // valid self-edit field returns 200 with an `errors` map — assert errors either way.
+      const r1 = await prisma.employee.findFirst({ where: { businessId, code: `${PREFIX}-R1` }, select: { id: true, personalEmail: true } });
+      const res = await callController(rich.patchContact, { customer: r1Cust, body: { personalEmail: mgrUser.email } });
+      assert(res.body.errors && res.body.errors.personalEmail, 'collision with another employee email → rejected (errors.personalEmail)');
+      assert(!(res.body.applied || []).includes('personalEmail'), 'personalEmail NOT applied on collision');
+      const fresh = await prisma.employee.findUnique({ where: { id: r1.id }, select: { personalEmail: true } });
+      assert((fresh.personalEmail || null) === (r1.personalEmail || null), 'R1.personalEmail unchanged after a rejected collision');
+
+      // collides with another USER's login email (hr) → rejected.
+      const res2 = await callController(rich.patchContact, { customer: r1Cust, body: { personalEmail: hrUser.email } });
+      assert(res2.body.errors && res2.body.errors.personalEmail, 'collision with another login email → rejected');
+
+      // RESOLUTION cannot be hijacked: even with the (rejected) value never landing, a
+      // fresh session for the victim (mgr) must still resolve to MGR's OWN row, never R1.
+      const mgrScope = await resolveCustomerScope(mgrCust, 'canViewEmployees');
+      const mgrEmp = await prisma.employee.findFirst({ where: { businessId, code: `${PREFIX}-MGR` }, select: { id: true } });
+      assert(mgrScope.employee && mgrScope.employee.id === mgrEmp.id, 'victim (mgr) session still resolves to MGR row (resolution not hijacked)');
+
+      // a NON-colliding personalEmail still commits normally (no false-positive).
+      const okEmail = `${PREFIX.toLowerCase()}-r1-personal@example.com`;
+      const res3 = await callController(rich.patchContact, { customer: r1Cust, body: { personalEmail: okEmail } });
+      assert(res3.statusCode === 200 && (res3.body.applied || []).includes('personalEmail'), 'a non-colliding personalEmail commits (no false-positive)');
+      const fresh3 = await prisma.employee.findUnique({ where: { id: r1.id }, select: { personalEmail: true } });
+      assert(fresh3.personalEmail === okEmail, 'non-colliding personalEmail written to the row');
+    }
+
+    // ═══ (n) LOW — ALL-band ESS user is self-excluded for team approval reads/decides ═══
+    // An ALL-band ESS session must NOT read-as-approver nor decide their OWN request via
+    // /me/team. Build an ALL-band manager (ALLM) with one report (ALLR) + ALLM's own
+    // pending leave, then assert ALLM's own row is absent from the inbox and undecidable.
+    log('(n) ALL-band ESS user self-excluded for /me/team approval read + decide:');
+    {
+      const allRole = await prisma.businessRole.create({ data: { businessId, name: `${PREFIX}-AllRole`, defaultScope: 'ALL', permissions: { canViewEmployees: true, canApproveLeave: true } } });
+      const allmUser = await mkUser('allm', allRole.id);
+      const allm = await mkEmp('ALLM', { userId: allmUser.id, workEmail: allmUser.email });
+      const allr = await mkEmp('ALLR', { managerEmployeeId: allm.id });
+      const allmCust = custOf(allmUser);
+
+      // sanity: the band really is ALL, and for an approval action it's now narrowed to IDS-minus-self.
+      const viewScope = await resolveCustomerScope(allmCust, 'canViewEmployees');
+      assert(viewScope.scope.kind === 'ALL', 'ALL band preserved for a NON-approval read (roster/directory)');
+      const apprScope = await resolveCustomerScope(allmCust, 'canApproveLeave');
+      assert(apprScope.scope.kind !== 'ALL', 'ALL band narrowed to an explicit id-set for an approval action');
+      assert(apprScope.scope.kind === 'NONE' || !apprScope.scope.ids.has(allm.id), 'ALL-band approver scope EXCLUDES self (no own-request read)');
+
+      const lt = await prisma.leaveType.create({ data: { businessId, code: `${PREFIX}-ALLEL`, name: 'F13 ALL EL', category: 'ANNUAL', unit: 'DAYS' } });
+      // ALLM's OWN pending leave + ALLR's pending leave (a real report).
+      const ownApp = await prisma.leaveTransaction.create({ data: { businessId, employeeId: allm.id, leaveTypeId: lt.id, txnType: 'APPLICATION', unit: 'DAYS', quantity: -1, startDate: new Date('2026-08-01'), endDate: new Date('2026-08-01'), status: 'PENDING', appliedAt: new Date(), reason: `${PREFIX}-own` } });
+      const repApp = await prisma.leaveTransaction.create({ data: { businessId, employeeId: allr.id, leaveTypeId: lt.id, txnType: 'APPLICATION', unit: 'DAYS', quantity: -1, startDate: new Date('2026-08-02'), endDate: new Date('2026-08-02'), status: 'PENDING', appliedAt: new Date(), reason: `${PREFIX}-rep` } });
+
+      // READ: the manager inbox must NOT surface ALLM's own request (self-excluded), and
+      // must NOT surface the whole tenant (PEER/R1/R2 etc.) — only the sub-tree (ALLR).
+      const pend = await callController(team.leavePending, { customer: allmCust, query: {} });
+      const inboxIds = new Set((pend.body.items || []).map((t) => t.employeeId));
+      assert(pend.statusCode === 200, 'leavePending → 200');
+      assert(!inboxIds.has(allm.id), 'ALL-band manager inbox EXCLUDES own request (SoD read self-exclusion)');
+      assert(inboxIds.has(allr.id), 'ALL-band manager inbox still shows a real report (ALLR)');
+      assert(!inboxIds.has(peer.id) && !inboxIds.has(r1.id), 'ALL-band manager inbox is NOT the whole tenant (no PEER/R1 leak)');
+
+      // DECIDE: ALLM cannot decide their OWN leave via /me/team (out-of-scope → 404).
+      const dec = await callController(team.leaveDecide, { customer: allmCust, params: { id: ownApp.id }, body: { decision: 'approve' } });
+      assert(dec.statusCode === 404, 'ALL-band manager cannot decide OWN leave via /me/team (404)');
+      const reloadOwn = await prisma.leaveTransaction.findUnique({ where: { id: ownApp.id } });
+      assert(reloadOwn.status === 'PENDING', 'own leave stays PENDING (decide self-excluded)');
+    }
   } finally {
     await cleanup(businessId);
   }
