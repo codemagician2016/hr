@@ -18,7 +18,7 @@ function asList(res) {
   return [];
 }
 
-function SelectField({ label, value, onChange, options }) {
+function SelectField({ label, value, onChange, options, placeholder = 'Unassigned', hint }) {
   return (
     <div>
       <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
@@ -27,13 +27,15 @@ function SelectField({ label, value, onChange, options }) {
         onChange={(e) => onChange(e.target.value)}
         className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--theme-primary)] text-sm bg-white"
       >
-        <option value="">—</option>
+        <option value="">{placeholder}</option>
         {options.map((o) => (
+          // Designations expose `title`; departments/locations expose `name`.
           <option key={o.id} value={o.id}>
-            {o.name}
+            {o.name || o.title}
           </option>
         ))}
       </select>
+      {hint && <p className="text-xs text-gray-500 mt-1">{hint}</p>}
     </div>
   );
 }
@@ -118,6 +120,7 @@ export default function NewEmployeePage() {
             value={form.departmentId}
             onChange={(v) => set('departmentId', v)}
             options={orgs.departments}
+            hint="Recorded as the employee's starting department."
           />
           <SelectField
             label="Designation"

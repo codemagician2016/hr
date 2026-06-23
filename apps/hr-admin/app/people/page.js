@@ -21,17 +21,33 @@ const STATUSES = [
 
 const PAGE_SIZE = 20;
 
+// Backend stores the EmployeeStatus enum in UPPER_SNAKE (ACTIVE, ON_LEAVE…).
+// Normalise before matching so badges/labels render regardless of casing.
 function statusBadgeClass(status) {
-  switch (status) {
-    case 'active':
+  switch (String(status || '').toUpperCase()) {
+    case 'ACTIVE':
       return 'bg-green-50 text-green-700 border-green-200';
-    case 'on_leave':
+    case 'PROBATION':
+      return 'bg-blue-50 text-blue-700 border-blue-200';
+    case 'ON_LEAVE':
       return 'bg-amber-50 text-amber-700 border-amber-200';
-    case 'terminated':
+    case 'NOTICE_PERIOD':
+      return 'bg-orange-50 text-orange-700 border-orange-200';
+    case 'SUSPENDED':
+      return 'bg-red-50 text-red-700 border-red-200';
+    case 'TERMINATED':
+    case 'RETIRED':
       return 'bg-gray-100 text-gray-600 border-gray-200';
     default:
       return 'bg-gray-50 text-gray-600 border-gray-200';
   }
+}
+
+// "ON_LEAVE" → "On leave" — a human label from the enum.
+function statusLabel(status) {
+  if (!status) return 'Unknown';
+  const s = String(status).replace(/_/g, ' ').toLowerCase();
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function PeopleInner() {
@@ -167,6 +183,7 @@ function PeopleInner() {
                 <th scope="col" className="px-4 py-3 font-medium">Name</th>
                 <th scope="col" className="px-4 py-3 font-medium">Department</th>
                 <th scope="col" className="px-4 py-3 font-medium">Designation</th>
+                <th scope="col" className="px-4 py-3 font-medium">Email</th>
                 <th scope="col" className="px-4 py-3 font-medium">Status</th>
                 <th scope="col" className="px-4 py-3 font-medium">Joined</th>
               </tr>
@@ -179,21 +196,31 @@ function PeopleInner() {
                     <Link href={`/people/${emp.id}`} className="font-medium text-gray-900 hover:underline">
                       {[emp.firstName, emp.lastName].filter(Boolean).join(' ') || '—'}
                     </Link>
-                    {emp.email && <div className="text-xs text-gray-500">{emp.email}</div>}
                   </td>
-                  <td className="px-4 py-3 text-gray-700">{emp.department?.name || emp.departmentName || '—'}</td>
-                  <td className="px-4 py-3 text-gray-700">{emp.designation?.name || emp.designationName || '—'}</td>
+                  <td className="px-4 py-3 text-gray-700">
+                    {emp.department?.name || <span className="text-gray-400">Unassigned</span>}
+                  </td>
+                  <td className="px-4 py-3 text-gray-700">
+                    {emp.designation?.name || <span className="text-gray-400">Unassigned</span>}
+                  </td>
+                  <td className="px-4 py-3 text-gray-700">
+                    {emp.workEmail ? (
+                      <a href={`mailto:${emp.workEmail}`} className="hover:underline">{emp.workEmail}</a>
+                    ) : (
+                      <span className="text-gray-400">—</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3">
                     <span
                       className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${statusBadgeClass(
                         emp.status
                       )}`}
                     >
-                      {emp.status || 'unknown'}
+                      {statusLabel(emp.status)}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-gray-500">
-                    {emp.joinedAt || emp.dateOfJoining ? formatAdminDate(emp.joinedAt || emp.dateOfJoining) : '—'}
+                    {emp.hireDate ? formatAdminDate(emp.hireDate) : <span className="text-gray-400">—</span>}
                   </td>
                 </tr>
               ))}
