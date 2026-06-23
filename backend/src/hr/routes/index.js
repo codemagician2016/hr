@@ -34,6 +34,7 @@ router.use('/performance', talent.performance);
 // /me/payslips router uses the customer-auth middleware internally.
 router.use('/payroll', require('../payroll/payroll.routes'));
 router.use('/me/payslips', require('../payroll/mePayslips.routes'));
+router.use('/me/onboarding', require('../lifecycle/routes/meOnboarding.routes'));
 
 // Reports / analytics — read-only payroll register, statutory summary,
 // headcount & attrition, leave liability. RBAC: canViewPayrollReports.

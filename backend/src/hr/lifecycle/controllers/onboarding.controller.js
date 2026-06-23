@@ -18,6 +18,9 @@
 const prisma = require('../../../core/lib/prisma');
 const { scopeWhere, scopeAllows } = require('../../lib/scopeResolver');
 const { advanceJourney } = require('../journeyEngine');
+const {
+  provisionEmployee, confirmProbation, resolveOfferApproverUserId, ProvisionError,
+} = require('../provision');
 
 // Statuses that count as "blocking still open" for the advance guard.
 const OPEN_BLOCKING = new Set(['PENDING', 'IN_PROGRESS', 'WAITING_APPROVAL', 'BLOCKED', 'OVERDUE', 'FAILED']);
@@ -261,6 +264,103 @@ async function advanceJourneyEndpoint(req, res, next) {
   } catch (e) { next(e); }
 }
 
+// Load a journey for an HR pipeline action + enforce subject-scope. Returns the
+// journey or sends a 404 (and returns null). A pre-provision journey (no
+// employeeId yet) is HR-only (ALL band) — a manager has no hierarchy anchor to a
+// not-yet-hired person, so out-of-scope resolves to 404 (IDOR-safe, never 403).
+async function loadScopedJourney(req, res) {
+  const { businessId } = req.user;
+  const journey = await prisma.lifecycleJourney.findFirst({
+    where: { id: req.params.id, businessId, deletedAt: null },
+  });
+  if (!journey) {
+    res.status(404).json({ message: 'Journey not found' });
+    return null;
+  }
+  if (req.scope && req.scope.kind !== 'ALL') {
+    if (!journey.employeeId || !scopeAllows(req.scope, journey.employeeId)) {
+      res.status(404).json({ message: 'Journey not found' });
+      return null;
+    }
+  }
+  return journey;
+}
+
+// POST /journeys/:id/provision — atomically provision the employee (Feature 4
+// §4.2, slice 4c). requirePermission('canManageOnboarding') + scope guard on the
+// route; SoD here: the provisioner must NOT be the offer's approver (if the offer
+// went through an approval gate). On 409 'already-provisioned' returns the linked
+// employeeId; on a genuine failure the tx is rolled back and the journey BLOCKED.
+async function provisionJourney(req, res, next) {
+  try {
+    const journey = await loadScopedJourney(req, res);
+    if (!journey) return undefined;
+
+    // ── SoD (spec §7/§8): provisioner ≠ offer approver. Only enforced when the
+    //    offer carries a recorded approver; an unapproved offer allows anyone
+    //    with the permission to provision. ──
+    if (journey.offerId) {
+      const offer = await prisma.offer.findFirst({
+        where: { id: journey.offerId, businessId: req.user.businessId },
+      });
+      if (offer) {
+        const approverUserId = await resolveOfferApproverUserId(prisma, offer);
+        if (approverUserId && approverUserId === req.user.id) {
+          return res.status(403).json({
+            message: 'Separation of duties: the offer approver cannot provision this hire',
+            reason: 'sod-provision-vs-approve',
+          });
+        }
+      }
+    }
+
+    const out = await provisionEmployee({ journeyId: journey.id, actorId: req.user.id }, prisma);
+    return res.status(201).json({
+      employee: {
+        id: out.employee.id, code: out.employee.code, status: out.employee.status,
+        userId: out.employee.userId,
+        currentEmploymentRecordId: out.employee.currentEmploymentRecordId,
+        currentCompensationId: out.employee.currentCompensationId,
+        managerEmployeeId: out.employee.managerEmployeeId,
+      },
+      journey: out.journey,
+      provisioned: out.resultJson,
+    });
+  } catch (e) {
+    if (e instanceof ProvisionError) {
+      return res.status(e.status || 422).json({
+        message: e.message,
+        reason: e.reason,
+        ...(e.employeeId ? { employeeId: e.employeeId } : {}),
+      });
+    }
+    return next(e);
+  }
+}
+
+// POST /journeys/:id/confirm-probation — confirm the hire's probation (Feature 4
+// §4.2). EmploymentRecord(PROBATION_CONFIRM), Employee.status → ACTIVE, advance
+// PROBATION → COMPLETED. Scoped to the journey's subject employee.
+async function confirmProbationEndpoint(req, res, next) {
+  try {
+    const journey = await loadScopedJourney(req, res);
+    if (!journey) return undefined;
+    if (!journey.employeeId) {
+      return res.status(422).json({ message: 'Journey has no provisioned employee to confirm', reason: 'precondition' });
+    }
+    const out = await confirmProbation({ employeeId: journey.employeeId, actorId: req.user.id }, prisma);
+    return res.json({
+      employee: { id: out.employee.id, status: out.employee.status },
+      changed: out.changed,
+    });
+  } catch (e) {
+    if (e instanceof ProvisionError) {
+      return res.status(e.status || 422).json({ message: e.message, reason: e.reason });
+    }
+    return next(e);
+  }
+}
+
 module.exports = {
   listJourneys,
   getJourney,
@@ -268,4 +368,6 @@ module.exports = {
   completeTask,
   skipTask,
   advanceJourney: advanceJourneyEndpoint,
+  provisionJourney,
+  confirmProbation: confirmProbationEndpoint,
 };

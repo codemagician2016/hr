@@ -62,4 +62,20 @@ router.post('/tasks/:id/skip',
   withEmployeeScope('canViewEmployees'),
   c.skipTask);
 
+// ── Provisioning (slice 4c) ──────────────────────────────────────────────────
+// Atomic, idempotent employee provisioning + probation confirmation. HR-only
+// (canManageOnboarding); the scope is attached for the controller's journey-
+// subject guard. NOTE: we do NOT pass { idParam:'id' } — the path :id is a
+// JOURNEY id, not an Employee id, so it would never be in the employee scope set;
+// the controller resolves the journey's subject employee and 404s out-of-scope.
+router.post('/journeys/:id/provision',
+  requirePermission('canManageOnboarding'),
+  withEmployeeScope('canManageOnboarding'),
+  c.provisionJourney);
+
+router.post('/journeys/:id/confirm-probation',
+  requirePermission('canManageOnboarding'),
+  withEmployeeScope('canManageOnboarding'),
+  c.confirmProbation);
+
 module.exports = router;
