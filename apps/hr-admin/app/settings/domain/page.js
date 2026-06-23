@@ -911,7 +911,11 @@ export default function DomainSettingsPage() {
       const session = me?.user || me;
       setCanEdit(hasPermission(permissionsFromSession(session), 'canEditDomain'));
       setConfig(cfg || {});
-      setBusiness(biz || {});
+      // GET /api/business/me returns { business, stats, ... } — unwrap to the
+      // business row so `business.slug` is populated. Without this the portal
+      // host renders as just the suffix (e.g. "-staging.drifthr.com") and the
+      // "Change address" button stays disabled (empty slug reads as unchanged).
+      setBusiness(biz?.business || biz || {});
       // For the AddressCard's row-2 (custom domain primary marker).
       const st = await get('/api/subscription/custom-domain/status').catch(() => null);
       setDomainStatus(st);
