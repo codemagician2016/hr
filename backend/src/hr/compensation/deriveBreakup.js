@@ -118,7 +118,11 @@ function employerCostFixedPoint({
   resolveBasicDaMonthly,
   capPfAtCeiling = true,
   esiApplicable = false,
-  maxIters = 4,
+  // Raised from 4 → 8: now that convergence is ASSERTED (we throw rather than
+  // silently ship the last value), the loop needs comfortable headroom. A linear
+  // Basic+DA=½·gross structure converges in ~6 iters near the ₹15k PF ceiling
+  // boundary; 8 gives margin while still bounding a genuinely diverging quote.
+  maxIters = 8,
 }) {
   money.assertMinor(ctcAnnualMinor, 'ctcAnnualMinor');
   const ctcMonthlyMinor = money.roundRational(ctcAnnualMinor, 12, RoundingMode.HALF_UP);
@@ -126,6 +130,8 @@ function employerCostFixedPoint({
   let employerCostMonthly = 0;
   let basicDaMonthly = 0;
   let items = [];
+  let converged = false;
+  let lastDelta = null;
 
   for (let i = 0; i < maxIters; i += 1) {
     const grossMonthly = money.subMinor(ctcMonthlyMinor, employerCostMonthly);
@@ -162,11 +168,24 @@ function employerCostFixedPoint({
       { code: 'GRATUITY_PROVISION', amountMinor: gratuityProvision },
     ];
 
-    if (Math.abs(next - employerCostMonthly) <= 1) {
+    lastDelta = Math.abs(next - employerCostMonthly);
+    if (lastDelta <= 1) {
       employerCostMonthly = next;
+      converged = true;
       break;
     }
     employerCostMonthly = next;
+  }
+
+  // Fail-closed: a quote that did NOT converge to within 1 paise after maxIters
+  // would silently ship an off-by-N-paise CTC/gross split (targetGross =
+  // ctcMonthly − employerCostMonthly is then wrong). Never persist that.
+  if (!converged) {
+    throw new DeriveError(
+      'EMPLOYER_COST_DIVERGED',
+      `employer-cost fixed point did not converge within ${maxIters} iterations (residual ${lastDelta} paise)`,
+      { residualMinor: lastDelta, maxIters },
+    );
   }
 
   return {
@@ -337,16 +356,34 @@ function resolveEarnings(earningDefs, targetGrossMinor, ctcAnnualMinor) {
 
   const push = (o, amountMinor, baseMinor, isBalancing) => {
     const comp = o.line.component || {};
-    const clamped = clampLine(amountMinor, comp);
-    byCode.set(comp.code, clamped);
-    if (comp.kind === 'BASIC' || comp.kind === 'DEARNESS_ALLOWANCE') basicDaMinor += clamped;
+    // The BALANCING residual MUST land at the exact paise gap (targetGross −
+    // Σothers); clamping it would silently break Σresolved === targetGross. If a
+    // floor/cap is configured on the balancing line AND it would bite, that is a
+    // structurally-infeasible structure (the cap/floor cannot reconcile to the
+    // target) → throw rather than ship a drifting breakup.
+    let amount = amountMinor;
+    if (isBalancing) {
+      const clamped = clampLine(amountMinor, comp);
+      if (clamped !== amountMinor) {
+        throw new DeriveError(
+          'STRUCTURE_INFEASIBLE',
+          `the BALANCING component ${comp.code || ''} has a floor/cap that prevents it from absorbing the residual (residual ${money.fromMinor(amountMinor)} would clamp to ${money.fromMinor(clamped)}); Σ components cannot reconcile to the target gross`,
+          { residualMinor: amountMinor, clampedMinor: clamped },
+        );
+      }
+      amount = amountMinor; // residual passes through UNCLAMPED
+    } else {
+      amount = clampLine(amountMinor, comp);
+    }
+    byCode.set(comp.code, amount);
+    if (comp.kind === 'BASIC' || comp.kind === 'DEARNESS_ALLOWANCE') basicDaMinor += amount;
     resolved.push({
       code: comp.code,
       componentId: comp.id || o.line.componentId || null,
       category: 'EARNING',
       calcMethod: o.line.calcMethod || comp.calcMethod || CALC.FLAT,
-      amountMonthlyMinor: clamped,
-      amountAnnualMinor: clamped * 12,
+      amountMonthlyMinor: amount,
+      amountAnnualMinor: amount * 12,
       baseMinor: baseMinor != null ? baseMinor : undefined,
       isBalancing: !!isBalancing,
       _order: o.idx,
@@ -401,6 +438,21 @@ function resolveEarnings(earningDefs, targetGrossMinor, ctcAnnualMinor) {
   // shortfall (the structure simply does not reach the target gross).
   if (!hasBalancing && nonBalancingSum > targetGrossMinor) {
     return { infeasible: true, nonBalancingSum, resolved: [], basicDaMinor: 0 };
+  }
+
+  // PARITY ASSERT (§4.1): with a balancing line the components MUST sum to the
+  // target gross to the paise. If the residual was floored at 0 (nonBalancingSum
+  // already > target with a balancing line present) Σ would exceed the target —
+  // that is infeasible, not a silent over-allocation.
+  if (hasBalancing) {
+    const resolvedSum = money.sumMinor(resolved.map((r) => r.amountMonthlyMinor));
+    if (resolvedSum !== targetGrossMinor) {
+      throw new DeriveError(
+        'STRUCTURE_INFEASIBLE',
+        `Σ resolved earnings (${money.fromMinor(resolvedSum)}) != target gross (${money.fromMinor(targetGrossMinor)}); the BALANCING residual could not reconcile`,
+        { resolvedSumMinor: resolvedSum, targetGrossMinor },
+      );
+    }
   }
 
   resolved.sort((a, b) => (a._order - b._order));

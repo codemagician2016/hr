@@ -586,7 +586,7 @@ async function provisionEmployee({ journeyId, actorId } = {}, prismaOrTx) {
           target.grossMonthlyMinor = mtoMinor(grossMonthly);
         }
         try {
-          const { lines: matLines } = materializeRevisionLines(
+          const { lines: matLines, breakup } = materializeRevisionLines(
             { lines: structure.lines, basis },
             {
               target,
@@ -596,10 +596,26 @@ async function provisionEmployee({ journeyId, actorId } = {}, prismaOrTx) {
               esiApplicable: false,
             },
           );
+          // Enforce the India 50% floor on the SAME amounts that get persisted.
+          // The PRE-WRITE offerWageCheck validated the offer's NOMINAL structure
+          // Basic+DA, but STEP 8 re-derives lines from the CTC target (percent-of
+          // -CTC after employer-cost subtraction shrinks gross, hence Basic). If
+          // the DERIVED Basic+DA breaches 50%, fail-close here — never persist a
+          // revision whose actual Basic+DA is sub-50% just because the nominal
+          // structure passed.
+          if (breakup.wagesVerdict && breakup.wagesVerdict.applies && !breakup.wagesVerdict.ok) {
+            throw new ProvisionError(
+              'The derived salary structure violates the India 50% wage rule (Basic + DA below 50% of gross after CTC materialization).',
+              { status: 422, reason: 'wage-rule' },
+            );
+          }
           if (matLines.length) {
             revisionLineCreates = matLines.map((l) => ({ ...l, businessId }));
           }
         } catch (err) {
+          // A wage-rule breach (or any ProvisionError we raised above) propagates
+          // as-is; only a deriveBreakup failure becomes a comp-structure error.
+          if (err instanceof ProvisionError) throw err;
           // A structurally-infeasible structure is a hard provisioning failure
           // (we will not silently write a zero-line revision again).
           throw new ProvisionError(

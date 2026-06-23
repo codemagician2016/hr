@@ -117,6 +117,10 @@ async function main() {
   const hrUser = { id: `${PREFIX}-u-hr`, businessId, role: 'STAFF', employeeId: null, businessRole: { name: 'HR-Admin', defaultScope: 'ALL', compVisibility: 'ABSOLUTE', permissions: { canViewCompensation: true, canManageCompensation: true } } };
   const financeUser = { id: `${PREFIX}-u-fin`, businessId, role: 'STAFF', employeeId: null, businessRole: { name: 'Finance', defaultScope: 'ALL', compVisibility: 'ABSOLUTE', permissions: { canViewCompensation: true, canApproveCompensation: true } } };
   const managerUser = { id: `${PREFIX}-u-mgr`, businessId, role: 'STAFF', employeeId: mgr.id, businessRole: { name: 'Manager', defaultScope: 'TEAM', compVisibility: 'RANGE_ONLY', permissions: { canProposeCompensation: true } } };
+  // INDEPENDENT-FIELDS actor: canManageCompensation + canApproveCompensation but
+  // compVisibility=RANGE_ONLY (NO canViewCompensation → effective level RANGE_ONLY).
+  // Proves the WRITE responses (create/approve/reject) are masked, not just reads.
+  const rangeOpUser = { id: `${PREFIX}-u-rangeop`, businessId, role: 'STAFF', employeeId: null, businessRole: { name: 'CompOps', defaultScope: 'ALL', compVisibility: 'RANGE_ONLY', permissions: { canManageCompensation: true, canApproveCompensation: true } } };
 
   try {
     // ════════════════════════════════════════════════════════════════════════
@@ -260,6 +264,152 @@ async function main() {
       assert(res.body.isCurrent === true, 'approved revision becomes current');
       const prior = await prisma.compensationRevision.findUnique({ where: { id: rev.id } });
       assert(prior.isCurrent === false, 'the prior current revision is superseded (isCurrent=false)');
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Finding 1 — a PERCENT-defined revision-create RESOLVES concrete amounts
+    // before the 50% guard (no amountMonthly → derive from CTC target).
+    // ════════════════════════════════════════════════════════════════════════
+    log('\nFinding 1 — percent-defined revision-create resolves + 50% on derived amounts:');
+    {
+      // Lines carry ONLY percent calcValues + a balancing line — NO amountMonthly.
+      // Pre-fix: validateWages50 read '50' as ₹50 → garbage gross → fail-open.
+      const req = {
+        user: hrUser, params: { employeeId: r1.id },
+        body: {
+          entityId: entity.id, currencyCode: 'INR', basis: 'CTC', countryCode: 'IN',
+          effectiveFrom: '2028-01-01', revisionReason: 'ANNUAL_REVISION', ctcAnnual: '1200000',
+          lines: [
+            { componentId: cBasic.id, calcMethod: 'PERCENT_OF', calcValue: '50' },
+            { componentId: cHra.id, calcMethod: 'PERCENT_OF', calcValue: '50' },
+            { componentId: cConv.id, calcMethod: 'FLAT', calcValue: '1600' },
+            { componentId: cSpecial.id, calcMethod: 'BALANCING' },
+          ],
+        },
+      };
+      const res = await callController(comp.revisions.create, req);
+      assert(res.statusCode === 201, 'percent-defined create succeeds (resolved, not fail-open junk)');
+      // Persisted lines must carry concrete derived amounts — BASIC ≈ ₹50,000/mo.
+      const persisted = await prisma.compensationRevision.findFirst({
+        where: { businessId, employeeId: r1.id, effectiveFrom: new Date('2028-01-01') },
+        include: { lines: { include: { component: true } } },
+      });
+      const pBasic = persisted.lines.find((l) => l.component.id === cBasic.id);
+      assert(pBasic && Math.round(Number(pBasic.amountMonthly) * 100) === 5000000, 'BASIC persisted as ₹50,000/mo (resolved from 50%-of-CTC, NOT ₹50)');
+    }
+    {
+      // A genuinely Basic-light PERCENT structure (BASIC=20% of CTC) must FAIL the
+      // 50% rule on the DERIVED amounts — proof the floor no longer fails open.
+      const req = {
+        user: hrUser, params: { employeeId: r1.id },
+        body: {
+          entityId: entity.id, currencyCode: 'INR', basis: 'CTC', countryCode: 'IN',
+          effectiveFrom: '2028-06-01', revisionReason: 'ANNUAL_REVISION', ctcAnnual: '1200000',
+          lines: [
+            { componentId: cBasic.id, calcMethod: 'PERCENT_OF', calcValue: '20' },
+            { componentId: cSpecial.id, calcMethod: 'BALANCING' },
+          ],
+        },
+      };
+      const res = await callController(comp.revisions.create, req);
+      assert(res.statusCode === 400 && res.body.error === 'WAGES_50_RULE', 'BASIC=20%-of-CTC percent structure → derived Basic<50% caught (no fail-open)');
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Findings 2+3 — WRITE responses (create/approve/reject) are MASKED for a
+    // RANGE_ONLY operator who carries canManage/canApprove (independent fields).
+    // ════════════════════════════════════════════════════════════════════════
+    log('\nFindings 2+3 — create/approve/reject responses masked for RANGE_ONLY operator:');
+    let rangeProposedId; let rangeProposedId2;
+    {
+      // create (proposer = rangeOp) → 201 but RANGE_ONLY: NO absolute money, NO
+      // line amounts, NO exact pct. propose=true so it stays a draft (not current).
+      const req = {
+        user: rangeOpUser, params: { employeeId: r1.id },
+        body: {
+          entityId: entity.id, currencyCode: 'INR', basis: 'CTC', countryCode: 'IN',
+          effectiveFrom: '2029-01-01', revisionReason: 'ANNUAL_REVISION', ctcAnnual: '1800000', propose: true,
+          lines: [
+            { componentId: cBasic.id, calcMethod: 'FLAT', amountMonthly: '75000' },
+            { componentId: cHra.id, calcMethod: 'FLAT', amountMonthly: '37500' },
+            { componentId: cSpecial.id, calcMethod: 'FLAT', amountMonthly: '37500' },
+          ],
+        },
+      };
+      const res = await callController(comp.revisions.create, req);
+      assert(res.statusCode === 201, 'RANGE_ONLY operator create → 201');
+      assert(res.body.visibility === 'RANGE_ONLY', 'create response visibility == RANGE_ONLY');
+      assert(!res.body.absolute, 'create response has NO absolute object (no ctcAnnual/grossMonthly/netMonthly)');
+      assert(!res.body.lines || res.body.lines.every((l) => l.amountMonthly == null && l.amountAnnual == null), 'create response lines carry NO amounts');
+      assert(!(res.body.delta && res.body.delta.pct != null), 'create response has NO exact delta.pct');
+      assert(res.body.id && res.body.status === 'PROPOSED', 'create response still carries id + status (workflow envelope)');
+    }
+    {
+      // A PROPOSED revision proposed by hrUser → rangeOp is a DISTINCT checker that
+      // can APPROVE it (SoD ok). Proves the approve response is masked.
+      const mk = await prisma.compensationRevision.create({
+        data: {
+          businessId, employeeId: r1.id, entityId: entity.id, currencyCode: 'INR', basis: 'CTC',
+          ctcAnnual: '1750000', grossMonthly: '125000', effectiveFrom: new Date('2029-02-01'),
+          isCurrent: false, revisionReason: 'ANNUAL_REVISION', status: 'PROPOSED', proposedById: hrUser.id,
+        },
+      });
+      rangeProposedId = mk.id;
+    }
+    {
+      // A second PROPOSED revision (proposer = hrUser) the rangeOp can REJECT.
+      const mk = await prisma.compensationRevision.create({
+        data: {
+          businessId, employeeId: r1.id, entityId: entity.id, currencyCode: 'INR', basis: 'CTC',
+          ctcAnnual: '1700000', grossMonthly: '120000', effectiveFrom: new Date('2029-03-01'),
+          isCurrent: false, revisionReason: 'ANNUAL_REVISION', status: 'PROPOSED', proposedById: hrUser.id,
+        },
+      });
+      rangeProposedId2 = mk.id;
+    }
+    {
+      // approve (distinct checker rangeOp vs proposer hrUser) → masked EFFECTIVE.
+      const res = await callController(comp.revisions.approve, { user: rangeOpUser, params: { id: rangeProposedId } });
+      assert(res.statusCode === 200, 'RANGE_ONLY checker approve → 200');
+      assert(res.body.visibility === 'RANGE_ONLY', 'approve response visibility == RANGE_ONLY');
+      assert(!res.body.absolute, 'approve response has NO absolute money');
+      assert(res.body.status === 'EFFECTIVE' && res.body.isCurrent === true, 'approve response still carries status/isCurrent envelope');
+    }
+    {
+      // reject → masked REJECTED, no absolute money.
+      const res = await callController(comp.revisions.reject, { user: rangeOpUser, params: { id: rangeProposedId2 }, body: { reason: 'budget' } });
+      assert(res.statusCode === 200, 'RANGE_ONLY checker reject → 200');
+      assert(res.body.visibility === 'RANGE_ONLY', 'reject response visibility == RANGE_ONLY');
+      assert(!res.body.absolute, 'reject response has NO absolute money');
+      assert(res.body.status === 'REJECTED', 'reject response carries status envelope');
+    }
+    {
+      // Control: an ABSOLUTE operator (hrUser) on a write STILL gets full money.
+      const mk = await prisma.compensationRevision.create({
+        data: {
+          businessId, employeeId: r1.id, entityId: entity.id, currencyCode: 'INR', basis: 'CTC',
+          ctcAnnual: '1900000', grossMonthly: '130000', effectiveFrom: new Date('2029-09-01'),
+          isCurrent: false, revisionReason: 'ANNUAL_REVISION', status: 'PROPOSED', proposedById: rangeOpUser.id,
+        },
+      });
+      const res = await callController(comp.revisions.approve, { user: hrUser, params: { id: mk.id } });
+      assert(res.statusCode === 200 && res.body.visibility === 'ABSOLUTE', 'ABSOLUTE operator approve → ABSOLUTE');
+      assert(res.body.absolute && res.body.absolute.ctcAnnual != null, 'ABSOLUTE approve response carries absolute ctcAnnual');
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Finding 8 — provision STEP 8 enforces the 50% floor on the DERIVED lines:
+    // materializeRevisionLines returns wagesVerdict.{applies,ok}; a sub-50%
+    // derived structure → ok=false (the signal provision throws 'wage-rule' on).
+    // ════════════════════════════════════════════════════════════════════════
+    log('\nFinding 8 — provision-derived structure surfaces a sub-50% verdict:');
+    {
+      const subFiftyStructure = [
+        { component: { id: cBasic.id, code: cBasic.code, kind: 'BASIC', category: 'EARNING', calcMethod: 'PERCENT_OF', calcBaseScope: 'CTC', isWageForPF: true, derivationPass: 2 }, componentId: cBasic.id, calcMethod: 'PERCENT_OF', calcValue: '20', sortOrder: 0 },
+        { component: { id: cSpecial.id, code: cSpecial.code, kind: 'SPECIAL_ALLOWANCE', category: 'EARNING', calcMethod: 'BALANCING', derivationPass: 3 }, componentId: cSpecial.id, calcMethod: 'BALANCING', sortOrder: 1 },
+      ];
+      const { breakup } = materializeRevisionLines({ lines: subFiftyStructure, basis: 'CTC' }, { target: { ctcAnnualMinor: 120000000 }, basis: 'CTC', countryCode: 'IN', asOf: '2026-06-01' });
+      assert(breakup.wagesVerdict.applies && breakup.wagesVerdict.ok === false, 'derived BASIC=20%-of-CTC → wagesVerdict.ok=false (provision STEP 8 throws wage-rule on this)');
     }
 
     log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILURE(S)'} — Feature 5 compensation\n`);

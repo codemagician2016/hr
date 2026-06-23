@@ -410,23 +410,82 @@ const revisions = {
         if (byId.size !== componentIds.length) {
           return res.status(400).json({ message: 'one or more componentId values are invalid for this tenant' });
         }
-        // India Code-on-Wages 50% rule (Basic+DA >= 50% of gross). CONSOLIDATED
-        // engine-backed guard: fail-closed, integer paise, effective-dated,
-        // country-gated (skipped for NZ). Runs on the DERIVED line amounts.
         const cc = (req.body.countryCode || emp.countryCode || (basis === 'CTC' ? 'IN' : '')).toUpperCase();
-        const wage = validateWages50(
-          lines.map((l) => ({ amountMonthly: l.amountMonthly, calcValue: l.calcValue, component: byId.get(l.componentId) })),
-          { countryCode: cc, asOf: effectiveFrom },
-        );
-        if (wage.applies && !wage.ok) {
-          return res.status(400).json({
-            error: 'WAGES_50_RULE',
-            message: 'Basic + DA must be at least 50% of gross (India Code on Wages, 2019).',
-            wages: wage.wages,
-            gross: wage.gross,
-          });
+
+        // CRITICAL — RESOLVE concrete monthly amounts BEFORE the 50% guard. A
+        // normal CTC structure is defined with PERCENT_OF lines that carry NO
+        // amountMonthly (only a percent calcValue). Feeding that percent to
+        // toMinorSafe as rupees yields garbage gross and FAILS THE 50% RULE OPEN.
+        // When any EARNING line lacks a literal amountMonthly we derive the whole
+        // breakup from the revision target (CTC for CTC-basis, gross otherwise),
+        // exactly as provision.js STEP 8 does, then validate + persist the DERIVED
+        // amounts (never the raw percent literals).
+        const needsDerive = lines.some((l) => {
+          const comp = byId.get(l.componentId) || {};
+          return (comp.category || 'EARNING') === 'EARNING' && l.amountMonthly == null;
+        });
+
+        if (needsDerive) {
+          // Build the structure shape deriveBreakup consumes (component joined).
+          const structLines = lines.map((l, i) => ({
+            component: byId.get(l.componentId),
+            componentId: l.componentId,
+            calcMethod: l.calcMethod,
+            calcValue: l.calcValue,
+            amountMonthly: l.amountMonthly,
+            sortOrder: l.sortOrder != null ? l.sortOrder : i,
+          }));
+          const tgt = {};
+          if (basis === 'CTC' && req.body.ctcAnnual != null) tgt.ctcAnnualMinor = toMinorSafe(req.body.ctcAnnual);
+          else if (req.body.grossMonthly != null) tgt.grossMonthlyMinor = toMinorSafe(req.body.grossMonthly);
+          else {
+            return res.status(400).json({
+              message: basis === 'CTC'
+                ? 'ctcAnnual is required to resolve a percent-defined CTC structure'
+                : 'grossMonthly is required to resolve a percent-defined structure',
+            });
+          }
+          let matLines; let breakup;
+          try {
+            ({ lines: matLines, breakup } = materializeRevisionLines(
+              { lines: structLines, basis },
+              { target: tgt, basis, countryCode: cc, asOf: effectiveFrom, esiApplicable: req.body.esiApplicable === true },
+            ));
+          } catch (err) {
+            if (err instanceof DeriveError) {
+              return res.status(422).json({ error: err.code, message: err.message });
+            }
+            throw err;
+          }
+          // 50% floor on the DERIVED breakup (the SAME amounts persisted below).
+          if (breakup.wagesVerdict && breakup.wagesVerdict.applies && !breakup.wagesVerdict.ok) {
+            return res.status(400).json({
+              error: 'WAGES_50_RULE',
+              message: 'Basic + DA must be at least 50% of gross (India Code on Wages, 2019).',
+              wages: breakup.wagesVerdict.wagesMinor != null ? breakup.wagesVerdict.wagesMinor / 100 : undefined,
+              gross: breakup.wagesVerdict.grossMinor != null ? breakup.wagesVerdict.grossMinor / 100 : undefined,
+            });
+          }
+          lineCreates = matLines.map((l) => ({ ...l, businessId }));
+        } else {
+          // All EARNING lines carry literal amounts — validate them directly.
+          // India Code-on-Wages 50% rule (Basic+DA >= 50% of gross). CONSOLIDATED
+          // engine-backed guard: fail-closed, integer paise, effective-dated,
+          // country-gated (skipped for NZ). Runs on the DERIVED line amounts.
+          const wage = validateWages50(
+            lines.map((l) => ({ amountMonthly: l.amountMonthly, calcValue: l.calcValue, component: byId.get(l.componentId) })),
+            { countryCode: cc, asOf: effectiveFrom },
+          );
+          if (wage.applies && !wage.ok) {
+            return res.status(400).json({
+              error: 'WAGES_50_RULE',
+              message: 'Basic + DA must be at least 50% of gross (India Code on Wages, 2019).',
+              wages: wage.wages,
+              gross: wage.gross,
+            });
+          }
+          lineCreates = lines.map((l) => ({ ...pickLine(l), businessId }));
         }
-        lineCreates = lines.map((l) => ({ ...pickLine(l), businessId }));
       }
 
       // Feature 5 — maker-checker status machine. A maker without
@@ -493,7 +552,25 @@ const revisions = {
         },
       });
 
-      res.status(201).json(created);
+      // MASK the write response per the actor's effective compVisibility. The
+      // route gates on canManageCompensation, which is INDEPENDENT of
+      // compVisibility — a custom role may carry canManageCompensation while
+      // compVisibility='RANGE_ONLY'. Echoing the raw `created` (ctcAnnual/
+      // grossMonthly/netMonthly + every line amount) would leak absolute salary
+      // to a RANGE_ONLY operator. Same shaper the read path (revisions.list) uses.
+      const grade = await resolveEmployeeGrade(businessId, employeeId);
+      const priorRev = await prisma.compensationRevision.findFirst({
+        where: { businessId, employeeId, status: 'EFFECTIVE', id: { not: created.id }, effectiveFrom: { lt: effFrom } },
+        orderBy: { effectiveFrom: 'desc' },
+        select: { ctcAnnual: true },
+      });
+      const priorCtc = priorRev ? toNum(priorRev.ctcAnnual) : null;
+      const masked = maskCompensation(
+        revisionPayload(created, employeeId, priorCtc),
+        { ...req.user, employeeId: req.user.employeeId },
+        { grade, target: { employeeId } },
+      );
+      res.status(201).json(masked);
     } catch (e) {
       if (e.code === 'P2002') {
         return res.status(409).json({ message: 'A revision with that effectiveFrom already exists for this employee' });
@@ -548,7 +625,22 @@ const revisions = {
         entityType: 'CompensationRevision', entityId: rev.id,
         meta: { employeeId: rev.employeeId, transition: 'PROPOSED→EFFECTIVE', approvedBy: req.user.id, proposedBy: rev.proposedById },
       });
-      res.json(committed);
+      // MASK the commit response. canApproveCompensation is INDEPENDENT of
+      // compVisibility — a checker with RANGE_ONLY (or NONE) must NOT get the
+      // absolute ctcAnnual/grossMonthly/netMonthly + line amounts echoed back.
+      const grade = await resolveEmployeeGrade(businessId, committed.employeeId);
+      const priorRev = await prisma.compensationRevision.findFirst({
+        where: { businessId, employeeId: committed.employeeId, status: 'EFFECTIVE', id: { not: committed.id }, effectiveFrom: { lt: committed.effectiveFrom } },
+        orderBy: { effectiveFrom: 'desc' },
+        select: { ctcAnnual: true },
+      });
+      const priorCtc = priorRev ? toNum(priorRev.ctcAnnual) : null;
+      const masked = maskCompensation(
+        revisionPayload(committed, committed.employeeId, priorCtc),
+        { ...req.user, employeeId: req.user.employeeId },
+        { grade, target: { employeeId: committed.employeeId } },
+      );
+      res.json(masked);
     } catch (e) { next(e); }
   },
 
@@ -574,7 +666,16 @@ const revisions = {
         entityType: 'CompensationRevision', entityId: rev.id,
         meta: { employeeId: rev.employeeId, transition: 'PROPOSED→REJECTED', reason: req.body.reason || null },
       });
-      res.json(updated);
+      // MASK the reject response — same independent-fields leak as approve: a
+      // RANGE_ONLY/NONE reviewer must not get absolute money back on the
+      // status-transition envelope.
+      const grade = await resolveEmployeeGrade(businessId, updated.employeeId);
+      const masked = maskCompensation(
+        revisionPayload(updated, updated.employeeId, null),
+        { ...req.user, employeeId: req.user.employeeId },
+        { grade, target: { employeeId: updated.employeeId } },
+      );
+      res.json(masked);
     } catch (e) { next(e); }
   },
 };
@@ -630,14 +731,29 @@ async function preview(req, res, next) {
       }
       throw err;
     }
+    // Waterfall labeling. On CTC basis the target IS the CTC. On GROSS basis the
+    // IN employer-cost fixed point is NEVER run (employerCost.monthlyMinor==0), so
+    // gross*12 is NOT a true cost-to-company — only claim a CTC when employer cost
+    // was actually quoted; otherwise label the field grossAnnualMinor and omit the
+    // CTC claim so the builder never understates PF/ESI/gratuity as "CTC".
+    const employerCostMonthlyMinor = breakup.employerCost.monthlyMinor;
+    const waterfall = {
+      employerCostMonthlyMinor,
+      grossMonthlyMinor: breakup.grossMinor,
+    };
+    if (tgt.ctcAnnualMinor != null) {
+      waterfall.ctcAnnualMinor = tgt.ctcAnnualMinor;
+    } else if (employerCostMonthlyMinor > 0) {
+      // GROSS basis but employer cost was quoted (forward) — a true CTC.
+      waterfall.ctcAnnualMinor = (breakup.targetGrossMinor + employerCostMonthlyMinor) * 12;
+    } else {
+      // No employer cost quoted — this is gross, NOT CTC. Do not claim a CTC.
+      waterfall.grossAnnualMinor = breakup.grossMinor * 12;
+    }
     res.json({
       basis,
       target: tgt,
-      waterfall: {
-        ctcAnnualMinor: tgt.ctcAnnualMinor != null ? tgt.ctcAnnualMinor : (breakup.targetGrossMinor + breakup.employerCost.monthlyMinor) * 12,
-        employerCostMonthlyMinor: breakup.employerCost.monthlyMinor,
-        grossMonthlyMinor: breakup.grossMinor,
-      },
+      waterfall,
       resolved: breakup.resolved,
       employerCost: breakup.employerCost,
       basicDaMonthlyMinor: breakup.basicDaMonthlyMinor,
