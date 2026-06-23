@@ -10,12 +10,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ErrorBanner, formatAdminDate } from '@hr/ui';
 import { get, post } from '@/lib/api';
-import { DataTable, PageHeader, StatusBadge, ActionButton, employeeLabel, moneyish } from '@/lib/ui';
+import { DataTable, PageHeader, StatusBadge, ActionButton, employeeLabel, moneyish, ServerPagination } from '@/lib/ui';
 import { InfoTip } from '@/lib/widgets';
 
 const STATUSES = ['', 'DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED', 'REIMBURSED', 'CANCELLED'];
 const VERDICTS = ['', 'OK', 'FLAGGED', 'AUTO_REJECTED', 'NO_POLICY'];
-const PAGE_SIZE = 25;
+const PAGE_SIZES = [25, 50, 100];
 
 function VerdictBadge({ v }) {
   if (!v || v === 'NO_POLICY') return <span className="text-xs text-gray-400">—</span>;
@@ -32,6 +32,7 @@ export default function ExpensesPage() {
   const [status, setStatus] = useState('SUBMITTED');
   const [verdict, setVerdict] = useState('');
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -41,11 +42,11 @@ export default function ExpensesPage() {
   const load = useCallback(() => {
     setLoading(true);
     setError('');
-    get('/api/hr/expenses/claims', { status, policyVerdict: verdict, page, pageSize: PAGE_SIZE })
+    get('/api/hr/expenses/claims', { status, policyVerdict: verdict, page, pageSize })
       .then(setData)
       .catch((e) => setError(e.message || 'Failed to load claims.'))
       .finally(() => setLoading(false));
-  }, [status, verdict, page]);
+  }, [status, verdict, page, pageSize]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -70,7 +71,6 @@ export default function ExpensesPage() {
 
   const items = data?.items || [];
   const total = data?.total ?? items.length;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const columns = [
     { key: 'number', header: 'Claim', render: (r) => <button onClick={() => openDetail(r.id)} className="font-medium text-blue-700 hover:underline">{r.claimNumber || r.id.slice(0, 8)}</button> },
@@ -113,13 +113,15 @@ export default function ExpensesPage() {
       {error && <ErrorBanner message={error} />}
       <DataTable columns={columns} rows={items} loading={loading} emptyText="No claims match." />
 
-      {totalPages > 1 && (
-        <div className="mt-4 flex items-center justify-between text-sm">
-          <button type="button" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="rounded-lg border border-gray-300 px-3 py-1.5 disabled:opacity-40 hover:bg-gray-50">Previous</button>
-          <span className="text-gray-500">Page {page} of {totalPages}</span>
-          <button type="button" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)} className="rounded-lg border border-gray-300 px-3 py-1.5 disabled:opacity-40 hover:bg-gray-50">Next</button>
-        </div>
-      )}
+      <ServerPagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        sizes={PAGE_SIZES}
+        noun="claims"
+        onPageChange={setPage}
+        onPageSizeChange={(ps) => { setPage(1); setPageSize(ps); }}
+      />
 
       {detail && <ClaimDetailModal claim={detail} onClose={() => setDetail(null)} onAct={act} busyId={busyId} />}
     </div>

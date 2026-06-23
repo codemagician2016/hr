@@ -33,9 +33,11 @@ import {
   formatAdminDateTime,
 } from '@hr/ui';
 import { get, post, patch, del } from '@/lib/api';
-import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, employeeLabel } from '@/lib/ui';
+import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, employeeLabel, ServerPagination } from '@/lib/ui';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
 import { useTenantCountries } from '@/lib/useTenantCountries';
+
+const PAGE_SIZES = [50, 100];
 
 const BASE_TABS = [
   { key: 'dashboard', label: 'Dashboard' },
@@ -256,14 +258,19 @@ function PunchesTab() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);
 
   useEffect(() => {
     setLoading(true);
-    get('/api/hr/attendance/punches', { page: 1, pageSize: 50 })
+    get('/api/hr/attendance/punches', { page, pageSize })
       .then(setData)
       .catch((e) => setError(e.data?.message || e.message || 'Failed to load punches.'))
       .finally(() => setLoading(false));
-  }, []);
+  }, [page, pageSize]);
+
+  const items = asList(data);
+  const total = data?.total ?? items.length;
 
   const columns = [
     { key: 'employee', header: 'Employee', render: (r) => <span className="font-medium text-gray-900">{employeeLabel(r)}</span> },
@@ -275,7 +282,16 @@ function PunchesTab() {
   return (
     <div>
       {error && <ErrorBanner message={error} />}
-      <DataTable columns={columns} rows={asList(data)} loading={loading} emptyText="No punches recorded." />
+      <DataTable columns={columns} rows={items} loading={loading} emptyText="No punches recorded." />
+      <ServerPagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        sizes={PAGE_SIZES}
+        noun="punches"
+        onPageChange={setPage}
+        onPageSizeChange={(ps) => { setPage(1); setPageSize(ps); }}
+      />
     </div>
   );
 }
@@ -884,9 +900,12 @@ function HolidayForm({ defaults, canManage, countries = [], onClose, onSaved }) 
 }
 
 function ImportHolidaysModal({ year, countries = [], onClose, onDone }) {
-  // Offer/seed only the tenant's operating countries. Default to the tenant's own
+  // Offer/seed only the tenant's operating countries. India-first: when the
+  // tenant's country set is unknown, fall back to India ahead of NZ (so an
+  // India tenant never lands on a New Zealand default).
+  // Default to the tenant's own
   // when single-country, else the first available — never a hardcoded NZ default.
-  const importCountries = Array.isArray(countries) && countries.length ? countries : ['NZ', 'IN'];
+  const importCountries = Array.isArray(countries) && countries.length ? countries : ['IN', 'NZ'];
   const [countryCode, setCountryCode] = useState(importCountries[0]);
   const [importYear, setImportYear] = useState(String(year));
   const [entityId, setEntityId] = useState('');
@@ -1160,24 +1179,29 @@ function HolidaysTab({ canManage }) {
 
 // ─── Approval lists (timesheets + regularizations) ──────────────────────────
 
-function ApprovalListTab({ endpoint, idField, pending, columnsFor, emptyText }) {
+function ApprovalListTab({ endpoint, idField, pending, columnsFor, emptyText, noun }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);
 
   const load = useCallback(() => {
     setLoading(true);
     setError('');
-    get(`/api/hr/attendance/${endpoint}`, { page: 1, pageSize: 50 })
+    get(`/api/hr/attendance/${endpoint}`, { page, pageSize })
       .then(setData)
       .catch((e) => setError(e.data?.message || e.message || 'Failed to load.'))
       .finally(() => setLoading(false));
-  }, [endpoint]);
+  }, [endpoint, page, pageSize]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  const items = asList(data);
+  const total = data?.total ?? items.length;
 
   async function decide(row, action) {
     const id = row[idField] || row.id;
@@ -1224,10 +1248,19 @@ function ApprovalListTab({ endpoint, idField, pending, columnsFor, emptyText }) 
       {error && <ErrorBanner message={error} />}
       <DataTable
         columns={columns}
-        rows={asList(data)}
+        rows={items}
         loading={loading}
         emptyText={emptyText || 'Nothing awaiting action.'}
         rowKey={(r) => r[idField] || r.id}
+      />
+      <ServerPagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        sizes={PAGE_SIZES}
+        noun={noun || 'rows'}
+        onPageChange={setPage}
+        onPageSizeChange={(ps) => { setPage(1); setPageSize(ps); }}
       />
     </div>
   );
@@ -1435,6 +1468,7 @@ export default function AttendancePage() {
           endpoint="timesheets"
           idField="id"
           pending="SUBMITTED"
+          noun="timesheets"
           emptyText="No timesheets awaiting action."
           columnsFor={() => [
             { key: 'employee', header: 'Employee', render: (r) => <span className="font-medium text-gray-900">{employeeLabel(r)}</span> },
@@ -1448,6 +1482,7 @@ export default function AttendancePage() {
           endpoint="regularizations"
           idField="requestId"
           pending="PENDING"
+          noun="requests"
           emptyText="No correction requests."
           columnsFor={() => [
             { key: 'employee', header: 'Employee', render: (r) => <span className="font-medium text-gray-900">{employeeLabel(r)}</span> },

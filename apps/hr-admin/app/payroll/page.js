@@ -29,6 +29,7 @@ import { Spinner, ErrorBanner, PrimaryButton, TextInput, DateField, Modal, Modal
 import { get, post, downloadFile } from '@/lib/api';
 import { DataTable, PageHeader, StatusBadge, ActionButton, employeeLabel, moneyish } from '@/lib/ui';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
+import { InfoTip } from '@/lib/widgets';
 
 const PAGE_SIZE = 20;
 
@@ -173,7 +174,7 @@ function NewRunModal({ onClose, onCreated }) {
       <form onSubmit={submit} className="space-y-3">
         {error && <ErrorBanner message={error} />}
         <label className="block text-sm">
-          <span className="text-gray-700 font-medium">Entity</span>
+          <span className="flex items-center text-gray-700 font-medium">Entity<InfoTip text="The legal entity you're paying. Its country sets the tax & statutory rules (e.g. India PF/ESI/TDS) for this run." /></span>
           <select
             value={entityId}
             onChange={(e) => { setEntityId(e.target.value); setPayCalendarId(''); }}
@@ -187,7 +188,7 @@ function NewRunModal({ onClose, onCreated }) {
           </select>
         </label>
         <label className="block text-sm">
-          <span className="text-gray-700 font-medium">Pay calendar</span>
+          <span className="flex items-center text-gray-700 font-medium">Pay calendar<InfoTip text="The schedule that defines how often you pay (e.g. Monthly) and the cut-off dates. Pick the entity first to see its calendars." /></span>
           <select
             value={payCalendarId}
             onChange={(e) => setPayCalendarId(e.target.value)}
@@ -202,8 +203,8 @@ function NewRunModal({ onClose, onCreated }) {
           </select>
         </label>
         <div className="grid grid-cols-2 gap-3">
-          <DateField label="Period start" value={periodStart} onChange={setPeriodStart} required />
-          <DateField label="Period end" value={periodEnd} onChange={setPeriodEnd} required />
+          <DateField label={<>Period start <InfoTip text="First day of the pay period this run covers (e.g. 1st of the month)." /></>} value={periodStart} onChange={setPeriodStart} required />
+          <DateField label={<>Period end <InfoTip text="Last day of the pay period (e.g. month-end). Attendance and inputs up to this date are included." /></>} value={periodEnd} onChange={setPeriodEnd} required />
         </div>
         <ModalActions>
           <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50">

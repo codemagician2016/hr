@@ -828,24 +828,41 @@ async function createRegularization(req, res, next) {
   } catch (e) { next(e); }
 }
 
-// GET /regularizations?employeeId=&status= — scoped read of the model.
+// GET /regularizations?employeeId=&status=[&page=&pageSize=] — scoped read.
+// Backward-compatible pagination: with NO page/pageSize the response is the
+// historical shape `{ items }` (capped at 200 rows as before). When the caller
+// passes page/pageSize it switches to the standard `{ items, total, page,
+// pageSize }` envelope with a scoped LIMIT/OFFSET + a scoped COUNT. The F1
+// scope filter (scopeWhere) is applied to BOTH the page query and the count.
 async function listRegularizations(req, res, next) {
   try {
     const { businessId } = req.user;
     const { employeeId, status } = req.query;
+    const paged = req.query.page !== undefined || req.query.pageSize !== undefined;
+    const { take, skip, page } = clampPage(req.query);
     const where = { businessId, ...scopeWhere(req.scope, 'employeeId') };
     if (employeeId) {
-      if (!scopeAllows(req.scope, employeeId)) return res.json({ items: [] });
+      if (!scopeAllows(req.scope, employeeId)) {
+        return res.json(paged ? { items: [], total: 0, page, pageSize: take } : { items: [] });
+      }
       where.employeeId = employeeId;
     }
     if (status) where.status = status;
-    const rows = await prisma.attendanceRegularizationRequest.findMany({
+    const findArgs = {
       where,
       orderBy: { date: 'desc' },
-      take: 200,
       // Resolve the employee so the list renders a name, not a UUID (#17).
       include: { employee: { select: { id: true, firstName: true, lastName: true, code: true } } },
-    });
+    };
+    let total = null;
+    if (paged) {
+      findArgs.skip = skip;
+      findArgs.take = take;
+      total = await prisma.attendanceRegularizationRequest.count({ where });
+    } else {
+      findArgs.take = 200; // unchanged legacy hard cap for no-params callers
+    }
+    const rows = await prisma.attendanceRegularizationRequest.findMany(findArgs);
 
     // `decidedBy` is a User id (no Prisma relation on this model), so resolve the
     // decider's display name in one batched lookup and surface it as decidedByName
@@ -864,7 +881,7 @@ async function listRegularizations(req, res, next) {
       decidedByName: r.decidedBy ? (deciderById.get(r.decidedBy) || null) : null,
     }));
 
-    res.json({ items });
+    res.json(paged ? { items, total, page, pageSize: take } : { items });
   } catch (e) { next(e); }
 }
 

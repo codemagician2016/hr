@@ -9,7 +9,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ErrorBanner, PrimaryButton, TextInput, DateField, formatAdminDate, DocumentDropzone, maskDocumentNumber } from '@hr/ui';
 import { get, post, del } from '@/lib/api';
-import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, employeeLabel } from '@/lib/ui';
+import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, employeeLabel, ServerPagination } from '@/lib/ui';
+
+const PAGE_SIZES = [25, 50, 100];
 
 // DocumentCategory enum (mirrors prisma/schema.prisma) for the upload picker.
 const DOC_CATEGORIES = [
@@ -27,14 +29,19 @@ function ExpiringPanel() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);
 
   useEffect(() => {
     setLoading(true);
-    get('/api/hr/documents/expiring', { page: 1, pageSize: 25 })
+    get('/api/hr/documents/expiring', { page, pageSize })
       .then(setData)
       .catch((e) => setError(e.message || 'Failed to load expiring documents.'))
       .finally(() => setLoading(false));
-  }, []);
+  }, [page, pageSize]);
+
+  const items = asList(data);
+  const total = data?.total ?? items.length;
 
   const columns = [
     { key: 'name', header: 'Document', render: (r) => <span className="font-medium text-gray-900">{r.name || r.category}</span> },
@@ -47,27 +54,43 @@ function ExpiringPanel() {
     <div className="mb-6">
       <h2 className="text-sm font-semibold text-gray-900 mb-3">Expiring soon</h2>
       {error && <ErrorBanner message={error} />}
-      <DataTable columns={columns} rows={asList(data)} loading={loading} emptyText="No documents expiring soon." />
+      <DataTable columns={columns} rows={items} loading={loading} emptyText="No documents expiring soon." />
+      <ServerPagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        sizes={PAGE_SIZES}
+        noun="documents"
+        onPageChange={setPage}
+        onPageSizeChange={(ps) => { setPage(1); setPageSize(ps); }}
+      />
     </div>
   );
 }
 
 function DocumentsTab({ employeeId }) {
   const [rows, setRows] = useState(null);
+  const [total, setTotal] = useState(0);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [meta, setMeta] = useState({ category: 'ID_PROOF', name: '', visibility: 'HR_ONLY', expiresAt: '' });
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZES[1]);
 
   const load = useCallback(() => {
     if (!employeeId) return;
     setError('');
-    get(`/api/hr/documents/employees/${employeeId}/documents`, { page: 1, pageSize: 100 })
-      .then((r) => setRows(asList(r)))
+    get(`/api/hr/documents/employees/${employeeId}/documents`, { page, pageSize })
+      .then((r) => { setRows(asList(r)); setTotal(r?.total ?? asList(r).length); })
       .catch((e) => {
         setError(e.message || 'Failed to load documents.');
         setRows([]);
+        setTotal(0);
       });
-  }, [employeeId]);
+  }, [employeeId, page, pageSize]);
+
+  // Reset to page 1 when the selected employee changes.
+  useEffect(() => { setPage(1); }, [employeeId]);
 
   useEffect(() => {
     setRows(null);
@@ -139,6 +162,15 @@ function DocumentsTab({ employeeId }) {
       <div className="lg:col-span-2">
         {error && <ErrorBanner message={error} />}
         <DataTable columns={columns} rows={rows} loading={rows === null} emptyText="No documents on file." />
+        <ServerPagination
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          sizes={PAGE_SIZES}
+          noun="documents"
+          onPageChange={setPage}
+          onPageSizeChange={(ps) => { setPage(1); setPageSize(ps); }}
+        />
       </div>
       <div className="rounded-2xl border border-gray-200 bg-white p-5 space-y-3 h-fit">
         <h2 className="text-sm font-semibold text-gray-900">Upload document</h2>

@@ -277,7 +277,8 @@ async function getFile(req, res) {
 async function getMyPayslips(req, res) {
   try {
     const { businessId } = req.customer;
-    const out = await service.getMyPayslips({ businessId, customer: req.customer });
+    const { page, pageSize } = req.query;
+    const out = await service.getMyPayslips({ businessId, customer: req.customer, page, pageSize });
     res.json(out);
   } catch (err) { handleError(res, err); }
 }

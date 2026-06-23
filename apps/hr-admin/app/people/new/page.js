@@ -11,6 +11,7 @@ import Link from 'next/link';
 import { TextInput, PrimaryButton, ErrorBanner } from '@hr/ui';
 import { get, post } from '@/lib/api';
 import ManagerPicker from '@/components/ManagerPicker';
+import { InfoTip, FieldLabel } from '@/lib/widgets';
 
 function asList(res) {
   if (Array.isArray(res)) return res;
@@ -18,10 +19,10 @@ function asList(res) {
   return [];
 }
 
-function SelectField({ label, value, onChange, options, placeholder = 'Unassigned', hint }) {
+function SelectField({ label, value, onChange, options, placeholder = 'Unassigned', hint, tip }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+      <FieldLabel tip={tip}>{label}</FieldLabel>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -106,17 +107,18 @@ export default function NewEmployeePage() {
 
       <form onSubmit={onSubmit} className="space-y-5">
         <div className="grid grid-cols-2 gap-4">
-          <TextInput label="Employee code" value={form.code} onChange={(v) => set('code', v)} required />
+          <TextInput label={<>Employee code <InfoTip text="A unique ID for this person (e.g. EMP-000123). Leave blank to auto-generate the next number in the series." /></>} value={form.code} onChange={(v) => set('code', v)} required />
           <div />
-          <TextInput label="First name" value={form.firstName} onChange={(v) => set('firstName', v)} required />
-          <TextInput label="Last name" value={form.lastName} onChange={(v) => set('lastName', v)} required />
-          <TextInput label="Email" type="email" value={form.email} onChange={(v) => set('email', v)} />
-          <TextInput label="Phone" value={form.phone} onChange={(v) => set('phone', v)} />
+          <TextInput label={<>First name <InfoTip text="The employee's legal first/given name as it should appear on letters and payslips." /></>} value={form.firstName} onChange={(v) => set('firstName', v)} required />
+          <TextInput label={<>Last name <InfoTip text="The employee's legal surname/family name." /></>} value={form.lastName} onChange={(v) => set('lastName', v)} required />
+          <TextInput label={<>Email <InfoTip text="Work email — used for the employee's self-service (ESS) login and notifications." /></>} type="email" value={form.email} onChange={(v) => set('email', v)} />
+          <TextInput label={<>Phone <InfoTip text="Contact mobile number. Optional, but handy for HR to reach the employee." /></>} value={form.phone} onChange={(v) => set('phone', v)} />
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <SelectField
             label="Department"
+            tip="The team or function this person joins (e.g. Engineering, Sales). Drives org-chart and reporting rollups."
             value={form.departmentId}
             onChange={(v) => set('departmentId', v)}
             options={orgs.departments}
@@ -124,12 +126,14 @@ export default function NewEmployeePage() {
           />
           <SelectField
             label="Designation"
+            tip="The job title / role (e.g. Software Engineer, Accountant)."
             value={form.designationId}
             onChange={(v) => set('designationId', v)}
             options={orgs.designations}
           />
           <SelectField
             label="Location"
+            tip="The office or site this employee is based at. Used for holidays and statutory rules."
             value={form.locationId}
             onChange={(v) => set('locationId', v)}
             options={orgs.locations}
@@ -140,7 +144,7 @@ export default function NewEmployeePage() {
             hint="Who this employee reports to. Leave empty for the top of the chain."
           />
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Date of joining</label>
+            <FieldLabel tip="The employee's first working day. Drives probation, leave accrual and tenure calculations.">Date of joining</FieldLabel>
             <input
               type="date"
               value={form.dateOfJoining}

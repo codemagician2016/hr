@@ -24,7 +24,7 @@ import {
   formatAdminDate,
 } from '@hr/ui';
 import { get, post } from '@/lib/api';
-import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, employeeLabel } from '@/lib/ui';
+import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, employeeLabel, ServerPagination } from '@/lib/ui';
 import { useTenantCountries } from '@/lib/useTenantCountries';
 
 const TABS = [
@@ -40,7 +40,7 @@ const TABS = [
 ];
 
 const STATUSES = ['', 'PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'];
-const PAGE_SIZE = 25;
+const PAGE_SIZES = [25, 50, 100];
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
@@ -130,6 +130,7 @@ function EmployeePicker({ value, onChange, label = 'Employee', placeholder = 'Se
 function RequestsTab() {
   const [status, setStatus] = useState('PENDING');
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -138,11 +139,11 @@ function RequestsTab() {
   const load = useCallback(() => {
     setLoading(true);
     setError('');
-    get('/api/hr/leave/requests', { status, page, pageSize: PAGE_SIZE })
+    get('/api/hr/leave/requests', { status, page, pageSize })
       .then(setData)
       .catch((e) => setError(e.data?.message || e.message || 'Failed to load leave requests.'))
       .finally(() => setLoading(false));
-  }, [status, page]);
+  }, [status, page, pageSize]);
 
   useEffect(() => {
     load();
@@ -163,7 +164,6 @@ function RequestsTab() {
 
   const items = data?.items || [];
   const total = data?.total ?? items.length;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const columns = [
     { key: 'employee', header: 'Employee', render: (r) => <span className="font-medium text-gray-900">{employeeLabel(r)}</span> },
@@ -215,29 +215,15 @@ function RequestsTab() {
 
       <DataTable columns={columns} rows={items} loading={loading} emptyText="No leave requests match." />
 
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between mt-4 text-sm">
-          <button
-            type="button"
-            disabled={page <= 1}
-            onClick={() => setPage((p) => p - 1)}
-            className="px-3 py-1.5 border border-gray-300 rounded-lg disabled:opacity-40 hover:bg-gray-50"
-          >
-            Previous
-          </button>
-          <span className="text-gray-500">
-            Page {page} of {totalPages}
-          </span>
-          <button
-            type="button"
-            disabled={page >= totalPages}
-            onClick={() => setPage((p) => p + 1)}
-            className="px-3 py-1.5 border border-gray-300 rounded-lg disabled:opacity-40 hover:bg-gray-50"
-          >
-            Next
-          </button>
-        </div>
-      )}
+      <ServerPagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        sizes={PAGE_SIZES}
+        noun="requests"
+        onPageChange={setPage}
+        onPageSizeChange={(ps) => { setPage(1); setPageSize(ps); }}
+      />
     </div>
   );
 }

@@ -20,6 +20,7 @@ import { ErrorBanner, PrimaryButton, TextInput, DateField, Modal, ModalActions, 
 import { get, post, patch, del, downloadFile } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, moneyish } from '@/lib/ui';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
+import { InfoTip } from '@/lib/widgets';
 // Entities (and their authoritative countryCode) back the structure form's
 // country/currency derivation; imported directly via /api/hr/payroll/entities.
 
@@ -140,11 +141,11 @@ function ComponentsTab({ canManage }) {
       {canManage ? (
         <form onSubmit={onCreate} className="rounded-2xl border border-gray-200 bg-white p-5 space-y-3 h-fit">
           <h2 className="text-sm font-semibold text-gray-900">Add component</h2>
-          <TextInput label="Name" value={draft.name} onChange={(v) => setDraft((d) => ({ ...d, name: v }))} required />
-          <TextInput label="Code" value={draft.code} onChange={(v) => setDraft((d) => ({ ...d, code: v }))} required />
-          <Select label="Kind" value={draft.kind} options={KINDS} onChange={(v) => setDraft((d) => ({ ...d, kind: v }))} />
-          <Select label="Category" value={draft.category} options={CATEGORIES} onChange={(v) => setDraft((d) => ({ ...d, category: v }))} />
-          <Select label="Calc method" value={draft.calcMethod} options={CALC_METHODS} onChange={(v) => setDraft((d) => ({ ...d, calcMethod: v }))} />
+          <TextInput label={<>Name <InfoTip text="A pay component is one line on the salary, e.g. Basic, HRA, Special Allowance. This is its display name on payslips." /></>} value={draft.name} onChange={(v) => setDraft((d) => ({ ...d, name: v }))} required />
+          <TextInput label={<>Code <InfoTip text="A short unique key (e.g. BASIC, HRA) used by formulas and statutory rules. Cannot be changed once used in a structure." /></>} value={draft.code} onChange={(v) => setDraft((d) => ({ ...d, code: v }))} required />
+          <Select label="Kind" tip="The statutory nature of this component (Basic, Dearness Allowance, HRA…). Drives PF/ESI/tax treatment in India." value={draft.kind} options={KINDS} onChange={(v) => setDraft((d) => ({ ...d, kind: v }))} />
+          <Select label="Category" tip="Whether this adds to pay (Earning), reduces it (Deduction), is a cost to the employer, or a reimbursement." value={draft.category} options={CATEGORIES} onChange={(v) => setDraft((d) => ({ ...d, category: v }))} />
+          <Select label="Calc method" tip="How the amount is worked out: a Flat figure, a Percent of another component, a Balancing fill-to-target, a Formula, or a Statutory rule." value={draft.calcMethod} options={CALC_METHODS} onChange={(v) => setDraft((d) => ({ ...d, calcMethod: v }))} />
           {draft.calcMethod === 'BALANCING' && (
             <p className="text-xs text-amber-700">Balancing (fills to target) — amount is derived, not entered.</p>
           )}
@@ -357,12 +358,12 @@ function StructuresTab({ canManage }) {
 
       <form onSubmit={onCreate} className="rounded-2xl border border-gray-200 bg-white p-5 space-y-3 h-fit">
         <h2 className="text-sm font-semibold text-gray-900">Add structure</h2>
-        <TextInput label="Name" value={draft.name} onChange={(v) => setDraft((d) => ({ ...d, name: v }))} required />
-        <TextInput label="Code" value={draft.code} onChange={(v) => setDraft((d) => ({ ...d, code: v }))} required />
+        <TextInput label={<>Name <InfoTip text="A salary structure is a reusable template of pay components (Basic, HRA…) that you apply to employees. This is its name." /></>} value={draft.name} onChange={(v) => setDraft((d) => ({ ...d, name: v }))} required />
+        <TextInput label={<>Code <InfoTip text="A short unique key for this structure, used when assigning it to employees." /></>} value={draft.code} onChange={(v) => setDraft((d) => ({ ...d, code: v }))} required />
         {/* Entity drives the market: countryCode + currency are derived from it,
             not typed, so an NZ entity can never be saved as an India structure. */}
         <label className="block text-sm">
-          <span className="text-gray-700 font-medium">Entity</span>
+          <span className="flex items-center text-gray-700 font-medium">Entity<InfoTip text="The legal entity this structure belongs to. The country and pay currency are taken from the entity automatically — you don't pick them." /></span>
           <select
             value={draft.entityId}
             onChange={(e) => selectEntity(e.target.value)}
@@ -379,7 +380,7 @@ function StructuresTab({ canManage }) {
           Country: <span className="font-medium text-gray-700">{draft.countryCode || '—'}</span>
           {' · '}Currency: <span className="font-medium text-gray-700">{draft.currencyCode || '—'}</span>
         </div>
-        <Select label="Basis" value={draft.basis} options={['CTC', 'GROSS', 'NET']} onChange={(v) => setDraft((d) => ({ ...d, basis: v }))} />
+        <Select label="Basis" tip="What the target figure represents: CTC (annual cost to company), Gross (before deductions) or Net (take-home)." value={draft.basis} options={['CTC', 'GROSS', 'NET']} onChange={(v) => setDraft((d) => ({ ...d, basis: v }))} />
         {verdict && verdict.applies && !verdict.ok && (
           <p className="text-xs text-red-600">Basic + DA must be ≥ 50% of gross — save is blocked.</p>
         )}
@@ -598,10 +599,10 @@ function ProposalsTab({ canApprove, me }) {
 
 // Minimal labelled <select> (the design system exposes TextInput/DateField but
 // not a Select; this keeps the same look without pulling in a new dependency).
-function Select({ label, value, options, onChange }) {
+function Select({ label, value, options, onChange, tip }) {
   return (
     <label className="block">
-      <span className="block text-sm font-medium text-gray-700 mb-1">{label}</span>
+      <span className="flex items-center text-sm font-medium text-gray-700 mb-1">{label}{tip && <InfoTip text={tip} />}</span>
       <select value={value} onChange={(e) => onChange(e.target.value)}
         className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--theme-primary)]">
         {options.map((o) => <option key={o} value={o}>{o}</option>)}

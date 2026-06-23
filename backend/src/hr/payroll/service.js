@@ -1107,19 +1107,32 @@ async function resolveSelfEmployee(businessId, customer) {
   return byUser ? byUser.id : null;
 }
 
-/** getMyPayslips — the logged-in EMPLOYEE's own payslips (ESS). */
-async function getMyPayslips({ businessId, customer }) {
+/** getMyPayslips — the logged-in EMPLOYEE's own payslips (ESS).
+ * Backward-compatible pagination: with no page/pageSize the full self-scoped list
+ * is returned (shape `{ items, total }` as before). When the caller passes
+ * page/pageSize, a LIMIT/OFFSET window + a scoped COUNT are used and the response
+ * gains page/pageSize. The self-only employeeId scope is applied on BOTH paths
+ * (query AND count) so a paged read can never leak another employee's payslips. */
+async function getMyPayslips({ businessId, customer, page, pageSize } = {}) {
+  const paged = page !== undefined || pageSize !== undefined;
+  const take = Math.min(Math.max(parseInt(pageSize, 10) || 25, 1), 100);
+  const pageNum = Math.max(parseInt(page, 10) || 1, 1);
   const employeeId = await resolveSelfEmployee(businessId, customer);
-  if (!employeeId) return { items: [], total: 0 };
-  const items = await prisma.payslip.findMany({
-    where: { businessId, employeeId, deletedAt: null, status: { in: ['PUBLISHED', 'VIEWED'] } },
-    orderBy: { payDate: 'desc' },
-    select: {
-      id: true, code: true, periodStart: true, periodEnd: true, payDate: true,
-      currencyCode: true, grossEarnings: true, totalDeductions: true, netPay: true, status: true,
-    },
-  });
-  return { items, total: items.length };
+  if (!employeeId) return paged ? { items: [], total: 0, page: pageNum, pageSize: take } : { items: [], total: 0 };
+  const where = { businessId, employeeId, deletedAt: null, status: { in: ['PUBLISHED', 'VIEWED'] } };
+  const select = {
+    id: true, code: true, periodStart: true, periodEnd: true, payDate: true,
+    currencyCode: true, grossEarnings: true, totalDeductions: true, netPay: true, status: true,
+  };
+  if (!paged) {
+    const items = await prisma.payslip.findMany({ where, orderBy: { payDate: 'desc' }, select });
+    return { items, total: items.length };
+  }
+  const [items, total] = await Promise.all([
+    prisma.payslip.findMany({ where, orderBy: { payDate: 'desc' }, select, skip: (pageNum - 1) * take, take }),
+    prisma.payslip.count({ where }),
+  ]);
+  return { items, total, page: pageNum, pageSize: take };
 }
 
 /** getMyPayslip — the logged-in employee's own payslip detail (ESS). */

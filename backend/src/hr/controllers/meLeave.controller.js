@@ -263,8 +263,12 @@ async function cancelRequest(req, res, next) {
 // narrows the feed; a terminated/inactive employee gets an empty feed (lockout).
 async function listHistory(req, res, next) {
   try {
+    const paged = req.query.page !== undefined || req.query.pageSize !== undefined;
+    const take = Math.min(Math.max(parseInt(req.query.pageSize, 10) || 25, 1), 100);
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+
     const employeeId = await resolveActiveSelfId(req);
-    if (!employeeId) return res.json({ items: [] });
+    if (!employeeId) return res.json(paged ? { items: [], total: 0, page, pageSize: take } : { items: [] });
     const { businessId } = req.customer;
 
     const where = { businessId, employeeId };
@@ -285,8 +289,14 @@ async function listHistory(req, res, next) {
       include: { leaveType: { select: { id: true, code: true, name: true, color: true, unit: true } } },
     });
     // newest-first for display; the running balance is computed oldest→newest inside.
-    const items = buildHistory(rows).reverse();
-    res.json({ items });
+    // The running balance MUST be derived from the full chronological ledger, so we
+    // build the entire feed first, then (only when the caller asks for a page) slice
+    // the requested window. No-params callers get the full feed exactly as before.
+    const full = buildHistory(rows).reverse();
+    if (!paged) return res.json({ items: full });
+    const total = full.length;
+    const start = (page - 1) * take;
+    res.json({ items: full.slice(start, start + take), total, page, pageSize: take });
   } catch (e) { next(e); }
 }
 

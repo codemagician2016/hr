@@ -8,10 +8,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ErrorBanner, formatAdminDate } from '@hr/ui';
 import { get, post } from '@/lib/api';
-import { DataTable, PageHeader, StatusBadge, ActionButton, employeeLabel, moneyish } from '@/lib/ui';
+import { DataTable, PageHeader, StatusBadge, ActionButton, employeeLabel, moneyish, ServerPagination } from '@/lib/ui';
 
 const STATUSES = ['', 'DRAFT', 'PENDING', 'APPROVED', 'DISBURSED', 'CLOSED', 'REJECTED', 'CANCELLED'];
-const PAGE_SIZE = 25;
+const PAGE_SIZES = [25, 50, 100];
 
 // Which transition buttons to show for each lifecycle state.
 const NEXT_ACTIONS = {
@@ -27,6 +27,7 @@ const NEXT_ACTIONS = {
 export default function LoansPage() {
   const [status, setStatus] = useState('');
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -35,11 +36,11 @@ export default function LoansPage() {
   const load = useCallback(() => {
     setLoading(true);
     setError('');
-    get('/api/hr/loans', { status, page, pageSize: PAGE_SIZE })
+    get('/api/hr/loans', { status, page, pageSize })
       .then(setData)
       .catch((e) => setError(e.message || 'Failed to load loans.'))
       .finally(() => setLoading(false));
-  }, [status, page]);
+  }, [status, page, pageSize]);
 
   useEffect(() => {
     load();
@@ -60,7 +61,6 @@ export default function LoansPage() {
 
   const items = data?.items || [];
   const total = data?.total ?? items.length;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const columns = [
     { key: 'number', header: 'Loan', render: (r) => <span className="font-medium text-gray-900">{r.loanNumber || r.id.slice(0, 8)}</span> },
@@ -115,29 +115,18 @@ export default function LoansPage() {
 
       <DataTable columns={columns} rows={items} loading={loading} emptyText="No loans match." />
 
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between mt-4 text-sm">
-          <button
-            type="button"
-            disabled={page <= 1}
-            onClick={() => setPage((p) => p - 1)}
-            className="px-3 py-1.5 border border-gray-300 rounded-lg disabled:opacity-40 hover:bg-gray-50"
-          >
-            Previous
-          </button>
-          <span className="text-gray-500">
-            Page {page} of {totalPages}
-          </span>
-          <button
-            type="button"
-            disabled={page >= totalPages}
-            onClick={() => setPage((p) => p + 1)}
-            className="px-3 py-1.5 border border-gray-300 rounded-lg disabled:opacity-40 hover:bg-gray-50"
-          >
-            Next
-          </button>
-        </div>
-      )}
+      <ServerPagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        sizes={PAGE_SIZES}
+        noun="loans"
+        onPageChange={setPage}
+        onPageSizeChange={(ps) => {
+          setPage(1);
+          setPageSize(ps);
+        }}
+      />
     </div>
   );
 }

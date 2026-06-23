@@ -7,19 +7,25 @@
 // it lands in a given environment we degrade a 404 to a friendly empty state so
 // the page stays branded and shippable.
 
+import { useState } from 'react';
 import Link from 'next/link';
 import AppShell from '@/components/AppShell';
 import { ErrorBanner, Empty, Spinner, Centered } from '@hr/ui';
 import { useApi } from '@/lib/useApi';
 import { money, formatPeriod } from '@/lib/format';
+import { ServerPagination } from '@/lib/pagination';
 
-const PAYSLIPS_PATH = '/api/hr/me/payslips';
+const PAGE_SIZES = [10, 25, 50];
 
 function PayslipsInner() {
-  const { data, loading, error } = useApi(PAYSLIPS_PATH, {
-    select: (b) => (Array.isArray(b) ? b : b?.items || b?.payslips || []),
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);
+  const { data, loading, error } = useApi(`/api/hr/me/payslips?page=${page}&pageSize=${pageSize}`, {
+    deps: [page, pageSize],
+    select: (b) => (Array.isArray(b) ? { items: b, total: b.length } : { items: b?.items || b?.payslips || [], total: b?.total ?? (b?.items || []).length }),
   });
-  const items = data || [];
+  const items = data?.items || [];
+  const total = data?.total ?? items.length;
 
   if (loading) return <Centered><Spinner /></Centered>;
 
@@ -36,6 +42,7 @@ function PayslipsInner() {
       {items.length === 0 ? (
         <Empty text="No payslips available yet." />
       ) : (
+        <>
         <ul className="space-y-2">
           {items.map((p) => {
             const net = p.net ?? p.netPay ?? p.netPayable;
@@ -65,6 +72,16 @@ function PayslipsInner() {
             );
           })}
         </ul>
+        <ServerPagination
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          sizes={PAGE_SIZES}
+          noun="payslips"
+          onPageChange={setPage}
+          onPageSizeChange={(ps) => { setPage(1); setPageSize(ps); }}
+        />
+        </>
       )}
     </div>
   );
