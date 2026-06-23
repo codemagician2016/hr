@@ -30,8 +30,8 @@ function PayslipsInner() {
   }
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-xl font-semibold" style={{ color: 'var(--theme-text)' }}>Payslips</h1>
+    <div className="max-w-3xl space-y-4">
+      <h1 className="text-2xl font-semibold" style={{ color: 'var(--theme-text)' }}>Payslips</h1>
 
       {items.length === 0 ? (
         <Empty text="No payslips available yet." />

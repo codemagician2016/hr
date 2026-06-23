@@ -1,0 +1,238 @@
+'use client';
+
+// Left navigation rail for the ESS portal.
+//
+// Top: a circular avatar + the employee's name (from useSession, tolerant of the
+// several session shapes — see lib/format.js) and the tenant business name.
+// Below: a vertical nav of icon+label items. Some items are GROUPS that expand
+// to sub-items. The active item (or a group containing the active path) is
+// highlighted with the tenant brand color (var(--theme-primary)) — NEVER a
+// hardcoded colour, so each employer sees their own brand.
+//
+// Icons are consistent inline line-SVGs (no extra dependency); each item ships a
+// single `path` (stroke=currentColor) so it inherits the active/idle colour.
+//
+// On mobile (<lg) this rail lives inside a drawer rendered by AppShell; `onNavigate`
+// closes that drawer after a link is tapped. On desktop it is a fixed column.
+
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { useSession } from '@/components/AppShell';
+import { useTenant } from '@/components/TenantProvider';
+
+// ── icon set (single-path line icons, 24x24 viewBox) ─────────────────────────
+const ICONS = {
+  dashboard: 'M3 11l9-8 9 8M5 10v10h6v-6h2v6h6V10',
+  user: 'M12 12a4 4 0 100-8 4 4 0 000 8zM4 21a8 8 0 0116 0',
+  calendar: 'M7 3v4M17 3v4M3 9h18M5 5h14v16H5z',
+  clock: 'M12 8v4l3 2M12 3a9 9 0 100 18 9 9 0 000-18z',
+  leaf: 'M5 21c0-9 7-16 16-16 0 9-7 16-16 16zM5 21c4-4 8-6 12-7',
+  wallet: 'M3 7h16a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2zM3 7V6a2 2 0 012-2h12M17 13h.01',
+  receipt: 'M6 2h12v20l-3-2-3 2-3-2-3 2zM9 7h6M9 11h6M9 15h4',
+  coin: 'M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6',
+  doc: 'M6 2h9l5 5v15H6zM15 2v5h5M9 13h6M9 17h6',
+  tax: 'M9 7h6M9 11h6M9 15h4M6 3h12v18H6z',
+  chart: 'M3 17l6-6 4 4 8-8M14 7h7v7',
+  exit: 'M16 17l5-5-5-5M21 12H9M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4',
+};
+
+function Icon({ name, className }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"
+         stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"
+         className={className}>
+      <path d={ICONS[name] || ICONS.doc} />
+    </svg>
+  );
+}
+
+// ── nav model — the REAL ess routes (this is the employee's own portal) ──────
+const NAV = [
+  { type: 'item', href: '/', label: 'Dashboard', icon: 'dashboard' },
+  { type: 'item', href: '/profile', label: 'Personal Information', icon: 'user' },
+  {
+    type: 'group',
+    key: 'attendance-leaves',
+    label: 'Attendance & Leaves',
+    icon: 'calendar',
+    children: [
+      { href: '/attendance', label: 'Attendance', icon: 'clock' },
+      { href: '/leave', label: 'Leave', icon: 'leaf' },
+    ],
+  },
+  {
+    type: 'group',
+    key: 'payroll-reimbursement',
+    label: 'Payroll & Reimbursement',
+    icon: 'wallet',
+    children: [
+      { href: '/payslips', label: 'Payslips', icon: 'receipt' },
+      { href: '/compensation', label: 'Compensation', icon: 'coin' },
+      { href: '/tax', label: 'Tax', icon: 'tax' },
+      { href: '/documents', label: 'Documents', icon: 'doc' },
+    ],
+  },
+  { type: 'item', href: '/performance', label: 'Performance', icon: 'chart' },
+  { type: 'item', href: '/separation', label: 'Separation', icon: 'exit' },
+];
+
+function pathMatches(pathname, href) {
+  if (href === '/') return pathname === '/';
+  return pathname === href || pathname.startsWith(href + '/');
+}
+function groupActive(pathname, group) {
+  return group.children.some((c) => pathMatches(pathname, c.href));
+}
+
+// Resolve the employee's display name + initials from the tolerant session shape.
+function nameFromSession(me) {
+  const emp = me?.employee || me?.customer || me || {};
+  return (
+    emp.name ||
+    [emp.firstName, emp.lastName].filter(Boolean).join(' ') ||
+    me?.name ||
+    'Employee'
+  );
+}
+function initialsOf(name) {
+  const parts = String(name).trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+  return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+}
+
+export default function Sidebar({ onNavigate }) {
+  const pathname = usePathname() || '/';
+  const me = useSession();
+  const { tenant, theme } = useTenant();
+
+  const fullName = nameFromSession(me);
+  const emp = me?.employee || me?.customer || me || {};
+  const subtitle =
+    emp.designation?.name || emp.designation || emp.designationName ||
+    emp.employeeCode || emp.code || null;
+  const business = tenant?.business || {};
+  const businessName = business.name || business.displayName || null;
+  const logoUrl = theme?.logoUrl || business.logoUrl || null;
+  const avatarUrl = emp.avatarUrl || emp.photoUrl || emp.photo || null;
+
+  // Groups start expanded when they contain the active route; the user can toggle.
+  const [open, setOpen] = useState(() => {
+    const init = {};
+    for (const n of NAV) if (n.type === 'group') init[n.key] = groupActive(pathname, n);
+    return init;
+  });
+  // Keep the active group open as the route changes (without collapsing user toggles).
+  useEffect(() => {
+    setOpen((prev) => {
+      const next = { ...prev };
+      for (const n of NAV) if (n.type === 'group' && groupActive(pathname, n)) next[n.key] = true;
+      return next;
+    });
+  }, [pathname]);
+
+  const ACTIVE = { color: 'var(--theme-primary)', background: 'var(--theme-primary-soft)' };
+  const IDLE = { color: 'var(--theme-text)' };
+
+  return (
+    <div className="ess-sidebar ess-scroll">
+      {/* Tenant identity (logo / business name) */}
+      <div className="ess-sidebar-brand">
+        {logoUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={logoUrl} alt={businessName ? `${businessName} logo` : 'Logo'} className="ess-sidebar-logo" />
+        ) : businessName ? (
+          <span className="ess-sidebar-brandname truncate">{businessName}</span>
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src="/drifthr-logo.svg" alt="DriftHR" className="ess-sidebar-logo" />
+        )}
+      </div>
+
+      {/* Employee header — avatar + name */}
+      <div className="ess-sidebar-me">
+        <div className="ess-avatar" aria-hidden={avatarUrl ? undefined : 'true'}>
+          {avatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={avatarUrl} alt="" className="ess-avatar-img" />
+          ) : (
+            <span>{initialsOf(fullName)}</span>
+          )}
+        </div>
+        <div className="min-w-0">
+          <div className="ess-me-name truncate" title={fullName}>{fullName}</div>
+          {subtitle && <div className="ess-me-sub truncate">{subtitle}</div>}
+        </div>
+      </div>
+
+      {/* Navigation */}
+      <nav className="ess-nav" aria-label="Primary">
+        <ul className="ess-nav-list">
+          {NAV.map((n) => {
+            if (n.type === 'item') {
+              const active = pathMatches(pathname, n.href);
+              return (
+                <li key={n.href}>
+                  <Link
+                    href={n.href}
+                    onClick={onNavigate}
+                    aria-current={active ? 'page' : undefined}
+                    className={`ess-nav-link${active ? ' is-active' : ''}`}
+                    style={active ? ACTIVE : IDLE}
+                  >
+                    <Icon name={n.icon} className="ess-nav-icon" />
+                    <span className="truncate">{n.label}</span>
+                  </Link>
+                </li>
+              );
+            }
+            // group
+            const gActive = groupActive(pathname, n);
+            const isOpen = !!open[n.key];
+            return (
+              <li key={n.key}>
+                <button
+                  type="button"
+                  onClick={() => setOpen((p) => ({ ...p, [n.key]: !p[n.key] }))}
+                  aria-expanded={isOpen}
+                  className={`ess-nav-link ess-nav-group${gActive ? ' is-active' : ''}`}
+                  style={gActive ? { color: 'var(--theme-primary)' } : IDLE}
+                >
+                  <Icon name={n.icon} className="ess-nav-icon" />
+                  <span className="truncate flex-1 text-left">{n.label}</span>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"
+                       stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                       className={`ess-chevron${isOpen ? ' is-open' : ''}`}>
+                    <path d="M6 9l6 6 6-6" />
+                  </svg>
+                </button>
+                {isOpen && (
+                  <ul className="ess-subnav">
+                    {n.children.map((c) => {
+                      const active = pathMatches(pathname, c.href);
+                      return (
+                        <li key={c.href}>
+                          <Link
+                            href={c.href}
+                            onClick={onNavigate}
+                            aria-current={active ? 'page' : undefined}
+                            className={`ess-nav-link ess-subnav-link${active ? ' is-active' : ''}`}
+                            style={active ? ACTIVE : IDLE}
+                          >
+                            <Icon name={c.icon} className="ess-nav-icon" />
+                            <span className="truncate">{c.label}</span>
+                          </Link>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </nav>
+    </div>
+  );
+}

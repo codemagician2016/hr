@@ -654,7 +654,7 @@ function AttendanceInner() {
 
   return (
     <div className="space-y-5">
-      <h1 className="text-xl font-semibold" style={{ color: 'var(--theme-text)' }}>Attendance</h1>
+      <h1 className="text-2xl font-semibold" style={{ color: 'var(--theme-text)' }}>Attendance</h1>
 
       {/* Section switcher — keyboard-navigable tablist */}
       <div className="flex gap-1 overflow-x-auto border-b" style={{ borderColor: 'var(--theme-border)' }} role="tablist" aria-label="Attendance sections">

@@ -92,9 +92,9 @@ function CompensationInner() {
   const abs = current.absolute || {};
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-lg font-semibold" style={{ color: 'var(--theme-text)' }}>Compensation</h1>
-      <header className="rounded-2xl border bg-white p-4 shadow-sm" style={{ borderColor: 'var(--theme-border)' }}>
+    <div className="max-w-3xl space-y-4">
+      <h1 className="text-2xl font-semibold" style={{ color: 'var(--theme-text)' }}>Compensation</h1>
+      <header className="rounded-2xl border bg-white p-5 shadow-sm" style={{ borderColor: 'var(--theme-border)' }}>
         <div className="flex items-baseline justify-between">
           <div>
             <p className="text-xs uppercase tracking-wide" style={{ color: 'var(--theme-muted)' }}>Cost to company (annual)</p>

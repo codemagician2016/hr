@@ -55,6 +55,9 @@ export function themeVarsFromResolved(theme) {
   return {
     '--theme-primary': primary,
     '--theme-primary-dark': darken(primary),
+    // Soft brand tint for active nav backgrounds / subtle accents. Alpha keeps
+    // it readable on the white sidebar across every one of the 12 brand colours.
+    '--theme-primary-soft': `${primary}14`,
     '--theme-accent': accent,
     '--theme-bg': bg,
     '--theme-surface': surface,

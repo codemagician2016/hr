@@ -277,8 +277,8 @@ function SeparationInner() {
   const active = separation && !['SETTLED', 'CANCELLED'].includes(separation.status);
 
   return (
-    <div className="space-y-5">
-      <h1 className="text-xl font-semibold" style={{ color: 'var(--theme-text)' }}>Separation</h1>
+    <div className="max-w-3xl space-y-5">
+      <h1 className="text-2xl font-semibold" style={{ color: 'var(--theme-text)' }}>Separation</h1>
 
       {justSubmitted && justSubmitted.shortNotice && (
         <div className="rounded-xl border px-4 py-3 text-sm" style={{ borderColor: '#f59e0b', background: '#fffbeb', color: '#b45309' }}>

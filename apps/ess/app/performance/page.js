@@ -46,17 +46,29 @@ function GrowthInner() {
   if (ovLoading) return <Centered><Spinner /></Centered>;
 
   return (
-    <div className="px-4 py-4 space-y-4">
-      <h1 className="text-xl font-semibold text-gray-900">Growth</h1>
+    <div className="space-y-5">
+      <div>
+        <h1 className="text-2xl font-semibold" style={{ color: 'var(--theme-text)' }}>Performance</h1>
+        <p className="text-sm" style={{ color: 'var(--theme-muted)' }}>Your goals, reviews and growth.</p>
+      </div>
       {error ? <ErrorBanner message={error} /> : null}
 
       <div className="flex gap-2 text-sm">
-        {[['hub', 'Overview'], ['goals', 'My Goals'], ['review', 'My Review']].map(([k, label]) => (
-          <button key={k} onClick={() => setTab(k)}
-            className={`px-3 py-1.5 rounded-full ${tab === k ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
-            {label}
-          </button>
-        ))}
+        {[['hub', 'Overview'], ['goals', 'My Goals'], ['review', 'My Review']].map(([k, label]) => {
+          const on = tab === k;
+          return (
+            <button
+              key={k}
+              onClick={() => setTab(k)}
+              className="rounded-full px-3.5 py-1.5 font-medium transition"
+              style={on
+                ? { background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }
+                : { background: 'var(--theme-primary-soft)', color: 'var(--theme-text)' }}
+            >
+              {label}
+            </button>
+          );
+        })}
       </div>
 
       {tab === 'hub' ? (
@@ -81,7 +93,7 @@ function GrowthInner() {
 
       {tab === 'review' ? (
         reviewLoading ? <Spinner /> : !review ? <Empty text="No review for you yet." /> : (
-          <div className="space-y-3 rounded-xl border border-gray-100 bg-white p-4">
+          <div className="space-y-3 rounded-2xl border bg-white p-5 shadow-sm" style={{ borderColor: 'var(--theme-border)' }}>
             <Row label="Status" value={<span>{review.status}</span>} />
             <Row label="Self rating" value={<RatingScale value={review.selfRating} scale={[]} />} />
             {/* finalRating/managerComments are ABSENT from the payload until release. */}
@@ -91,14 +103,22 @@ function GrowthInner() {
                 <Row label="Manager comments" value={<span>{review.managerComments || '—'}</span>} />
               </>
             ) : (
-              <p className="text-xs text-gray-500">Your final rating is not yet released.</p>
+              <p className="text-xs" style={{ color: 'var(--theme-muted)' }}>Your final rating is not yet released.</p>
             )}
             <div className="flex gap-2 pt-2">
               {review.status === 'NOT_STARTED' ? (
-                <button disabled={busy} onClick={submitSelf} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm text-white">Submit self-review</button>
+                <button disabled={busy} onClick={submitSelf}
+                  className="rounded-lg px-3.5 py-2 text-sm font-semibold transition disabled:opacity-60"
+                  style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}>
+                  Submit self-review
+                </button>
               ) : null}
               {review.status === 'CALIBRATED' && review.releasedAt ? (
-                <button disabled={busy} onClick={acknowledge} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm text-white">Acknowledge</button>
+                <button disabled={busy} onClick={acknowledge}
+                  className="rounded-lg px-3.5 py-2 text-sm font-semibold transition disabled:opacity-60"
+                  style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}>
+                  Acknowledge
+                </button>
               ) : null}
             </div>
           </div>
@@ -110,17 +130,17 @@ function GrowthInner() {
 
 function Stat({ label, value }) {
   return (
-    <div className="flex items-center justify-between rounded-xl border border-gray-100 bg-white px-4 py-3">
-      <span className="text-sm text-gray-500">{label}</span>
-      <span className="text-sm font-medium text-gray-900">{value}</span>
+    <div className="flex items-center justify-between rounded-2xl border bg-white px-4 py-3 shadow-sm" style={{ borderColor: 'var(--theme-border)' }}>
+      <span className="text-sm" style={{ color: 'var(--theme-muted)' }}>{label}</span>
+      <span className="text-sm font-medium" style={{ color: 'var(--theme-text)' }}>{value}</span>
     </div>
   );
 }
 function Row({ label, value }) {
   return (
     <div className="flex items-center justify-between">
-      <span className="text-sm text-gray-500">{label}</span>
-      <span className="text-sm text-gray-900">{value}</span>
+      <span className="text-sm" style={{ color: 'var(--theme-muted)' }}>{label}</span>
+      <span className="text-sm" style={{ color: 'var(--theme-text)' }}>{value}</span>
     </div>
   );
 }

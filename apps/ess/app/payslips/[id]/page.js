@@ -135,7 +135,7 @@ function PayslipDetailInner() {
   const ytd = slip?.yptdJson || snap.ytd || null;
 
   return (
-    <div className="space-y-5">
+    <div className="max-w-3xl space-y-5">
       <div className="flex items-center gap-2 text-sm">
         <Link href="/payslips" style={{ color: 'var(--theme-primary)' }}>← Payslips</Link>
       </div>
@@ -145,7 +145,7 @@ function PayslipDetailInner() {
       ) : (
         <>
           <header>
-            <h1 className="text-xl font-semibold" style={{ color: 'var(--theme-text)' }}>
+            <h1 className="text-2xl font-semibold" style={{ color: 'var(--theme-text)' }}>
               {formatPeriod(slip.period || slip) || 'Payslip'}
             </h1>
             {(slip.employee?.name || slip.employeeName) && (
