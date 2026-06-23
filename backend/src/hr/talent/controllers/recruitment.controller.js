@@ -81,6 +81,49 @@ function slugify(s) {
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || null;
 }
 
+// ── Shareable public-link resolution ─────────────────────────────────────────
+// A published, public job is shared as a candidate-facing LINK to give to job
+// portals. The link points at the tenant's careers host (reuses the SAME
+// hostForSlug helper subdomain provisioning uses, so it tracks staging/prod),
+// e.g. https://acme-staging.drifthr.com/careers/acme/jobs/<publicSlug>. The API
+// apply route (POST /api/public/careers/:businessSlug/jobs/:publicSlug/apply) is
+// the same endpoint the public page submits to — no internal scores ever leak.
+//
+// Best-effort: if the host helper is unavailable we still return the relative
+// path so the UI can render a copyable link from window.location.origin.
+let _hostForSlug;
+try { ({ hostForSlug: _hostForSlug } = require('../../../core/lib/subdomainProvision')); } catch { _hostForSlug = null; }
+
+// Build the public link bundle for a job. `businessSlug` is the tenant's careers
+// slug (Business.slug). Returns null when the job has no public slug yet.
+function publicCareersLink(businessSlug, job) {
+  if (!job || !job.publicSlug || !businessSlug) return null;
+  const careersPath = `/careers/${businessSlug}`;
+  const jobPath = `${careersPath}/jobs/${job.publicSlug}`;
+  // API apply path the public page (and any portal that wires a direct POST) hits.
+  const apiApplyPath = `/api/public/careers/${businessSlug}/jobs/${job.publicSlug}`;
+  let host = null;
+  try { host = _hostForSlug ? _hostForSlug(businessSlug) : null; } catch { host = null; }
+  const origin = host ? `https://${host}` : null;
+  return {
+    businessSlug,
+    publicSlug: job.publicSlug,
+    careersPath,            // tenant careers board (relative)
+    jobPath,                // candidate-facing JD + apply page (relative)
+    apiApplyPath,           // the unauth apply endpoint (relative)
+    careersUrl: origin ? `${origin}${careersPath}` : null,
+    url: origin ? `${origin}${jobPath}` : null, // the shareable absolute link
+    // only LIVE (OPEN + isPublic) jobs actually resolve on the public board.
+    live: !!(job.isPublic && job.status === 'OPEN'),
+  };
+}
+
+// Resolve the tenant careers slug for the caller's business (Business.slug).
+async function businessSlug(businessId) {
+  const biz = await prisma.business.findUnique({ where: { id: businessId }, select: { slug: true } });
+  return biz ? biz.slug : null;
+}
+
 async function listJobs(req, res, next) {
   try {
     const { businessId } = req.user;
@@ -102,7 +145,60 @@ async function getJob(req, res, next) {
     if (!item) return res.status(404).json({ message: 'Not found' });
     // F1 scope — an out-of-requisition job 404s (IDOR-safe), not 403.
     if (!scopeAllowsJob(req.recruitmentScope, item)) return res.status(404).json({ message: 'Not found' });
-    res.json(item);
+    // Surface the shareable public-careers link so the job page can render a
+    // copyable URL + Publish/Unpublish without guessing the tenant host.
+    const slug = await businessSlug(businessId);
+    res.json({ ...item, publicLink: publicCareersLink(slug, item) });
+  } catch (e) { next(e); }
+}
+
+// GET /jobs/:id/share — the shareable public-link bundle on its own (used by the
+// "Share / public link" panel). Returns the careers URL + slug + apply path and
+// whether the link is LIVE (the job must be isPublic + OPEN to actually resolve).
+async function shareJob(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const job = await prisma.job.findFirst({
+      where: { id: req.params.id, businessId, deletedAt: null },
+      select: { id: true, title: true, status: true, isPublic: true, publicSlug: true, hiringManagerId: true },
+    });
+    if (!job) return res.status(404).json({ message: 'Not found' });
+    if (!scopeAllowsJob(req.recruitmentScope, job)) return res.status(404).json({ message: 'Not found' });
+    const slug = await businessSlug(businessId);
+    res.json({
+      jobId: job.id, title: job.title, status: job.status, isPublic: job.isPublic,
+      publicSlug: job.publicSlug,
+      publicLink: publicCareersLink(slug, job),
+    });
+  } catch (e) { next(e); }
+}
+
+// POST /jobs/:id/set-public — the prominent Publish/Unpublish toggle for the
+// careers board. body: { isPublic: bool }. Publishing auto-derives a stable
+// publicSlug when one is missing (never regenerated on re-publish, so a shared
+// link stays valid). Returns the fresh job + its public-link bundle. The job
+// must be OPEN for the link to actually resolve on the public board, but we
+// allow flagging a DRAFT public so HR can prepare the slug ahead of publishing.
+async function setJobPublic(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const job = await prisma.job.findFirst({ where: { id: req.params.id, businessId, deletedAt: null } });
+    if (!job) return res.status(404).json({ message: 'Not found' });
+    const isPublic = req.body.isPublic === undefined ? true : !!req.body.isPublic;
+    const data = { isPublic };
+    if (isPublic && !job.publicSlug) data.publicSlug = slugify(`${job.title}-${job.code}`);
+    let updated;
+    try {
+      updated = await prisma.job.update({ where: { id: job.id }, data });
+    } catch (e) {
+      if (e.code === 'P2002') {
+        // slug collided with another job — disambiguate with a short suffix.
+        data.publicSlug = slugify(`${job.title}-${job.code}-${job.id.slice(0, 6)}`);
+        updated = await prisma.job.update({ where: { id: job.id }, data });
+      } else { throw e; }
+    }
+    const slug = await businessSlug(businessId);
+    res.json({ ...updated, publicLink: publicCareersLink(slug, updated) });
   } catch (e) { next(e); }
 }
 
@@ -166,20 +262,126 @@ async function publishJob(req, res, next) {
   } catch (e) { next(e); }
 }
 
-// POST /jobs/:id/close — OPEN/ON_HOLD -> CLOSED, stamping closedAt.
+// POST /jobs/:id/close — OPEN/ON_HOLD -> CLOSED, stamping closedAt + an optional
+// reason (FILLED | CANCELLED | ON_HOLD_INDEFINITELY | OTHER, free-text note). The
+// reason is persisted on Job.closeReason and audited so the funnel summary can
+// explain the outcome. F1 scope: a recruiter can only close a job they own.
 async function closeJob(req, res, next) {
   try {
     const { businessId } = req.user;
     const job = await prisma.job.findFirst({ where: { id: req.params.id, businessId, deletedAt: null } });
     if (!job) return res.status(404).json({ message: 'Not found' });
+    if (!scopeAllowsJob(req.recruitmentScope, job)) return res.status(404).json({ message: 'Not found' });
     if (!['OPEN', 'ON_HOLD'].includes(job.status)) {
       return res.status(409).json({ message: `Cannot close a job in status ${job.status}` });
     }
+    // A filled requisition flips to FILLED; otherwise CLOSED. Caller can force
+    // FILLED via outcome='FILLED' (e.g. all openings met).
+    const outcome = String(req.body.outcome || '').toUpperCase();
+    const status = outcome === 'FILLED' ? 'FILLED' : 'CLOSED';
+    const reason = req.body.reason != null ? String(req.body.reason).slice(0, 2000) : null;
     const item = await prisma.job.update({
       where: { id: job.id },
-      data: { status: 'CLOSED', closedAt: new Date() },
+      data: { status, closedAt: new Date(), closeReason: reason },
     });
+    try {
+      await prisma.auditLog.create({ data: {
+        businessId, action: 'recruitment.job.close', entityType: 'Job', entityId: job.id,
+        actorId: req.user.id || null, meta: { status, reason: reason || null },
+      } });
+    } catch { /* audit is best-effort */ }
     res.json(item);
+  } catch (e) { next(e); }
+}
+
+// ── Per-job funnel SUMMARY (applied → … → accepted) + time-to-fill ───────────
+// The hire funnel maps every live application onto an ordered set of milestone
+// buckets derived from ApplicationStatus, plus rejected/withdrawn/on-hold tallies.
+// time-to-fill = days from the job opening (publishedAt ?? createdAt) to the
+// first accepted offer (or to now if still open). Reuses the F1 read-scope.
+const FUNNEL_STEPS = [
+  { key: 'applied', label: 'Applied', statuses: ['APPLIED', 'SCREENING', 'ASSESSMENT', 'INTERVIEWING', 'OFFERED', 'HIRED'] },
+  { key: 'screened', label: 'Screened', statuses: ['SCREENING', 'ASSESSMENT', 'INTERVIEWING', 'OFFERED', 'HIRED'] },
+  { key: 'shortlisted', label: 'Shortlisted', statuses: ['ASSESSMENT', 'INTERVIEWING', 'OFFERED', 'HIRED'] },
+  { key: 'interview', label: 'Interview', statuses: ['INTERVIEWING', 'OFFERED', 'HIRED'] },
+  { key: 'offer', label: 'Offer', statuses: ['OFFERED', 'HIRED'] },
+  { key: 'accepted', label: 'Accepted', statuses: ['HIRED'] },
+];
+
+async function jobSummary(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const job = await prisma.job.findFirst({
+      where: { id: req.params.id, businessId, deletedAt: null },
+      select: {
+        id: true, title: true, code: true, status: true, openings: true,
+        publishedAt: true, createdAt: true, closedAt: true, closeReason: true,
+        isPublic: true, publicSlug: true, hiringManagerId: true,
+      },
+    });
+    if (!job) return res.status(404).json({ message: 'Not found' });
+    if (!scopeAllowsJob(req.recruitmentScope, job)) return res.status(404).json({ message: 'Not found' });
+
+    // group all of this job's applications by status (one query).
+    const grouped = await prisma.application.groupBy({
+      by: ['status'],
+      where: { businessId, jobId: job.id },
+      _count: { _all: true },
+    });
+    const countByStatus = {};
+    let total = 0;
+    for (const g of grouped) { countByStatus[g.status] = g._count._all; total += g._count._all; }
+
+    const at = (s) => countByStatus[s] || 0;
+    // cumulative funnel — a candidate at a later step counted every earlier step.
+    const funnel = FUNNEL_STEPS.map((step) => ({
+      key: step.key, label: step.label,
+      count: step.statuses.reduce((n, s) => n + at(s), 0),
+    }));
+
+    // count offers SENT (not just OFFERED status) for the "offer sent" line.
+    const offerSent = await prisma.offer.count({ where: { businessId, application: { is: { jobId: job.id } }, status: { in: ['SENT', 'ACCEPTED', 'DECLINED'] } } });
+
+    const outcomes = {
+      rejected: at('REJECTED'),
+      withdrawn: at('WITHDRAWN'),
+      onHold: at('ON_HOLD'),
+      knockedOut: await prisma.application.count({ where: { businessId, jobId: job.id, knockedOut: true } }),
+      hired: at('HIRED'),
+    };
+    // "waiting" = active applicants not yet rejected/withdrawn/hired.
+    const waiting = total - outcomes.rejected - outcomes.withdrawn - outcomes.hired;
+
+    // time-to-fill — opening anchor → first accepted offer (or open-for N days).
+    const openedAt = job.publishedAt || job.createdAt;
+    let firstHireAt = null;
+    if (outcomes.hired > 0) {
+      const firstAccepted = await prisma.offer.findFirst({
+        where: { businessId, application: { is: { jobId: job.id } }, status: 'ACCEPTED', respondedAt: { not: null } },
+        orderBy: { respondedAt: 'asc' }, select: { respondedAt: true },
+      });
+      firstHireAt = firstAccepted ? firstAccepted.respondedAt : job.closedAt;
+    }
+    const DAY = 24 * 60 * 60 * 1000;
+    const endAt = firstHireAt || (job.status === 'CLOSED' || job.status === 'FILLED' ? job.closedAt : new Date());
+    const timeToFillDays = openedAt && endAt ? Math.max(0, Math.round((new Date(endAt) - new Date(openedAt)) / DAY)) : null;
+
+    const slug = await businessSlug(businessId);
+    res.json({
+      job: {
+        id: job.id, title: job.title, code: job.code, status: job.status, openings: job.openings,
+        openedAt, closedAt: job.closedAt, closeReason: job.closeReason,
+        isPublic: job.isPublic, publicLink: publicCareersLink(slug, job),
+      },
+      totals: { total, ...outcomes, offerSent, waiting },
+      funnel,
+      timeToFill: {
+        days: timeToFillDays,
+        filled: firstHireAt != null,
+        openSince: openedAt,
+        asOf: endAt,
+      },
+    });
   } catch (e) { next(e); }
 }
 
@@ -309,23 +511,185 @@ const STAGE_KIND_TO_STATUS = {
   WITHDRAWN: 'WITHDRAWN',
 };
 
+// Build the Prisma `where` for the candidate-list filters. Pure + reused by both
+// the list endpoint and the bulk-action endpoint so "select-all-within-filter"
+// acts on EXACTLY the same server-side subset the UI is showing (no client trust).
+//   stage     — currentStageId
+//   status    — ApplicationStatus
+//   source    — appliedSource (PUBLIC/REFERRAL/AGENCY/MANUAL/IMPORT)
+//   knockout  — 'true' | 'false' (knockedOut flag)
+//   minScore/maxScore — meritScore range (inclusive)
+//   from/to   — createdAt date range (ISO)
+//   skill     — candidate name/email contains (free-text quick search)
+function applicationFilterWhere(q) {
+  const where = {};
+  if (q.jobId) where.jobId = q.jobId;
+  if (q.candidateId) where.candidateId = q.candidateId;
+  if (q.status) where.status = q.status;
+  if (q.stageId) where.currentStageId = q.stageId;
+  if (q.source) where.appliedSource = q.source;
+  if (q.knockout === 'true') where.knockedOut = true;
+  else if (q.knockout === 'false') where.knockedOut = false;
+  const min = q.minScore !== undefined && q.minScore !== '' ? Number(q.minScore) : null;
+  const max = q.maxScore !== undefined && q.maxScore !== '' ? Number(q.maxScore) : null;
+  if (Number.isFinite(min) || Number.isFinite(max)) {
+    where.meritScore = {};
+    if (Number.isFinite(min)) where.meritScore.gte = min;
+    if (Number.isFinite(max)) where.meritScore.lte = max;
+  }
+  const from = q.from ? new Date(q.from) : null;
+  const to = q.to ? new Date(q.to) : null;
+  if ((from && !Number.isNaN(+from)) || (to && !Number.isNaN(+to))) {
+    where.createdAt = {};
+    if (from && !Number.isNaN(+from)) where.createdAt.gte = from;
+    if (to && !Number.isNaN(+to)) where.createdAt.lte = to;
+  }
+  // free-text "skill"/search across candidate name + email (case-insensitive).
+  const term = (q.skill || q.q || '').trim();
+  if (term) {
+    where.candidate = { is: { OR: [
+      { firstName: { contains: term, mode: 'insensitive' } },
+      { lastName: { contains: term, mode: 'insensitive' } },
+      { email: { contains: term, mode: 'insensitive' } },
+    ] } };
+  }
+  return where;
+}
+
+// Apply the F1 read-scope onto a filter `where`, intersecting any caller-supplied
+// jobId with the accessible set. Mutates + returns `where` (or a match-nothing
+// where when the caller is fully out of scope). Centralised so list + bulk share it.
+function scopeApplicationWhere(where, reach, callerJobId) {
+  if (reach.all) return where;
+  if (callerJobId) {
+    where.jobId = reach.ids.includes(callerJobId) ? callerJobId : { in: [] };
+  } else {
+    where.jobId = { in: reach.ids };
+  }
+  return where;
+}
+
 async function listApplications(req, res, next) {
   try {
     const { businessId } = req.user;
-    const where = { businessId };
-    if (req.query.jobId) where.jobId = req.query.jobId;
-    if (req.query.candidateId) where.candidateId = req.query.candidateId;
-    if (req.query.status) where.status = req.query.status;
+    const q = req.query || {};
+    const where = { businessId, ...applicationFilterWhere(q) };
     // F1 scope — applications under in-scope requisitions only.
     const reach = await accessibleJobIds(businessId, req.recruitmentScope);
-    if (!reach.all) {
-      // intersect any caller-supplied jobId with the accessible set.
-      where.jobId = where.jobId && reach.ids.includes(where.jobId)
-        ? where.jobId
-        : { in: where.jobId ? [] : reach.ids };
+    scopeApplicationWhere(where, reach, q.jobId);
+
+    const page = Math.max(1, parseInt(q.page, 10) || 1);
+    const pageSize = Math.min(200, Math.max(1, parseInt(q.pageSize, 10) || 100));
+    // sort: meritScore desc | createdAt desc (default). The merit sort puts the
+    // strongest candidates first (knockouts/unscored fall to the bottom).
+    const orderBy = q.sort === 'merit'
+      ? [{ meritScore: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }]
+      : { createdAt: 'desc' };
+
+    const [total, items] = await Promise.all([
+      prisma.application.count({ where }),
+      prisma.application.findMany({
+        where, orderBy, skip: (page - 1) * pageSize, take: pageSize,
+        // hydrate the candidate so the pipeline/list renders names without N+1.
+        include: { candidate: { select: { id: true, firstName: true, lastName: true, email: true, source: true } } },
+      }),
+    ]);
+    res.json({
+      items,
+      pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
+    });
+  } catch (e) { next(e); }
+}
+
+// ── Bulk actions over the CURRENT FILTER (or an explicit id allow-list) ───────
+// POST /applications/bulk-action
+//   body: { action: 'reject'|'shortlist'|'set-status', status?, stageId?, reason?,
+//           filter?: {jobId,status,stageId,source,knockout,minScore,maxScore,from,to,skill},
+//           ids?: string[] }  — when `ids` is given they are INTERSECTED with the
+//           scoped filter set (never a blind id list), so a client can never act
+//           on an out-of-scope / cross-tenant candidate. Returns the changed count.
+//
+// SoD-safe: bulk acts on PIPELINE STAGE/STATUS only (reject/shortlist/status) —
+// it never sends/accepts offers, so the offer-approval SoD is untouched. Each
+// change is scoped to the caller's businessId + F1 reach and audited.
+const BULK_TERMINAL = new Set(['HIRED', 'REJECTED', 'WITHDRAWN']);
+
+async function bulkApplicationAction(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const body = req.body || {};
+    const action = String(body.action || '').toLowerCase();
+    if (!['reject', 'shortlist', 'set-status'].includes(action)) {
+      return res.status(400).json({ message: "action must be one of 'reject', 'shortlist', 'set-status'" });
     }
-    const items = await prisma.application.findMany({ where, orderBy: { createdAt: 'desc' } });
-    res.json({ items });
+
+    // resolve the scoped, filtered target set on the SERVER (never trust the client).
+    const filter = body.filter || {};
+    const reach = await accessibleJobIds(businessId, req.recruitmentScope);
+    const where = { businessId, ...applicationFilterWhere(filter) };
+    scopeApplicationWhere(where, reach, filter.jobId);
+    // when an explicit id allow-list is supplied, intersect it with the scoped set.
+    if (Array.isArray(body.ids) && body.ids.length) {
+      where.id = { in: body.ids.map(String) };
+    }
+
+    // load the candidate rows in-scope; we only ever touch THESE ids.
+    const targets = await prisma.application.findMany({ where, select: { id: true, status: true, jobId: true } });
+    if (!targets.length) return res.json({ changed: 0, skipped: 0, total: 0, ids: [] });
+
+    // a bulk reject/shortlist/status move is a pipeline move; terminal apps are
+    // skipped (a HIRED/REJECTED/WITHDRAWN candidate is not silently flipped).
+    const actionable = targets.filter((a) => !BULK_TERMINAL.has(a.status) || action === 'set-status');
+    const skipped = targets.length - actionable.length;
+    if (!actionable.length) return res.json({ changed: 0, skipped, total: targets.length, ids: [] });
+
+    // group target jobIds so we can resolve the right destination stage per job
+    // (each job has its own JobStage rows; the kind is shared).
+    const jobIds = [...new Set(actionable.map((a) => a.jobId))];
+    const stages = await prisma.jobStage.findMany({ where: { businessId, jobId: { in: jobIds } } });
+    const stageByJobKind = new Map();
+    for (const st of stages) stageByJobKind.set(`${st.jobId}:${st.kind}`, st);
+
+    // resolve the target (status, stageKind) for the action.
+    let targetStatus = null; let targetKind = null;
+    if (action === 'reject') { targetStatus = 'REJECTED'; targetKind = 'REJECTED'; }
+    else if (action === 'shortlist') { targetStatus = 'INTERVIEWING'; targetKind = 'INTERVIEW'; }
+    else if (action === 'set-status') {
+      targetStatus = String(body.status || '').toUpperCase();
+      const VALID = ['APPLIED', 'SCREENING', 'INTERVIEWING', 'ASSESSMENT', 'OFFERED', 'HIRED', 'REJECTED', 'WITHDRAWN', 'ON_HOLD'];
+      if (!VALID.includes(targetStatus)) {
+        return res.status(400).json({ message: `status must be one of ${VALID.join(', ')}` });
+      }
+      // map status → stage kind so the pipeline card follows the status.
+      const S2K = { APPLIED: 'SOURCED', SCREENING: 'SCREENING', INTERVIEWING: 'INTERVIEW', ASSESSMENT: 'ASSESSMENT', OFFERED: 'OFFER', HIRED: 'HIRED', REJECTED: 'REJECTED', WITHDRAWN: 'WITHDRAWN' };
+      targetKind = S2K[targetStatus] || null;
+    }
+    const reason = body.reason != null ? String(body.reason).slice(0, 500) : null;
+
+    // apply each move (per-app so we can land it on that job's stage of the kind).
+    const changedIds = [];
+    await prisma.$transaction(async (tx) => {
+      for (const a of actionable) {
+        const data = { status: targetStatus };
+        if (targetKind) {
+          const st = stageByJobKind.get(`${a.jobId}:${targetKind}`);
+          if (st) data.currentStageId = st.id;
+        }
+        if (targetStatus === 'REJECTED') data.rejectReason = reason || 'Bulk reject';
+        await tx.application.update({ where: { id: a.id }, data });
+        changedIds.push(a.id);
+      }
+    });
+
+    try {
+      await prisma.auditLog.create({ data: {
+        businessId, action: `recruitment.application.bulk.${action}`, entityType: 'Application',
+        entityId: null, actorId: req.user.id || null,
+        meta: { action, targetStatus, changed: changedIds.length, skipped, jobIds, filter },
+      } });
+    } catch { /* audit is best-effort */ }
+
+    res.json({ changed: changedIds.length, skipped, total: targets.length, ids: changedIds });
   } catch (e) { next(e); }
 }
 
@@ -334,11 +698,19 @@ async function getApplication(req, res, next) {
     const { businessId } = req.user;
     const item = await prisma.application.findFirst({
       where: { id: req.params.id, businessId },
-      include: { interviews: true, offers: true, job: { select: { hiringManagerId: true } } },
+      include: {
+        interviews: { include: { scorecards: { select: { id: true, status: true } } } },
+        offers: true,
+        candidate: { select: { id: true, firstName: true, lastName: true, email: true, phone: true, resumeUrl: true, source: true, linkedinUrl: true } },
+        job: { select: { hiringManagerId: true, title: true, countryCode: true } },
+      },
     });
     if (!item) return res.status(404).json({ message: 'Not found' });
     // F1 scope — 404 an application on an out-of-requisition job.
     if (!scopeAllowsJob(req.recruitmentScope, item.job)) return res.status(404).json({ message: 'Not found' });
+    // keep the job title/country for the UI but drop the internal scope field.
+    item.jobTitle = item.job ? item.job.title : null;
+    item.jobCountryCode = item.job ? item.job.countryCode : null;
     delete item.job;
     res.json(item);
   } catch (e) { next(e); }
@@ -785,14 +1157,20 @@ module.exports = {
   // jobs
   listJobs, getJob, createJob, updateJob, removeJob, publishJob, closeJob,
   listStages, createStage,
+  // jobs — share link + funnel summary (Feature 12 enhancement)
+  shareJob, setJobPublic, jobSummary,
   // candidates
   listCandidates, getCandidate, createCandidate, updateCandidate, removeCandidate,
-  // applications
-  listApplications, getApplication, createApplication, moveApplication,
+  // applications (+ server-side filters + bulk actions)
+  listApplications, getApplication, createApplication, moveApplication, bulkApplicationAction,
   // interviews
   listInterviews, createInterview, updateInterview,
   // offers
   listOffers, getOffer, createOffer, sendOffer, acceptOffer, declineOffer, renderOfferLetter,
-  // exported for unit-testing the pure 50% pre-flight + offer-approval SoD
-  _internals: { offerWageCheck, toMinor, validateMeritWeights, slugify, parsePanel, offerApproverConflict },
+  // exported for unit-testing the pure 50% pre-flight + offer-approval SoD +
+  // the public-link + filter helpers
+  _internals: {
+    offerWageCheck, toMinor, validateMeritWeights, slugify, parsePanel, offerApproverConflict,
+    publicCareersLink, applicationFilterWhere, scopeApplicationWhere,
+  },
 };

@@ -11,26 +11,27 @@
 //     with a "Why this rank?" drawer printing the exact formula + every line.
 // Every field has an ⓘ tooltip; lists are paginated. Server is the RBAC boundary.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { ErrorBanner, PrimaryButton, TextInput, Modal, ModalActions, Spinner } from '@hr/ui';
+import { ErrorBanner, PrimaryButton, TextInput, TextArea, Modal, ModalActions, Spinner } from '@hr/ui';
 import { get, post, patch, del } from '@/lib/api';
-import { asList, PageHeader, Tabs, StatusBadge, ActionButton } from '@/lib/ui';
-import { Info, FieldLabel, ScoreBadge, Pager, NumberInput } from '../../_components';
+import { asList, PageHeader, Tabs, ActionButton } from '@/lib/ui';
+import { Info, FieldLabel, ScoreBadge, Pager, NumberInput, StatusPill, CopyField, Check, StatCard, FunnelChart } from '../../_components';
 
 const TABS = [
-  { key: 'pipeline', label: 'Pipeline' },
+  { key: 'summary', label: 'Summary' },
+  { key: 'pipeline', label: 'Candidates' },
   { key: 'screening', label: 'Screening questions' },
   { key: 'scorecard', label: 'Interview scorecard' },
   { key: 'merit', label: 'Merit list' },
-  { key: 'publish', label: 'Publish & careers' },
+  { key: 'share', label: 'Share & careers' },
 ];
 
 export default function JobDetailPage() {
   const { id } = useParams();
   const [job, setJob] = useState(null);
-  const [tab, setTab] = useState('pipeline');
+  const [tab, setTab] = useState('summary');
   const [error, setError] = useState('');
 
   const loadJob = useCallback(async () => {
@@ -39,7 +40,7 @@ export default function JobDetailPage() {
   }, [id]);
   useEffect(() => { loadJob(); }, [loadJob]);
 
-  if (!job) return <div className="p-6"><Spinner /></div>;
+  if (!job) return <div className="p-6">{error ? <ErrorBanner message={error} /> : <Spinner />}</div>;
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
@@ -47,93 +48,369 @@ export default function JobDetailPage() {
       <PageHeader
         title={job.title}
         subtitle={`${job.code} · ${job.countryCode} · ${job.openings} opening${job.openings === 1 ? '' : 's'}`}
-        actions={<StatusBadge status={job.status} />}
+        actions={<div className="flex items-center gap-2">{job.isPublic && job.publicLink?.live && <span className="text-[11px] font-semibold text-emerald-600">● Live on careers</span>}<StatusPill status={job.status} /></div>}
       />
       {error && <ErrorBanner message={error} />}
       <Tabs tabs={TABS} active={tab} onChange={setTab} />
+      {tab === 'summary' && <SummaryTab jobId={id} onJobChanged={loadJob} onGoShare={() => setTab('share')} />}
       {tab === 'pipeline' && <PipelineTab jobId={id} />}
       {tab === 'screening' && <ScreeningTab jobId={id} />}
       {tab === 'scorecard' && <ScorecardTab job={job} onSaved={loadJob} />}
       {tab === 'merit' && <MeritTab jobId={id} />}
-      {tab === 'publish' && <PublishTab job={job} onSaved={loadJob} />}
+      {tab === 'share' && <ShareTab job={job} onSaved={loadJob} />}
     </div>
   );
 }
 
-// ── Pipeline board ──────────────────────────────────────────────────────────
-const STAGE_ORDER = ['SOURCED', 'SCREENING', 'INTERVIEW', 'ASSESSMENT', 'OFFER', 'HIRED', 'REJECTED', 'WITHDRAWN'];
-
-function PipelineTab({ jobId }) {
-  const [stages, setStages] = useState([]);
-  const [apps, setApps] = useState([]);
-  const [loading, setLoading] = useState(true);
+// ══════════════════════════════════════════════════════════════════════════
+// Summary tab — the at-a-glance hire funnel + time-to-fill + close action
+// ══════════════════════════════════════════════════════════════════════════
+function SummaryTab({ jobId, onJobChanged, onGoShare }) {
+  const [data, setData] = useState(null);
   const [error, setError] = useState('');
+  const [showClose, setShowClose] = useState(false);
 
   const load = useCallback(async () => {
-    setLoading(true); setError('');
-    try {
-      const [st, ap] = await Promise.all([
-        get(`/api/hr/recruitment/jobs/${jobId}/stages`),
-        get('/api/hr/recruitment/applications', { jobId }),
-      ]);
-      setStages(asList(st)); setApps(asList(ap));
-    } catch (e) { setError(e.message); }
-    finally { setLoading(false); }
+    setError('');
+    try { setData(await get(`/api/hr/recruitment/jobs/${jobId}/summary`)); }
+    catch (e) { setError(e.message); }
   }, [jobId]);
   useEffect(() => { load(); }, [load]);
 
-  async function moveTo(appId, stageId) {
-    try { await post(`/api/hr/recruitment/applications/${appId}/move`, { stageId }); load(); }
-    catch (e) { setError(e.message); }
+  if (!data) return error ? <ErrorBanner message={error} /> : <Spinner />;
+  const { job, totals, funnel, timeToFill } = data;
+  const ttf = timeToFill.days;
+  const isClosable = job.status === 'OPEN' || job.status === 'ON_HOLD';
+
+  return (
+    <div className="space-y-6">
+      {error && <ErrorBanner message={error} />}
+
+      {/* Headline stats */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatCard label="Total applicants" value={totals.total} tone="accent" hint="Everyone who has applied to this role." />
+        <StatCard label="In progress" value={totals.waiting} sub="not yet hired / rejected" hint="Active candidates still moving through the pipeline." />
+        <StatCard label="Offers accepted" value={totals.hired} tone="good" sub={`of ${job.openings} opening${job.openings === 1 ? '' : 's'}`} />
+        <StatCard
+          label="Time to fill" value={ttf != null ? `${ttf}d` : '—'}
+          tone={timeToFill.filled ? 'good' : 'default'}
+          sub={timeToFill.filled ? 'first hire accepted' : 'open so far'}
+          hint="Days from when the role opened to the first accepted offer (or to today if still open)."
+        />
+      </div>
+
+      {/* Funnel */}
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-gray-900">Hiring funnel
+            <Info text="How candidates flow from applied → screened → shortlisted → interview → offer → accepted. The % shows conversion from the previous stage." />
+          </h2>
+          <span className="text-xs text-gray-400">{totals.offerSent} offer{totals.offerSent === 1 ? '' : 's'} sent</span>
+        </div>
+        <FunnelChart steps={funnel} />
+        <div className="mt-4 flex flex-wrap gap-2 text-xs">
+          <span className="inline-flex items-center rounded-full border border-red-100 bg-red-50 text-red-700 px-2.5 py-1">Rejected {totals.rejected}</span>
+          <span className="inline-flex items-center rounded-full border border-amber-100 bg-amber-50 text-amber-700 px-2.5 py-1">Knocked out {totals.knockedOut}</span>
+          <span className="inline-flex items-center rounded-full border border-yellow-100 bg-yellow-50 text-yellow-700 px-2.5 py-1">On hold {totals.onHold}</span>
+          <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 text-gray-500 px-2.5 py-1">Withdrawn {totals.withdrawn}</span>
+        </div>
+      </section>
+
+      {/* Status + careers + close */}
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold text-gray-900 flex items-center gap-2">Requisition status <StatusPill status={job.status} /></div>
+            <div className="text-xs text-gray-500 mt-1">
+              Opened {job.openedAt ? new Date(job.openedAt).toLocaleDateString() : '—'}
+              {job.closedAt && ` · Closed ${new Date(job.closedAt).toLocaleDateString()}`}
+              {job.closeReason && ` · ${job.closeReason}`}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {job.isPublic && job.publicLink?.live
+              ? <button onClick={onGoShare} className="text-sm px-3 py-2 rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50">● Live — Share link</button>
+              : <button onClick={onGoShare} className="text-sm px-3 py-2 rounded-lg border" style={{ borderColor: 'var(--theme-primary)', color: 'var(--theme-primary)' }}>Share / publish</button>}
+            {isClosable && <ActionButton tone="danger" onClick={() => setShowClose(true)}>Close job</ActionButton>}
+          </div>
+        </div>
+      </section>
+
+      {showClose && <CloseJobModal jobId={jobId} onClose={() => setShowClose(false)} onClosed={() => { setShowClose(false); load(); onJobChanged && onJobChanged(); }} />}
+    </div>
+  );
+}
+
+const CLOSE_REASONS = [
+  { v: 'FILLED', label: 'Filled — all openings met', outcome: 'FILLED' },
+  { v: 'CANCELLED', label: 'Cancelled — no longer hiring', outcome: 'CANCELLED' },
+  { v: 'BUDGET', label: 'Budget frozen / on hold indefinitely', outcome: 'CANCELLED' },
+  { v: 'OTHER', label: 'Other', outcome: 'CANCELLED' },
+];
+
+function CloseJobModal({ jobId, onClose, onClosed }) {
+  const [reason, setReason] = useState('FILLED');
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const chosen = CLOSE_REASONS.find((r) => r.v === reason) || CLOSE_REASONS[0];
+
+  async function save(e) {
+    e.preventDefault();
+    setSaving(true); setError('');
+    const label = chosen.label;
+    const reasonText = note.trim() ? `${label} — ${note.trim()}` : label;
+    try {
+      await post(`/api/hr/recruitment/jobs/${jobId}/close`, { outcome: chosen.outcome, reason: reasonText });
+      onClosed();
+    } catch (err) { setError(err.message); }
+    finally { setSaving(false); }
   }
+  return (
+    <Modal title="Close this job" onClose={onClose}>
+      {error && <ErrorBanner message={error} />}
+      <form onSubmit={save} className="space-y-4">
+        <p className="text-xs text-gray-500">Closing stops new public applications. A <b>Filled</b> close marks the requisition FILLED; everything else marks it CLOSED. The reason is recorded for the audit trail.</p>
+        <div>
+          <FieldLabel hint="Why the requisition is being closed. Filled = you've hired enough; Cancelled = the role is dropped.">Reason</FieldLabel>
+          <select value={reason} onChange={(e) => setReason(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+            {CLOSE_REASONS.map((r) => <option key={r.v} value={r.v}>{r.label}</option>)}
+          </select>
+        </div>
+        <div>
+          <FieldLabel hint="Optional free-text note added to the recorded reason.">Note (optional)</FieldLabel>
+          <TextInput value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. headcount moved to Q3" />
+        </div>
+        <ModalActions>
+          <button type="button" onClick={onClose} className="px-3 py-2 text-sm text-gray-600">Cancel</button>
+          <PrimaryButton type="submit" disabled={saving}>{saving ? 'Closing…' : 'Close job'}</PrimaryButton>
+        </ModalActions>
+      </form>
+    </Modal>
+  );
+}
 
-  if (loading) return <Spinner />;
-  if (!stages.length) return <div className="text-sm text-gray-500">No pipeline stages yet. Add stages to this job (SCREENING, INTERVIEW, OFFER, HIRED, REJECTED).</div>;
+// ── Candidates / pipeline — filters + bulk-select + a clean ranked list ───────
+const STATUS_OPTIONS = ['APPLIED', 'SCREENING', 'INTERVIEWING', 'ASSESSMENT', 'OFFERED', 'HIRED', 'REJECTED', 'WITHDRAWN', 'ON_HOLD'];
+const SOURCE_OPTIONS = ['PUBLIC', 'REFERRAL', 'AGENCY', 'MANUAL', 'IMPORT'];
+const EMPTY_FILTERS = { status: '', stageId: '', source: '', knockout: '', minScore: '', maxScore: '', skill: '', from: '', to: '' };
 
-  const sorted = [...stages].sort((a, b) => a.sortOrder - b.sortOrder);
-  const byStage = (sid) => apps.filter((a) => a.currentStageId === sid);
+function PipelineTab({ jobId }) {
+  const [stages, setStages] = useState([]);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [page, setPage] = useState(1);
+  const [sort, setSort] = useState('merit');
+  const [selected, setSelected] = useState(() => new Set());
+  const [selectAllMatching, setSelectAllMatching] = useState(false); // "all within the filter"
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [notice, setNotice] = useState('');
+  const pageSize = 50;
+
+  const queryParams = useMemo(() => {
+    const q = { jobId, page, pageSize, sort };
+    for (const [k, v] of Object.entries(filters)) if (v !== '' && v != null) q[k] = v;
+    return q;
+  }, [jobId, page, sort, filters]);
+
+  const loadStages = useCallback(async () => {
+    try { setStages(asList(await get(`/api/hr/recruitment/jobs/${jobId}/stages`))); } catch { /* non-fatal */ }
+  }, [jobId]);
+  useEffect(() => { loadStages(); }, [loadStages]);
+
+  const load = useCallback(async () => {
+    setLoading(true); setError('');
+    try { setData(await get('/api/hr/recruitment/applications', queryParams)); }
+    catch (e) { setError(e.message); }
+    finally { setLoading(false); }
+  }, [queryParams]);
+  useEffect(() => { load(); }, [load]);
+
+  // a filter / page change resets the selection (the visible set changed).
+  useEffect(() => { setSelected(new Set()); setSelectAllMatching(false); }, [queryParams]);
+
+  const apps = data ? data.items : [];
+  const total = data ? data.pagination.total : 0;
+  const totalPages = data ? data.pagination.totalPages : 1;
+  const sortedStages = [...stages].sort((a, b) => a.sortOrder - b.sortOrder);
+
+  const activeFilterCount = Object.values(filters).filter((v) => v !== '' && v != null).length;
+  const setFilter = (k) => (v) => { setFilters((s) => ({ ...s, [k]: v })); setPage(1); };
+  const resetFilters = () => { setFilters(EMPTY_FILTERS); setPage(1); };
+
+  // selection helpers
+  const allOnPageSelected = apps.length > 0 && apps.every((a) => selected.has(a.id));
+  const someOnPageSelected = apps.some((a) => selected.has(a.id));
+  function togglePageAll(on) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const a of apps) { if (on) next.add(a.id); else next.delete(a.id); }
+      return next;
+    });
+    if (!on) setSelectAllMatching(false);
+  }
+  function toggleOne(id, on) {
+    setSelected((prev) => { const next = new Set(prev); if (on) next.add(id); else next.delete(id); return next; });
+    if (!on) setSelectAllMatching(false);
+  }
+  const selectionCount = selectAllMatching ? total : selected.size;
+
+  async function runBulk(action, extra = {}) {
+    setBulkBusy(true); setError(''); setNotice('');
+    try {
+      // "all within the filter" → server resolves the whole filtered set (never the
+      // page only). Otherwise send the explicit, in-scope id allow-list.
+      const filterPayload = { jobId };
+      for (const [k, v] of Object.entries(filters)) if (v !== '' && v != null) filterPayload[k] = v;
+      const body = selectAllMatching
+        ? { action, filter: filterPayload, ...extra }
+        : { action, filter: { jobId }, ids: [...selected], ...extra };
+      const res = await post('/api/hr/recruitment/applications/bulk-action', body);
+      setNotice(`${res.changed} candidate${res.changed === 1 ? '' : 's'} updated${res.skipped ? ` · ${res.skipped} skipped` : ''}.`);
+      setSelected(new Set()); setSelectAllMatching(false);
+      load();
+    } catch (e) { setError(e.message); }
+    finally { setBulkBusy(false); }
+  }
 
   return (
     <div>
       {error && <ErrorBanner message={error} />}
-      <div className="flex gap-4 overflow-x-auto pb-4">
-        {sorted.map((stage) => (
-          <div key={stage.id} className="min-w-[220px] w-56 flex-shrink-0">
-            <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2 flex items-center justify-between">
-              <span>{stage.name}</span>
-              <span className="text-gray-400">{byStage(stage.id).length}</span>
-            </div>
-            <div className="space-y-2">
-              {byStage(stage.id).map((a) => (
-                <CandidateCard key={a.id} app={a} stages={sorted} onMove={moveTo} />
-              ))}
-              {byStage(stage.id).length === 0 && <div className="text-xs text-gray-300 border border-dashed rounded-lg p-3 text-center">Empty</div>}
-            </div>
+      {notice && <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{notice}</div>}
+
+      {/* Filter bar */}
+      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm mb-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div>
+            <FieldLabel hint="Search by candidate name or email.">Search</FieldLabel>
+            <TextInput value={filters.skill} onChange={(e) => setFilter('skill')(e.target.value)} placeholder="name or email" />
           </div>
-        ))}
+          <div>
+            <FieldLabel hint="Filter to one application status.">Status</FieldLabel>
+            <select value={filters.status} onChange={(e) => setFilter('status')(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+              <option value="">Any status</option>
+              {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
+            </select>
+          </div>
+          <div>
+            <FieldLabel hint="Filter to one pipeline stage.">Stage</FieldLabel>
+            <select value={filters.stageId} onChange={(e) => setFilter('stageId')(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+              <option value="">Any stage</option>
+              {sortedStages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <FieldLabel hint="Where the application came from.">Source</FieldLabel>
+            <select value={filters.source} onChange={(e) => setFilter('source')(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+              <option value="">Any source</option>
+              {SOURCE_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div>
+            <FieldLabel hint="Hide or isolate candidates who failed a knockout question.">Knockout</FieldLabel>
+            <select value={filters.knockout} onChange={(e) => setFilter('knockout')(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+              <option value="">All</option>
+              <option value="false">Passed knockouts</option>
+              <option value="true">Knocked out</option>
+            </select>
+          </div>
+          <div>
+            <FieldLabel hint="Minimum merit score (0–100).">Min merit</FieldLabel>
+            <NumberInput value={filters.minScore} onChange={setFilter('minScore')} min={0} max={100} />
+          </div>
+          <div>
+            <FieldLabel hint="Maximum merit score (0–100).">Max merit</FieldLabel>
+            <NumberInput value={filters.maxScore} onChange={setFilter('maxScore')} min={0} max={100} />
+          </div>
+          <div>
+            <FieldLabel hint="How to order the list.">Sort</FieldLabel>
+            <select value={sort} onChange={(e) => { setSort(e.target.value); setPage(1); }} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+              <option value="merit">Merit (high → low)</option>
+              <option value="recent">Most recent</option>
+            </select>
+          </div>
+        </div>
+        <div className="flex items-center justify-between mt-3">
+          <span className="text-xs text-gray-500">{total} candidate{total === 1 ? '' : 's'}{activeFilterCount ? ` · ${activeFilterCount} filter${activeFilterCount === 1 ? '' : 's'} applied` : ''}</span>
+          {activeFilterCount > 0 && <button type="button" onClick={resetFilters} className="text-xs text-gray-500 hover:underline">Clear filters</button>}
+        </div>
       </div>
+
+      {/* Bulk action bar (sticky-feel) — appears once anything is selected */}
+      {selectionCount > 0 && (
+        <div className="rounded-xl border-2 border-dashed mb-3 px-4 py-3 flex flex-wrap items-center gap-3" style={{ borderColor: 'var(--theme-primary)', background: 'color-mix(in srgb, var(--theme-primary) 6%, white)' }}>
+          <span className="text-sm font-medium text-gray-800">{selectionCount} selected</span>
+          {/* offer "select all matching" once a whole page is ticked and more rows exist */}
+          {!selectAllMatching && allOnPageSelected && total > apps.length && (
+            <button type="button" onClick={() => setSelectAllMatching(true)} className="text-xs font-medium hover:underline" style={{ color: 'var(--theme-primary)' }}>
+              Select all {total} matching the filter
+            </button>
+          )}
+          {selectAllMatching && (
+            <button type="button" onClick={() => { setSelectAllMatching(false); setSelected(new Set()); }} className="text-xs text-gray-500 hover:underline">Clear selection</button>
+          )}
+          <div className="flex-1" />
+          <button disabled={bulkBusy} onClick={() => runBulk('shortlist')} className="text-sm px-3 py-1.5 rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">Shortlist</button>
+          <BulkStatusButton disabled={bulkBusy} onPick={(status) => runBulk('set-status', { status })} />
+          <button disabled={bulkBusy} onClick={() => { if (confirm(`Reject ${selectionCount} candidate${selectionCount === 1 ? '' : 's'}?`)) runBulk('reject', { reason: 'Bulk reject' }); }} className="text-sm px-3 py-1.5 rounded-lg border border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-50">Reject</button>
+        </div>
+      )}
+
+      {/* List */}
+      {loading ? <Spinner /> : (
+        <div className="rounded-2xl border border-gray-200 bg-white overflow-x-auto shadow-sm">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs uppercase tracking-wide text-gray-500 border-b border-gray-100">
+                <th className="px-4 py-3 w-10"><Check checked={allOnPageSelected} indeterminate={someOnPageSelected} onChange={togglePageAll} label="Select all on page" /></th>
+                <th className="px-4 py-3">Candidate</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Source</th>
+                <th className="px-4 py-3">Application</th>
+                <th className="px-4 py-3">Merit</th>
+              </tr>
+            </thead>
+            <tbody>
+              {apps.length === 0 && <tr><td colSpan={6} className="px-4 py-10 text-center text-gray-400">No candidates match these filters.</td></tr>}
+              {apps.map((a) => {
+                const checked = selectAllMatching || selected.has(a.id);
+                return (
+                  <tr key={a.id} className={`border-b border-gray-50 last:border-0 ${checked ? 'bg-indigo-50/40' : 'hover:bg-gray-50'}`}>
+                    <td className="px-4 py-3"><Check checked={checked} onChange={(on) => toggleOne(a.id, on)} label="Select candidate" /></td>
+                    <td className="px-4 py-3">
+                      <Link href={`/recruitment/applications/${a.id}`} className="font-medium text-gray-900 hover:underline">
+                        {a.candidate ? `${a.candidate.firstName} ${a.candidate.lastName}` : (a.candidateId || 'Candidate').slice(0, 8)}
+                      </Link>
+                      {a.candidate?.email && <div className="text-[11px] text-gray-400">{a.candidate.email}</div>}
+                    </td>
+                    <td className="px-4 py-3"><StatusPill status={a.status} /></td>
+                    <td className="px-4 py-3 text-xs text-gray-500">{a.appliedSource || 'MANUAL'}</td>
+                    <td className="px-4 py-3"><ScoreBadge score={a.screeningScore} max={a.screeningMaxScore} knockedOut={a.knockedOut} /></td>
+                    <td className="px-4 py-3 font-semibold tabular-nums" style={{ color: 'var(--theme-primary)' }}>{a.meritScore != null ? Number(a.meritScore) : '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <Pager page={page} totalPages={totalPages} total={total} onPage={setPage} />
     </div>
   );
 }
 
-function CandidateCard({ app, stages, onMove }) {
+// Bulk "change status" dropdown button.
+function BulkStatusButton({ onPick, disabled }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
-      <div className="flex items-start justify-between gap-2">
-        <Link href={`/recruitment/applications/${app.id}`} className="text-sm font-medium text-gray-900 hover:underline">
-          {app.candidate ? `${app.candidate.firstName} ${app.candidate.lastName}` : (app.candidateId || 'Candidate').slice(0, 8)}
-        </Link>
-        <ScoreBadge score={app.screeningScore} max={app.screeningMaxScore} knockedOut={app.knockedOut} />
-      </div>
-      <div className="mt-1 flex items-center justify-between">
-        <span className="text-[11px] text-gray-400">{app.meritScore != null ? `Merit ${Number(app.meritScore)}` : 'Not scored'}</span>
-        <button type="button" className="text-[11px] hover:underline" style={{ color: 'var(--theme-primary)' }} onClick={() => setOpen((v) => !v)}>Move</button>
-      </div>
+    <div className="relative">
+      <button disabled={disabled} onClick={() => setOpen((v) => !v)} className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50">Change status ▾</button>
       {open && (
-        <div className="mt-2 flex flex-wrap gap-1">
-          {stages.map((s) => (
-            <button key={s.id} type="button" onClick={() => onMove(app.id, s.id)} className="text-[10px] px-1.5 py-0.5 border rounded hover:bg-gray-50">{s.name}</button>
+        <div className="absolute right-0 z-20 mt-1 w-44 rounded-lg border border-gray-200 bg-white shadow-lg py-1">
+          {STATUS_OPTIONS.map((s) => (
+            <button key={s} type="button" onClick={() => { setOpen(false); onPick(s); }} className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{s.replace(/_/g, ' ')}</button>
           ))}
         </div>
       )}
@@ -471,43 +748,93 @@ function WhyDrawer({ app, onClose }) {
   );
 }
 
-// ── Publish & careers ───────────────────────────────────────────────────────
-function PublishTab({ job, onSaved }) {
+// ── Share & careers ─────────────────────────────────────────────────────────
+// The prominent "Share / public link" surface: a copyable candidate-facing URL
+// to give to job portals (LinkedIn, Naukri, Indeed…) so applicants apply DIRECTLY
+// to our portal, plus a Publish/Unpublish toggle. Candidates see the JD + apply —
+// no internal scores ever leak (the public page reads the no-score apply API).
+function ShareTab({ job, onSaved }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  async function act(path) {
+  const [link, setLink] = useState(job.publicLink || null);
+
+  // Resolve the freshest link bundle (origin may need the tenant host).
+  const refreshLink = useCallback(async () => {
+    try { const r = await get(`/api/hr/recruitment/jobs/${job.id}/share`); setLink(r.publicLink || null); }
+    catch { /* fall back to whatever getJob embedded */ }
+  }, [job.id]);
+  useEffect(() => { refreshLink(); }, [refreshLink]);
+
+  async function setPublic(isPublic) {
     setBusy(true); setError('');
-    try { await post(`/api/hr/recruitment/jobs/${job.id}/${path}`, {}); onSaved(); }
+    try {
+      const r = await post(`/api/hr/recruitment/jobs/${job.id}/set-public`, { isPublic });
+      setLink(r.publicLink || null);
+      onSaved();
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+  async function publishOpen() {
+    setBusy(true); setError('');
+    try { await post(`/api/hr/recruitment/jobs/${job.id}/publish`, {}); onSaved(); }
     catch (e) { setError(e.message); }
     finally { setBusy(false); }
   }
-  async function togglePublic() {
-    setBusy(true); setError('');
-    try { await patch(`/api/hr/recruitment/jobs/${job.id}`, { isPublic: !job.isPublic }); onSaved(); }
-    catch (e) { setError(e.message); }
-    finally { setBusy(false); }
-  }
+
+  // Build an absolute URL even when the API can't resolve the tenant host: fall
+  // back to the current browser origin + the relative careers path.
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const absJobUrl = link ? (link.url || `${origin}${link.jobPath}`) : '';
+  const absBoardUrl = link ? (link.careersUrl || `${origin}${link.careersPath}`) : '';
+  const isLive = job.isPublic && job.status === 'OPEN';
+
   return (
-    <div className="max-w-xl space-y-4">
+    <div className="max-w-2xl space-y-5">
       {error && <ErrorBanner message={error} />}
-      <div className="rounded-xl border p-4">
-        <div className="text-sm font-medium text-gray-900 mb-1">Status: <StatusBadge status={job.status} /></div>
-        <p className="text-xs text-gray-500 mb-3">Publishing flips the job to OPEN. Closing stops new applications.</p>
-        <div className="flex gap-2">
-          {job.status === 'DRAFT' && <PrimaryButton onClick={() => act('publish')} disabled={busy}>Publish (→ OPEN)</PrimaryButton>}
-          {(job.status === 'OPEN' || job.status === 'ON_HOLD') && <ActionButton tone="danger" onClick={() => act('close')}>Close job</ActionButton>}
+
+      {/* The hero share card */}
+      <section className="rounded-2xl border-2 bg-white p-5 shadow-sm" style={{ borderColor: isLive ? '#10b981' : 'var(--theme-primary)' }}>
+        <div className="flex items-start justify-between gap-3 mb-1">
+          <div>
+            <h2 className="text-base font-semibold text-gray-900">Share this job</h2>
+            <p className="text-xs text-gray-500 mt-0.5">Give this link to job portals (LinkedIn, Naukri, Indeed…). Candidates apply directly on your careers page — no account needed, and your internal scores stay private.</p>
+          </div>
+          <span className={`shrink-0 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${isLive ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+            {isLive ? '● Live' : 'Not live'}
+          </span>
         </div>
-      </div>
-      <div className="rounded-xl border p-4">
-        <label className="flex items-center gap-2 text-sm text-gray-700">
-          <input type="checkbox" checked={job.isPublic} onChange={togglePublic} disabled={busy} />
-          Show on the public careers page
-          <Info text="When ON and the job is OPEN, candidates can apply via your tenant's public careers link without an account." />
-        </label>
-        {job.isPublic && job.publicSlug && (
-          <p className="text-xs text-gray-500 mt-2">Public apply link: <code className="bg-gray-100 px-1.5 py-0.5 rounded">/api/public/careers/&lt;your-slug&gt;/jobs/{job.publicSlug}</code></p>
+
+        {job.isPublic && link ? (
+          <div className="space-y-3 mt-4">
+            <CopyField label="Public apply link" hint="The candidate-facing job page. Paste this into any job board." value={absJobUrl} openHref={absJobUrl} />
+            <CopyField label="Careers board" hint="Your full public careers board (all open public roles)." value={absBoardUrl} openHref={absBoardUrl} />
+            {!isLive && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                This link is prepared but won't resolve until the job is <b>OPEN</b>.
+                {job.status === 'DRAFT' && <button onClick={publishOpen} disabled={busy} className="ml-2 font-semibold underline">Publish now →</button>}
+              </div>
+            )}
+            <div className="flex items-center justify-between pt-1">
+              <span className="text-xs text-gray-400">slug: <code className="bg-gray-100 px-1 rounded">{link.publicSlug}</code></span>
+              <button onClick={() => setPublic(false)} disabled={busy} className="text-xs text-red-600 hover:underline">Unpublish (remove from careers)</button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-4 rounded-xl border border-dashed border-gray-300 p-5 text-center">
+            <p className="text-sm text-gray-500 mb-3">This job is internal. Publish it to the public careers board to get a shareable apply link.</p>
+            <PrimaryButton onClick={() => setPublic(true)} disabled={busy}>{busy ? 'Publishing…' : 'Publish to careers & get link'}</PrimaryButton>
+          </div>
         )}
-      </div>
+      </section>
+
+      {/* Status helper */}
+      <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-medium text-gray-900 flex items-center gap-2">Requisition status <StatusPill status={job.status} /></div>
+          {job.status === 'DRAFT' && <PrimaryButton onClick={publishOpen} disabled={busy}>Publish (→ OPEN)</PrimaryButton>}
+        </div>
+        <p className="text-xs text-gray-500 mt-2">A job must be <b>OPEN</b> for its public link to accept applications. Use the Summary tab to close the job when hiring is done.</p>
+      </section>
     </div>
   );
 }

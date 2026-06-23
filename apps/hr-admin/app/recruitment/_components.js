@@ -94,6 +94,140 @@ export function NumberInput({ value, onChange, min, max, step = 1, className = '
   );
 }
 
+// ── Status pill — a clean coloured chip for ApplicationStatus / JobStatus ──────
+const PILL_TONES = {
+  APPLIED: 'bg-blue-50 text-blue-700 border-blue-200',
+  SCREENING: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+  ASSESSMENT: 'bg-violet-50 text-violet-700 border-violet-200',
+  INTERVIEWING: 'bg-amber-50 text-amber-700 border-amber-200',
+  OFFERED: 'bg-teal-50 text-teal-700 border-teal-200',
+  HIRED: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  REJECTED: 'bg-red-50 text-red-700 border-red-200',
+  WITHDRAWN: 'bg-gray-100 text-gray-500 border-gray-200',
+  ON_HOLD: 'bg-yellow-50 text-yellow-700 border-yellow-200',
+  // job statuses
+  DRAFT: 'bg-gray-100 text-gray-600 border-gray-200',
+  OPEN: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  CLOSED: 'bg-gray-100 text-gray-500 border-gray-200',
+  FILLED: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  CANCELLED: 'bg-red-50 text-red-600 border-red-200',
+};
+export function StatusPill({ status }) {
+  if (!status) return null;
+  const tone = PILL_TONES[status] || 'bg-gray-100 text-gray-600 border-gray-200';
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${tone}`}>
+      {String(status).replace(/_/g, ' ').toLowerCase()}
+    </span>
+  );
+}
+
+// ── Copy-to-clipboard field — the shareable public link surface ───────────────
+// Renders a read-only URL with a one-click Copy button (clipboard API with a
+// select-text fallback) and an "Open ↗" affordance. Shows a transient "Copied!".
+export function CopyField({ value, label, hint, openHref }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try {
+      if (navigator.clipboard) await navigator.clipboard.writeText(value);
+      else {
+        const ta = document.createElement('textarea');
+        ta.value = value; document.body.appendChild(ta); ta.select();
+        document.execCommand('copy'); document.body.removeChild(ta);
+      }
+      setCopied(true); setTimeout(() => setCopied(false), 1600);
+    } catch { /* clipboard blocked — the field is still selectable */ }
+  }
+  return (
+    <div>
+      {label && <FieldLabel hint={hint}>{label}</FieldLabel>}
+      <div className="flex items-stretch gap-2">
+        <input
+          readOnly value={value || ''} onClick={(e) => e.target.select()}
+          className="flex-1 rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm font-mono text-gray-700 focus:outline-none focus:ring-2 truncate"
+        />
+        <button
+          type="button" onClick={copy}
+          className="shrink-0 inline-flex items-center gap-1 rounded-lg px-3 py-2 text-sm font-medium text-white shadow-sm transition"
+          style={{ background: copied ? '#059669' : 'var(--theme-primary)' }}
+        >
+          {copied ? 'Copied!' : 'Copy'}
+        </button>
+        {openHref && (
+          <a
+            href={openHref} target="_blank" rel="noreferrer"
+            className="shrink-0 inline-flex items-center rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Open ↗
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Accessible checkbox used by the bulk-select pipeline rows ─────────────────
+export function Check({ checked, indeterminate, onChange, label, className = '' }) {
+  return (
+    <input
+      type="checkbox"
+      checked={!!checked}
+      ref={(el) => { if (el) el.indeterminate = !!indeterminate && !checked; }}
+      onChange={(e) => onChange(e.target.checked)}
+      aria-label={label}
+      className={`h-4 w-4 rounded border-gray-300 cursor-pointer ${className}`}
+      style={{ accentColor: 'var(--theme-primary)' }}
+    />
+  );
+}
+
+// ── Stat card — a big number with a label, for the funnel summary header ───────
+export function StatCard({ label, value, sub, tone = 'default', hint }) {
+  const tones = {
+    default: 'text-gray-900', good: 'text-emerald-600', warn: 'text-amber-600', bad: 'text-red-600',
+    accent: '', // uses theme primary
+  };
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="text-[11px] font-medium uppercase tracking-wide text-gray-500">{label}{hint && <Info text={hint} />}</div>
+      <div className={`mt-1 text-2xl font-semibold tabular-nums ${tones[tone] || tones.default}`} style={tone === 'accent' ? { color: 'var(--theme-primary)' } : undefined}>
+        {value}
+      </div>
+      {sub && <div className="text-xs text-gray-400 mt-0.5">{sub}</div>}
+    </div>
+  );
+}
+
+// ── Funnel chart — horizontal bars (applied → … → accepted), width ∝ count ─────
+// `steps` = [{ key, label, count }]; bars scale to the first (largest) step.
+export function FunnelChart({ steps }) {
+  const top = Math.max(1, ...(steps || []).map((s) => s.count || 0));
+  const palette = ['#6366f1', '#4f46e5', '#7c3aed', '#d97706', '#0d9488', '#059669'];
+  return (
+    <div className="space-y-2">
+      {(steps || []).map((s, i) => {
+        const pct = Math.round(((s.count || 0) / top) * 100);
+        const conv = i > 0 && steps[i - 1].count ? Math.round((s.count / steps[i - 1].count) * 100) : null;
+        return (
+          <div key={s.key} className="flex items-center gap-3">
+            <div className="w-24 shrink-0 text-right text-xs font-medium text-gray-600">{s.label}</div>
+            <div className="flex-1 h-8 rounded-lg bg-gray-100 overflow-hidden relative">
+              <div
+                className="h-full rounded-lg flex items-center justify-end pr-2 transition-all"
+                style={{ width: `${Math.max(pct, s.count ? 8 : 0)}%`, background: palette[i % palette.length] }}
+              >
+                {s.count > 0 && <span className="text-xs font-semibold text-white tabular-nums">{s.count}</span>}
+              </div>
+              {s.count === 0 && <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">0</span>}
+            </div>
+            <div className="w-14 shrink-0 text-[11px] text-gray-400 tabular-nums">{conv != null ? `${conv}%` : ''}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // 1–10 skill slider used on the interviewer scoring screen.
 export function SkillSlider({ skill, value, comment, onScore, onComment }) {
   const min = skill.scaleMin ?? 1;

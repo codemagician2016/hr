@@ -9995,6 +9995,7 @@ model Job {                                             // requisition
   status      JobStatus @default(DRAFT)
   publishedAt DateTime?
   closedAt    DateTime?
+  closeReason String?  @db.Text                          // Feature 12 — why the requisition was closed (audited)
   // Feature 12 — public posting + configurable merit-blend + scoring config.
   publicSlug  String?                                  // careers URL token (unique per business when set)
   isPublic    Boolean  @default(false)                 // appears on the public careers board
