@@ -71,6 +71,16 @@ export function fetchMyProfile() {
   return apiGet('/api/hr/me/profile');
 }
 
+// Feature 14 — the AUTHORITATIVE tenant country/capability matrix for the ESS
+// app. Returns { country, currency, capabilities } sourced from Business.hrCountry
+// (the single source of truth). The ESS app gates its onboarding statutory step /
+// tax declaration / currency formatting off `capabilities`, never a hard-coded
+// literal. A pre-setup / ambiguous tenant returns 409 (HR_NOT_SET_UP /
+// HR_COUNTRY_AMBIGUOUS) — callers FAIL CLOSED (render an "HR not configured" state).
+export function fetchMyCountryContext() {
+  return apiGet('/api/hr/me/country-context');
+}
+
 // The employee's outstanding self-service tasks (in-progress onboarding, unsigned
 // e-sign envelopes, un-acknowledged assets, + approvals awaiting them). Powers the
 // dashboard "Pending tasks" card and the conditional Onboarding nav item.

@@ -21,6 +21,10 @@
 
 const prisma = require('../../core/lib/prisma');
 const payrollService = require('../payroll/service');
+// Feature 14: the tenant HR country is the single source of truth. The SP→Emp→
+// Entity chain is kept as a per-row read, but asserted against the tenant country
+// (tripwire) and falls back to it when the row carries no country.
+const { tenantCountry, assertCountry } = require('../tenant/countryContext');
 
 const NZ_TAX_CODES = new Set(['M', 'ME', 'SB', 'S', 'SH', 'ST', 'SA', 'M SL', 'ME SL', 'SB SL', 'S SL', 'SH SL', 'ST SL', 'SA SL', 'WT', 'ND', 'STC', 'CAE', 'EDW', 'NSW']);
 const KIWISAVER_RATES = new Set([0, 3, 4, 6, 8, 10]);
@@ -47,6 +51,11 @@ async function resolveActiveSelf(req) {
 // Resolve the employee's statutory country: StatutoryProfile → Employee → current
 // entity. Returns 'IN' | 'NZ' | null (fail-closed — never assume a market).
 async function resolveCountry(businessId, emp) {
+  // Feature 14 — the tenant country is authoritative. The per-row chain is kept as
+  // a TRIPWIRE: if a row carries a country it MUST equal the tenant country (else a
+  // bad backfill / quarantined tenant → throw, never serve the wrong market). When
+  // no row carries a country we fall through to the tenant country (single source).
+  const tCountry = await tenantCountry(businessId);
   const sp = await prisma.statutoryProfile.findFirst({
     where: { businessId, employeeId: emp.id },
     select: { countryCode: true },
@@ -60,7 +69,8 @@ async function resolveCountry(businessId, emp) {
     });
     cc = rec && rec.entity ? normCc(rec.entity.countryCode) : null;
   }
-  return cc;
+  if (cc) { await assertCountry(businessId, cc); return cc; }
+  return tCountry;
 }
 
 const noEmployee = (res) => res.status(404).json({ message: 'No active employee record for this account' });

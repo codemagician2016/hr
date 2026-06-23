@@ -28,6 +28,10 @@
  */
 
 const { isWeeklyOff, isHoliday, daysBetweenInclusive } = require('../attendance/derive');
+// Feature 14: the sandwich policy is sourced from the country CAPABILITY matrix
+// (the single source of truth) rather than an inline `NZ ? EXCLUSIVE : INCLUSIVE`
+// ternary. countryCapabilities is a pure sync read, so calendar.js stays PURE.
+const { countryCapabilities } = require('../tenant/countryContext');
 
 function utcDayMs(d) {
   const x = d instanceof Date ? d : new Date(d);
@@ -39,14 +43,16 @@ function isoDay(ms) {
 
 /**
  * resolveSandwich(leaveType, employee) — INCLUSIVE | EXCLUSIVE.
- * Explicit `leaveType.sandwichPolicy` wins; else NZ ⇒ EXCLUSIVE, IN/other ⇒
- * INCLUSIVE (matches IN EL). The employee's countryCode is the fallback signal.
+ * Explicit `leaveType.sandwichPolicy` wins; else the policy comes from the
+ * country capability matrix (IN=INCLUSIVE for EL; NZ=EXCLUSIVE per Holidays Act).
+ * The leaveType/employee countryCode is the per-row signal; default INCLUSIVE.
  */
 function resolveSandwich(leaveType, employee) {
   const t = leaveType || {};
   if (t.sandwichPolicy === 'INCLUSIVE' || t.sandwichPolicy === 'EXCLUSIVE') return t.sandwichPolicy;
   const cc = t.countryCode || (employee && employee.countryCode) || null;
-  return cc === 'NZ' ? 'EXCLUSIVE' : 'INCLUSIVE';
+  const caps = countryCapabilities(cc);
+  return (caps && caps.leaveSandwich) || 'INCLUSIVE';
 }
 
 /**

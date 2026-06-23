@@ -18,6 +18,8 @@ import { get, patch, post, del, downloadFile } from '@/lib/api';
 import { PageHeader, Tabs } from '@/lib/ui';
 import { FieldLabel, SectionTitle, InfoTip } from '@/lib/widgets';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
+// Feature 14 — the locked, single-country setup/badge for this tenant.
+import CountrySetupCard from '@/components/CountrySetupCard';
 
 // India-first document categories (mirrors the backend BusinessDocumentCategory enum).
 const DOC_CATEGORIES = [
@@ -406,13 +408,19 @@ export default function CompanyProfilePage() {
       />
       <div className="mt-4">
         <Tabs
-          tabs={[{ key: 'profile', label: 'Profile' }, { key: 'documents', label: 'Documents' }]}
+          tabs={[
+            { key: 'profile', label: 'Profile' },
+            { key: 'country', label: 'Country' },
+            { key: 'documents', label: 'Documents' },
+          ]}
           active={tab}
           onChange={setTab}
         />
       </div>
       <div className="mt-6">
-        {tab === 'profile' ? <ProfileTab canEdit={canEdit} /> : <DocumentsTab canEdit={canEdit} />}
+        {tab === 'profile' && <ProfileTab canEdit={canEdit} />}
+        {tab === 'country' && <CountrySetupCard canEdit={canEdit} />}
+        {tab === 'documents' && <DocumentsTab canEdit={canEdit} />}
       </div>
     </div>
   );

@@ -20,6 +20,9 @@
 const { seedJourneyTasks, advanceJourney } = require('./journeyEngine');
 const { getDefaultOnboardingTemplate } = require('./templates/seed');
 const { allocateCode } = require('./lib/codes');
+// Feature 14: onboarding template selection follows the TENANT country (single
+// source of truth), not `job.countryCode || 'IN'`.
+const { tenantCountry } = require('../tenant/countryContext');
 
 /**
  * seedOnboardingJourney(offer, tx, { hydratedOffer? } = {}) -> { journey, created }
@@ -48,7 +51,8 @@ async function seedOnboardingJourney(offer, tx, opts = {}) {
     include: { job: true },
   });
   const job = application && application.job ? application.job : null;
-  const countryCode = job && job.countryCode ? job.countryCode : 'IN';
+  // Feature 14 — the tenant country drives the onboarding template, not the job.
+  const countryCode = await tenantCountry(businessId);
   const entityId = job && job.entityId ? job.entityId : null;
 
   // Resolve the hiring manager's Employee id (owner of MANAGER-owned tasks).

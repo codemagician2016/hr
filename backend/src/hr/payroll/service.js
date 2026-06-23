@@ -28,6 +28,11 @@ const payrun = require('./payrun');
 const variance = require('./variance');
 const registry = require('./complianceRegistry');
 const filing = require('./filing');
+// Feature 14: a payroll run's entity country MUST equal the tenant country. The
+// engine still routes by the entity's countryCode (the correct per-run design);
+// this is a fail-closed TRIPWIRE at the run boundary so a quarantined / bad
+// -backfill tenant can never compute payroll for the wrong market.
+const { assertCountry } = require('../tenant/countryContext');
 
 // Publish chain (Feature 7): payslip.published webhook + HR_PAYSLIP_PUBLISHED
 // notification. Both are pre-wired libraries (not routers) invoked from publishRun.
@@ -442,6 +447,9 @@ async function createRun({ businessId, actorId, entityId, payCalendarId, periodS
     where: { id: entityId, businessId, deletedAt: null },
   });
   if (!entity) throw notFound('Entity not found');
+  // Feature 14 tripwire — the run's entity must be the tenant country. Fail-closed:
+  // a quarantined / mis-backfilled tenant cannot start a run for the wrong market.
+  if (entity.countryCode) await assertCountry(businessId, entity.countryCode);
 
   const cal = await prisma.payCalendar.findFirst({
     where: { id: payCalendarId, businessId, entityId },

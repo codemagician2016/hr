@@ -4,6 +4,13 @@ const router = express.Router();
 const { protect, requirePermission } = require('../../core/middleware/auth.middleware');
 const { attachSelfEmployee, withEmployeeScope } = require('../middleware/scope.middleware');
 const c = require('../controllers/compensation.controller');
+// FLAG (Feature 14 — shared edit): comp currency must equal the tenant currency
+// (off-currency → 422), and a structure's country must match the tenant. Kills the
+// off-currency leak path at the WRITE side (the read side is already guarded).
+const {
+  assertTenantCountryWrite,
+  assertTenantCurrencyWrite,
+} = require('../tenant/assertTenantCountry.middleware');
 
 // All compensation routes require an authenticated operator. Reads are gated by
 // canViewCompensation; writes by canManageCompensation (comp is sensitive PII).
@@ -24,7 +31,13 @@ router.get('/structures', requirePermission('canViewCompensation'), c.structures
 // PURE preview (no persistence) — backs the live builder waterfall + 50% chip.
 router.post('/structures/preview', requirePermission('canViewCompensation'), c.preview);
 router.get('/structures/:id', requirePermission('canViewCompensation'), c.structures.get);
-router.post('/structures', requirePermission('canManageCompensation'), c.structures.create);
+router.post(
+  '/structures',
+  requirePermission('canManageCompensation'),
+  assertTenantCountryWrite('body.countryCode'),
+  assertTenantCurrencyWrite('body.currencyCode'),
+  c.structures.create,
+);
 router.patch('/structures/:id', requirePermission('canManageCompensation'), c.structures.update);
 router.delete('/structures/:id', requirePermission('canManageCompensation'), c.structures.remove);
 
@@ -47,6 +60,7 @@ router.post(
   '/employees/:employeeId/revisions',
   requirePermission('canManageCompensation'),
   withEmployeeScope('compensation', { idParam: 'employeeId' }),
+  assertTenantCurrencyWrite('body.currencyCode'),
   c.revisions.create,
 );
 
