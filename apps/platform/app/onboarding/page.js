@@ -21,7 +21,7 @@
 // engine), so step 3 captures the operator's intended frequency and stores
 // it on the draft + surfaces it on the finish screen; it is NOT a blocker.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import Link from 'next/link';
 import LanguageSelector from '@/components/LanguageSelector';
@@ -113,6 +113,11 @@ const DEFAULT_STATE = {
   // Step 1
   companyName: '',
   country: 'IN',
+  // Portal subdomain — derived from the company name by default, but editable.
+  // `slugTouched` flips once the admin types in the slug field so we stop
+  // re-deriving it from the company name on subsequent name edits.
+  slug: '',
+  slugTouched: false,
   // Step 2
   entityCode: '',
   legalName: '',
@@ -158,6 +163,39 @@ function entityCodeFor(country, name) {
   return `${country}-${base}`.slice(0, 16);
 }
 
+// Subdomain slugify — mirrors the hr-admin Settings → Domain screen (and the
+// backend slugify) so the portal address chosen here matches what Settings
+// shows later: lowercase, spaces/underscores→hyphens, strip anything that
+// isn't [a-z0-9-], collapse repeats. We deliberately DON'T trim leading/
+// trailing hyphens on every keystroke (that fights the user mid-type); the
+// live preview shows the normalized value and the server re-normalizes.
+function slugifySubdomain(input) {
+  return String(input || '')
+    .toLowerCase()
+    .replace(/[\s_]+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-{2,}/g, '-');
+}
+
+// Suggest a few alternative slugs when the chosen one is taken/reserved. The
+// platform check-slug endpoint doesn't return suggestions, so we synthesize
+// them client-side (same spirit as the hr-admin UX).
+function slugSuggestions(base) {
+  const clean = slugifySubdomain(base).replace(/^-+|-+$/g, '');
+  if (!clean) return [];
+  return [`${clean}-hr`, `${clean}-app`, `get-${clean}`].filter((v, i, a) => a.indexOf(v) === i);
+}
+
+// Debounce a value by `delay` ms — used to throttle slug availability checks.
+function useDebouncedValue(value, delay = 400) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return debounced;
+}
+
 function Icon({ name, className = 'h-4 w-4' }) {
   const common = { className, fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true };
   if (name === 'check') return <svg {...common}><path d="m5 12 4 4L19 6" /></svg>;
@@ -178,7 +216,27 @@ export default function OnboardingPage() {
   const [done, setDone] = useState(null);
   const [savedBusiness, setSavedBusiness] = useState(null); // { slug, name } once setup runs
 
+  // Portal-address (subdomain) suffix + availability. Suffix comes from the
+  // same source the rest of the app uses — GET /api/business/domain-config
+  // (subdomainSuffix/platformDomain) — with an env fallback, so onboarding and
+  // Settings → Domain agree on the host shape (staging is HYPHENATED:
+  // {slug}-staging.drifthr.com → suffix "-staging.drifthr.com").
+  const [domainConfig, setDomainConfig] = useState(null);
+  const [slugCheck, setSlugCheck] = useState(null);   // { available, reason, url, ... } from check-slug
+  const [slugChecking, setSlugChecking] = useState(false);
+
   const country = COUNTRIES.find((c) => c.code === s.country) || COUNTRIES[0];
+
+  // Resolve the subdomain suffix like the hr-admin Settings → Domain screen.
+  const platformDomain =
+    domainConfig?.platformDomain || process.env.NEXT_PUBLIC_PLATFORM_DOMAIN || 'drifthr.com';
+  const suffix = domainConfig?.subdomainSuffix || `.${platformDomain}`;
+
+  // Effective slug: the admin's choice once they've touched the field, else the
+  // live derivation from the company name. Normalized for preview + checks.
+  const derivedSlug = slugifySubdomain(s.companyName);
+  const effectiveSlug = s.slugTouched ? slugifySubdomain(s.slug) : derivedSlug;
+  const debouncedSlug = useDebouncedValue(effectiveSlug, 400);
 
   useEffect(() => { document.title = 'Set up your company · HR'; }, []);
 
@@ -246,12 +304,68 @@ export default function OnboardingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s.companyName, s.country]);
 
+  // Resolve the subdomain suffix once — same endpoint the Settings → Domain
+  // screen uses. Degrades to the env fallback if the endpoint isn't reachable.
+  useEffect(() => {
+    axios.get('/api/business/domain-config', { withCredentials: true })
+      .then(({ data }) => setDomainConfig(data || {}))
+      .catch(() => setDomainConfig({}));
+  }, []);
+
+  // Debounced, abortable availability check against /api/business/check-slug —
+  // mirrors the hr-admin Settings → Domain flow. Each request is tagged with the
+  // slug it was made for so a stale resolve can't overwrite a newer query.
+  useEffect(() => {
+    if (!debouncedSlug) { setSlugCheck(null); setSlugChecking(false); return undefined; }
+    const ctrl = new AbortController();
+    const forQuery = debouncedSlug;
+    setSlugChecking(true);
+    axios.get(`/api/business/check-slug?slug=${encodeURIComponent(forQuery)}`, {
+      withCredentials: true,
+      signal: ctrl.signal,
+    })
+      .then(({ data }) => {
+        if (forQuery === slugifySubdomain(effectiveSlug)) { setSlugCheck(data); setSlugChecking(false); }
+      })
+      .catch((err) => {
+        if (axios.isCancel?.(err) || err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError') return;
+        if (forQuery === slugifySubdomain(effectiveSlug)) {
+          setSlugCheck({ slug: forQuery, available: false, reason: 'Invalid slug' });
+          setSlugChecking(false);
+        }
+      });
+    return () => ctrl.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSlug]);
+
   function patch(arg) {
     setS((prev) => ({ ...prev, ...(typeof arg === 'function' ? arg(prev) : arg) }));
   }
 
+  // ---- Portal-address verdict ---------------------------------------------
+  // The platform check-slug endpoint returns { available, reason } where reason
+  // is a human string ("Already in use" / "This name is reserved" / "Invalid
+  // slug"). Map it to the same ok/warn/bad tones the Settings screen uses.
+  const slugVerdict = useMemo(() => {
+    if (!effectiveSlug) return { tone: 'bad', text: 'Pick a portal address.' };
+    if (slugChecking || !slugCheck) return null; // checking…
+    if (slugCheck.available) return { tone: 'ok', text: 'Available — this address is free.' };
+    const reason = String(slugCheck.reason || '').toLowerCase();
+    if (reason.includes('reserved'))
+      return { tone: 'warn', text: 'Reserved — that word is held back. Try one of the suggestions below.' };
+    if (reason.includes('use') || reason.includes('taken'))
+      return { tone: 'bad', text: 'Taken — another business already uses this address.' };
+    return { tone: 'bad', text: 'Not a valid address — use letters, numbers and hyphens.' };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveSlug, slugChecking, slugCheck]);
+
+  // Block proceeding only when the slug is empty/taken/reserved/invalid. While a
+  // check is still in flight we allow the (untouched) derived default through —
+  // the server re-validates the chosen slug on setup and 409s if it's gone.
+  const slugReady = !!effectiveSlug && (slugVerdict === null || slugVerdict.tone === 'ok');
+
   // ---- Per-step validity --------------------------------------------------
-  const companyReady = s.companyName.trim().length >= 2 && !!s.country;
+  const companyReady = s.companyName.trim().length >= 2 && !!s.country && slugReady;
 
   const entityReady = (() => {
     if (!s.legalName.trim() || !s.entityCode.trim()) return false;
@@ -293,18 +407,22 @@ export default function OnboardingPage() {
     setSubmitting(true);
     setError('');
     try {
-      // 1) Business setup (idempotent for the current session's tenant).
+      // 1) Business setup (idempotent for the current session's tenant). Use
+      //    the admin's chosen portal address — strip leading/trailing hyphens
+      //    so the slug we send matches what the backend slugify produces (the
+      //    live field tolerates them mid-type; the server re-normalizes).
+      const chosenSlug = slugifySubdomain(effectiveSlug).replace(/^-+|-+$/g, '');
       let business = savedBusiness;
       if (!business) {
         const setupRes = await axios.post('/api/business/setup?onboarding=1', {
           name: s.companyName,
-          slug: slugify(s.companyName) || undefined,
+          slug: chosenSlug || undefined,
           country: s.country,
           timezone: country.timezone,
           vertical: 'STATIC',
           description: `${s.companyName} — HR & payroll`,
         }, { withCredentials: true });
-        business = setupRes.data?.business || { name: s.companyName, slug: slugify(s.companyName) };
+        business = setupRes.data?.business || { name: s.companyName, slug: chosenSlug };
         setSavedBusiness(business);
       }
 
@@ -385,6 +503,12 @@ export default function OnboardingPage() {
         window.location.href = `/login?redirect=${encodeURIComponent('/onboarding')}`;
         return;
       }
+      // Slug taken/reserved between the live check and submit — send the admin
+      // back to the company step to pick another portal address.
+      if (err.response?.status === 409) {
+        setSlugCheck({ slug: slugifySubdomain(effectiveSlug), available: false, reason: 'Already in use' });
+        setStep(0);
+      }
       setError(err.response?.data?.message || err.message || 'Something went wrong. Please try again.');
     } finally {
       setSubmitting(false);
@@ -431,7 +555,18 @@ export default function OnboardingPage() {
           </div>
 
           <div className="px-5 py-5 md:px-8 md:py-6">
-            {current.key === 'company' && <StepCompany s={s} patch={patch} />}
+            {current.key === 'company' && (
+              <StepCompany
+                s={s}
+                patch={patch}
+                suffix={suffix}
+                derivedSlug={derivedSlug}
+                effectiveSlug={effectiveSlug}
+                slugChecking={slugChecking}
+                slugVerdict={slugVerdict}
+                slugCheck={slugCheck}
+              />
+            )}
             {current.key === 'entity' && <StepEntity s={s} patch={patch} country={country} />}
             {current.key === 'paycal' && <StepPayCalendar s={s} patch={patch} />}
             {current.key === 'people' && <StepPeople s={s} patch={patch} />}
@@ -513,7 +648,25 @@ function Stepper({ step, setStep, maxReachable }) {
 // --------------------------------------------------------------------------
 // Step 1 — Company
 // --------------------------------------------------------------------------
-function StepCompany({ s, patch }) {
+function StepCompany({ s, patch, suffix, derivedSlug, effectiveSlug, slugChecking, slugVerdict, slugCheck }) {
+  // What the field shows: the admin's typed value once touched, else the live
+  // derivation from the company name (so they always see the address).
+  const slugFieldValue = s.slugTouched ? s.slug : derivedSlug;
+  const previewSlug = slugifySubdomain(effectiveSlug) || '…';
+
+  const verdictTone =
+    slugVerdict?.tone === 'ok' ? 'text-emerald-700'
+    : slugVerdict?.tone === 'warn' ? 'text-amber-700'
+    : slugVerdict?.tone === 'bad' ? 'text-red-600'
+    : 'text-gray-500';
+
+  // The platform check-slug endpoint doesn't return suggestions; synthesize a
+  // few when the chosen address is reserved/taken so the admin can recover.
+  const suggestions =
+    slugVerdict && slugVerdict.tone !== 'ok' && !slugChecking && slugCheck && !slugCheck.available
+      ? slugSuggestions(effectiveSlug)
+      : [];
+
   return (
     <div className="space-y-6">
       <div>
@@ -523,6 +676,56 @@ function StepCompany({ s, patch }) {
           placeholder="e.g. Acme Technologies" autoFocus />
         <p className="mt-1 text-xs text-gray-400">This is the workspace name your team will see.</p>
       </div>
+
+      {/* Portal address (subdomain). Default-derived from the company name; the
+          admin can edit it. Live preview + availability check against the same
+          endpoints the Settings → Domain screen uses. */}
+      <div>
+        <label className={LABEL_CLASS} htmlFor="portalSlug">Your portal address</label>
+        <div className="flex items-stretch max-w-lg">
+          <input
+            id="portalSlug"
+            className="min-w-0 flex-1 rounded-l-lg border border-r-0 border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-950 outline-none transition placeholder:text-gray-400 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100"
+            value={slugFieldValue}
+            maxLength={60}
+            autoComplete="off"
+            spellCheck={false}
+            aria-describedby="portalSlug-preview portalSlug-verdict"
+            onChange={(e) => patch({ slug: e.target.value, slugTouched: true })}
+            placeholder="your-company"
+          />
+          <span className="inline-flex items-center rounded-r-lg border border-l-0 border-gray-300 bg-gray-50 px-3 text-sm text-gray-500 whitespace-nowrap">
+            {suffix}
+          </span>
+        </div>
+
+        <p id="portalSlug-preview" className="mt-2 text-sm text-gray-600">
+          Your portal will be{' '}
+          <span className="font-semibold text-gray-900">{previewSlug}{suffix}</span>
+        </p>
+
+        <p id="portalSlug-verdict" className={`mt-1 min-h-[1.25rem] text-sm ${verdictTone}`} aria-live="polite">
+          {slugChecking ? 'Checking availability…' : slugVerdict?.text || ''}
+        </p>
+
+        {suggestions.length > 0 && (
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <span className="text-xs text-gray-500">Try:</span>
+            {suggestions.map((sg) => (
+              <button
+                key={sg}
+                type="button"
+                onClick={() => patch({ slug: sg, slugTouched: true })}
+                className="rounded-md border border-gray-300 px-2 py-0.5 text-xs font-medium text-gray-700 transition hover:bg-gray-50"
+              >
+                {sg}
+              </button>
+            ))}
+          </div>
+        )}
+        <p className="mt-1 text-xs text-gray-400">Where your team signs in. Letters, numbers and hyphens only — you can change it later in Settings.</p>
+      </div>
+
       <div>
         <span className={LABEL_CLASS}>Operating country</span>
         <div className="grid gap-3 sm:grid-cols-2">
