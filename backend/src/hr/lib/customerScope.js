@@ -20,19 +20,30 @@
  */
 
 const prisma = require('../../core/lib/prisma');
-const { resolveAccessibleEmployeeIds } = require('./scopeResolver');
+const { resolveAccessibleEmployeeIds, APPROVAL_ACTIONS } = require('./scopeResolver');
+
+const ACTOR_SELECT = { id: true, businessId: true, managerEmployeeId: true, isActive: true, status: true, userId: true };
 
 // Resolve the customer's Employee + the band from its linked User.businessRole.
 async function resolveCustomerActor(customer) {
   if (!customer || !customer.businessId || !customer.email) return { actor: null, employee: null };
   const businessId = customer.businessId;
-  // Match the same way the ESS self-resolution does: workEmail/personalEmail, then User.
+  // Deterministic resolution (F13 hardening): prefer the LOGIN identity — the linked
+  // portal User.email (which carries a global unique constraint) — then the official
+  // workEmail, and only LAST the self-editable personalEmail. personalEmail is a
+  // self-service field; keeping it the lowest-priority key means a self-edited
+  // personalEmail can never hijack another account's session/scope resolution. (A
+  // collision is independently rejected at write time in profileFieldValidate /
+  // meProfileRich, so two rows can't share an email anyway.)
   const emp = await prisma.employee.findFirst({
-    where: { businessId, deletedAt: null, OR: [{ workEmail: customer.email }, { personalEmail: customer.email }] },
-    select: { id: true, businessId: true, managerEmployeeId: true, isActive: true, status: true, userId: true },
-  }) || await prisma.employee.findFirst({
     where: { businessId, deletedAt: null, user: { is: { email: customer.email } } },
-    select: { id: true, businessId: true, managerEmployeeId: true, isActive: true, status: true, userId: true },
+    select: ACTOR_SELECT,
+  }) || await prisma.employee.findFirst({
+    where: { businessId, deletedAt: null, workEmail: customer.email },
+    select: ACTOR_SELECT,
+  }) || await prisma.employee.findFirst({
+    where: { businessId, deletedAt: null, personalEmail: customer.email },
+    select: ACTOR_SELECT,
   });
   if (!emp) return { actor: null, employee: null };
 
@@ -66,8 +77,49 @@ async function resolveCustomerActor(customer) {
 async function resolveCustomerScope(customer, action) {
   const { actor, employee } = await resolveCustomerActor(customer);
   if (!actor) return { scope: { kind: 'NONE' }, actor: null, employee: null };
-  const scope = await resolveAccessibleEmployeeIds(actor, action);
+  let scope = await resolveAccessibleEmployeeIds(actor, action);
+
+  // F13 hardening — ALL-band SoD self-exclusion on the MSS (customer) surface.
+  // resolveAccessibleEmployeeIds returns the ALL fast-path (no in-list) BEFORE the
+  // APPROVAL_ACTIONS self-drop, so an ESS user whose role band is ALL would otherwise
+  // read the WHOLE tenant's pending leave/expense (including their OWN requests) on the
+  // /me/team approval endpoints, and scopeAllows(ALL) would let them reach the engine
+  // to decide their own row (the engine SoD still blocks the finalize, but the
+  // read/own-request visibility is a SoD leak). For an approval action we therefore
+  // narrow the ALL band to an explicit id-set = the actor's reporting sub-tree MINUS
+  // self, so the manager-inbox path can never read-as-approver nor decide their OWN
+  // request via /me/team. Non-approval reads (roster/directory/org) keep ALL.
+  if (scope && scope.kind === 'ALL' && APPROVAL_ACTIONS.has(action) && employee) {
+    const ids = await reportingSubtreeIds(employee.businessId, employee.id);
+    ids.delete(employee.id); // SoD: drop self from the approver scope
+    scope = ids.size ? { kind: 'IDS', ids } : { kind: 'NONE' };
+  }
+
   return { scope, actor, employee };
+}
+
+// The recursive reporting sub-tree rooted at `rootId` (direct + indirect reports),
+// tenant-scoped, soft-delete-aware — identical math to scopeResolver's TEAM CTE. Used
+// only to materialise an explicit id-set when narrowing the ALL band for an approval
+// action on the customer/MSS surface (so the ALL fast-path can be self-excluded).
+async function reportingSubtreeIds(businessId, rootId) {
+  const ids = new Set([rootId]);
+  const rows = await prisma.$queryRaw`
+    WITH RECURSIVE subtree AS (
+      SELECT id FROM "Employee"
+        WHERE "managerEmployeeId" = ${rootId}
+          AND "businessId" = ${businessId}
+          AND "deletedAt" IS NULL
+      UNION
+      SELECT e.id FROM "Employee" e
+        JOIN subtree s ON e."managerEmployeeId" = s.id
+        WHERE e."businessId" = ${businessId}
+          AND e."deletedAt" IS NULL
+    )
+    SELECT id FROM subtree
+  `;
+  for (const r of rows) ids.add(r.id);
+  return ids;
 }
 
 module.exports = { resolveCustomerScope, resolveCustomerActor };

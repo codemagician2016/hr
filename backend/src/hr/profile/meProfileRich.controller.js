@@ -203,6 +203,17 @@ async function applyEmployeeFields(req, res, fields) {
     const vr = validateField(key, raw);
     if (!vr.ok) { errors[key] = vr.error; continue; }
     if (pol.policy === 'self-edit' && pol.model === 'employee') {
+      // personalEmail is self-editable but is ALSO an ESS-resolution candidate key
+      // (resolveSelfEmployee / resolveCustomerActor match on personalEmail). A
+      // self-set value that collides with ANOTHER account's email in the tenant could
+      // poison cross-account resolution (the attacker's row resolving for the victim's
+      // session) and pollute directory/identity joins. Reject any collision so the
+      // self-editable field can never become an ambiguous resolution key. (Resolution
+      // also prefers the login User/workEmail over personalEmail — see customerScope.)
+      if (key === 'personalEmail' && vr.value) {
+        const taken = await personalEmailCollides(businessId, emp.id, vr.value);
+        if (taken) { errors[key] = 'This email is already in use by another account'; continue; }
+      }
       selfEdit[key] = vr.value;
     } else if (pol.policy === 'hr-approval') {
       gated.push({ field: key, newValue: vr.value });
@@ -236,6 +247,42 @@ async function applyEmployeeFields(req, res, fields) {
   }
 
   return res.json({ applied, pending, errors: Object.keys(errors).length ? errors : undefined });
+}
+
+// True when `email` (a normalised personalEmail being self-set by `selfEmpId`) is
+// already used — as workEmail OR personalEmail of ANY OTHER employee, or as the login
+// email of ANY User — within the SAME tenant. Case-insensitive (emails are compared
+// case-insensitively to match auth). This is the uniqueness gate that keeps a
+// self-editable personalEmail from colliding with another account's resolution key.
+async function personalEmailCollides(businessId, selfEmpId, email) {
+  const e = String(email).trim();
+  if (!e) return false;
+  const empHit = await prisma.employee.findFirst({
+    where: {
+      businessId,
+      deletedAt: null,
+      id: { not: selfEmpId },
+      OR: [
+        { workEmail: { equals: e, mode: 'insensitive' } },
+        { personalEmail: { equals: e, mode: 'insensitive' } },
+      ],
+    },
+    select: { id: true },
+  });
+  if (empHit) return true;
+  // A User.email is the login/auth identity; never let a self-set personalEmail shadow
+  // another account's login. Exclude the caller's OWN linked user (self) — a user may
+  // mirror their own login email into their personalEmail field. The back-relation from
+  // User → Employee is `hrEmployee` (the ESS portal link).
+  const userHit = await prisma.user.findFirst({
+    where: {
+      businessId,
+      email: { equals: e, mode: 'insensitive' },
+      NOT: { hrEmployee: { is: { id: selfEmpId } } },
+    },
+    select: { id: true },
+  });
+  return !!userHit;
 }
 
 // Open ONE ProfileChangeRequest(PENDING) + an ApprovalRequest(PROFILE_CHANGE) via the
@@ -359,5 +406,5 @@ module.exports = {
   submitChangeRequests,
   listChangeRequests,
   // exported for the section sub-controllers + tests
-  _internals: { resolveSelf, openChangeRequest, applyEmployeeFields, currentValueOf, PROFILE_SELECT },
+  _internals: { resolveSelf, openChangeRequest, applyEmployeeFields, currentValueOf, personalEmailCollides, PROFILE_SELECT },
 };
