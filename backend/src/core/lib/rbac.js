@@ -33,6 +33,14 @@ const PERMISSIONS = Object.freeze({
   canManageOnboarding:  'Onboarding templates + run pipeline + provision',
   canRunSeparation:     'Initiate/run separation + FnF (distinct from terminate)',
   canGenerateLetters:   'Generate offer/relieving/experience letters',
+  // Performance & Goals (Feature 8) — additive; no migration. canViewTeamPerformance
+  // is the Manager TEAM-band read key; canManagePerformanceCycle is HR-admin config
+  // (cycles/templates/scales/reopen/release); canCalibrateRatings is the skip-level
+  // calibration-participation grant. ESS USER self-access stays implicit (own goals +
+  // own review when released) — no key needed, the scope band (SELF) carries it.
+  canManagePerformanceCycle: 'Create/configure review cycles, templates, scales; reopen/calibrate',
+  canCalibrateRatings:       'Participate in calibration sessions for own org sub-tree',
+  canViewTeamPerformance:    "View reports' goals + reviews (TEAM band)",
 });
 
 const PERMISSION_KEYS = Object.freeze(Object.keys(PERMISSIONS));
@@ -53,6 +61,8 @@ const SYSTEM_ROLES = Object.freeze({
     canManageOrg: true, canEditBranding: true,
     // Feature 4 — HR-Admin owns the lifecycle (onboarding/separation/letters).
     canManageOnboarding: true, canRunSeparation: true, canGenerateLetters: true,
+    // Feature 8 — HR-Admin owns performance config + calibration + team visibility.
+    canManagePerformanceCycle: true, canCalibrateRatings: true, canViewTeamPerformance: true,
     // No canEditBilling / canEditDomain / canApprovePayroll — Owner/Finance only
   },
   // Finance — payroll + compensation + statutory + billing.
@@ -69,6 +79,10 @@ const SYSTEM_ROLES = Object.freeze({
     canViewEmployees: true,
     canApproveLeave: true,
     canManageAttendance: true,
+    // Feature 8 — a Manager sees their reports' goals + reviews (TEAM band carries the
+    // sub-tree scope); calibration/cycle-config stay HR-only. Manager review-submit is
+    // gated by canViewTeamPerformance + the reviewer≠reviewee SoD (APPROVAL_ACTIONS).
+    canViewTeamPerformance: true,
   },
 });
 

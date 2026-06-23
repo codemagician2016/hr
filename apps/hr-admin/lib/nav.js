@@ -25,6 +25,11 @@ export const NAV_ITEMS = [
   { key: 'expenses', label: 'Expenses', href: '/expenses', feature: 'hr', permission: 'canViewEmployees' },
   { key: 'loans', label: 'Loans', href: '/loans', feature: 'hr', permission: 'canViewEmployees' },
   { key: 'documents', label: 'Documents', href: '/documents', feature: 'hr', permission: 'canViewEmployees' },
+  // Performance & Goals (Feature 8). Visible to Managers (TEAM band — their reports'
+  // goals/reviews, server-scoped) + HR-Admin (cycle config behind
+  // canManagePerformanceCycle, hidden via hasPermission on the page). Server is the
+  // real boundary; this just shows the tab to anyone with team-performance read.
+  { key: 'performance', label: 'Performance', href: '/performance', feature: 'hr', permission: 'canViewTeamPerformance' },
   { key: 'payroll', label: 'Payroll', href: '/payroll', feature: 'payroll', permission: 'canRunPayroll' },
   { key: 'reports', label: 'Reports', href: '/reports', feature: 'payroll', permission: 'canViewPayrollReports' },
   { key: 'settings', label: 'Settings', href: '/settings', permission: 'canEditBranding' },
@@ -37,6 +42,8 @@ const PERMISSION_KEYS = [
   'canApproveLeave', 'canManageAttendance', 'canRunPayroll', 'canApprovePayroll',
   'canViewPayrollReports', 'canManageStatutory', 'canFileReturns', 'canManageOrg',
   'canEditBilling', 'canEditDomain', 'canEditBranding',
+  // Feature 8
+  'canManagePerformanceCycle', 'canCalibrateRatings', 'canViewTeamPerformance',
 ];
 const ALL_TRUE = Object.fromEntries(PERMISSION_KEYS.map((k) => [k, true]));
 
