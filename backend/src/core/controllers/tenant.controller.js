@@ -157,7 +157,13 @@ async function resolve(req, res) {
   }
 
   let business = null;
+  // Tenant subdomain hosts: `{slug}.{PLATFORM_DOMAIN}` (prod apex) OR the
+  // 1-level HYPHENATED staging form `{slug}-{PLATFORM_DOMAIN}` (e.g.
+  // acme-staging.drifthr.com) so SSL stays under the *.drifthr.com wildcard.
+  // Both resolve by SLUG (no customDomainStatus gate) — only true bring-your-own
+  // custom domains go through the routable/ACTIVE check below.
   const platformSuffix = `.${PLATFORM_DOMAIN}`;
+  const hyphenSuffix = `-${PLATFORM_DOMAIN}`;
 
   if (slug) {
     if (!/^[a-z0-9-]+$/.test(slug) || RESERVED_SUBDOMAINS.has(slug)) {
@@ -173,9 +179,11 @@ async function resolve(req, res) {
     });
   } else if (host === PLATFORM_DOMAIN) {
     return res.status(404).json({ message: 'Platform domain is not a tenant' });
-  } else if (host.endsWith(platformSuffix)) {
-    // Subdomain tenant, e.g. "acme-barber-shop.drifthr.com"
-    const sub = host.slice(0, -platformSuffix.length);
+  } else if (host.endsWith(hyphenSuffix) || host.endsWith(platformSuffix)) {
+    // Subdomain tenant — dotted (acme.drifthr.com) or hyphenated staging
+    // (acme-staging.drifthr.com). Strip whichever suffix matched (hyphen first).
+    const matched = host.endsWith(hyphenSuffix) ? hyphenSuffix : platformSuffix;
+    const sub = host.slice(0, -matched.length);
     if (!sub || sub.includes('.') || RESERVED_SUBDOMAINS.has(sub)) {
       return res.status(404).json({ message: 'Not a tenant' });
     }

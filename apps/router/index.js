@@ -329,10 +329,16 @@ function resolveEssPort(pathname) {
 function platformTenantSlug(host) {
   const cleanHost = (host || '').toLowerCase().split(':')[0];
   const platformDomain = (process.env.PLATFORM_DOMAIN || 'hr.com').toLowerCase();
-  const suffix = `.${platformDomain}`;
-  if (!cleanHost.endsWith(suffix)) return null;
-
-  const slug = cleanHost.slice(0, -suffix.length);
+  // Tenant subdomain hosts come in two shapes:
+  //   {slug}.{platformDomain}   — prod apex (acme.drifthr.com)
+  //   {slug}-{platformDomain}   — sub-labelled staging domain, 1-level HYPHENATED
+  //                               (acme-staging.drifthr.com) so SSL stays under the
+  //                               *.drifthr.com wildcard. Try the hyphen form first.
+  const dotSuffix = `.${platformDomain}`;
+  const hyphenSuffix = `-${platformDomain}`;
+  let slug = null;
+  if (cleanHost.endsWith(hyphenSuffix)) slug = cleanHost.slice(0, -hyphenSuffix.length);
+  else if (cleanHost.endsWith(dotSuffix)) slug = cleanHost.slice(0, -dotSuffix.length);
   if (!slug || slug.includes('.') || RESERVED_SUBDOMAINS.has(slug)) return null;
   return slug;
 }
