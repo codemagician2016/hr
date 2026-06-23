@@ -348,9 +348,16 @@ function platformSubdomainForHost(cleanHost, platformDomain) {
   const apex = (platformDomain || '').toLowerCase();
   if (!host || !apex) return null;
   if (host === apex) return '';
-  const suffix = `.${apex}`;
-  if (!host.endsWith(suffix)) return null;
-  return host.slice(0, -suffix.length);
+  // Tenant/app subdomain hosts: `{slug}.{apex}` (prod) OR the 1-level HYPHENATED
+  // staging host `{slug}-{apex}` (e.g. demo-staging.drifthr.com, app-staging.…),
+  // which keeps SSL under the *.drifthr.com wildcard. Try the hyphen form first
+  // so per-tenant hosts resolve by SLUG (no customDomainStatus gate) instead of
+  // falling through to the custom-domain ACTIVE-status path.
+  const hyphenSuffix = `-${apex}`;
+  if (host.endsWith(hyphenSuffix)) return host.slice(0, -hyphenSuffix.length);
+  const dotSuffix = `.${apex}`;
+  if (host.endsWith(dotSuffix)) return host.slice(0, -dotSuffix.length);
+  return null;
 }
 
 async function lookupDomainRouteFromBackend(host) {
