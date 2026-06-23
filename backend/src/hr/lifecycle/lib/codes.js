@@ -21,6 +21,15 @@ const SCOPE_DEFAULTS = Object.freeze({
   OFFBOARD: { prefix: 'OFB-', padding: 6 },
   // Separation cases (Feature 4 §4.3 / §8 slice 4f) — SEP-000017 etc.
   SEP: { prefix: 'SEP-', padding: 6 },
+  // Employee master human codes — EMP-000001 etc. The padding-6 default matches
+  // the lifecycle provisionEmployee path (which already mints EMP- codes), so a
+  // tenant that never configures a scheme keeps the existing format and the
+  // provision tests stay green. The admin CAN override prefix/padding/next-start
+  // per tenant via the Employee-number settings page (it edits the
+  // (businessId, scope:'EMPLOYEE') NumberSequence row, and allocateCode reads the
+  // stored prefix/padding once the row exists). India-first: a custom prefix like
+  // "EMP-IN-" with padding 4 ("EMP-IN-0001") is a one-field change.
+  EMPLOYEE: { prefix: 'EMP-', padding: 6 },
   // Letters & Communication (Feature 9 §6) — LTR-0001 etc. The caller passes a
   // periodKey (the tax year, e.g. "2026-27") so the sequence resets yearly via
   // the (businessId, entityId, scope, periodKey) NumberSequence row.

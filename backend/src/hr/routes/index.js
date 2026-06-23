@@ -13,6 +13,11 @@ const router = express.Router();
 require('../approvals/registerConsumers');
 
 router.use('/employees', require('./employee.routes'));
+// Company Profile settings — business legal/registration profile, the OPTIONAL
+// company-document vault (licences/tax reports/financials/registration+GST
+// certificates), and the auto employee-number scheme. Gated on
+// canManageCompanyProfile (Owner + HR-Admin); tenant-scoped + audited.
+router.use('/company-profile', require('./companyProfile.routes'));
 router.use('/org', require('./org.routes'));
 router.use('/leave', require('./leave.routes'));
 router.use('/attendance', require('./attendance.routes'));

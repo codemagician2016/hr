@@ -6,6 +6,36 @@
 const prisma = require('../../core/lib/prisma');
 const { writeAudit } = require('../../core/lib/audit');
 const { scopeWhere } = require('../lib/scopeResolver');
+const { allocateCode, SCOPE_DEFAULTS } = require('../lifecycle/lib/codes');
+
+const EMP_SCOPE = 'EMPLOYEE';
+const EMP_DEFAULTS = SCOPE_DEFAULTS[EMP_SCOPE] || { prefix: 'EMP-', padding: 6 };
+
+// Ensure the tenant-wide EMPLOYEE NumberSequence row exists + is COMMITTED before
+// we attempt an auto-numbered create. This matters for the collision-retry path:
+// if allocateCode created the row inside a transaction that then aborted (insert
+// hit a duplicate code), the row creation rolls back too — so a standalone bump of
+// nextValue would touch nothing and the retry would re-mint the same value. A
+// committed row lets the between-attempts bump actually advance the series.
+async function ensureEmployeeSequence(businessId) {
+  const existing = await prisma.numberSequence.findFirst({
+    where: { businessId, entityId: null, scope: EMP_SCOPE, periodKey: null },
+    select: { id: true },
+  });
+  if (existing) return;
+  try {
+    await prisma.numberSequence.create({
+      data: {
+        businessId, entityId: null, scope: EMP_SCOPE, periodKey: null,
+        prefix: EMP_DEFAULTS.prefix, padding: EMP_DEFAULTS.padding, nextValue: 1,
+      },
+    });
+  } catch (e) {
+    // A concurrent create won the @@unique([businessId, entityId, scope, periodKey])
+    // race — the row now exists, which is all we need.
+    if (e.code !== 'P2002') throw e;
+  }
+}
 
 const LIST_SELECT = {
   id: true, code: true, firstName: true, lastName: true, preferredName: true,
@@ -183,9 +213,14 @@ async function create(req, res, next) {
   try {
     const { businessId } = req.user;
     const { code, firstName, lastName } = req.body;
-    if (!code || !firstName || !lastName) {
-      return res.status(400).json({ message: 'code, firstName and lastName are required' });
+    // `code` is now OPTIONAL: when the admin doesn't type one, we mint the next
+    // number from the tenant's EMPLOYEE numbering scheme (atomic, inside the same
+    // tx as the insert). An explicitly-provided code still wins — backwards
+    // compatible with manual codes. firstName/lastName remain required.
+    if (!firstName || !lastName) {
+      return res.status(400).json({ message: 'firstName and lastName are required' });
     }
+    const autoCode = !code || !String(code).trim();
 
     // Map the admin form's field names onto the model BEFORE pickWritable runs, so
     // the create wires the values the operator entered instead of silently dropping
@@ -197,13 +232,23 @@ async function create(req, res, next) {
     if (body.dateOfJoining !== undefined && body.hireDate === undefined) body.hireDate = body.dateOfJoining;
 
     const data = { ...pickWritable(body), businessId };
+    // Drop a blank/whitespace code so the auto-allocate path mints a real one
+    // (pickWritable would otherwise carry an empty string through to the insert).
+    if (autoCode) delete data.code;
 
     const departmentId = body.departmentId || null;
     const designationId = body.designationId || null;
     const locationId = body.locationId || null;
     const wantsEmployment = !!(departmentId || designationId || locationId);
 
-    const emp = await prisma.$transaction(async (tx) => {
+    const runCreate = () => prisma.$transaction(async (tx) => {
+      // Mint the next employee number from the tenant's EMPLOYEE scheme when the
+      // admin didn't type a code. allocateCode atomically increments the
+      // (businessId, scope:'EMPLOYEE') NumberSequence row inside THIS tx, so the
+      // allocated value and the Employee row that uses it commit together.
+      if (autoCode) {
+        data.code = await allocateCode(tx, { businessId, scope: 'EMPLOYEE' });
+      }
       const created = await tx.employee.create({ data });
 
       // Create the initial HIRE EmploymentRecord so the org context (department /
@@ -245,6 +290,37 @@ async function create(req, res, next) {
       }
       return created;
     });
+
+    // For an AUTO-allocated code, a P2002 on the code means the minted number
+    // collided with a pre-existing (likely manually-typed) code (e.g. a legacy
+    // EMP-000001 typed before auto-numbering was switched on). The failed insert
+    // ALSO rolls back allocateCode's increment (same tx), so a naive retry would
+    // re-mint the same value forever. Instead, between attempts we advance the
+    // tenant's EMPLOYEE sequence past the collision in its OWN committed statement,
+    // then re-run — minting the next free number rather than 409-ing the admin. A
+    // P2002 for a MANUAL code is a real duplicate the caller must fix → no retry.
+    // Commit the EMPLOYEE sequence row up-front so the between-attempts bump below
+    // can actually advance it (see ensureEmployeeSequence for why).
+    if (autoCode) await ensureEmployeeSequence(businessId);
+
+    let emp;
+    const MAX_RETRIES = 10;
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        emp = await runCreate();
+        break;
+      } catch (err) {
+        const isCodeConflict = err && err.code === 'P2002'
+          && String(JSON.stringify(err.meta?.target || '')).includes('code');
+        if (!autoCode || !isCodeConflict || attempt >= MAX_RETRIES) throw err;
+        // Skip the collided number: bump nextValue by 1 in a standalone write so
+        // the next allocateCode (in a fresh tx) reads a higher, hopefully-free value.
+        await prisma.numberSequence.updateMany({
+          where: { businessId, entityId: null, scope: 'EMPLOYEE', periodKey: null },
+          data: { nextValue: { increment: 1 } },
+        });
+      }
+    }
 
     res.status(201).json(emp);
   } catch (e) {
