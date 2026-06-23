@@ -27,7 +27,6 @@
  * guard) and end-dates the Employee via the demoted employee.settle helper.
  */
 
-const crypto = require('crypto');
 const prisma = require('../../../core/lib/prisma');
 const { writeAudit } = require('../../../core/lib/audit');
 const { effectivePermissions } = require('../../../core/lib/rbac');
@@ -950,20 +949,69 @@ async function settleSeparation(req, res, next) {
 
 // =====================================================================
 // POST /separations/:id/letters — generate relieving / experience letters
-//   (canGenerateLetters; gated on SETTLED). Writes a branded EmployeeDocument
-//   with a verifiable fileHash (simple HTML doc when no e-sign module present).
+//   (canGenerateLetters; gated on SETTLED). Feature 09 slice 9F: this no longer
+//   hand-concatenates a `data:text/html` EmployeeDocument — it delegates to the
+//   shared Letters engine (`letters.service.issueLetter`) which mints a real
+//   letterhead PDF + a per-tenant reference number, writes the EmployeeDocument
+//   (EMPLOYEE_VISIBLE), and chains the audit. The SETTLED gate, the bounded
+//   elevated override, and `writeAudit` here are PRESERVED.
+//
+//   `letters.service.js` is owned/built by slice 9E and is absent in this worktree;
+//   the require is therefore LAZY + GUARDED so node --check and the require-graph
+//   resolve today and the live engine is picked up automatically post-merge. Until
+//   the service is present the endpoint returns 501 (not a silent stub).
 // =====================================================================
-const LETTER_KINDS = { relieving: { category: 'OFFER_LETTER', title: 'Relieving Letter' }, experience: { category: 'EXPERIENCE', title: 'Experience Certificate' } };
+// kind → LetterCategory (the issuance taxonomy, schema enum). The LetterCategory
+// enum has no dedicated RELIEVING value, so a relieving letter maps to EXPERIENCE
+// (service/experience certificate family); the distinct wording is carried by the
+// template the engine resolves + the `kind`/`subject` overrides we pass through.
+const SEPARATION_LETTER_KINDS = {
+  relieving:  { category: 'EXPERIENCE', title: 'Relieving Letter' },
+  experience: { category: 'EXPERIENCE', title: 'Experience Certificate' },
+};
+
+// Lazy + guarded load of the 9E-owned engine. Returns the module or null if it is
+// not yet present (this worktree). MERGE NOTE: no code change needed at merge — once
+// letters/letters.service.js exists exporting issueLetter, this resolves it.
+function loadLettersService() {
+  try {
+    // eslint-disable-next-line global-require
+    return require('../../letters/letters.service');
+  } catch (e) {
+    if (e && e.code === 'MODULE_NOT_FOUND') return null;
+    throw e;
+  }
+}
+
+// Resolve a published LetterTemplate for the given category, preferring the
+// employee's entity country (IN/NZ) then a country-agnostic one. Tenant-scoped.
+// (The engine itself resolves the letterhead by template/category/default.)
+async function resolveSeparationTemplate(businessId, category, countryCode) {
+  const base = { businessId, category, isActive: true, deletedAt: null };
+  if (countryCode) {
+    const byCountry = await prisma.letterTemplate.findFirst({
+      where: { ...base, countryCode },
+      orderBy: [{ isSystem: 'desc' }, { updatedAt: 'desc' }],
+    });
+    if (byCountry) return byCountry;
+  }
+  return prisma.letterTemplate.findFirst({
+    where: base,
+    orderBy: [{ isSystem: 'desc' }, { updatedAt: 'desc' }],
+  });
+}
+
 async function generateLetters(req, res, next) {
   try {
     const sep = await loadScopedCase(req, res);
     if (!sep) return undefined;
     const kind = String((req.body && req.body.type) || 'relieving').toLowerCase();
-    if (!LETTER_KINDS[kind]) {
-      return res.status(422).json({ message: `Unknown letter type: ${kind}`, types: Object.keys(LETTER_KINDS) });
+    const meta = SEPARATION_LETTER_KINDS[kind];
+    if (!meta) {
+      return res.status(422).json({ message: `Unknown letter type: ${kind}`, types: Object.keys(SEPARATION_LETTER_KINDS) });
     }
-    // S9: relieving/experience letters REQUIRE status SETTLED. The override path is
-    // strictly bounded: it can only relax SETTLED → FNF_APPROVED (the dues are
+    // S9 (PRESERVED): relieving/experience letters REQUIRE status SETTLED. The override
+    // path is strictly bounded: it can only relax SETTLED → FNF_APPROVED (the dues are
     // already approved) and NEVER earlier — a plain override can no longer mint a
     // relieving letter pre-FnF-approval. It also requires an ELEVATED permission
     // (canManageOrg, an admin-grade key the base canGenerateLetters role need not
@@ -988,51 +1036,66 @@ async function generateLetters(req, res, next) {
     const businessId = req.user.businessId;
     const employee = await prisma.employee.findFirst({ where: { id: sep.employeeId, businessId } });
     if (!employee) return res.status(404).json({ message: 'Employee not found' });
-    const business = await prisma.business.findFirst({ where: { id: businessId }, select: { name: true } });
 
-    // Branded HTML letter with correct tenure dates. (No e-sign module mounted in
-    // 4f → write a simple branded HTML doc with a verifiable SHA-256 fileHash.)
-    const meta = LETTER_KINDS[kind];
-    const fullName = `${employee.firstName || ''} ${employee.lastName || ''}`.trim();
-    const hire = employee.hireDate ? new Date(employee.hireDate).toISOString().slice(0, 10) : '—';
-    const lwd = sep.lastWorkingDay ? new Date(sep.lastWorkingDay).toISOString().slice(0, 10) : '—';
-    const html = [
-      `<html><head><title>${meta.title}</title></head><body>`,
-      `<h1>${business ? business.name : 'Company'}</h1>`,
-      `<h2>${meta.title}</h2>`,
-      `<p>This is to certify that ${fullName} (Employee Code ${employee.code}) was employed with `,
-      `${business ? business.name : 'us'} from ${hire} to ${lwd}.</p>`,
-      kind === 'relieving'
-        ? `<p>The employee has been relieved of their duties effective ${sep.relievingDate ? new Date(sep.relievingDate).toISOString().slice(0, 10) : lwd} and all dues have been settled.</p>`
-        : `<p>We confirm their service and wish them well in their future endeavours.</p>`,
-      `<p>Separation reference: ${sep.code}</p>`,
-      `</body></html>`,
-    ].join('');
-    const fileHash = crypto.createHash('sha256').update(html).digest('hex');
-    // data: URL key (no object storage write in 4f; the hash is verifiable).
-    const fileUrl = `data:text/html;base64,${Buffer.from(html).toString('base64')}`;
+    // Shared Letters engine (9E). Guarded so this worktree (no service yet) still
+    // node --check's + require-resolves; live engine is used automatically post-merge.
+    const letters = loadLettersService();
+    if (!letters || typeof letters.issueLetter !== 'function') {
+      return res.status(501).json({
+        message: 'Letters engine not available in this build (slice 9E reconciles at merge)',
+        reason: 'letters-service-unavailable',
+      });
+    }
 
-    const doc = await prisma.employeeDocument.create({
-      data: {
-        businessId,
-        employeeId: sep.employeeId,
-        category: meta.category,
-        name: `${meta.title} — ${sep.code}`,
-        fileUrl,
-        fileHash,
-        mimeType: 'text/html',
-        sizeBytes: Buffer.byteLength(html),
-        visibility: 'EMPLOYEE_VISIBLE',
-        signatureStatus: 'NOT_REQUIRED',
+    // Resolve the entity (for the per-entity ref-no sequence + country wording) and
+    // a published template for this category. Out-of-scope subject was already
+    // enforced by loadScopedCase.
+    const { entity } = await resolveEmployeeEntity(businessId, sep.employeeId);
+    const countryCode = entity && entity.countryCode === 'NZ' ? 'NZ' : 'IN';
+    const template = await resolveSeparationTemplate(businessId, meta.category, countryCode);
+    if (!template) {
+      return res.status(422).json({
+        message: `No published ${meta.title} template is configured for ${countryCode}`,
+        reason: 'no-template', category: meta.category, countryCode,
+      });
+    }
+
+    const perms = effectivePermissions(req.user) || {};
+    // Call the documented issueLetter interface (Feature 09 §4.3):
+    //   { businessId, entityId, actorUserId, perms, templateId, employeeId, overrides, mode }
+    // `overrides` carry the offboarding-specific facts (kind/subject/dates/ref) so the
+    // engine's merge can render relieving-vs-experience wording + the separation ref.
+    const result = await letters.issueLetter({
+      businessId,
+      entityId: entity ? entity.id : (sep.entityId || null),
+      actorUserId: req.user.id,
+      perms,
+      templateId: template.id,
+      employeeId: sep.employeeId,
+      mode: 'issue',
+      overrides: {
+        kind,
+        subject: meta.title,
+        title: meta.title,
+        separationCode: sep.code,
+        separationId: sep.id,
+        lastWorkingDay: sep.lastWorkingDay || null,
+        relievingDate: sep.relievingDate || sep.lastWorkingDay || null,
       },
     });
 
     await writeAudit({
       businessId, actorId: req.user.id, action: 'separation.letter',
-      entityType: 'EmployeeDocument', entityId: doc.id,
-      meta: { code: sep.code, kind, fileHash, override: overrideUsed, forcedFromStatus: overrideUsed ? sep.status : null },
+      entityType: 'IssuedLetter', entityId: (result && (result.issuedLetterId || result.id)) || null,
+      meta: {
+        code: sep.code, kind, category: meta.category,
+        referenceNo: result && result.referenceNo,
+        employeeDocumentId: result && result.employeeDocumentId,
+        fileHash: result && result.fileHash,
+        override: overrideUsed, forcedFromStatus: overrideUsed ? sep.status : null,
+      },
     });
-    res.status(201).json({ document: { id: doc.id, name: doc.name, category: doc.category, fileHash: doc.fileHash, visibility: doc.visibility } });
+    res.status(201).json({ letter: result });
   } catch (e) { next(e); }
 }
 

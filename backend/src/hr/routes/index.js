@@ -44,6 +44,9 @@ router.use('/me/profile', require('../lifecycle/routes/meProfile.routes'));
 router.use('/me/onboarding', require('../lifecycle/routes/meOnboarding.routes'));
 router.use('/me/separation', require('../lifecycle/routes/meSeparation.routes'));
 router.use('/me/documents', require('./meDocuments.routes'));
+// ESS "My Letters" (Feature 09 §4.5, slice 9F) — own ISSUED non-voided letters +
+// download (self-only) + request-a-letter (DocumentRequest → HR queue). Customer session.
+router.use('/me/letters', require('../letters/routes/me-letters.routes'));
 // ESS compensation (CTC breakup waterfall + history + letters). Customer session;
 // SELF_ONLY; no `:id` path → cross-employee leakage is structurally impossible.
 router.use('/me/compensation', require('./meCompensation.routes'));
