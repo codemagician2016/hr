@@ -144,6 +144,86 @@ function main() {
   const matBalancing = m.lines.find((l) => l.calcMethod === 'BALANCING');
   ok(matBalancing && Number(matBalancing.amountMonthly) > 0, 'materialized BALANCING line has a concrete amount');
 
+  // ── Finding 1: PERCENT-defined structure RESOLVES (no amountMonthly literals) ──
+  // The canonical inStructure() carries ONLY percent calcValues + a flat + a
+  // balancing — NO amountMonthly. Materializing it must produce concrete amounts
+  // and a wagesVerdict computed on the DERIVED (not literal-percent) gross.
+  log('\n— percent-defined structure resolution + 50% floor on derived amounts —');
+  {
+    const percentOnly = inStructure().map((l) => ({ ...l, amountMonthly: undefined }));
+    ok(percentOnly.every((l) => l.amountMonthly == null), 'fixture lines carry NO amountMonthly (percent-defined)');
+    const mp = materializeRevisionLines({ lines: percentOnly, basis: 'CTC' }, { target: { ctcAnnualMinor }, basis: 'CTC', countryCode: 'IN', asOf: '2026-06-01' });
+    const basicLine = mp.lines.find((l) => l.componentId === 'c-basic');
+    ok(basicLine && Math.round(Number(basicLine.amountMonthly) * 100) === R(50000), 'BASIC resolves to ₹50,000 from 50%-of-CTC (NOT ₹50 from the percent literal)');
+    ok(mp.breakup.wagesVerdict.applies && mp.breakup.wagesVerdict.ok, 'compliant percent structure → wagesVerdict.ok=true on DERIVED amounts');
+  }
+
+  // ── Finding 1: a percent structure that genuinely breaches Basic<50% FAILS ──
+  {
+    // BASIC=20% of CTC, HRA=10% of BASIC, rest balancing → Basic+DA < 50% gross.
+    const breach = [
+      { component: { id: 'b-basic', code: 'BASIC', kind: 'BASIC', category: 'EARNING', calcMethod: 'PERCENT_OF', calcBaseScope: 'CTC', isWageForPF: true, derivationPass: 2 }, calcMethod: 'PERCENT_OF', calcValue: '20', sortOrder: 0 },
+      { component: { id: 'b-spl', code: 'SPECIAL', kind: 'SPECIAL_ALLOWANCE', category: 'EARNING', calcMethod: 'BALANCING', derivationPass: 3 }, calcMethod: 'BALANCING', sortOrder: 1 },
+    ];
+    const db = deriveBreakup({ target: { ctcAnnualMinor: R(1200000) }, basis: 'CTC', lines: breach, ctx: { countryCode: 'IN', asOf: '2026-06-01' } });
+    ok(db.wagesVerdict.applies && db.wagesVerdict.ok === false && db.wagesVerdict.code === 'WAGES_50_RULE',
+      'BASIC=20%-of-CTC percent structure → DERIVED Basic<50% caught fail-closed (would FAIL-OPEN on raw percent literals)');
+  }
+
+  // ── Finding 5: a BALANCING line with a floor/cap that bites → STRUCTURE_INFEASIBLE ──
+  log('\n— balancing-line clamp is infeasible, never silently clamped —');
+  {
+    // BASIC flat ₹20,000 of ₹50,000 gross; SPECIAL balancing residual = ₹30,000
+    // but capped at ₹5,000 — the cap cannot absorb the residual → infeasible.
+    const cappedBal = [
+      { component: { id: 'cb-basic', code: 'BASIC', kind: 'BASIC', category: 'EARNING', calcMethod: 'FLAT', derivationPass: 0 }, calcMethod: 'FLAT', calcValue: '20000', sortOrder: 0 },
+      { component: { id: 'cb-spl', code: 'SPECIAL', kind: 'SPECIAL_ALLOWANCE', category: 'EARNING', calcMethod: 'BALANCING', capValue: '5000', derivationPass: 3 }, calcMethod: 'BALANCING', sortOrder: 1 },
+    ];
+    throws(
+      () => deriveBreakup({ target: { grossMonthlyMinor: R(50000) }, basis: 'GROSS', lines: cappedBal, ctx: { countryCode: 'IN', asOf: '2026-06-01' } }),
+      'STRUCTURE_INFEASIBLE',
+      'BALANCING line capped below its residual → STRUCTURE_INFEASIBLE (no silent clamp, Σ would drift)',
+    );
+  }
+  {
+    // A balancing FLOOR above the residual also cannot reconcile → infeasible.
+    const flooredBal = [
+      { component: { id: 'fb-basic', code: 'BASIC', kind: 'BASIC', category: 'EARNING', calcMethod: 'FLAT', derivationPass: 0 }, calcMethod: 'FLAT', calcValue: '48000', sortOrder: 0 },
+      { component: { id: 'fb-spl', code: 'SPECIAL', kind: 'SPECIAL_ALLOWANCE', category: 'EARNING', calcMethod: 'BALANCING', floorValue: '10000', derivationPass: 3 }, calcMethod: 'BALANCING', sortOrder: 1 },
+    ];
+    throws(
+      () => deriveBreakup({ target: { grossMonthlyMinor: R(50000) }, basis: 'GROSS', lines: flooredBal, ctx: { countryCode: 'IN', asOf: '2026-06-01' } }),
+      'STRUCTURE_INFEASIBLE',
+      'BALANCING line floored above its residual → STRUCTURE_INFEASIBLE',
+    );
+  }
+  {
+    // A balancing line whose floor/cap does NOT bite still reconciles cleanly.
+    const okBal = [
+      { component: { id: 'ob-basic', code: 'BASIC', kind: 'BASIC', category: 'EARNING', calcMethod: 'FLAT', derivationPass: 0 }, calcMethod: 'FLAT', calcValue: '30000', sortOrder: 0 },
+      { component: { id: 'ob-spl', code: 'SPECIAL', kind: 'SPECIAL_ALLOWANCE', category: 'EARNING', calcMethod: 'BALANCING', floorValue: '1000', capValue: '40000', derivationPass: 3 }, calcMethod: 'BALANCING', sortOrder: 1 },
+    ];
+    const okd = deriveBreakup({ target: { grossMonthlyMinor: R(50000) }, basis: 'GROSS', lines: okBal, ctx: { countryCode: 'NZ', asOf: '2026-06-01' } });
+    ok(okd.grossMinor === R(50000), 'non-biting balancing floor/cap → Σ reconciles to target exactly');
+  }
+
+  // ── Finding 7: employerCostFixedPoint asserts convergence (throws on divergence) ──
+  log('\n— employer-cost convergence is asserted —');
+  {
+    // A pathological resolver that oscillates Basic+DA so the loop never settles
+    // within 1 paise → must throw EMPLOYER_COST_DIVERGED, not ship a bad split.
+    let toggle = 0;
+    throws(
+      () => employerCostFixedPoint({
+        ctcAnnualMinor: R(1200000),
+        resolveBasicDaMonthly: () => { toggle = toggle ? 0 : R(80000); return toggle; },
+        maxIters: 4,
+      }),
+      'EMPLOYER_COST_DIVERGED',
+      'non-converging employer-cost fixed point → EMPLOYER_COST_DIVERGED (never silently ships off-by-N split)',
+    );
+  }
+
   log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILURE(S)'} — deriveBreakup\n`);
   process.exit(failures === 0 ? 0 : 1);
 }

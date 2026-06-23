@@ -30,6 +30,21 @@ function n(v) {
 }
 
 /**
+ * Bucket a signed percentage change into a coarse band so RANGE_ONLY viewers see
+ * the direction/magnitude without an exact number that reverse-derives absolute
+ * pay. Bands key off |pct|: <5%, 5-10%, >10% (sign preserved for decrease).
+ */
+function bucketPct(pct) {
+  const x = Number(pct);
+  if (!Number.isFinite(x)) return null;
+  const mag = Math.abs(x);
+  const sign = x < 0 ? '-' : '';
+  if (mag < 5) return `${sign}<5%`;
+  if (mag <= 10) return `${sign}5-10%`;
+  return `${sign}>10%`;
+}
+
+/**
  * Resolve the effective level for THIS read: a viewer looking at their OWN
  * compensation always gets at least SELF_ONLY (full own breakup), even if their
  * role band is NONE — "you can always see your own pay".
@@ -93,23 +108,40 @@ function bandView(grade, actualAnnual) {
  *
  * Invariants:
  *   - RANGE_ONLY: NO absolute money key (ctcAnnual/grossMonthly/netMonthly), NO
- *     per-line amounts, NO delta.absolute. Names may appear; numbers never.
+ *     per-line amounts, NO exact delta.pct (only a coarse delta.band). Names may
+ *     appear; absolute-reconstructable numbers never.
  *   - NONE: only { visibility:'NONE' }. (Caller decides whether NONE → 404/empty.)
  *   - SELF_ONLY is only legitimate when viewer === target (the caller enforces the
  *     route shape; here we still emit a full breakup for the SELF case).
  */
+// Record identity + workflow-state fields. These are NOT salary data (no money),
+// so they ride alongside EVERY visibility level — a RANGE_ONLY checker still needs
+// to see { id, status, isCurrent } to drive the maker-checker UI/flow without ever
+// learning an amount. Only stamped when present on the payload.
+function identityEnvelope(payload) {
+  const out = {};
+  if (!payload) return out;
+  if (payload.id != null) out.id = payload.id;
+  if (payload.employeeId != null) out.employeeId = payload.employeeId;
+  if (payload.status != null) out.status = payload.status;
+  if (payload.effectiveFrom != null) out.effectiveFrom = payload.effectiveFrom;
+  if (payload.effectiveTo != null) out.effectiveTo = payload.effectiveTo;
+  if (payload.isCurrent != null) out.isCurrent = payload.isCurrent;
+  return out;
+}
+
 function maskCompensation(payload, viewer, opts = {}) {
   const level = opts.level || resolveLevel(viewer, payload || {});
   const grade = opts.grade || (payload && payload.grade) || null;
 
   if (level === 'NONE') {
-    return { visibility: 'NONE' };
+    return { visibility: 'NONE', ...identityEnvelope(payload) };
   }
 
   const ctcAnnual = n(payload && payload.ctcAnnual);
 
   if (level === 'RANGE_ONLY') {
-    const env = { visibility: 'RANGE_ONLY' };
+    const env = { visibility: 'RANGE_ONLY', ...identityEnvelope(payload) };
     const range = bandView(grade, ctcAnnual);
     if (range) env.range = range;
     // Component NAMES (no amounts) may show — strip every amount field.
@@ -121,8 +153,13 @@ function maskCompensation(payload, viewer, opts = {}) {
         // NO amountMonthly / amountAnnual / calcValue — server-side omission.
       }));
     }
+    // NO delta under RANGE_ONLY. An exact pct is a number that, combined with any
+    // one absolute anchor (a prior CTC learned elsewhere, a leaked band midpoint,
+    // or range penetration over a tight band), algebraically reverse-derives the
+    // new absolute CTC (new = prior*(1+pct/100)). Bucket it to a coarse band
+    // ('<5%','5-10%','>10%') so the magnitude reads without leaking the number.
     if (payload && payload.delta && payload.delta.pct != null) {
-      env.delta = { pct: payload.delta.pct }; // NEVER delta.absolute under RANGE_ONLY
+      env.delta = { band: bucketPct(payload.delta.pct) }; // coarse band only — never an exact pct/absolute
     }
     return env;
   }
@@ -130,6 +167,7 @@ function maskCompensation(payload, viewer, opts = {}) {
   // ABSOLUTE | SELF_ONLY → full money pass-through.
   const env = {
     visibility: level,
+    ...identityEnvelope(payload),
     absolute: {
       ctcAnnual,
       grossMonthly: n(payload && payload.grossMonthly),
@@ -145,4 +183,4 @@ function maskCompensation(payload, viewer, opts = {}) {
   return env;
 }
 
-module.exports = { maskCompensation, resolveLevel, bandView };
+module.exports = { maskCompensation, resolveLevel, bandView, bucketPct };

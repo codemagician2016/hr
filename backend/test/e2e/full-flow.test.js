@@ -238,8 +238,13 @@ async function main() {
       }),
     );
     ok(revRes.statusCode === 201, 'compensationRevision.create → 201');
+    // The create response is now MASKED (Feature 5 review fix): it carries the
+    // identity/workflow envelope (id, employeeId, status, isCurrent) + absolute
+    // money for an ABSOLUTE viewer, but NOT businessId. Tenant scope is asserted
+    // against the persisted row.
     ok(revRes.body && revRes.body.employeeId === targetEmp.id && revRes.body.isCurrent === true, 'compensationRevision is current for the employee');
-    ok(revRes.body.businessId === businessId, 'compensationRevision is tenant-scoped');
+    const persistedRev = await prisma.compensationRevision.findUnique({ where: { id: revRes.body.id } });
+    ok(persistedRev && persistedRev.businessId === businessId, 'compensationRevision is tenant-scoped');
 
     // Restore the seeded revision as the current one so the rest of the suite
     // (payroll) keeps using the seeded structure deterministically. We mark the
