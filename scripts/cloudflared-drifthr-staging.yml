@@ -1,0 +1,27 @@
+# Cloudflare Tunnel config for STAGING (staging.drifthr.com).
+#
+# Same shape as cloudflared-drifthr-prod.yml: the edge router (PM2 drifthr-router)
+# on :3099 fronts every surface and host-routes by Host. Only the hostnames and
+# the tunnel/credentials names differ.
+#
+# Install on the staging EC2 as /etc/cloudflared/config.yml:
+#   sudo cp scripts/cloudflared-drifthr-staging.yml /etc/cloudflared/config.yml
+#   sudo cloudflared service install
+#   sudo systemctl enable --now cloudflared
+#
+# DNS routes (run once per hostname AFTER the tunnel exists):
+#   cloudflared tunnel route dns drifthr-staging staging.drifthr.com
+#   cloudflared tunnel route dns drifthr-staging app.staging.drifthr.com
+#   cloudflared tunnel route dns drifthr-staging admin.staging.drifthr.com
+#   cloudflared tunnel route dns drifthr-staging '*.staging.drifthr.com'
+#   cloudflared tunnel route dns drifthr-staging api.staging.drifthr.com   # optional
+#
+# NOTE: the router's PLATFORM_DOMAIN on this box must be `staging.drifthr.com`
+# (set in ecosystem.config.js `env` / via --update-env, NOT env_production).
+tunnel: drifthr-staging
+credentials-file: /etc/cloudflared/drifthr-staging.json
+
+ingress:
+  - hostname: api.staging.drifthr.com
+    service: http://127.0.0.1:5000
+  - service: http://127.0.0.1:3099

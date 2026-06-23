@@ -1,0 +1,42 @@
+# Cloudflare Tunnel config for PRODUCTION (drifthr.com).
+#
+# DriftHR is self-hosted: the edge router (apps/router, PM2 drifthr-router) on
+# :3099 fronts EVERY surface (platform / hr-admin / ess / backend) and host-routes
+# by the incoming Host header. So the tunnel ingress is essentially a single
+# catch-all → the router, which makes tenant custom domains (Cloudflare-for-SaaS
+# custom hostnames) just work without per-host tunnel entries.
+#
+# This is the Sitepresso-style "tunnel" option. The alternative is a direct
+# origin (nginx on :443 with a public IP + the wildcard/apex A records pointing
+# at the box) — see scripts/nginx-drifthr-prod.conf. Use ONE of them, not both.
+#
+# Install on the prod EC2 as /etc/cloudflared/config.yml:
+#   sudo cp scripts/cloudflared-drifthr-prod.yml /etc/cloudflared/config.yml
+#   sudo cloudflared service install
+#   sudo systemctl enable --now cloudflared
+#
+# DNS routes (run once per hostname AFTER the tunnel exists). The wildcard +
+# apex cover all tenant subdomains; api is optional (only if you keep a separate
+# API host instead of letting the router proxy /api/* internally):
+#   cloudflared tunnel route dns drifthr-prod drifthr.com
+#   cloudflared tunnel route dns drifthr-prod www.drifthr.com
+#   cloudflared tunnel route dns drifthr-prod app.drifthr.com
+#   cloudflared tunnel route dns drifthr-prod admin.drifthr.com
+#   cloudflared tunnel route dns drifthr-prod '*.drifthr.com'
+#   cloudflared tunnel route dns drifthr-prod api.drifthr.com   # optional
+#
+# Tenant custom domains are added as Cloudflare-for-SaaS custom hostnames (by the
+# backend via CLOUDFLARE_API_TOKEN), NOT as tunnel ingress rules — they reach the
+# box through the same catch-all and the router resolves them by X-Tenant-Host.
+tunnel: drifthr-prod
+credentials-file: /etc/cloudflared/drifthr-prod.json
+
+ingress:
+  # Optional dedicated API host. Drop this block to route /api/* through the
+  # router catch-all below instead (the router already forwards /api/* → :5000).
+  - hostname: api.drifthr.com
+    service: http://127.0.0.1:5000
+  # Catch-all → the edge router. It host-routes drifthr.com/www→platform,
+  # admin→platform/superadmin, app→hr-admin, <slug> + custom domains→ess,
+  # /api/*→backend.
+  - service: http://127.0.0.1:3099

@@ -1052,7 +1052,17 @@ async function generateLetters(req, res, next) {
     // enforced by loadScopedCase.
     const { entity } = await resolveEmployeeEntity(businessId, sep.employeeId);
     const countryCode = entity && entity.countryCode === 'NZ' ? 'NZ' : 'IN';
-    const template = await resolveSeparationTemplate(businessId, meta.category, countryCode);
+    let template = await resolveSeparationTemplate(businessId, meta.category, countryCode);
+    if (!template) {
+      // Self-heal: a tenant that never opened the Letters module still needs a
+      // relieving/experience letter at offboarding. Seed the system IN/NZ
+      // templates once, then re-resolve. (Idempotent; no-op if already seeded.)
+      try {
+        const { seedLetterTemplates } = require('../../letters/templates/seed');
+        await seedLetterTemplates(prisma, businessId);
+        template = await resolveSeparationTemplate(businessId, meta.category, countryCode);
+      } catch (_e) { /* fall through to the 422 below */ }
+    }
     if (!template) {
       return res.status(422).json({
         message: `No published ${meta.title} template is configured for ${countryCode}`,
@@ -1065,7 +1075,9 @@ async function generateLetters(req, res, next) {
     //   { businessId, entityId, actorUserId, perms, templateId, employeeId, overrides, mode }
     // `overrides` carry the offboarding-specific facts (kind/subject/dates/ref) so the
     // engine's merge can render relieving-vs-experience wording + the separation ref.
-    const result = await letters.issueLetter({
+    // issueLetter(client, args) — pass the prisma client first (it opens its own
+    // $transaction for the ref-no + insert); the options object is the 2nd arg.
+    const result = await letters.issueLetter(prisma, {
       businessId,
       entityId: entity ? entity.id : (sep.entityId || null),
       actorUserId: req.user.id,
@@ -1095,7 +1107,18 @@ async function generateLetters(req, res, next) {
         override: overrideUsed, forcedFromStatus: overrideUsed ? sep.status : null,
       },
     });
-    res.status(201).json({ letter: result });
+    // Response carries the new engine result AND a backward-compatible `document`
+    // summary (the prior contract + the separation UI read document.fileHash/visibility).
+    res.status(201).json({
+      letter: result,
+      document: result ? {
+        id: result.employeeDocumentId || null,
+        fileHash: result.fileHash || null,
+        visibility: 'EMPLOYEE_VISIBLE',
+        referenceNo: result.referenceNo || null,
+        fileUrl: result.fileUrl || null,
+      } : null,
+    });
   } catch (e) { next(e); }
 }
 
