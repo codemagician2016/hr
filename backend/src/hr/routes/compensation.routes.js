@@ -50,6 +50,15 @@ router.post(
   c.revisions.create,
 );
 
+// ── Branded Compensation Statement / CTC Breakup PDF for one revision. ──
+// canViewCompensation gates the route; the controller applies the F5 masking
+// shaper + the SAME scope band as the JSON read (out-of-subtree → 404). A
+// RANGE_ONLY viewer gets a BANDED statement (compa-ratio, no absolute pay), a
+// NONE viewer is refused (403, zero salary in body), an ABSOLUTE viewer gets the
+// full waterfall. Defined before the parameterised POSTs to keep the GET literal
+// `/revisions/:id/pdf` unambiguous.
+router.get('/revisions/:id/pdf', requirePermission('canViewCompensation'), c.getRevisionPdf);
+
 // ── Maker-checker: the proposals queue + approve/reject (SoD fail-closed). ──
 // The queue is checker-facing (canApproveCompensation); each row is masked.
 router.get('/revisions/proposed', requirePermission('canApproveCompensation'), c.revisions.listProposed);

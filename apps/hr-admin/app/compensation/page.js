@@ -17,7 +17,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { ErrorBanner, PrimaryButton, TextInput, DateField, Modal, ModalActions, formatAdminDate } from '@hr/ui';
-import { get, post, patch, del } from '@/lib/api';
+import { get, post, patch, del, downloadFile } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, moneyish } from '@/lib/ui';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
 // Entities (and their authoritative countryCode) back the structure form's
@@ -416,6 +416,23 @@ function RevisionsTab({ canApprove }) {
 
   function onLookup(e) { e.preventDefault(); const id = employeeId.trim(); setActive(id); setRows(null); load(id); }
 
+  // Per-revision branded CTC PDF download (blob fetch + loading state). The
+  // backend RE-APPLIES the F5 masking: an ABSOLUTE/SELF viewer gets the full
+  // waterfall, a RANGE_ONLY viewer gets a BANDED statement (compa-ratio, no
+  // absolute pay), a NONE viewer is refused 403 — the button never leaks.
+  const [pdfBusyId, setPdfBusyId] = useState('');
+  async function onDownloadPdf(row) {
+    if (!row?.id) return;
+    setPdfBusyId(row.id); setError('');
+    try {
+      await downloadFile(`/api/hr/compensation/revisions/${row.id}/pdf`);
+    } catch (e) {
+      setError(e.data?.message || e.message || 'Could not download the compensation statement.');
+    } finally {
+      setPdfBusyId('');
+    }
+  }
+
   async function onCreate(e) {
     e.preventDefault();
     if (!active) return;
@@ -442,6 +459,25 @@ function RevisionsTab({ canApprove }) {
     { key: 'status', header: 'Status', render: (r) => <StatusBadge status={r.status || '—'} /> },
     { key: 'ctc', header: 'CTC (annual)', render: (r) => r.absolute ? moneyish(r.absolute.ctcAnnual) : (r.range ? `••• (compa ${r.range.compaRatio ?? '—'})` : '•••') },
     { key: 'visibility', header: 'Visibility', render: (r) => r.visibility || '—' },
+    {
+      key: 'pdf', header: '',
+      render: (r) => {
+        const noneVisible = r.visibility === 'NONE';
+        const banded = r.visibility === 'RANGE_ONLY';
+        const tip = noneVisible
+          ? 'You do not have permission to view this employee’s compensation.'
+          : banded
+            ? 'Range-only access: the PDF is a banded statement (compa-ratio, no absolute amounts).'
+            : 'Download the branded Compensation Statement (PDF).';
+        return (
+          <div className="flex justify-end" title={tip}>
+            <ActionButton disabled={noneVisible || pdfBusyId === r.id} onClick={() => onDownloadPdf(r)}>
+              {pdfBusyId === r.id ? 'Preparing…' : banded ? 'PDF (banded)' : 'PDF'}
+            </ActionButton>
+          </div>
+        );
+      },
+    },
   ];
 
   return (
