@@ -25,8 +25,14 @@ const { writeAudit } = require('../../core/lib/audit');
 const money = require('./money');
 const engine = require('./engine');
 const payrun = require('./payrun');
+const variance = require('./variance');
 const registry = require('./complianceRegistry');
 const filing = require('./filing');
+
+// Publish chain (Feature 7): payslip.published webhook + HR_PAYSLIP_PUBLISHED
+// notification. Both are pre-wired libraries (not routers) invoked from publishRun.
+const webhooks = require('../integrations/webhooks');
+const notifications = require('../integrations/notifications');
 
 const india = require('./compliance/india');
 const newzealand = require('./compliance/newzealand');
@@ -36,7 +42,9 @@ const newzealand = require('./compliance/newzealand');
 const { freezeAttendance } = require('../attendance/freeze');
 
 const { CATEGORY, CALC, PRORATION, LOP_BEHAVIOR, computePayslip } = engine;
-const { STATE, PayRunError, transition, computeInputHash } = payrun;
+const {
+  STATE, PayRunError, transition, computeInputHash, persistTransition, PRISMA_TO_STATE,
+} = payrun;
 
 const ENGINE_VERSION = '1.0.0';
 
@@ -882,42 +890,39 @@ function buildPayslipSnapshot(r, payRun, ln) {
 }
 
 /**
- * approveRun — maker-checker. Approver must differ from the preparer/computer.
- * Transitions COMPUTED -> APPROVED. Blocking anomalies gate approval.
+ * approveRun — maker-checker. Approver must differ from EVERY maker on the run
+ * (the preparer/computer AND, when a review gate was used, the submitter).
+ * Transitions COMPUTED|REVIEW -> APPROVED via persistTransition. Blocking
+ * anomalies (engine + variance) gate approval; STALE_TOTALS rejects an approve
+ * whose reviewed totals no longer match (silent recompute since review).
+ *
+ * @param {Object} args { businessId, actorId, payRunId, fourEyes?, totalsHash? }
  */
-async function approveRun({ businessId, actorId, payRunId, fourEyes = true }) {
+async function approveRun({ businessId, actorId, payRunId, fourEyes = true, totalsHash }) {
   const payRun = await prisma.payRun.findFirst({ where: { id: payRunId, businessId } });
   if (!payRun) throw notFound('Pay run not found');
 
-  // Re-evaluate blocking anomalies from persisted line errors.
-  const linesWithErrors = await prisma.payRunLine.findMany({
-    where: { businessId, payRunId, errorJson: { not: null } },
-    select: { errorJson: true },
-  });
-  let blockingAnomalies = 0;
-  for (const l of linesWithErrors) {
-    const errs = Array.isArray(l.errorJson) ? l.errorJson : [];
-    for (const e of errs) if (e.severity === 'BLOCKER') blockingAnomalies += 1;
+  if (payRun.status !== 'COMPUTED' && payRun.status !== 'REVIEW') {
+    throw badRequest('NOT_CALCULATED', `Approval requires a COMPUTED or REVIEW run (current: ${payRun.status})`);
   }
 
-  // Pure state-machine guard (NOT_CALCULATED, MAKER_CHECKER, OPEN_BLOCKERS).
+  // Re-evaluate blocking anomalies from persisted line errors + run-level variance.
+  const blockingAnomalies = await recountBlockers(businessId, payRunId);
+
+  // Pure state-machine guard (NOT_CALCULATED, MAKER_CHECKER, STALE_TOTALS, OPEN_BLOCKERS).
+  const from = payRun.status === 'REVIEW' ? STATE.IN_REVIEW : STATE.CALCULATED;
   const runState = {
     id: payRun.id,
-    status: STATE.CALCULATED, // schema COMPUTED maps to engine CALCULATED
+    status: from,
     preparerId: payRun.computedBy || payRun.lockedBy,
+    submittedBy: payRun.submittedBy || null,
+    totalsHash: payRun.totalsHash || null,
     blockingAnomalies,
     fourEyes,
   };
-  if (payRun.status !== 'COMPUTED') {
-    throw badRequest('NOT_CALCULATED', `Approval requires a COMPUTED run (current: ${payRun.status})`);
-  }
-  transition(runState, STATE.APPROVED, { actorId, at: new Date(), blockingAnomalies, fourEyes });
+  transition(runState, STATE.APPROVED, { actorId, at: new Date(), blockingAnomalies, fourEyes, totalsHash });
 
-  const res = await prisma.payRun.updateMany({
-    where: { id: payRunId, businessId, status: 'COMPUTED' },
-    data: { status: 'APPROVED', approvedAt: new Date(), approvedBy: actorId || null, version: { increment: 1 } },
-  });
-  if (res.count === 0) throw badRequest('STALE_TRANSITION', 'Pay run is no longer in COMPUTED state');
+  await persistTransition({ prisma, payRunId, from, to: STATE.APPROVED, ctx: { actorId } });
 
   // Sensitive action — audit the approval (best-effort, tenant-scoped).
   await writeAudit({
@@ -933,21 +938,37 @@ async function approveRun({ businessId, actorId, payRunId, fourEyes = true }) {
       periodEnd: isoDate(payRun.periodEnd),
       fourEyes,
       preparerId: payRun.computedBy || payRun.lockedBy || null,
+      submitterId: payRun.submittedBy || null,
+      reviewerId: actorId,
+      totalsHash: payRun.totalsHash || null,
     },
   });
 
   return getRun({ businessId, payRunId });
 }
 
-/** listRuns — paginated list, tenant-scoped. */
-async function listRuns({ businessId, entityId, status, page = 1, pageSize = 25 }) {
+/**
+ * listRuns — paginated list, tenant-scoped. Feature 7: a `type` filter so FnF
+ * runs don't leak into the regular list. Default behaviour excludes FNF (the
+ * regular console hides them); pass `includeFnf:true` or `type:'FNF'` to see them.
+ */
+async function listRuns({ businessId, entityId, status, type, includeFnf = false, taxYear, page = 1, pageSize = 25 }) {
   const take = Math.min(Math.max(parseInt(pageSize, 10) || 25, 1), 100);
   const skip = (Math.max(parseInt(page, 10) || 1, 1) - 1) * take;
   const where = { businessId, deletedAt: null };
   if (entityId) where.entityId = entityId;
   if (status) where.status = status;
+  if (taxYear) where.taxYear = taxYear;
+  if (type) {
+    where.type = type;
+  } else if (!includeFnf && String(includeFnf) !== 'true') {
+    where.type = { not: 'FNF' };
+  }
   const [items, total] = await Promise.all([
-    prisma.payRun.findMany({ where, orderBy: { periodStart: 'desc' }, skip, take }),
+    prisma.payRun.findMany({
+      where, orderBy: { periodStart: 'desc' }, skip, take,
+      include: { entity: { select: { id: true, code: true, legalName: true, countryCode: true } } },
+    }),
     prisma.payRun.count({ where }),
   ]);
   return { items, total, page: Math.max(parseInt(page, 10) || 1, 1), pageSize: take };
@@ -1066,6 +1087,653 @@ async function getMyPayslip({ businessId, customer, payslipId }) {
     await prisma.payslip.update({ where: { id: payslip.id }, data: { status: 'VIEWED', viewedAt: new Date() } });
   }
   return payslip;
+}
+
+// ===========================================================================
+//  FEATURE 7 — RUN ORCHESTRATION (checklist · one-time · variance · lifecycle)
+//
+//  Thin wrappers over the engine + the PURE variance engine + persistTransition.
+//  The math/state-graph never lives here; this layer only loads rows, calls the
+//  pure functions, and writes the result. Every fn is tenant-scoped (businessId).
+// ===========================================================================
+
+/**
+ * listRunEntities — entities + their pay calendars for the NewRunModal pickers
+ * (§6.1: replace free-text UUIDs with selects). Tenant-scoped, read-only.
+ */
+async function listRunEntities({ businessId }) {
+  const entities = await prisma.entity.findMany({
+    where: { businessId, deletedAt: null },
+    select: {
+      id: true, code: true, legalName: true, countryCode: true, payCurrency: true,
+      taxYearStartMonth: true,
+    },
+    orderBy: { code: 'asc' },
+  });
+  const calendars = await prisma.payCalendar.findMany({
+    where: { businessId, isActive: true },
+    select: {
+      id: true, entityId: true, code: true, name: true, frequency: true,
+      payDayRule: true, payDayValue: true,
+    },
+    orderBy: { code: 'asc' },
+  });
+  const byEntity = new Map();
+  for (const c of calendars) {
+    if (!byEntity.has(c.entityId)) byEntity.set(c.entityId, []);
+    byEntity.get(c.entityId).push(c);
+  }
+  return {
+    items: entities.map((e) => ({ ...e, payCalendars: byEntity.get(e.id) || [] })),
+  };
+}
+
+/** Load a PayRun (tenant-scoped) or throw a 404. Optionally include the entity. */
+async function loadRun(businessId, payRunId, withEntity = false) {
+  const payRun = await prisma.payRun.findFirst({
+    where: { id: payRunId, businessId, deletedAt: null },
+    include: withEntity ? { entity: true } : undefined,
+  });
+  if (!payRun) throw notFound('Pay run not found');
+  return payRun;
+}
+
+/** Map the prisma status (+ closedAt) to the engine STATE the state machine uses. */
+function engineStateOf(payRun) {
+  if (payRun.status === 'FILED' && payRun.closedAt) return STATE.CLOSED;
+  return PRISMA_TO_STATE[payRun.status] || payRun.status;
+}
+
+/**
+ * getInputsChecklist — read-only readiness gates for the inputs tab (§6.2).
+ * Pure-ish: reads attendance-freeze coverage, pending comp revisions effective in
+ * the period, and the count of one-time items. No mutation.
+ */
+async function getInputsChecklist({ businessId, payRunId }) {
+  const payRun = await loadRun(businessId, payRunId);
+  const { entity, bundles } = await loadRunRowBundles(businessId, payRun);
+  const headcount = bundles.length;
+
+  // Attendance freeze coverage for this run.
+  const frozen = await prisma.attendancePayInput.count({ where: { businessId, payRunId } });
+  const attendanceRow = {
+    key: 'attendance', label: 'Attendance freeze',
+    status: frozen >= headcount && headcount > 0 ? 'OK'
+      : frozen === 0 ? 'WARN' : 'PARTIAL',
+    detail: frozen === 0
+      ? 'No frozen attendance — the run will pay full calendar days (NO_ATTENDANCE_DATA).'
+      : `${frozen} of ${headcount} employees frozen.`,
+    code: frozen === 0 ? 'NO_ATTENDANCE_DATA' : null,
+    frozen, headcount,
+  };
+
+  // Leave / LOP — surfaced from frozen lopDays (drawer detail in the UI).
+  const lopRows = await prisma.attendancePayInput.findMany({
+    where: { businessId, payRunId, lopDays: { gt: 0 } },
+    select: { employeeId: true, lopDays: true },
+  });
+  const leaveRow = {
+    key: 'leave', label: 'Leave / LOP',
+    status: lopRows.length ? 'INFO' : 'OK',
+    detail: lopRows.length ? `${lopRows.length} employee(s) carry loss-of-pay days.` : 'No loss-of-pay this period.',
+    items: lopRows.map((r) => ({ employeeId: r.employeeId, lopDays: Number(r.lopDays) })),
+  };
+
+  // Pending comp revisions effective in-period but not yet current.
+  const periodStart = new Date(isoDate(payRun.periodStart) + 'T00:00:00Z');
+  const periodEnd = new Date(isoDate(payRun.periodEnd) + 'T00:00:00Z');
+  const pendingRevs = await prisma.compensationRevision.count({
+    where: {
+      businessId,
+      effectiveFrom: { gte: periodStart, lte: periodEnd },
+      isCurrent: false,
+      status: { in: ['PROPOSED', 'APPROVED'] },
+    },
+  }).catch(() => 0);
+  const revisionRow = {
+    key: 'revisions', label: 'Pending comp revisions',
+    status: pendingRevs ? 'WARN' : 'OK',
+    detail: pendingRevs ? `${pendingRevs} revision(s) effective this period not yet applied.` : 'No pending revisions.',
+    count: pendingRevs,
+  };
+
+  // One-time inputs.
+  const oneTime = await prisma.payRunInputItem.findMany({
+    where: { businessId, payRunId },
+    orderBy: { createdAt: 'asc' },
+  });
+  const oneTimeRow = {
+    key: 'oneTime', label: 'One-time inputs',
+    status: 'OK',
+    detail: oneTime.length ? `${oneTime.length} one-time item(s) staged.` : 'No one-time items.',
+    editable: payRun.status === 'DRAFT',
+    items: oneTime.map(serializeInputItem),
+  };
+
+  return {
+    payRunId, status: payRun.status, entity: { id: entity.id, countryCode: entity.countryCode },
+    headcount,
+    rows: [attendanceRow, leaveRow, revisionRow, oneTimeRow],
+    canCompute: payRun.status === 'DRAFT' || payRun.status === 'INPUTS_LOCKED',
+  };
+}
+
+/** BigInt-safe serialization of a PayRunInputItem (amountMinor is BigInt). */
+function serializeInputItem(it) {
+  return {
+    id: it.id, payRunId: it.payRunId, employeeId: it.employeeId, kind: it.kind,
+    componentCode: it.componentCode, amountMinor: Number(it.amountMinor),
+    sourcePeriod: it.sourcePeriod, taxable: it.taxable, note: it.note,
+    createdBy: it.createdBy, createdAt: it.createdAt,
+  };
+}
+
+/**
+ * upsertOneTimeInput — DRAFT-only CRUD for one-time / ad-hoc inputs (§5.2).
+ * Create (no id), update (id), or delete (id + _delete). BAD_STATE outside DRAFT.
+ */
+async function upsertOneTimeInput({ businessId, actorId, payRunId, item }) {
+  const payRun = await loadRun(businessId, payRunId);
+  if (payRun.status !== 'DRAFT') {
+    throw badRequest('BAD_STATE', 'One-time inputs are editable only while the run is DRAFT.');
+  }
+  if (!item || !item.employeeId || !item.kind) {
+    throw badRequest('MISSING_FIELDS', 'employeeId and kind are required.');
+  }
+  const KINDS = ['OTE', 'OTD', 'ARREAR', 'REIMBURSEMENT'];
+  if (!KINDS.includes(item.kind)) throw badRequest('MISSING_FIELDS', `kind must be one of ${KINDS.join(', ')}`);
+
+  if (item.id && item._delete) {
+    await prisma.payRunInputItem.deleteMany({ where: { id: item.id, businessId, payRunId } });
+    return { deleted: item.id };
+  }
+
+  const data = {
+    businessId, payRunId, employeeId: item.employeeId, kind: item.kind,
+    componentCode: item.componentCode || null,
+    amountMinor: BigInt(Math.round(Number(item.amountMinor) || 0)),
+    sourcePeriod: item.sourcePeriod || null,
+    taxable: item.taxable !== false,
+    note: item.note || null,
+  };
+  if (item.id) {
+    const upd = await prisma.payRunInputItem.updateMany({
+      where: { id: item.id, businessId, payRunId },
+      data: { ...data, version: { increment: 1 } },
+    });
+    if (upd.count === 0) throw notFound('One-time input not found');
+    const row = await prisma.payRunInputItem.findUnique({ where: { id: item.id } });
+    return serializeInputItem(row);
+  }
+  const row = await prisma.payRunInputItem.create({ data: { ...data, createdBy: actorId || 'system' } });
+  return serializeInputItem(row);
+}
+
+/**
+ * loadVarianceLines — map persisted PayRunLine rows into the PURE variance line
+ * shape. DB-touching; the variance math stays pure. Returns lines + totalsMinor.
+ */
+function varianceLineFromRow(line, ctx = {}) {
+  return {
+    employeeId: line.employeeId,
+    status: line.status,
+    grossMinor: decimalToMinor(line.grossEarnings),
+    netMinor: decimalToMinor(line.netPay),
+    payableDays: line.payableDays == null ? null : toNum(line.payableDays),
+    lopDays: line.lopDays == null ? 0 : toNum(line.lopDays),
+    components: (line.components || []).map((c) => ({
+      code: c.componentCode, amountMinor: decimalToMinor(c.amount), statutory: !!c.isStatutory,
+    })),
+    isNewJoiner: !!ctx.isNewJoiner,
+    isLeaver: !!ctx.isLeaver,
+    hasCompRevision: !!ctx.hasCompRevision,
+    hasArrear: !!ctx.hasArrear,
+    hasBankDetail: ctx.hasBankDetail,
+  };
+}
+
+/** Resolve the per-tenant variance thresholds (config override of the defaults). */
+async function resolveThresholds(businessId) {
+  const row = await prisma.varianceThreshold.findUnique({ where: { businessId } }).catch(() => null);
+  return row && row.config && typeof row.config === 'object'
+    ? { ...variance.DEFAULT_THRESHOLDS, ...row.config }
+    : variance.DEFAULT_THRESHOLDS;
+}
+
+/**
+ * computeVariance — fetch the prior period (same entity+calendar+type, the
+ * immediately-lower sequenceInYear), run the PURE variance engine, persist the
+ * per-line findings to PayRunLine.errorJson (BLOCKER/WARNING only) and the
+ * run-level roll-up to PayRun.varianceReport. Returns the report.
+ */
+async function computeVariance({ businessId, payRunId }) {
+  const payRun = await loadRun(businessId, payRunId, true);
+
+  const curLines = await prisma.payRunLine.findMany({
+    where: { businessId, payRunId },
+    include: { components: { orderBy: { sortOrder: 'asc' } } },
+  });
+
+  // Prior period: same (entity, calendar, type), the highest sequence strictly
+  // below this run's, that is at least COMPUTED.
+  const prior = await prisma.payRun.findFirst({
+    where: {
+      businessId, entityId: payRun.entityId, payCalendarId: payRun.payCalendarId,
+      type: payRun.type, deletedAt: null, id: { not: payRun.id },
+      sequenceInYear: { lt: payRun.sequenceInYear },
+      status: { in: ['COMPUTED', 'REVIEW', 'APPROVED', 'PAID', 'FILED'] },
+    },
+    orderBy: { sequenceInYear: 'desc' },
+  });
+  let prevPayload = null;
+  if (prior) {
+    const prevLines = await prisma.payRunLine.findMany({
+      where: { businessId, payRunId: prior.id },
+      include: { components: { orderBy: { sortOrder: 'asc' } } },
+    });
+    prevPayload = { runId: prior.id, lines: prevLines.map((l) => varianceLineFromRow(l)) };
+  }
+  const prevEmpIds = new Set((prevPayload ? prevPayload.lines : []).map((l) => l.employeeId));
+
+  // One-time items flag arrear context for the downgrade.
+  const oneTimeByEmp = new Set(
+    (await prisma.payRunInputItem.findMany({ where: { businessId, payRunId }, select: { employeeId: true } }))
+      .map((r) => r.employeeId),
+  );
+
+  const current = {
+    runId: payRun.id, type: payRun.type,
+    totalsMinor: { netMinor: decimalToMinor(payRun.totalNet) },
+    lines: curLines.map((l) => varianceLineFromRow(l, {
+      isNewJoiner: prevPayload ? !prevEmpIds.has(l.employeeId) : false,
+      hasArrear: oneTimeByEmp.has(l.employeeId),
+    })),
+  };
+
+  const thresholds = await resolveThresholds(businessId);
+  const result = variance.runVarianceChecks({ current, previous: prevPayload, thresholds });
+
+  const reportTotals = {
+    current: {
+      gross: decimalToMinor(payRun.totalGross), net: decimalToMinor(payRun.totalNet),
+      deductions: decimalToMinor(payRun.totalDeductions), employerCost: decimalToMinor(payRun.totalEmployerCost),
+      headcount: payRun.headcount,
+    },
+    previous: prior ? {
+      gross: decimalToMinor(prior.totalGross), net: decimalToMinor(prior.totalNet),
+      deductions: decimalToMinor(prior.totalDeductions), employerCost: decimalToMinor(prior.totalEmployerCost),
+      headcount: prior.headcount,
+    } : null,
+  };
+
+  // Persist: per-line errorJson (BLOCKER/WARNING) + run-level varianceReport.
+  const { byEmployee } = variance.findingsByEmployee(result.findings);
+  await prisma.$transaction(async (tx) => {
+    for (const line of curLines) {
+      const findings = (byEmployee.get(line.employeeId) || []).filter(
+        (f) => f.severity === 'BLOCKER' || f.severity === 'WARNING',
+      );
+      await tx.payRunLine.update({
+        where: { id: line.id },
+        data: { errorJson: findings.length ? findings : undefined },
+      });
+    }
+    await tx.payRun.update({
+      where: { id: payRun.id },
+      data: {
+        varianceReport: {
+          baselineRunId: prior ? prior.id : null,
+          summary: result.summary,
+          blockingAnomalies: result.blockingAnomalies,
+          findings: result.findings,
+          totals: reportTotals,
+        },
+      },
+    });
+  });
+
+  return {
+    payRunId, baselineRunId: prior ? prior.id : null,
+    hasBaseline: !!prior, totals: reportTotals, ...result,
+  };
+}
+
+/**
+ * recountBlockers — sum BLOCKER findings persisted across all line errorJson +
+ * the run-level varianceReport. Feeds the submit/approve gate (the same array
+ * approveRun already reads, now also carrying variance BLOCKERs).
+ */
+async function recountBlockers(businessId, payRunId) {
+  const lines = await prisma.payRunLine.findMany({
+    where: { businessId, payRunId, errorJson: { not: null } },
+    select: { errorJson: true },
+  });
+  let blockers = 0;
+  for (const l of lines) {
+    const errs = Array.isArray(l.errorJson) ? l.errorJson : [];
+    for (const e of errs) if (e.severity === 'BLOCKER') blockers += 1;
+  }
+  // Run-level (e.g. RECONCILIATION_MISMATCH) lives only in varianceReport.
+  const run = await prisma.payRun.findFirst({ where: { id: payRunId, businessId }, select: { varianceReport: true } });
+  const report = run && run.varianceReport;
+  if (report && Array.isArray(report.findings)) {
+    for (const f of report.findings) {
+      if (f.severity === 'BLOCKER' && f.employeeId == null) blockers += 1;
+    }
+  }
+  return blockers;
+}
+
+/** Stable hash of the run totals — what the checker reviews; STALE_TOTALS guard. */
+function totalsHashOf(payRun) {
+  return computeInputHash({
+    inputs: {
+      gross: String(payRun.totalGross), deductions: String(payRun.totalDeductions),
+      net: String(payRun.totalNet), employerCost: String(payRun.totalEmployerCost),
+      headcount: payRun.headcount, complianceVersionId: payRun.complianceVersionId || null,
+    },
+    ruleVersions: {}, engineVersion: ENGINE_VERSION,
+  });
+}
+
+/**
+ * submitRun — maker submits a COMPUTED run for review (COMPUTED→REVIEW). Guards
+ * OPEN_BLOCKERS; records submittedBy + the totalsHash the checker will see.
+ */
+async function submitRun({ businessId, actorId, payRunId }) {
+  const payRun = await loadRun(businessId, payRunId);
+  if (payRun.status !== 'COMPUTED') throw badRequest('BAD_STATE', `Submit requires a COMPUTED run (current: ${payRun.status})`);
+  const blockingAnomalies = await recountBlockers(businessId, payRunId);
+
+  const from = STATE.CALCULATED;
+  const runState = { id: payRun.id, status: from, preparerId: payRun.computedBy || payRun.lockedBy, blockingAnomalies };
+  transition(runState, STATE.IN_REVIEW, { actorId, blockingAnomalies });
+
+  const totalsHash = totalsHashOf(payRun);
+  await persistTransition({ prisma, payRunId, from, to: STATE.IN_REVIEW, ctx: { actorId, totalsHash } });
+  await writeAudit({
+    businessId, actorId, action: 'payrun.submit', entityType: 'PayRun', entityId: payRunId,
+    meta: { code: payRun.code, blockingAnomalies, totalsHash },
+  });
+  return getRun({ businessId, payRunId });
+}
+
+/**
+ * sendBackRun — checker returns a submitted run to the maker (REVIEW→COMPUTED).
+ * Requires a reason; recorded for the audit trail. Checker must differ from the
+ * submitter (a maker can't bounce their own submission to dodge the gate).
+ */
+async function sendBackRun({ businessId, actorId, payRunId, reason }) {
+  const payRun = await loadRun(businessId, payRunId);
+  if (payRun.status !== 'REVIEW') throw badRequest('BAD_STATE', `Send-back requires a REVIEW run (current: ${payRun.status})`);
+  if (!reason || !String(reason).trim()) throw badRequest('MISSING_FIELDS', 'A send-back reason is required.');
+
+  const from = STATE.IN_REVIEW;
+  const runState = { id: payRun.id, status: from, preparerId: payRun.computedBy, submittedBy: payRun.submittedBy };
+  transition(runState, STATE.CALCULATED, { actorId, reason });
+
+  await persistTransition({ prisma, payRunId, from, to: STATE.CALCULATED, ctx: { actorId, reason } });
+  await writeAudit({
+    businessId, actorId, action: 'payrun.send_back', entityType: 'PayRun', entityId: payRunId,
+    meta: { code: payRun.code, reason, submittedBy: payRun.submittedBy },
+  });
+  return getRun({ businessId, payRunId });
+}
+
+/**
+ * publishRun — flip a run's payslips GENERATED→PUBLISHED and fire the publish
+ * chain (payslip.published webhook + HR_PAYSLIP_PUBLISHED notification). Allowed
+ * once the run is APPROVED/PAID (employees see a payslip only after publish).
+ * Idempotent: already-PUBLISHED/VIEWED slips are left as-is.
+ */
+async function publishRun({ businessId, actorId, payRunId }) {
+  const payRun = await loadRun(businessId, payRunId);
+  if (!['APPROVED', 'PAID', 'FILED'].includes(payRun.status)) {
+    throw badRequest('BAD_STATE', `Payslips can be published only after approval (current: ${payRun.status}).`);
+  }
+  const now = new Date();
+  const updated = await prisma.payslip.updateMany({
+    where: { businessId, payRunId, status: 'GENERATED', deletedAt: null },
+    data: { status: 'PUBLISHED', publishedAt: now },
+  });
+
+  // Fire the publish chain per now-published slip (fire-and-forget; never blocks).
+  const slips = await prisma.payslip.findMany({
+    where: { businessId, payRunId, status: 'PUBLISHED', deletedAt: null },
+    include: { employee: { select: { id: true, code: true, firstName: true, lastName: true, workEmail: true, personalEmail: true, phone: true } } },
+  });
+  for (const slip of slips) {
+    webhooks.emitHrEvent(businessId, 'payslip.published', slip);
+    const emp = slip.employee || {};
+    notifications.notifyHrEvent({
+      businessId, event: 'payslip.published',
+      recipientEmail: emp.workEmail || emp.personalEmail || null,
+      recipientPhone: emp.phone || null,
+      variables: {
+        NAME: [emp.firstName, emp.lastName].filter(Boolean).join(' ') || emp.code || 'there',
+        PERIOD: `${isoDate(slip.periodStart)}–${isoDate(slip.periodEnd)}`,
+        AMT: `${slip.currencyCode} ${slip.netPay}`,
+        LINK: `/payslips/${slip.id}`,
+        BIZ: 'DriftHR',
+      },
+      triggeredBy: actorId,
+    }).catch(() => {});
+  }
+
+  await writeAudit({
+    businessId, actorId, action: 'payrun.publish', entityType: 'PayRun', entityId: payRunId,
+    meta: { code: payRun.code, published: updated.count },
+  });
+  return { payRunId, published: updated.count, total: slips.length };
+}
+
+/**
+ * disburseRun — APPROVED→PAID via persistTransition; publishes payslips on the
+ * disbursement boundary (employees see payslips only after PAID).
+ */
+async function disburseRun({ businessId, actorId, payRunId }) {
+  const payRun = await loadRun(businessId, payRunId);
+  if (payRun.status !== 'APPROVED') throw badRequest('BAD_STATE', `Disburse requires an APPROVED run (current: ${payRun.status})`);
+
+  const runState = { id: payRun.id, status: STATE.APPROVED, payDate: isoDate(payRun.payDate) };
+  transition(runState, STATE.PAID, { actorId, at: new Date() });
+  await persistTransition({ prisma, payRunId, from: STATE.APPROVED, to: STATE.PAID, ctx: { actorId } });
+
+  // Publish on the disbursement boundary.
+  await publishRun({ businessId, actorId, payRunId });
+
+  await writeAudit({
+    businessId, actorId, action: 'payrun.pay', entityType: 'PayRun', entityId: payRunId,
+    meta: { code: payRun.code, totalNet: String(payRun.totalNet) },
+  });
+  return getRun({ businessId, payRunId });
+}
+
+/** Map a country to the StatutoryRemittance rows + due dates its filings write. */
+const FILING_PLAN = Object.freeze({
+  IN: [
+    { kind: 'IN_PF', fileKind: 'ecr', dueDom: 15, periodGranularity: 'month' },
+    { kind: 'IN_ESI', fileKind: 'esic', dueDom: 15, periodGranularity: 'month' },
+    { kind: 'IN_PT', fileKind: null, dueDom: 20, periodGranularity: 'month' },
+    { kind: 'IN_FORM24Q', fileKind: 'form24q', dueDom: 31, periodGranularity: 'quarter' },
+  ],
+  NZ: [
+    { kind: 'NZ_PAYDAY_FILING', fileKind: 'ei', dueWorkingDays: 2, periodGranularity: 'payday' },
+    { kind: 'NZ_PAYE', fileKind: null, dueDom: 20, periodGranularity: 'month' },
+  ],
+});
+
+/** Compute a due date (Date) for a remittance kind from the run period. */
+function remittanceDueDate(plan, payRun) {
+  const end = new Date(isoDate(payRun.periodEnd) + 'T00:00:00Z');
+  if (plan.periodGranularity === 'quarter') {
+    // 24Q: filed by end of the month following the quarter (simplify: +31 days).
+    return new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, plan.dueDom || 31));
+  }
+  if (plan.dueWorkingDays != null) {
+    const d = new Date(isoDate(payRun.payDate) + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + plan.dueWorkingDays + 2); // pad weekends
+    return d;
+  }
+  // Monthly: dueDom of the month FOLLOWING the period.
+  return new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, plan.dueDom || 15));
+}
+
+/** taxPeriod string for a remittance: "YYYY-MM" or "YYYY-Qn". */
+function remittanceTaxPeriod(plan, payRun) {
+  if (plan.periodGranularity === 'quarter') {
+    return `${payRun.taxYear}-${indianQuarter(payRun.periodEnd)}`;
+  }
+  return isoDate(payRun.periodStart).slice(0, 7);
+}
+
+/**
+ * fileRun — PAID→FILED; write a StatutoryRemittance row per country filing
+ * obligation (idempotent on (entityId, kind, taxPeriod)). Uses persistTransition.
+ */
+async function fileRun({ businessId, actorId, payRunId }) {
+  const payRun = await loadRun(businessId, payRunId, true);
+  if (payRun.status !== 'PAID') throw badRequest('BAD_STATE', `Filing requires a PAID run (current: ${payRun.status})`);
+  const country = payRun.entity.countryCode;
+  const plan = FILING_PLAN[country] || [];
+
+  const lines = await prisma.payRunLine.findMany({ where: { businessId, payRunId } });
+  const sumDec = (field) => lines.reduce((s, l) => s + decimalToMinor(l[field]), 0);
+  const amountForKind = (kind) => {
+    switch (kind) {
+      case 'IN_PF': return sumDec('pfEmployee') + sumDec('pfEmployer');
+      case 'IN_ESI': return sumDec('esiEmployee') + sumDec('esiEmployer');
+      case 'IN_PT': return sumDec('pt');
+      case 'IN_FORM24Q': return sumDec('tds');
+      case 'NZ_PAYE': return sumDec('paye') + sumDec('esct');
+      case 'NZ_PAYDAY_FILING': return sumDec('paye') + sumDec('kiwiSaverEmployee') + sumDec('kiwiSaverEmployer');
+      default: return 0;
+    }
+  };
+
+  const transitionState = { id: payRun.id, status: STATE.PAID };
+  transition(transitionState, STATE.FILED, { actorId, at: new Date() });
+
+  const written = [];
+  await prisma.$transaction(async (tx) => {
+    await persistTransition({ prisma: tx, payRunId, from: STATE.PAID, to: STATE.FILED, ctx: { actorId } });
+    for (const p of plan) {
+      const taxPeriod = remittanceTaxPeriod(p, payRun);
+      const amountMinor = amountForKind(p.kind);
+      const existing = await tx.statutoryRemittance.findFirst({
+        where: { businessId, entityId: payRun.entityId, kind: p.kind, taxPeriod },
+      });
+      const fileUrl = p.fileKind ? `/api/hr/payroll/runs/${payRunId}/files/${p.fileKind}` : null;
+      const data = {
+        businessId, entityId: payRun.entityId, payRunId,
+        kind: p.kind, taxPeriod, amount: toDec(amountMinor), currencyCode: payRun.currencyCode,
+        dueDate: remittanceDueDate(p, payRun), status: 'DUE', fileUrl,
+        meta: { fileKind: p.fileKind, granularity: p.periodGranularity, runCode: payRun.code },
+      };
+      if (existing) {
+        await tx.statutoryRemittance.update({ where: { id: existing.id }, data: { ...data, version: { increment: 1 } } });
+        written.push({ kind: p.kind, taxPeriod, id: existing.id });
+      } else {
+        const row = await tx.statutoryRemittance.create({ data });
+        written.push({ kind: p.kind, taxPeriod, id: row.id });
+      }
+    }
+  });
+
+  await writeAudit({
+    businessId, actorId, action: 'payrun.file', entityType: 'PayRun', entityId: payRunId,
+    meta: { code: payRun.code, country, remittances: written.map((w) => w.kind) },
+  });
+  return { payRunId, country, remittances: written };
+}
+
+/**
+ * closeRun — FILED→FILED+closedAt. Guarded: every due StatutoryRemittance for the
+ * period must exist before a run can be closed (no quietly-skipped filing).
+ */
+async function closeRun({ businessId, actorId, payRunId }) {
+  const payRun = await loadRun(businessId, payRunId, true);
+  if (payRun.status !== 'FILED') throw badRequest('BAD_STATE', `Close requires a FILED run (current: ${payRun.status})`);
+  if (payRun.closedAt) return getRun({ businessId, payRunId }); // already closed → idempotent
+
+  const country = payRun.entity.countryCode;
+  const plan = FILING_PLAN[country] || [];
+  const remittances = await prisma.statutoryRemittance.findMany({ where: { businessId, payRunId } });
+  const haveKinds = new Set(remittances.map((r) => r.kind));
+  const missing = plan.map((p) => p.kind).filter((k) => !haveKinds.has(k));
+  if (missing.length) {
+    throw badRequest('CLOSE_BLOCKED', `Cannot close — missing remittances: ${missing.join(', ')}. File the run first.`);
+  }
+
+  const runState = { id: payRun.id, status: STATE.FILED };
+  transition(runState, STATE.CLOSED, { actorId, at: new Date() });
+  // CLOSED maps to prisma FILED; persistTransition sets closedAt.
+  await persistTransition({ prisma, payRunId, from: STATE.FILED, to: STATE.CLOSED, ctx: { actorId } });
+
+  await writeAudit({
+    businessId, actorId, action: 'payrun.close', entityType: 'PayRun', entityId: payRunId,
+    meta: { code: payRun.code },
+  });
+  return getRun({ businessId, payRunId });
+}
+
+/** cancelRun — →CANCELLED (pre-approval only; else CANNOT_CANCEL). */
+async function cancelRun({ businessId, actorId, payRunId, reason }) {
+  const payRun = await loadRun(businessId, payRunId);
+  const from = engineStateOf(payRun);
+  if (['APPROVED', 'PAID', 'FILED'].includes(payRun.status) || payRun.closedAt) {
+    throw badRequest('CANNOT_CANCEL', 'Cannot cancel after APPROVED; create a compensating CORRECTION run.');
+  }
+  const runState = { id: payRun.id, status: from };
+  transition(runState, STATE.CANCELLED, { actorId, reason });
+  await persistTransition({ prisma, payRunId, from, to: STATE.CANCELLED, ctx: { actorId, reason } });
+  await writeAudit({
+    businessId, actorId, action: 'payrun.cancel', entityType: 'PayRun', entityId: payRunId,
+    meta: { code: payRun.code, reason: reason || null, from: payRun.status },
+  });
+  return getRun({ businessId, payRunId });
+}
+
+/**
+ * reopenRun — INPUTS_LOCKED/COMPUTED/REVIEW → DRAFT (editable again); clears the
+ * compute fingerprint. Post-approval reopen is refused (CANNOT_REOPEN).
+ */
+async function reopenRun({ businessId, actorId, payRunId }) {
+  const payRun = await loadRun(businessId, payRunId);
+  if (['APPROVED', 'PAID', 'FILED'].includes(payRun.status) || payRun.closedAt) {
+    throw badRequest('CANNOT_REOPEN', 'Cannot reopen after APPROVED; create a CORRECTION run.');
+  }
+  if (!['INPUTS_LOCKED', 'COMPUTED', 'REVIEW'].includes(payRun.status)) {
+    throw badRequest('BAD_STATE', `Nothing to reopen from ${payRun.status}.`);
+  }
+  // REVIEW reopens to DRAFT through COMPUTED's edge (REVIEW→COMPUTED is send-back,
+  // then COMPUTED→DRAFT). Model directly: the prisma status moves to DRAFT.
+  const from = engineStateOf(payRun);
+  // INPUTS_LOCKED/CALCULATED have a direct →DRAFT edge; IN_REVIEW does not, so bounce.
+  if (from === STATE.IN_REVIEW) {
+    // REVIEW→COMPUTED (send-back to self as reopen) then COMPUTED→DRAFT.
+    await persistTransition({ prisma, payRunId, from: STATE.IN_REVIEW, to: STATE.CALCULATED, ctx: { actorId, reason: 'reopen' } });
+    await persistTransition({ prisma, payRunId, from: STATE.CALCULATED, to: STATE.DRAFT, ctx: { actorId } });
+  } else {
+    const runState = { id: payRun.id, status: from };
+    transition(runState, STATE.DRAFT, { actorId });
+    await persistTransition({ prisma, payRunId, from, to: STATE.DRAFT, ctx: { actorId } });
+  }
+  // Clear compute artefacts (lines/components/payslips/variance) so a recompute is clean.
+  await prisma.$transaction(async (tx) => {
+    await tx.payslip.deleteMany({ where: { businessId, payRunId } });
+    await tx.payRunLineComponent.deleteMany({ where: { payRunLine: { payRunId } } });
+    await tx.payRunLine.deleteMany({ where: { payRunId } });
+    await tx.payRun.update({
+      where: { id: payRunId },
+      data: { varianceReport: null, totalsHash: null, headcount: 0, totalGross: 0, totalDeductions: 0, totalNet: 0, totalEmployerCost: 0 },
+    });
+  });
+  await writeAudit({
+    businessId, actorId, action: 'payrun.reopen', entityType: 'PayRun', entityId: payRunId,
+    meta: { code: payRun.code, from: payRun.status },
+  });
+  return getRun({ businessId, payRunId });
 }
 
 // ===========================================================================
@@ -1211,8 +1879,26 @@ module.exports = {
   getMyPayslips,
   getMyPayslip,
   generateFile,
+  // Feature 7 — run orchestration / lifecycle past APPROVED
+  listRunEntities,
+  getInputsChecklist,
+  upsertOneTimeInput,
+  computeVariance,
+  submitRun,
+  sendBackRun,
+  publishRun,
+  disburseRun,
+  fileRun,
+  closeRun,
+  cancelRun,
+  reopenRun,
+  recountBlockers,
   // ESS self-resolution (reused by the compensation ESS route).
   resolveSelfEmployee,
   // internals exposed for tests
-  _internal: { taxYearFor, buildFilingAggregate, statutoryRollups, buildPayslipSnapshot, resolveCurrentCompensation, resolveBalancingTarget },
+  _internal: {
+    taxYearFor, buildFilingAggregate, statutoryRollups, buildPayslipSnapshot,
+    resolveCurrentCompensation, resolveBalancingTarget, varianceLineFromRow,
+    totalsHashOf, remittanceDueDate, remittanceTaxPeriod, FILING_PLAN,
+  },
 };

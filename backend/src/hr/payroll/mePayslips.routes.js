@@ -15,6 +15,9 @@ const c = require('./payroll.controller');
 router.use(requireCustomer);
 
 router.get('/', c.getMyPayslips);
+// Security fix (§6.6): the employee's OWN payslip PDF/text — scoped to the
+// employee + PUBLISHED. Must precede /:id so "pdf" is not swallowed as an id.
+router.get('/:id/pdf', c.getMyPayslipPdf);
 router.get('/:id', c.getMyPayslip);
 
 module.exports = router;

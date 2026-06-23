@@ -4,10 +4,15 @@
 // own payslips.
 //
 // Wired to GET /api/hr/me/payslips/:id (contract). Renders earnings,
-// deductions and employer contributions, the net, and — when the payslip
-// references its pay run — a download link to the run's bank/statutory file via
-// GET /api/hr/payroll/runs/:runId/files/:kind. Tolerant of several payload
-// shapes (lines[] with a `category`, or pre-split earnings/deductions arrays).
+// deductions and employer contributions, the net, a YTD strip, and the
+// employee's OWN payslip download (GET /api/hr/me/payslips/:id/pdf).
+//
+// SECURITY FIX (Feature 7 §6.6): the download MUST be the employee's own payslip
+// — NEVER the run-level bank/statutory file. The earlier `runFileHref` pointed at
+// /api/hr/payroll/runs/:runId/files/:kind, which would expose every employee's
+// pay to a single employee. That is removed; we link the per-employee PDF route.
+// Tolerant of several payload shapes (snapshotJson, lines[] with a `category`, or
+// pre-split earnings/deductions arrays).
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
@@ -61,7 +66,8 @@ function Section({ title, lines, currency, total }) {
   );
 }
 
-// Split a flat lines[] array by category into earnings/deductions/employer.
+// Split a flat lines[] array by category into earnings/deductions/employer. The
+// payslip snapshotJson (the frozen source of truth) carries pre-split arrays.
 function splitLines(slip) {
   const earnings = [];
   const deductions = [];
@@ -69,10 +75,12 @@ function splitLines(slip) {
 
   const push = (arr, list) => { if (Array.isArray(list)) arr.push(...list); };
 
-  // Pre-split shapes.
-  push(earnings, slip?.earnings || slip?.lineItems?.earnings);
-  push(deductions, slip?.deductions || slip?.lineItems?.deductions);
-  push(employer, slip?.employerContributions || slip?.employerContrib || slip?.lineItems?.employerContributions);
+  const snap = slip?.snapshotJson || slip;
+
+  // Pre-split shapes (snapshotJson uses earnings/employeeDeductions/employerContributions).
+  push(earnings, snap?.earnings || slip?.lineItems?.earnings);
+  push(deductions, snap?.employeeDeductions || slip?.deductions || slip?.lineItems?.deductions);
+  push(employer, snap?.employerContributions || slip?.employerContrib || slip?.lineItems?.employerContributions);
 
   // Flat lines[] with a category/type field.
   const flat = slip?.lines || slip?.components || [];
@@ -96,12 +104,11 @@ function sumOf(lines, currency) {
   return { amount: total, currency };
 }
 
-// Build a download URL to the pay-run file if the payslip references its run.
-function runFileHref(slip) {
-  const runId = slip?.runId || slip?.payRunId || slip?.run?.id;
-  if (!runId) return null;
-  const kind = slip?.bankFileKind || 'bank';
-  return `/api/hr/payroll/runs/${encodeURIComponent(runId)}/files/${encodeURIComponent(kind)}`;
+// SECURITY: download the employee's OWN payslip (per-employee, server-scoped),
+// NEVER the run-level bank/statutory file. The id is the payslip id.
+function ownPayslipHref(id) {
+  if (!id) return null;
+  return `/api/hr/me/payslips/${encodeURIComponent(id)}/pdf`;
 }
 
 function PayslipDetailInner() {
@@ -117,11 +124,15 @@ function PayslipDetailInner() {
   }
 
   const slip = data?.payslip || data;
-  const currency = slip?.currency || slip?.currencyCode || 'INR';
+  const snap = slip?.snapshotJson || {};
+  const currency = slip?.currency || slip?.currencyCode || snap.currencyCode || 'INR';
   const { earnings, deductions, employer } = splitLines(slip || {});
-  const gross = slip?.gross ?? slip?.grossPay ?? sumOf(earnings, currency);
-  const net = slip?.net ?? slip?.netPay ?? slip?.netPayable;
-  const fileHref = runFileHref(slip);
+  const gross = snap.gross ?? slip?.gross ?? slip?.grossPay ?? slip?.grossEarnings ?? sumOf(earnings, currency);
+  const net = snap.net ?? slip?.net ?? slip?.netPay ?? slip?.netPayable;
+  const fileHref = ownPayslipHref(id);
+  const status = String(slip?.status || '').toUpperCase();
+  // YTD strip from the snapshot (yptdJson if present).
+  const ytd = slip?.yptdJson || snap.ytd || null;
 
   return (
     <div className="space-y-5">
@@ -143,8 +154,14 @@ function PayslipDetailInner() {
                 {(slip.employee?.employeeCode || slip.employeeCode) ? ` · ${slip.employee?.employeeCode || slip.employeeCode}` : ''}
               </p>
             )}
-            {slip.paidOn && (
-              <p className="text-xs" style={{ color: 'var(--theme-muted)' }}>Paid on {formatDate(slip.paidOn)}</p>
+            {(slip.payDate || slip.paidOn) && (
+              <p className="text-xs" style={{ color: 'var(--theme-muted)' }}>Paid on {formatDate(slip.payDate || slip.paidOn)}</p>
+            )}
+            {status && (
+              <span className="mt-1 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold"
+                style={{ background: 'var(--theme-border)', color: 'var(--theme-muted)' }}>
+                {status === 'VIEWED' ? 'Viewed' : status === 'PUBLISHED' ? 'Published' : status.toLowerCase()}
+              </span>
             )}
           </header>
 
@@ -161,13 +178,27 @@ function PayslipDetailInner() {
             </div>
           </section>
 
+          {ytd && (typeof ytd === 'object') && (
+            <section className="rounded-2xl border bg-white p-4 shadow-sm" style={{ borderColor: 'var(--theme-border)' }}>
+              <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--theme-muted)' }}>Year to date</h2>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                {Object.entries(ytd).slice(0, 6).map(([k, v]) => (
+                  <div key={k} className="flex items-center justify-between">
+                    <span style={{ color: 'var(--theme-muted)' }}>{k}</span>
+                    <span style={{ color: 'var(--theme-text)' }}>{typeof v === 'number' ? money(v, currency) : String(v)}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
           {fileHref && (
             <a
               href={fileHref}
               className="block w-full rounded-lg border py-2.5 text-center text-sm font-semibold"
               style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-primary)' }}
             >
-              Download payroll file
+              Download my payslip
             </a>
           )}
         </>

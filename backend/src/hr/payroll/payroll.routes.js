@@ -27,11 +27,31 @@ router.use(protect);
 // (tenant, IP) by payrollMutationLimiter on top of the RBAC permission gate.
 router.post('/runs', requirePermission('canRunPayroll'), c.createRun);
 router.post('/runs/:id/compute', payrollMutationLimiter, requirePermission('canRunPayroll'), c.computeRun);
+router.post('/runs/:id/freeze', payrollMutationLimiter, requirePermission('canRunPayroll'), c.freezeRun);
 router.post('/runs/:id/approve', payrollMutationLimiter, requirePermission('canApprovePayroll'), c.approveRun);
 router.get('/runs', requirePermission('canViewPayrollReports'), c.listRuns);
 router.get('/runs/:id', requirePermission('canViewPayrollReports'), c.getRun);
 router.get('/runs/:id/payslips', requirePermission('canViewPayrollReports'), c.getRunPayslips);
 router.get('/runs/:id/files/:kind', requirePermission('canViewPayrollReports'), c.getFile);
+
+// ── Feature 7 — guided run orchestration + lifecycle past APPROVED ──
+//   inputs / compute → maker (canRunPayroll); variance read → reports;
+//   submit → maker; send-back / approve / publish / pay → checker (canApprovePayroll);
+//   file / close → finance (canViewPayrollReports). Maker-checker SoD is enforced
+//   in the service (approver ≠ preparer/submitter), not by RBAC alone.
+router.get('/entities', requirePermission('canRunPayroll'), c.listRunEntities);
+router.get('/runs/:id/inputs-checklist', requirePermission('canRunPayroll'), c.getInputsChecklist);
+router.post('/runs/:id/inputs/one-time', requirePermission('canRunPayroll'), c.upsertOneTimeInput);
+router.get('/runs/:id/variance', requirePermission('canViewPayrollReports'), c.getVariance);
+router.post('/runs/:id/variance', payrollMutationLimiter, requirePermission('canViewPayrollReports'), c.getVariance);
+router.post('/runs/:id/submit', payrollMutationLimiter, requirePermission('canRunPayroll'), c.submitRun);
+router.post('/runs/:id/send-back', payrollMutationLimiter, requirePermission('canApprovePayroll'), c.sendBackRun);
+router.post('/runs/:id/payslips/publish', payrollMutationLimiter, requirePermission('canApprovePayroll'), c.publishRun);
+router.post('/runs/:id/pay', payrollMutationLimiter, requirePermission('canApprovePayroll'), c.disburseRun);
+router.post('/runs/:id/file', payrollMutationLimiter, requirePermission('canViewPayrollReports'), c.fileRun);
+router.post('/runs/:id/close', payrollMutationLimiter, requirePermission('canViewPayrollReports'), c.closeRun);
+router.post('/runs/:id/cancel', payrollMutationLimiter, requirePermission('canRunPayroll'), c.cancelRun);
+router.post('/runs/:id/reopen', payrollMutationLimiter, requirePermission('canRunPayroll'), c.reopenRun);
 
 // ── Payslips (operator view) ──
 router.get('/payslips/:id', requirePermission('canViewPayrollReports'), c.getPayslip);
