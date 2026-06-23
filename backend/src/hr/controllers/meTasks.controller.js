@@ -23,6 +23,17 @@
 const prisma = require('../../core/lib/prisma');
 const payrollService = require('../payroll/service');
 
+// Feature 10 (slice 10e): include approvals awaiting THIS person so the ESS
+// dashboard "Pending tasks" count + list cover what they need to approve, not
+// just their own onboarding/e-sign/asset chores. We resolve the caller's portal
+// User from the ESS session (email → User), then surface PENDING ApprovalRequests
+// whose active-level approver set contains that user id. Deep-links to /approvals.
+const MODULE_TASK_LABEL = {
+  LEAVE: 'leave request', EXPENSE: 'reimbursement claim', TRAVEL: 'travel request',
+  LOAN: 'loan request', COMPENSATION: 'salary change', PROFILE_CHANGE: 'profile change',
+  ATTENDANCE_REGULARIZATION: 'attendance fix', SEPARATION: 'exit request',
+};
+
 // Journey statuses that still need the new hire's attention.
 const OPEN_JOURNEY_STATUS = ['NOT_STARTED', 'IN_PROGRESS', 'BLOCKED', 'ON_HOLD'];
 // Signer statuses that mean "not yet signed".
@@ -123,6 +134,37 @@ async function listMyTasks(req, res, next) {
         href: '/profile',
         dueDate: null,
       });
+    }
+
+    // 4) Approvals awaiting THIS person (Feature 10 slice 10e). Resolve the
+    // caller's portal User from the ESS session (email → User), then list PENDING
+    // ApprovalRequests whose active-level approver set includes that user id. JSON
+    // array membership is filtered in-code (same approach as the operator inbox).
+    const portalUser = req.customer.email
+      ? await prisma.user.findFirst({
+          where: { businessId, email: req.customer.email, isActive: true },
+          select: { id: true },
+        })
+      : null;
+    if (portalUser) {
+      const pending = await prisma.approvalRequest.findMany({
+        where: { businessId, status: 'PENDING' },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+        select: { id: true, module: true, payloadJson: true, slaDueAt: true },
+      });
+      for (const r of pending) {
+        const active = r.payloadJson && r.payloadJson._active;
+        if (!active || !Array.isArray(active.approverUserIds) || !active.approverUserIds.includes(portalUser.id)) continue;
+        items.push({
+          id: `approval:${r.id}`,
+          kind: 'APPROVAL',
+          title: 'Approve a request',
+          sub: `A ${MODULE_TASK_LABEL[r.module] || 'request'} is waiting for your decision`,
+          href: '/approvals',
+          dueDate: r.slaDueAt || null,
+        });
+      }
     }
 
     res.json({ items, total: items.length });

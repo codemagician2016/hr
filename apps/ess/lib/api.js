@@ -72,8 +72,38 @@ export function fetchMyProfile() {
 }
 
 // The employee's outstanding self-service tasks (in-progress onboarding, unsigned
-// e-sign envelopes, un-acknowledged assets). Powers the dashboard "Pending tasks"
-// card and the conditional Onboarding nav item.
+// e-sign envelopes, un-acknowledged assets, + approvals awaiting them). Powers the
+// dashboard "Pending tasks" card and the conditional Onboarding nav item.
 export function fetchMyTasks() {
   return apiGet('/api/hr/me/tasks');
+}
+
+// ── Feature 10 (ESS) ─────────────────────────────────────────────────────────
+// Unified approvals inbox (everything awaiting me, all modules). Customer session
+// — the caller's portal user is resolved server-side from the session.
+export function fetchMyApprovals(query = '') {
+  return apiGet(`/api/hr/me/approvals${query}`);
+}
+export function decideApproval(id, body) {
+  return apiPost(`/api/hr/me/approvals/${id}/decide`, body);
+}
+// "Who will approve this?" hint for a submit form. { module, ctx } → resolved chain.
+export function previewApprovalChain(body) {
+  return apiPost('/api/hr/me/approvals/preview', body);
+}
+
+// Minimal colleague directory (id + name) for the delegation stand-in picker.
+export function fetchColleagues() {
+  return apiGet('/api/hr/me/approvals/colleagues');
+}
+
+// Out-of-office delegation ("let someone approve for me while I'm away").
+export function fetchMyDelegations() {
+  return apiGet('/api/hr/me/delegations');
+}
+export function createDelegation(body) {
+  return apiPost('/api/hr/me/delegations', body);
+}
+export function revokeDelegation(id) {
+  return apiSend(`/api/hr/me/delegations/${id}`, 'DELETE');
 }
