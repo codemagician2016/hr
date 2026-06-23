@@ -10,7 +10,7 @@ const {
   setCustomerTokenCookie,
   resolveOperatorCookieHost,
 } = require('../utils/generateToken');
-const { effectivePermissions, SYSTEM_ROLES, SYSTEM_ROLE_SCOPES } = require('../lib/rbac');
+const { effectivePermissions, SYSTEM_ROLES, SYSTEM_ROLE_SCOPES, SYSTEM_ROLE_COMP_VISIBILITY } = require('../lib/rbac');
 const { ROLES } = require('../lib/roles');
 const { resolveVertical } = require('../lib/vertical');
 const { routableCustomDomainWhere } = require('../lib/customDomainRouting');
@@ -29,7 +29,7 @@ const USER_SELECT = {
   isServiceProvider: true,
   businessRoleId: true,
   passwordChangedAt: true,
-  businessRole: { select: { id: true, name: true, permissions: true, isSystem: true, defaultScope: true } },
+  businessRole: { select: { id: true, name: true, permissions: true, isSystem: true, defaultScope: true, compVisibility: true } },
 };
 
 const CUSTOMER_SELECT = {
@@ -146,12 +146,14 @@ async function ensureDefaultHrRole({ businessId }) {
   const roles = [];
   for (const [roleName, preset] of Object.entries(SYSTEM_ROLES)) {
     const defaultScope = SYSTEM_ROLE_SCOPES[roleName] || 'ALL';
+    const compVisibility = SYSTEM_ROLE_COMP_VISIBILITY[roleName] || 'NONE';
     const role = await prisma.businessRole.upsert({
       where: { businessId_name: { businessId, name: roleName } },
       update: {
         isSystem: true,
         permissions: preset,
         defaultScope,
+        compVisibility,
       },
       create: {
         businessId,
@@ -159,8 +161,9 @@ async function ensureDefaultHrRole({ businessId }) {
         isSystem: true,
         permissions: preset,
         defaultScope,
+        compVisibility,
       },
-      select: { id: true, name: true, permissions: true, isSystem: true, defaultScope: true },
+      select: { id: true, name: true, permissions: true, isSystem: true, defaultScope: true, compVisibility: true },
     });
     roles.push(role);
   }
