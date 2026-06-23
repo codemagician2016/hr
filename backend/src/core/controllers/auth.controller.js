@@ -12,6 +12,30 @@ function generateOtp() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
+// Safe projection for the authenticated user returned to the client — mirrors
+// USER_SELECT in auth.middleware.js (what /api/auth/me exposes). Login must NOT
+// leak internal columns (emailOtp, emailOtpExpiry, otpAttempts, resetToken,
+// resetTokenExpiry, passwordChangedAt, calendarFeedToken, …) just because the
+// row was loaded for a bcrypt compare. Keep this list in sync with USER_SELECT.
+const SAFE_LOGIN_USER_FIELDS = [
+  'id', 'email', 'name', 'role', 'businessId', 'avatarUrl', 'subtitle', 'bio',
+  'isActive', 'showOnWebsite', 'isServiceProvider', 'businessRoleId',
+];
+
+function projectSafeUser(user, extra = {}) {
+  const safe = {};
+  for (const key of SAFE_LOGIN_USER_FIELDS) {
+    if (user[key] !== undefined) safe[key] = user[key];
+  }
+  if (user.businessRole !== undefined) {
+    const r = user.businessRole;
+    safe.businessRole = r
+      ? { id: r.id, name: r.name, permissions: r.permissions, isSystem: r.isSystem }
+      : null;
+  }
+  return { ...safe, ...extra };
+}
+
 // POST /api/auth/register
 // Atomic signup: send OTP first, only create the user if the email is
 // actually deliverable. Prevents the half-baked state where a user row
@@ -103,10 +127,16 @@ async function register(req, res) {
 async function login(req, res) {
   const { email, password } = req.body;
 
+  // Read the password (for the bcrypt compare) and emailVerified (for the
+  // self-signup gate) explicitly, but project the RESPONSE to the safe field
+  // set below so no internal columns ride along in the JSON.
   const user = await prisma.user.findUnique({
     where: { email },
-    include: {
+    select: {
+      ...Object.fromEntries(SAFE_LOGIN_USER_FIELDS.map((k) => [k, true])),
       businessRole: { select: { id: true, name: true, permissions: true, isSystem: true } },
+      password: true,
+      emailVerified: true,
     },
   });
 
@@ -181,12 +211,8 @@ async function login(req, res) {
   const token = generateToken({ id: user.id });
   setTokenCookie(res, token, req);
 
-  const { password: _pw, resetToken: _rt, resetTokenExpiry: _rte, ...safeUser } = user;
   res.json({
-    user: {
-      ...safeUser,
-      businessSlug: business?.slug || null,
-    },
+    user: projectSafeUser(user, { businessSlug: business?.slug || null }),
     business,
   });
 }
@@ -319,7 +345,13 @@ async function exchangeLoginCode(req, res) {
     return res.status(401).json({ message: 'Invalid or expired code' });
   }
 
-  const user = await prisma.user.findUnique({ where: { id: entry.userId } });
+  const user = await prisma.user.findUnique({
+    where: { id: entry.userId },
+    select: {
+      ...Object.fromEntries(SAFE_LOGIN_USER_FIELDS.map((k) => [k, true])),
+      businessRole: { select: { id: true, name: true, permissions: true, isSystem: true } },
+    },
+  });
   if (!user || !user.isActive) {
     return res.status(401).json({ message: 'Account not found' });
   }
@@ -334,12 +366,8 @@ async function exchangeLoginCode(req, res) {
       })
     : null;
 
-  const { password: _pw, resetToken: _rt, resetTokenExpiry: _rte, emailOtp: _eo, emailOtpExpiry: _eoe, ...safeUser } = user;
   res.json({
-    user: {
-      ...safeUser,
-      businessSlug: business?.slug || null,
-    },
+    user: projectSafeUser(user, { businessSlug: business?.slug || null }),
     business,
   });
 }

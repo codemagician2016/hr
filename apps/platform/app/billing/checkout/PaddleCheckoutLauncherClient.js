@@ -36,6 +36,7 @@ export default function PaddleCheckoutLauncherClient({ transactionId = '', redir
   const [scriptReady, setScriptReady] = useState(false);
   const [config, setConfig] = useState(null);
   const [error, setError] = useState('');
+  const [notConfigured, setNotConfigured] = useState(false);
   const [status, setStatus] = useState(transactionId ? 'loading' : 'missing');
   const hasOpenedRef = useRef(false);
   const completedRef = useRef(false);
@@ -60,7 +61,11 @@ export default function PaddleCheckoutLauncherClient({ transactionId = '', redir
     fetch('/api/subscription/paddle-config', { credentials: 'include' })
       .then(async (res) => {
         const body = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(body.message || 'Could not load checkout configuration.');
+        if (!res.ok) {
+          const err = new Error(body.message || 'Could not load checkout configuration.');
+          err.notConfigured = !!body.notConfigured;
+          throw err;
+        }
         return body;
       })
       .then((body) => {
@@ -68,6 +73,7 @@ export default function PaddleCheckoutLauncherClient({ transactionId = '', redir
       })
       .catch((err) => {
         if (!cancelled) {
+          setNotConfigured(!!err.notConfigured);
           setError(err.message || 'Could not load checkout configuration.');
           setStatus('error');
         }
@@ -152,7 +158,15 @@ export default function PaddleCheckoutLauncherClient({ transactionId = '', redir
             </p>
           )}
 
-          {error && (
+          {error && notConfigured && (
+            <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-left">
+              <p className="text-sm font-semibold text-amber-900">Checkout isn&rsquo;t available just yet</p>
+              <p className="text-sm text-amber-800 mt-1">{error}</p>
+              <p className="text-xs text-amber-700 mt-2">Your workspace is still active — you can keep using it and upgrade once checkout is live.</p>
+            </div>
+          )}
+
+          {error && !notConfigured && (
             <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-left">
               <p className="text-sm font-semibold text-red-800">Checkout could not open</p>
               <p className="text-sm text-red-700 mt-1">{error}</p>

@@ -406,31 +406,54 @@ async function setup(req, res) {
   // Pre-2026-04-30 this was hardcoded to 'default', which fell through
   // resolveThemeKey() to 'general_practice' — every photographer, lawyer,
   // and barbershop got the medical theme.
+  // A tenant MUST always leave signup with a Subscription — without one the
+  // billing portal and every entitlement check dead-ends (the "tenant existed
+  // with no subscription → broken portal" bug). So resolve the vertical free
+  // tier, fall back to ANY active tier, and FAIL the request if neither exists
+  // (a catalog-less DB is an operator error, not something to swallow into a
+  // half-provisioned tenant).
   try {
-    // Assign the free tier that MATCHES this business's vertical (static-free /
-    // ecom-free / free) — otherwise a Website/Commerce business lands on the
-    // APPOINTMENT 'free' tier and gets the PLAN_VERTICAL_MISMATCH warning.
     const { getFreeTierForVertical } = require('../lib/subscriptionBilling');
-    const freeTier = await getFreeTierForVertical(business.vertical);
-    if (freeTier) {
-      const forever = new Date(Date.now() + 100 * 365 * 24 * 60 * 60 * 1000);
-      // initialTheme already computed above (used by CMS seeder)
-      await prisma.subscription.create({
-        data: {
-          businessId: business.id,
-          tierId: freeTier.id,
-          status: 'ACTIVE',
-          billingCycle: 'MONTHLY',
-          theme: initialTheme,
-          currentPeriodEnd: forever,
-          seatsUsed: 1,
-        },
+    // Prefer the vertical-matched free tier (free / static-free / ecom-free).
+    let landingTier = await getFreeTierForVertical(business.vertical);
+    // Defensive fallback: if no free tier is seeded for any reason, land on the
+    // cheapest active tier so the tenant still has a working subscription + portal
+    // (better a paid-tier-shaped row they can downgrade than no subscription).
+    if (!landingTier) {
+      landingTier = await prisma.pricingTier.findFirst({
+        where: { isActive: true },
+        orderBy: { sortOrder: 'asc' },
       });
-    } else {
-      console.warn('Free tier missing — run prisma/seeds/pricing.seed.js. Business created without a subscription.');
+      if (landingTier) {
+        console.warn(`Free tier missing for vertical "${business.vertical}" — landed business ${business.id} on fallback tier "${landingTier.slug}". Run prisma/seeds/pricing.seed.js.`);
+      }
     }
+    if (!landingTier) {
+      // No catalog at all. Surface a clean 500 instead of creating an orphan
+      // tenant with no subscription that breaks the portal silently.
+      throw new Error('Pricing catalog is empty — no tier to subscribe the new tenant to. Run prisma/seeds/pricing.seed.js.');
+    }
+    const forever = new Date(Date.now() + 100 * 365 * 24 * 60 * 60 * 1000);
+    await prisma.subscription.create({
+      data: {
+        businessId: business.id,
+        tierId: landingTier.id,
+        status: 'ACTIVE',
+        billingCycle: 'MONTHLY',
+        theme: initialTheme,
+        currentPeriodEnd: forever,
+        seatsUsed: 1,
+      },
+    });
   } catch (e) {
     console.error('Auto-subscription provisioning failed:', e.message);
+    // A tenant without a subscription is broken — don't return 201 success on a
+    // half-provisioned business. The business row exists (idempotent re-setup
+    // will reuse it), but signal the failure so the client retries / shows an error.
+    return res.status(500).json({
+      message: 'We created your workspace but could not finish setting up billing. Please try again in a moment.',
+      businessId: business.id,
+    });
   }
 
   // Provision the DriftHR subdomain for the freshly-created tenant (best-effort).

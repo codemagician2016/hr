@@ -202,6 +202,23 @@ async function main() {
     },
   });
 
+  // A second role — Finance — so the Segregation-of-Duties (SoD) maker/checker
+  // path is exercisable end-to-end with TWO distinct operators. The HR Operator
+  // (Owner) is the MAKER (proposes comp revisions, runs payroll, initiates
+  // separations); the Finance user is the CHECKER (approves comp, approves the
+  // locked PayRun, approves FnF). Self-approval is blocked by SoD, so a single
+  // login can't demonstrate the happy path — this gives the demo a real checker.
+  const financeRole = await prisma.businessRole.upsert({
+    where: { businessId_name: { businessId, name: 'Finance' } },
+    update: { permissions: SYSTEM_ROLES.Finance, isSystem: true },
+    create: {
+      businessId,
+      name: 'Finance',
+      isSystem: true,
+      permissions: SYSTEM_ROLES.Finance,
+    },
+  });
+
   const superAdmin = await prisma.user.upsert({
     where: { email: 'superadmin@demo.test' },
     update: { role: 'SUPER_ADMIN' },
@@ -229,7 +246,26 @@ async function main() {
       isActive: true,
     },
   });
-  console.log(`✓ Users: super-admin (${superAdmin.email}) + operator (${operator.email}) with role "${adminRole.name}"`);
+
+  // The SoD CHECKER login. BUSINESS_ADMIN role + the Finance BusinessRole so it
+  // carries canApprovePayroll + canApproveCompensation but NOT the maker keys —
+  // a clean second operator for approvals (payroll approve/pay/file/close, comp
+  // checker, FnF approval) that the Owner-maker cannot self-approve.
+  const finance = await prisma.user.upsert({
+    where: { email: 'finance@demo.test' },
+    update: { role: 'BUSINESS_ADMIN', businessId, businessRoleId: financeRole.id },
+    create: {
+      email: 'finance@demo.test',
+      password: DEMO_PASSWORD_HASH,
+      name: 'Finance Approver',
+      role: 'BUSINESS_ADMIN',
+      businessId,
+      businessRoleId: financeRole.id,
+      emailVerified: true,
+      isActive: true,
+    },
+  });
+  console.log(`✓ Users: super-admin (${superAdmin.email}) + operator (${operator.email}, ${adminRole.name}) + finance (${finance.email}, ${financeRole.name})`);
 
   // ═════════════════════════════════════════════════════════════════════════
   // 3. ENTITIES (IN + NZ) and their org scaffolding
@@ -750,6 +786,114 @@ async function main() {
   console.log(`✓ ESS portal logins created: ${portalUserCount}`);
 
   // ═════════════════════════════════════════════════════════════════════════
+  // 9. ONBOARDING JOURNEY — offer-linked, provisionable end-to-end.
+  // ═════════════════════════════════════════════════════════════════════════
+  // The /onboarding board needs at least one journey whose `Provision employee`
+  // task can actually SUCCEED. That requires an ACCEPTED Offer (provision.js
+  // precondition ~L272 fails 422 'no linked offer' otherwise). The Offer chain
+  // is Candidate → Job → Application → Offer, so we seed the whole pre-hire
+  // funnel for one IN new hire, then a LifecycleJourney that points at it.
+  //
+  // selfServiceJson carries:
+  //   - personal/statutory/bank → so provisioning has real data to promote.
+  //   - designation → so the board card shows a ROLE instead of '—' (#13).
+  //   - comp.basicMonthly → the explicit Basic/DA split so the India 50% wage
+  //     rule resolves cleanly at provision time (Basic 50000 of gross 90000 = 56%).
+  const onbJoinDate = ymd(PERIOD_YEAR, PERIOD_MONTH, Math.min(28, IN_CAL_DAYS));
+
+  const candidate = await prisma.candidate.upsert({
+    where: { businessId_email: { businessId, email: 'ishaan.gupta@candidates.test' } },
+    update: {},
+    create: {
+      businessId, firstName: 'Ishaan', lastName: 'Gupta', email: 'ishaan.gupta@candidates.test',
+      phone: '+91 98000 12345', source: 'referral',
+    },
+  });
+
+  const job = await prisma.job.upsert({
+    where: { businessId_code: { businessId, code: 'JOB-DEMO-0001' } },
+    update: {},
+    create: {
+      businessId, entityId: inEntity.id, code: 'JOB-DEMO-0001', title: 'Software Engineer',
+      departmentId: inOrg.department.id, designationId: inOrg.designation.id, locationId: inOrg.location.id,
+      countryCode: 'IN', employmentType: 'FULL_TIME', openings: 1, status: 'OPEN',
+      minSalary: '600000.00', maxSalary: '1500000.00', currencyCode: 'INR',
+      publishedAt: new Date(),
+    },
+  });
+
+  const application = await prisma.application.upsert({
+    where: { businessId_jobId_candidateId: { businessId, jobId: job.id, candidateId: candidate.id } },
+    update: { status: 'OFFERED' },
+    create: {
+      businessId, jobId: job.id, candidateId: candidate.id, status: 'OFFERED',
+    },
+  });
+
+  // ACCEPTED Offer — the source of truth provision.js reads (gross/structure/
+  // joining date). structureId points at the IN CTC structure so the wage-rule
+  // can read Basic from its lines too. Offer has no natural @@unique, so key it
+  // on a deterministic id for idempotency.
+  const offer = await ensure('offer', det('offer:demo-onb-1'), {
+    businessId, applicationId: application.id,
+    ctcAnnual: '1500000.00', grossMonthly: '90000.00', currencyCode: 'INR',
+    joiningDate: d(onbJoinDate), structureId: inStructure.id,
+    status: 'ACCEPTED', sentAt: new Date(), respondedAt: new Date(),
+  });
+
+  // The journey. offerId is @unique, and code is @@unique([businessId, code]) —
+  // upsert on the business+code natural key so re-seeding is stable.
+  const onbSelfService = {
+    personal: {
+      firstName: 'Ishaan', lastName: 'Gupta', gender: 'MALE', dateOfBirth: '1996-09-14',
+      personalEmail: 'ishaan.gupta@candidates.test', workEmail: 'ishaan.gupta@demo.test',
+      phone: '+91 98000 12345', employmentType: 'FULL_TIME',
+    },
+    statutory: { countryCode: 'IN', pan: 'ABCPG7777D', taxRegime: 'NEW' },
+    bank: { accountName: 'Ishaan Gupta', accountNumber: '50123456789', ifsc: 'HDFC0001234', bankName: 'HDFC Bank' },
+    // Drives the board card "Role" (#13) and the provisioned designation.
+    designation: 'Software Engineer',
+    role: 'Software Engineer',
+    // Explicit Basic/DA split → India 50% wage rule resolves at provision time.
+    comp: { basicMonthly: '50000', daMonthly: '0' },
+    completeness: { personal: true, statutory: true, bank: true },
+  };
+  const journey = await prisma.lifecycleJourney.upsert({
+    where: { businessId_code: { businessId, code: 'ONB-DEMO-0001' } },
+    update: { offerId: offer.id, selfServiceJson: onbSelfService, meta: { designation: 'Software Engineer' } },
+    create: {
+      businessId, entityId: inEntity.id, code: 'ONB-DEMO-0001',
+      direction: 'ONBOARDING', offerId: offer.id,
+      offerAcceptedAt: new Date(), joinDate: d(onbJoinDate),
+      currentStage: 'PROVISIONING', status: 'IN_PROGRESS',
+      selfServiceJson: onbSelfService,
+      meta: { designation: 'Software Engineer' },
+    },
+  });
+
+  // Tasks. A realistic mix so the board is meaningful AND the skip-with-reason
+  // flow is reachable: most are mandatory+blocking, but ONE is optional
+  // (isMandatory:false) so the Skip button renders (#12). The PROVISION_EMPLOYEE
+  // task is the one whose action provisions the employee from the offer above.
+  const onbTasks = [
+    { key: 'task:onb:collect',   stageKey: 'SELF_ONBOARDING', taskKey: 'COLLECT_PERSONAL', title: 'Collect personal & statutory details', ownerRole: 'NEW_HIRE', isMandatory: true,  isBlocking: true,  status: 'DONE' },
+    { key: 'task:onb:esign',     stageKey: 'DOCS_ESIGN',      taskKey: 'ESIGN_CONTRACT',   title: 'E-sign employment contract',          ownerRole: 'NEW_HIRE', isMandatory: true,  isBlocking: true,  status: 'DONE' },
+    { key: 'task:onb:provision', stageKey: 'PROVISIONING',    taskKey: 'PROVISION_EMPLOYEE', title: 'Provision employee from accepted offer', ownerRole: 'HR',      isMandatory: true,  isBlocking: true,  status: 'PENDING' },
+    { key: 'task:onb:asset',     stageKey: 'DAY_ONE',         taskKey: 'ASSIGN_ASSET',     title: 'Issue laptop & access card',          ownerRole: 'IT',       isMandatory: true,  isBlocking: true,  status: 'PENDING' },
+    // OPTIONAL task → the Skip (with reason) control is exercisable (#12).
+    { key: 'task:onb:welcome',   stageKey: 'DAY_ONE',         taskKey: 'CUSTOM',           title: 'Send welcome kit (optional)',         ownerRole: 'HR',       isMandatory: false, isBlocking: false, status: 'PENDING' },
+  ];
+  for (const t of onbTasks) {
+    await ensure('lifecycleTask', det(t.key), {
+      businessId, journeyId: journey.id,
+      stageKey: t.stageKey, taskKey: t.taskKey, title: t.title, ownerRole: t.ownerRole,
+      isMandatory: t.isMandatory, isBlocking: t.isBlocking, status: t.status,
+      dueDate: d(onbJoinDate),
+    });
+  }
+  console.log(`✓ Onboarding journey ${journey.code} (offer ${offer.status}) with ${onbTasks.length} tasks (1 optional, provisionable)`);
+
+  // ═════════════════════════════════════════════════════════════════════════
   // Summary
   // ═════════════════════════════════════════════════════════════════════════
   const [empTotal, attTotal] = await Promise.all([
@@ -767,7 +911,8 @@ async function main() {
   console.log('   Run a pay run with payrollService.computeRun, e.g.:');
   console.log(`     computeRun({ businessId: '${businessId}', actorId: '${operator.id}', payRunId: '${inRun.id}' })`);
   console.log('   Logins (password: Demo@12345):');
-  console.log('     superadmin@demo.test  operator@demo.test  aarav.sharma@demo.test …');
+  console.log('     superadmin@demo.test  operator@demo.test (Owner/maker)  finance@demo.test (Finance/checker)');
+  console.log('     ESS: aarav.sharma@demo.test  priya.nair@demo.test  olivia.williams@demo.test');
   console.log('────────────────────────────────────────────────────────');
 }
 

@@ -1091,15 +1091,27 @@ async function getPaddleClientConfig(req, res) {
 
     let clientToken = envToken;
     if (!clientToken) {
-      const tokens = await listPaddleClientTokens();
-      if (Array.isArray(tokens) && tokens.length > 0) {
-        clientToken = String(tokens[0].token || '').trim();
+      // The API key may lack client_tokens.read — treat that as "not configured"
+      // rather than a hard error, so a mis-scoped key still degrades gracefully.
+      try {
+        const tokens = await listPaddleClientTokens();
+        if (Array.isArray(tokens) && tokens.length > 0) {
+          clientToken = String(tokens[0].token || '').trim();
+        }
+      } catch (tokErr) {
+        console.warn('[getPaddleClientConfig] listPaddleClientTokens failed (check client_tokens.read scope):', tokErr?.message || tokErr);
       }
     }
 
     if (!clientToken) {
-      return res.status(500).json({
-        message: 'No active Paddle client-side token is available. Add PADDLE_CLIENT_TOKEN or grant client_tokens.read to the API key.',
+      // Paddle isn't fully configured (no PADDLE_CLIENT_TOKEN env + no readable
+      // client token via the API key). This is an OPERATOR config gap, not a
+      // user error — keep the actionable hint in the logs and present the client
+      // a clear, non-technical message + a `notConfigured` flag it can branch on.
+      console.error('[getPaddleClientConfig] No Paddle client-side token available. Set PADDLE_CLIENT_TOKEN (+ PADDLE_ENVIRONMENT) on this environment, or grant client_tokens.read to the Paddle API key.');
+      return res.status(503).json({
+        notConfigured: true,
+        message: 'Online checkout is being set up and is temporarily unavailable. Please try again shortly or contact support to upgrade.',
       });
     }
 
@@ -1110,7 +1122,7 @@ async function getPaddleClientConfig(req, res) {
   } catch (err) {
     console.error('[getPaddleClientConfig] error:', err?.message || err);
     return res.status(err?.statusCode ?? err?.status ?? 500).json({
-      message: err?.message || 'Could not load Paddle checkout configuration.',
+      message: 'Could not load checkout configuration. Please try again shortly.',
     });
   }
 }
