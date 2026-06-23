@@ -9,20 +9,35 @@
   --dh-ink:  #16243B;
   --dh-mist: #EAF1F4;
 
-  /* Tenant theme tokens — set at runtime by AdminShell from the
-     resolved tenant theme. @hr/ui primitives (PrimaryButton, Spinner)
-     read --theme-primary, so these defaults keep them usable before a
-     tenant brand is resolved. Default to the DriftHR teal. */
+  /* ──────────────────────────────────────────────────────────────────────────
+     Tenant theme tokens. AdminShell overwrites these on <html> from the
+     resolved tenant brand (themeVarsFromResolved → the same --theme-* contract
+     the ESS portal uses), so the shell + @hr/ui primitives read identical
+     variables across apps. Defaults below mirror the ESS :root so the console
+     renders sensibly (DriftHR teal) before the brand resolves.
+     ──────────────────────────────────────────────────────────────────────── */
   --theme-primary: #16B6A6;
-  --theme-primary-fg: #ffffff;
+  --theme-primary-dark: #109485;
+  --theme-primary-soft: #16B6A614;
+  --theme-accent: #16B6A6;
+  --theme-bg: #F6F8FA;
+  --theme-surface: #FFFFFF;
+  --theme-text: #16243B;
+  --theme-muted: #16243B99;
+  --theme-border: #16243B22;
+  --theme-on-primary: #FFFFFF;
+  --theme-on-accent: #FFFFFF;
+  /* Legacy alias some @hr/ui primitives may read. */
+  --theme-primary-fg: var(--theme-on-primary);
 }
 
 body {
+  background: var(--theme-bg);
   font-family: var(--font-manrope), ui-sans-serif, system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   /* DriftHR ink for body text — teal (#16B6A6) on white fails WCAG AA for
      small text, so it is reserved for accents/large text only. */
-  color: var(--dh-ink);
+  color: var(--theme-text);
 }
 
 /* Visible keyboard focus for all interactive controls. Mouse users don't see
@@ -54,12 +69,216 @@ body {
   z-index: 100;
   padding: 0.5rem 0.875rem;
   border-radius: 0.5rem;
-  background: var(--dh-ink);
-  color: #fff;
+  background: var(--theme-primary);
+  color: var(--theme-on-primary);
   font-size: 0.875rem;
   font-weight: 600;
   transition: top 0.15s ease;
 }
 .skip-link:focus {
   top: 0.5rem;
+}
+
+/* Thin branded scrollbar to match the portal look. */
+.dh-scroll { scrollbar-width: thin; scrollbar-color: #E2E8F0 transparent; }
+.dh-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+.dh-scroll::-webkit-scrollbar-thumb { background: #E2E8F0; border-radius: 8px; }
+.dh-scroll::-webkit-scrollbar-track { background: transparent; }
+
+/* ============================================================================
+   Admin console shell — left sidebar + top bar + content canvas.
+   Mirrors the ESS portal's visual language (avatar header, grouped icon nav,
+   sticky blurred top bar, light-gray canvas with white cards). Everything
+   brandable reads var(--theme-*); mobile (<1024px) turns the sidebar into an
+   off-canvas drawer behind the top-bar hamburger.
+   ============================================================================ */
+:root { --dh-sidebar-w: 268px; --dh-topbar-h: 60px; }
+
+.dh-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: var(--dh-sidebar-w) 1fr;
+  background: var(--theme-bg);
+}
+
+/* ── Sidebar column ───────────────────────────────────────────────────────── */
+.dh-sidebar-wrap {
+  grid-column: 1;
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  z-index: 40;
+}
+.dh-sidebar {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--theme-surface);
+  border-right: 1px solid var(--theme-border);
+  overflow-y: auto;
+}
+.dh-sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: var(--dh-topbar-h);
+  padding: 0 1.25rem;
+  border-bottom: 1px solid var(--theme-border);
+}
+.dh-sidebar-logo { height: 26px; width: auto; max-width: 150px; object-fit: contain; }
+.dh-sidebar-brandname { font-weight: 700; font-size: 1rem; color: var(--theme-text); }
+
+.dh-sidebar-me {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1.25rem 1.25rem 1rem;
+}
+.dh-avatar {
+  flex: 0 0 auto;
+  height: 44px; width: 44px;
+  border-radius: 9999px;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 0.95rem;
+  background: var(--theme-primary);
+  color: var(--theme-on-primary);
+  overflow: hidden;
+}
+.dh-avatar-img { height: 100%; width: 100%; object-fit: cover; }
+.dh-me-name { font-weight: 600; font-size: 0.95rem; color: var(--theme-text); }
+.dh-me-sub { font-size: 0.75rem; color: var(--theme-muted); }
+
+.dh-nav { flex: 1 1 auto; padding: 0.25rem 0.75rem 1.5rem; }
+.dh-nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+
+.dh-nav-link {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.6rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--theme-text);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.dh-nav-link:hover { background: color-mix(in srgb, var(--theme-text) 5%, transparent); }
+.dh-nav-link.is-active { font-weight: 600; }
+.dh-nav-icon { flex: 0 0 auto; }
+.dh-chevron { flex: 0 0 auto; transition: transform 0.15s ease; opacity: 0.7; }
+.dh-chevron.is-open { transform: rotate(180deg); }
+
+.dh-subnav { list-style: none; margin: 2px 0 4px; padding: 0 0 0 0.75rem; display: flex; flex-direction: column; gap: 2px; position: relative; }
+.dh-subnav-link { padding-left: 1.6rem; font-weight: 500; }
+.dh-subnav::before {
+  content: '';
+  position: absolute;
+  left: 1.05rem; top: 4px; bottom: 4px;
+  width: 1px;
+  background: var(--theme-border);
+}
+
+/* ── Content column ───────────────────────────────────────────────────────── */
+.dh-content { grid-column: 2; display: flex; flex-direction: column; min-width: 0; min-height: 100vh; }
+
+.dh-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  height: var(--dh-topbar-h);
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0 1rem;
+  background: color-mix(in srgb, var(--theme-surface) 92%, transparent);
+  backdrop-filter: saturate(140%) blur(6px);
+  border-bottom: 1px solid var(--theme-border);
+}
+.dh-topbar-iconbtn {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 38px; width: 38px;
+  border-radius: 0.6rem;
+  color: var(--theme-text);
+  background: transparent;
+  border: 0; cursor: pointer;
+  transition: background 0.12s ease;
+}
+.dh-topbar-iconbtn:hover { background: color-mix(in srgb, var(--theme-text) 6%, transparent); }
+
+.dh-search {
+  display: flex; align-items: center; gap: 0.5rem;
+  flex: 1 1 auto;
+  max-width: 380px;
+  padding: 0 0.75rem;
+  height: 38px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--theme-text) 5%, transparent);
+  color: var(--theme-muted);
+}
+.dh-search-input {
+  flex: 1 1 auto;
+  border: 0; background: transparent; outline: none;
+  font-size: 0.875rem; color: var(--theme-text);
+}
+.dh-search-input::placeholder { color: var(--theme-muted); }
+
+.dh-topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 0.25rem; }
+.dh-logout-btn {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  height: 38px; padding: 0 0.85rem; margin-left: 0.25rem;
+  border-radius: 0.6rem;
+  font-size: 0.85rem; font-weight: 600;
+  color: var(--theme-primary);
+  background: var(--theme-primary-soft);
+  border: 0; cursor: pointer;
+  transition: filter 0.12s ease;
+}
+.dh-logout-btn:hover { filter: brightness(0.97); }
+.dh-logout-btn:disabled { opacity: 0.6; cursor: default; }
+
+.dh-main { flex: 1 1 auto; overflow-y: auto; }
+.dh-main-inner { width: 100%; max-width: 1200px; margin: 0 auto; padding: 1.75rem 1.5rem 3rem; }
+
+/* ── Mobile drawer (<1024px) ──────────────────────────────────────────────── */
+.dh-drawer-backdrop { display: none; }
+.dh-hamburger { display: inline-flex; }
+
+@media (min-width: 1024px) {
+  /* The hamburger collapses the rail on desktop. */
+  .dh-shell.is-collapsed { grid-template-columns: 0 1fr; }
+  .dh-shell.is-collapsed .dh-sidebar-wrap { overflow: hidden; width: 0; }
+}
+
+@media (max-width: 1023px) {
+  .dh-shell { grid-template-columns: 1fr; }
+  .dh-sidebar-wrap {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: var(--dh-sidebar-w);
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+    box-shadow: 0 0 40px rgba(15, 23, 42, 0.15);
+  }
+  .dh-shell.drawer-open .dh-sidebar-wrap { transform: translateX(0); }
+  .dh-drawer-backdrop {
+    position: fixed; inset: 0; z-index: 35;
+    background: rgba(15, 23, 42, 0.45);
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+  .dh-shell.drawer-open .dh-drawer-backdrop { display: block; opacity: 1; pointer-events: auto; }
+  .dh-content { grid-column: 1; }
+  .dh-main-inner { padding: 1.25rem 1rem 4rem; }
+}
+
+/* Reduced motion: no slide/spin. */
+@media (prefers-reduced-motion: reduce) {
+  .dh-sidebar-wrap, .dh-drawer-backdrop, .dh-chevron { transition: none; }
 }
