@@ -9,7 +9,9 @@
  * and translate a PayRunError into the right status code.
  */
 
+const crypto = require('crypto');
 const service = require('./service');
+const { renderPayslipPdf } = require('./payslipPdf');
 
 /** Translate a thrown error into an HTTP response (PayRunError carries a code). */
 function handleError(res, err) {
@@ -251,34 +253,37 @@ async function getMyPayslip(req, res) {
 }
 
 /**
- * getMyPayslipPdf — the employee's OWN payslip rendered from its frozen snapshot.
- * Security fix (§6.6): the ESS download must serve the employee's payslip, NEVER
- * the run-level bank/statutory file. Server scopes to the employee + PUBLISHED.
- * We serve a clean text rendering of the snapshot (PDF binary generation is
- * out-of-scope per §3 — the snapshot is the source of truth).
+ * getMyPayslipPdf — the employee's OWN payslip as a branded `application/pdf`.
+ *
+ * Security (§6.6): the ESS download serves the employee's OWN payslip, NEVER the
+ * run-level bank/statutory file. ALL scoping flows through the existing secure
+ * path service.getMyPayslipPdfContext -> getMyPayslip, which enforces
+ * employee-own + PUBLISHED|VIEWED and marks first view. We then render the
+ * frozen snapshotJson (the immutable source of truth) into a PDF on demand —
+ * no S3, no stored blob; a fresh render per request. A SHA-256 of the bytes is
+ * recorded as tamper evidence (best-effort; never blocks the download).
  */
 async function getMyPayslipPdf(req, res) {
   try {
     const { businessId } = req.customer;
-    const payslip = await service.getMyPayslip({ businessId, customer: req.customer, payslipId: req.params.id });
-    const snap = payslip.snapshotJson || {};
-    const lines = [];
-    lines.push(`PAYSLIP ${payslip.code}`);
-    lines.push(`Period ${snap.periodStart || ''} - ${snap.periodEnd || ''}   Pay date ${snap.payDate || ''}`);
-    lines.push('');
-    lines.push('EARNINGS');
-    for (const e of snap.earnings || []) lines.push(`  ${e.label || e.code}: ${snap.currencyCode} ${e.amount}`);
-    lines.push(`  GROSS: ${snap.currencyCode} ${snap.gross}`);
-    lines.push('');
-    lines.push('DEDUCTIONS');
-    for (const d of snap.employeeDeductions || []) lines.push(`  ${d.label || d.code}: ${snap.currencyCode} ${d.amount}`);
-    lines.push(`  TOTAL DEDUCTIONS: ${snap.currencyCode} ${snap.totalDeductions}`);
-    lines.push('');
-    lines.push(`NET PAY: ${snap.currencyCode} ${snap.net}`);
-    const body = lines.join('\n') + '\n';
-    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${payslip.code}.txt"`);
-    res.status(200).send(body);
+    const { payslip, employee, business } = await service.getMyPayslipPdfContext({
+      businessId, customer: req.customer, payslipId: req.params.id,
+    });
+
+    const pdf = await renderPayslipPdf({ payslip, employee, business });
+
+    // Tamper-evidence: persist the SHA-256 of the rendered bytes. Best-effort —
+    // a write failure must NOT fail the employee's download.
+    try {
+      const pdfHash = crypto.createHash('sha256').update(pdf).digest('hex');
+      await service.recordPayslipPdfHash({ businessId, payslipId: payslip.id, pdfHash });
+    } catch (_e) { /* non-fatal */ }
+
+    const fileName = `${payslip.code || 'payslip'}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.setHeader('Content-Length', pdf.length);
+    res.status(200).send(pdf);
   } catch (err) { handleError(res, err); }
 }
 
