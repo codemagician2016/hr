@@ -64,7 +64,16 @@ export const NAV_ITEMS = [
   // Settings groups Branding, Roles, Domain and Billing. Show it to anyone who
   // can manage ANY of those — a Finance role (canEditBilling, no canEditBranding)
   // must still reach the Billing tab. Per-tab/per-action gating happens inside.
-  { key: 'settings', label: 'Settings', href: '/settings', anyPermission: ['canEditBranding', 'canEditBilling', 'canEditDomain'], icon: 'settings' },
+  { key: 'settings', label: 'Settings', href: '/settings', anyPermission: ['canEditBranding', 'canEditBilling', 'canEditDomain', 'canManageCompanyProfile'], group: true, icon: 'settings' },
+  // FLAG FOR MERGE: two NEW Settings sub-pages, gated on the new
+  // canManageCompanyProfile rbac key (seeded true for Owner + HR-Admin). The
+  // server is the real boundary; this just hides the links from operators who
+  // lack the key. They render under the Settings section header (NAV_GROUPS).
+  //   - Company profile : business legal/registration profile + optional document
+  //     vault (licences, tax reports, financials, GST/registration certificates).
+  //   - Employee number  : the auto employee-number format (prefix/padding/start).
+  { key: 'settings-company-profile', label: 'Company profile', href: '/settings/company-profile', permission: 'canManageCompanyProfile', parent: 'settings', icon: 'building' },
+  { key: 'settings-employee-number', label: 'Employee number', href: '/settings/employee-number', permission: 'canManageCompanyProfile', parent: 'settings', icon: 'hash' },
 ];
 
 // ── Sidebar grouping ─────────────────────────────────────────────────────────
@@ -132,8 +141,26 @@ export function buildNavTree(visibleItems) {
     });
   }
 
-  // Any remaining standalone visible items (e.g. Documents, Settings) in their
-  // original flat order, so nothing a user is entitled to ever disappears.
+  // Settings — native parent/child section (header + its sub-links: Company
+  // profile, Employee number). Mirrors the Letters group handling above so the
+  // new sub-pages render under the Settings header instead of as loose items.
+  const settingsParent = byKey.get('settings');
+  if (settingsParent) {
+    const children = visibleItems.filter((i) => i.parent === 'settings');
+    consumed.add('settings');
+    children.forEach((c) => consumed.add(c.key));
+    tree.push({
+      type: 'group',
+      key: 'settings',
+      label: settingsParent.label,
+      icon: settingsParent.icon || 'settings',
+      href: settingsParent.href,
+      children,
+    });
+  }
+
+  // Any remaining standalone visible items (e.g. Documents) in their original
+  // flat order, so nothing a user is entitled to ever disappears.
   for (const item of visibleItems) {
     if (consumed.has(item.key) || item.parent) continue;
     consumed.add(item.key);
@@ -150,6 +177,8 @@ const PERMISSION_KEYS = [
   'canApproveLeave', 'canManageAttendance', 'canRunPayroll', 'canApprovePayroll',
   'canViewPayrollReports', 'canManageStatutory', 'canFileReturns', 'canManageOrg',
   'canEditBilling', 'canEditDomain', 'canEditBranding',
+  // Company profile + business documents + employee-number format
+  'canManageCompanyProfile',
   // Feature 8
   'canManagePerformanceCycle', 'canCalibrateRatings', 'canViewTeamPerformance',
   // Feature 9 — Letters

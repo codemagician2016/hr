@@ -32,6 +32,12 @@ const PERMISSIONS = Object.freeze({
   canEditBilling:       'Manage subscription + payment method',
   canEditDomain:        'Connect/change white-label domain',
   canEditBranding:      'Logo, brand color, style, domain binding',
+  // Company profile + business document vault + employee-numbering scheme
+  // (additive; no migration). Gates the Company Profile settings page: edit the
+  // business legal/registration profile, upload/delete company documents
+  // (licences, tax reports, financials, GST/registration certificates), and set
+  // the auto employee-number format.
+  canManageCompanyProfile: 'Edit company profile, business documents + employee-number format',
   // Employee lifecycle (Feature 4)
   canManageOnboarding:  'Onboarding templates + run pipeline + provision',
   canRunSeparation:     'Initiate/run separation + FnF (distinct from terminate)',
@@ -75,6 +81,8 @@ const SYSTEM_ROLES = Object.freeze({
     canRunPayroll: true, canViewPayrollReports: true,
     canManageStatutory: true, canFileReturns: true,
     canManageOrg: true, canEditBranding: true,
+    // Company profile / business docs / employee-number format — HR-Admin owns it.
+    canManageCompanyProfile: true,
     // Feature 4 — HR-Admin owns the lifecycle (onboarding/separation/letters).
     canManageOnboarding: true, canRunSeparation: true, canGenerateLetters: true,
     // Feature 9 — HR-Admin owns letters config + revoke (the checker key).

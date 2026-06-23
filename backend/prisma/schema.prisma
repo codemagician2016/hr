@@ -489,9 +489,19 @@ model Business {
   lifecycleTemplates       LifecycleTemplate[]
   lifecycleJourneys        LifecycleJourney[]
   signatureEnvelopes       SignatureEnvelope[]
+  // Company Profile (HR) — India-first legal/registration profile, kept in one
+  // additive JSON column rather than ~8 new Business columns. Shape (all optional):
+  //   { legalName, tradeName, registrationNo (CIN), gstin, pan, tan,
+  //     registeredAddressLine1, registeredAddressLine2, registeredCity,
+  //     registeredState, registeredPostalCode, registeredCountry,
+  //     contactName, contactEmail, contactPhone, incorporationDate }
+  companyProfile           Json?
   // Documents / assets
   employeeDocuments        EmployeeDocument[]
   documentTemplates        DocumentTemplate[]
+  // Company-level document vault (business licences, tax reports, financials,
+  // registration/GST certificates) — optional, additive (Company Profile).
+  businessDocuments        BusinessDocument[]
   assets                   Asset[]
   assetAssignments         AssetAssignment[]
   // ESS requests
@@ -10052,6 +10062,40 @@ model NumberSequence {
   createdAt   DateTime @default(now())
   @@unique([businessId, entityId, scope, periodKey])
   @@index([businessId, scope])
+}
+
+// ── Company document vault (Company Profile, optional) ───────────────────────
+// Business-level document storage (NOT per-employee — that is EmployeeDocument).
+// A tenant MAY (optionally) keep their business licences, income-tax reports,
+// financial statements, registration + GST certificates here. Tenant-scoped,
+// soft-deletable, integrity-anchored by a server-computed SHA-256. Mirrors the
+// EmployeeDocument storage pattern (≤10 MB, PDF/PNG/JPG, S3 or inline fallback).
+model BusinessDocument {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  category    BusinessDocumentCategory
+  name        String
+  fileUrl     String   @db.Text                         // object-storage URL (S3/R2) or inline data URL
+  fileHash    String?                                   // SHA-256 of the decoded bytes (integrity)
+  mimeType    String?
+  sizeBytes   Int?
+  uploadedBy  String?                                   // User.id of the uploader
+  expiresAt   DateTime? @db.Date                        // licence/certificate expiry → reminder badge
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  @@index([businessId, category])
+  @@index([businessId, expiresAt])
+}
+
+enum BusinessDocumentCategory {
+  BUSINESS_LICENSE
+  INCOME_TAX_REPORT
+  FINANCIAL_STATEMENT
+  REGISTRATION_CERTIFICATE
+  GST_CERTIFICATE
+  OTHER
 }
 
 // ── Tenant branding (referenced by Business.tenantBrands; backs DocumentTemplate / ESS theming) ──
