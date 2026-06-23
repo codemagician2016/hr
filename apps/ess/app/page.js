@@ -90,7 +90,7 @@ function DashboardInner() {
         )}
       </section>
 
-      <section className="grid grid-cols-2 gap-3">
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard
           label="Next payday"
           value={nextPayday ? formatDate(nextPayday) : '—'}
@@ -115,7 +115,11 @@ function DashboardInner() {
         />
       </section>
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <section className="space-y-3">
+        <h2 className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--theme-muted)' }}>
+          Quick links
+        </h2>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {TILES.map((t) => (
           <Link
             key={t.href}
@@ -136,6 +140,7 @@ function DashboardInner() {
             <div className="text-xs" style={{ color: 'var(--theme-muted)' }}>{t.sub}</div>
           </Link>
         ))}
+        </div>
       </section>
     </div>
   );

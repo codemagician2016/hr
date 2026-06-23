@@ -122,9 +122,9 @@ function TaxInner() {
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-6">
+    <form onSubmit={onSubmit} className="max-w-2xl space-y-6">
       <div>
-        <h1 className="text-xl font-semibold" style={{ color: 'var(--theme-text)' }}>Tax declaration</h1>
+        <h1 className="text-2xl font-semibold" style={{ color: 'var(--theme-text)' }}>Tax declaration</h1>
         <p className="text-sm" style={{ color: 'var(--theme-muted)' }}>
           {country === 'NZ' ? 'New Zealand (IRD) tax code & KiwiSaver' : 'India income-tax declaration'}
         </p>

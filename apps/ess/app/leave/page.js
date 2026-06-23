@@ -108,7 +108,7 @@ function LeaveInner() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold" style={{ color: 'var(--theme-text)' }}>Leave</h1>
+      <h1 className="text-2xl font-semibold" style={{ color: 'var(--theme-text)' }}>Leave</h1>
 
       {/* ── Balances ── */}
       <section>
@@ -120,7 +120,7 @@ function LeaveInner() {
         ) : !balances || balances.length === 0 ? (
           <Empty text="No leave balances to show." />
         ) : (
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             {balances.map((b, i) => (
               <div key={b.id || b.leaveTypeId || i}
                    className="rounded-2xl border bg-white p-3 shadow-sm"
@@ -146,7 +146,7 @@ function LeaveInner() {
         <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--theme-muted)' }}>
           Apply for leave
         </h2>
-        <form onSubmit={onSubmit} className="rounded-2xl border bg-white p-4 shadow-sm space-y-3"
+        <form onSubmit={onSubmit} className="max-w-2xl rounded-2xl border bg-white p-5 shadow-sm space-y-3"
               style={{ borderColor: 'var(--theme-border)' }}>
           {error && <ErrorBanner message={error} />}
           {success && (
