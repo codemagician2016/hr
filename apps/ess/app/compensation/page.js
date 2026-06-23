@@ -86,7 +86,17 @@ function Row({ label, value, strong, accent }) {
   );
 }
 
-function Section({ title, note, lines, currency, total }) {
+// A line's amount for the chosen period (annual = the stored annual, else monthly*12).
+function lineAmount(l, period) {
+  const mo = num(l.amountMonthly);
+  if (period === 'annual') {
+    const an = num(l.amountAnnual);
+    return an || mo * 12;
+  }
+  return mo;
+}
+
+function Section({ title, note, lines, currency, total, period = 'monthly' }) {
   return (
     <section className="rounded-2xl border bg-white p-4 shadow-sm" style={{ borderColor: 'var(--theme-border)' }}>
       <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--theme-muted)' }}>{title}</h2>
@@ -97,17 +107,38 @@ function Section({ title, note, lines, currency, total }) {
         <>
           <div className="divide-y" style={{ borderColor: 'var(--theme-border)' }}>
             {lines.map((l, i) => (
-              <Row key={l.code || i} label={l.component?.name || l.name || l.code} value={money(num(l.amountMonthly), currency)} />
+              <Row key={l.code || i} label={l.component?.name || l.name || l.code} value={money(lineAmount(l, period), currency)} />
             ))}
           </div>
           {total != null && (
             <div className="mt-1 border-t pt-1" style={{ borderColor: 'var(--theme-border)' }}>
-              <Row label="Total (monthly)" value={money(total, currency)} strong />
+              <Row label={`Total (${period === 'annual' ? 'annual' : 'monthly'})`} value={money(period === 'annual' ? total * 12 : total, currency)} strong />
             </div>
           )}
         </>
       )}
     </section>
+  );
+}
+
+// Annual / monthly toggle (the "My CTC" statement view control).
+function PeriodToggle({ period, onChange }) {
+  return (
+    <div className="inline-flex rounded-lg border overflow-hidden text-xs font-semibold" style={{ borderColor: 'var(--theme-border)' }}>
+      {['monthly', 'annual'].map((p) => (
+        <button
+          key={p}
+          type="button"
+          onClick={() => onChange(p)}
+          className="px-3 py-1.5 capitalize"
+          style={period === p
+            ? { background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }
+            : { background: 'white', color: 'var(--theme-muted)' }}
+        >
+          {p}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -133,6 +164,8 @@ function splitLines(current) {
 
 function CompensationInner() {
   const { data, loading, error } = useApi(PATH, { select: (b) => b });
+  // Feature 17 — "My CTC" annual/monthly toggle over the same waterfall.
+  const [period, setPeriod] = useState('monthly');
 
   if (loading) return <Centered><Spinner /></Centered>;
 
@@ -158,8 +191,11 @@ function CompensationInner() {
   return (
     <div className="max-w-3xl space-y-4">
       <div className="flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold" style={{ color: 'var(--theme-text)' }}>Compensation</h1>
-        <DownloadCtcButton />
+        <h1 className="text-2xl font-semibold" style={{ color: 'var(--theme-text)' }}>My CTC</h1>
+        <div className="flex items-center gap-3">
+          <PeriodToggle period={period} onChange={setPeriod} />
+          <DownloadCtcButton />
+        </div>
       </div>
       <header className="rounded-2xl border bg-white p-5 shadow-sm" style={{ borderColor: 'var(--theme-border)' }}>
         <div className="flex items-baseline justify-between">
@@ -168,21 +204,22 @@ function CompensationInner() {
             <p className="text-2xl font-semibold" style={{ color: 'var(--theme-text)' }}>{money(num(abs.ctcAnnual), currency)}</p>
           </div>
           <div className="text-right text-sm" style={{ color: 'var(--theme-muted)' }}>
-            <div>Gross (monthly): <span style={{ color: 'var(--theme-text)' }}>{money(num(abs.grossMonthly), currency)}</span></div>
+            <div>Gross ({period}): <span style={{ color: 'var(--theme-text)' }}>{money(period === 'annual' ? num(abs.grossMonthly) * 12 : num(abs.grossMonthly), currency)}</span></div>
             {current.effectiveFrom && <div>Effective {formatDate(current.effectiveFrom)}</div>}
           </div>
         </div>
       </header>
 
-      <Section title="Earnings" lines={earnings} currency={currency} total={sum(earnings)} />
-      {employeeDed.length > 0 && <Section title="Employee deductions" lines={employeeDed} currency={currency} total={sum(employeeDed)} />}
+      <Section title="Earnings" lines={earnings} currency={currency} total={sum(earnings)} period={period} />
+      {employeeDed.length > 0 && <Section title="My deductions" lines={employeeDed} currency={currency} total={sum(employeeDed)} period={period} />}
       {employer.length > 0 && (
         <Section
-          title="Employer contributions"
+          title="Company contributions"
           note="Cost to company — not paid to you"
           lines={employer}
           currency={currency}
           total={sum(employer)}
+          period={period}
         />
       )}
 

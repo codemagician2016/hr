@@ -46,7 +46,12 @@ const { offerWageCheck } = recruitmentInternals;
 // rows so the HIRE revision carries REAL lines (the engine then computes a real
 // gross; FnF reads a real Basic+DA). Without this the HIRE revision had zero
 // lines → every provisioned hire computed zero gross. Pure; no DB.
-const { materializeRevisionLines } = require('../compensation/deriveBreakup');
+//
+// Feature 17 — STEP 8's materialize-from-structure + India 50% re-check now lives
+// in the SHARED `buildHireRevisionLines` helper, so ATS-provision and the new
+// direct onboard-by-CTC path cannot drift (one source of hire-pay math). Behaviour
+// is byte-identical to the old inline block (golden-asserted).
+const { buildHireRevisionLines, HireCompError } = require('../compensation/hireComp');
 
 // A structured error the controller maps to an HTTP status. `reason` is a stable
 // machine code; `status` the HTTP code; `employeeId` the already-linked id (409).
@@ -79,24 +84,9 @@ function periodCodeFor(date, startMonth = 4) {
   return `${startY}-${String((startY + 1) % 100).padStart(2, '0')}`;
 }
 
-// Feature 5 — Decimal|number|string → integer minor units (paise/cents) for the
-// CTC materializer. Reuses payroll money (string math, no float drift).
-const provMoney = require('../payroll/money');
-function mtoMinor(value, scale = 2) {
-  if (value == null || value === '') return 0;
-  let s;
-  if (typeof value === 'object' && typeof value.toFixed === 'function') s = value.toFixed(scale);
-  else if (typeof value === 'number') s = value.toFixed(scale);
-  else s = String(value);
-  return provMoney.toMinor(s, scale);
-}
-// YYYY-MM-DD from a Date | string (for the wage-rule effective-dating).
-function isoDateOnly(x) {
-  if (!x) return new Date().toISOString().slice(0, 10);
-  const d = x instanceof Date ? x : new Date(x);
-  if (Number.isNaN(d.getTime())) return new Date().toISOString().slice(0, 10);
-  return d.toISOString().slice(0, 10);
-}
+// Feature 17 — the CTC materializer's minor-unit coercion + effective-date helpers
+// moved into the shared compensation/hireComp.js with the STEP-8 extraction; the
+// inline copies here are gone (one source of hire-pay math).
 
 // The PROVISION_EMPLOYEE checklist task for a journey (the one we mark DONE/FAILED).
 async function findProvisionTask(client, journeyId) {
@@ -582,56 +572,37 @@ async function provisionEmployee({ journeyId, actorId } = {}, prismaOrTx) {
     const basis = countryCode === 'IN' ? 'CTC' : 'GROSS';
     let revisionLineCreates = null;
     if (offer.structureId) {
-      const structure = await tx.salaryStructure.findFirst({
-        where: { id: offer.structureId, businessId },
-        include: { lines: { orderBy: { sortOrder: 'asc' }, include: { component: true } } },
-      });
-      if (structure && Array.isArray(structure.lines) && structure.lines.length) {
-        // Target: prefer CTC (IN), else monthly gross (NZ). minor units.
-        const target = {};
-        if (basis === 'CTC' && offer.ctcAnnual != null) {
-          target.ctcAnnualMinor = mtoMinor(offer.ctcAnnual);
-        } else if (grossMonthly != null) {
-          target.grossMonthlyMinor = mtoMinor(grossMonthly);
-        }
-        try {
-          const { lines: matLines, breakup } = materializeRevisionLines(
-            { lines: structure.lines, basis },
-            {
-              target,
-              basis,
-              countryCode,
-              asOf: isoDateOnly(joinDate),
-              esiApplicable: false,
-            },
-          );
-          // Enforce the India 50% floor on the SAME amounts that get persisted.
-          // The PRE-WRITE offerWageCheck validated the offer's NOMINAL structure
-          // Basic+DA, but STEP 8 re-derives lines from the CTC target (percent-of
-          // -CTC after employer-cost subtraction shrinks gross, hence Basic). If
-          // the DERIVED Basic+DA breaches 50%, fail-close here — never persist a
-          // revision whose actual Basic+DA is sub-50% just because the nominal
-          // structure passed.
-          if (breakup.wagesVerdict && breakup.wagesVerdict.applies && !breakup.wagesVerdict.ok) {
-            throw new ProvisionError(
-              'The derived salary structure violates the India 50% wage rule (Basic + DA below 50% of gross after CTC materialization).',
-              { status: 422, reason: 'wage-rule' },
-            );
-          }
-          if (matLines.length) {
-            revisionLineCreates = matLines.map((l) => ({ ...l, businessId }));
-          }
-        } catch (err) {
-          // A wage-rule breach (or any ProvisionError we raised above) propagates
-          // as-is; only a deriveBreakup failure becomes a comp-structure error.
-          if (err instanceof ProvisionError) throw err;
-          // A structurally-infeasible structure is a hard provisioning failure
-          // (we will not silently write a zero-line revision again).
+      // Feature 17: the materialize-from-structure + India 50% re-check is the SHARED
+      // helper buildHireRevisionLines (also used by direct onboard-by-CTC), so the
+      // two hire paths can never produce different lines. esiApplicable:false matches
+      // the historical STEP-8 quote. A HireCompError is mapped to a ProvisionError so
+      // the FAILED/BLOCKED bookkeeping + HTTP status surface exactly as before.
+      try {
+        const { lineCreates } = await buildHireRevisionLines({
+          tx,
+          businessId,
+          countryCode,
+          structureId: offer.structureId,
+          ctcAnnual: basis === 'CTC' ? offer.ctcAnnual : null,
+          grossMonthly,
+          joinDate,
+          esiApplicable: false,
+        });
+        revisionLineCreates = lineCreates;
+      } catch (err) {
+        if (err instanceof HireCompError) {
           throw new ProvisionError(
-            `Cannot materialize the offer salary structure: ${err.message}`,
-            { status: 422, reason: 'comp-structure' },
+            err.reason === 'wage-rule'
+              ? 'The derived salary structure violates the India 50% wage rule (Basic + DA below 50% of gross after CTC materialization).'
+              : `Cannot materialize the offer salary structure: ${err.message}`,
+            { status: err.status || 422, reason: err.reason === 'wage-rule' ? 'wage-rule' : 'comp-structure' },
           );
         }
+        if (err instanceof ProvisionError) throw err;
+        throw new ProvisionError(
+          `Cannot materialize the offer salary structure: ${err.message}`,
+          { status: 422, reason: 'comp-structure' },
+        );
       }
     }
 

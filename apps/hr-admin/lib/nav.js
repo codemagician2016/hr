@@ -27,6 +27,10 @@ export const NAV_ITEMS = [
   { key: 'leave', label: 'Leave', href: '/leave', feature: 'leave', permission: 'canApproveLeave', icon: 'leaf' },
   { key: 'attendance', label: 'Attendance', href: '/attendance', feature: 'attendance', permission: 'canManageAttendance', icon: 'clock' },
   { key: 'compensation', label: 'Compensation', href: '/compensation', feature: 'hr', permission: 'canViewCompensation', icon: 'coin' },
+  // FLAG (Feature 17 — NEW nav item): the friendly CTC-policy builder workspace
+  // (reusable salary templates). Gated on canViewCompensation (the read key; writes
+  // are server-gated on canManageCompensation). The server is the real boundary.
+  { key: 'ctc-policies', label: 'CTC policies', href: '/compensation/policies', feature: 'hr', permission: 'canViewCompensation', icon: 'coin' },
   { key: 'expenses', label: 'Reimbursements', href: '/expenses', feature: 'hr', permission: 'canViewEmployees', icon: 'receipt' },
   // Feature 11 — travel / outdoor-duty queue (pre-trip approvals). Same view perm.
   { key: 'travel', label: 'Travel', href: '/travel', feature: 'hr', permission: 'canViewEmployees', icon: 'wallet' },
@@ -105,7 +109,7 @@ export const NAV_GROUPS = [
   { key: 'people-org', label: 'People & Org', icon: 'people', items: ['people', 'org', 'profile-changes', 'profile-policy'] },
   { key: 'talent', label: 'Talent', icon: 'onboarding', items: ['recruitment', 'onboarding', 'separations', 'performance'] },
   { key: 'time', label: 'Time', icon: 'calendar', items: ['leave', 'attendance'] },
-  { key: 'pay', label: 'Pay', icon: 'wallet', items: ['compensation', 'payroll', 'expenses', 'travel', 'loans', 'reports'] },
+  { key: 'pay', label: 'Pay', icon: 'wallet', items: ['compensation', 'ctc-policies', 'payroll', 'expenses', 'travel', 'loans', 'reports'] },
   // FLAG FOR MERGE: new Feature 10 group — approval chains + RBAC + reporting tree.
   { key: 'approvals-access', label: 'Approvals & Access', icon: 'approvals', items: ['approvals', 'access-roles', 'access-hierarchy'] },
 ];
