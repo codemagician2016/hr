@@ -42,6 +42,17 @@ router.use('/performance', talent.performance);
 // Feature 8 ESS — employee self-service performance (customer session, self-only).
 router.use('/ess/performance', talent.essPerformance);
 
+// Approval-Workflow engine + RBAC/hierarchy admin (Feature 10). Operator session.
+//   /api/hr/approvals  → workflow CRUD/publish/preview (canManageApprovalWorkflows)
+//                        + unified inbox + /:id/decide (any approver; the engine's
+//                        resolved approver set is the real gate) + reassign (admin).
+//   /api/hr/rbac       → permissions catalog + role CRUD/grants (canManageRoles),
+//                        org-tree (canViewEmployees), re-parent (canManageHierarchy),
+//                        assign-role. Backend-only in 10a/10b; no live consumer yet
+//                        (leave/expense wire onto the engine in 10c).
+router.use('/approvals', require('./approvals.routes'));
+router.use('/rbac', require('./rbac.routes'));
+
 // Payroll orchestration — operator API (RBAC: canRunPayroll / canApprovePayroll
 // / canViewPayrollReports) and the ESS payslip API (customer session). The
 // /me/payslips router uses the customer-auth middleware internally.
@@ -68,6 +79,9 @@ router.use('/me/attendance', require('./meAttendance.routes'));
 router.use('/me/leave', require('./meLeave.routes'));
 router.use('/me/tax-declaration', require('./meTax.routes'));
 router.use('/me/tasks', require('./meTasks.routes'));
+// Feature 10 ESS — "Delegate while I'm away" (out-of-office approval delegation).
+// Customer session; the delegating user is resolved from the session (self-only).
+router.use('/me/delegations', require('./meDelegations.routes'));
 
 // Reports / analytics — read-only payroll register, statutory summary,
 // headcount & attrition, leave liability. RBAC: canViewPayrollReports.
