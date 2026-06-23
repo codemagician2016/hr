@@ -1,0 +1,144 @@
+'use strict';
+
+/**
+ * consumers.leave.js — Feature 10 slice 10c. The LEAVE consumer bundle.
+ *
+ * The engine never knows leave-balance semantics; it only decides WHEN a terminal
+ * transition happens. The domain effect (flip the LeaveTransaction status + move the
+ * soft-hold on the LeaveBalance) is carried HERE, in callbacks the engine fires
+ * INSIDE its own transaction so the balance move commits atomically with the
+ * approval transition.
+ *
+ * These bodies are the EXISTING `decideTerminal(...,'APPROVED', balanceMove)` /
+ * soft-hold-release logic moved wholesale from leave.controller.js — ZERO behaviour
+ * change. The controller's approve/reject/cancel routes now drive the engine, which
+ * fires the matching hook; both the engine path and the legacy direct path share the
+ * single `applyLeaveDecision` core below so the balance outcome is byte-identical.
+ *
+ *   onApprove(req, tx) — PENDING → APPROVED: release the hold into `taken`,
+ *                        decrement `closing`.
+ *   onReject(req, tx)  — PENDING → REJECTED: release the hold (floored); no units
+ *                        are consumed.
+ *   onCancel(req, tx)  — requester cancel/withdraw of an OPEN request: release the
+ *                        hold (floored); no units consumed.
+ *
+ * Idempotency / concurrency are preserved exactly: every status flip is a
+ * conditional `updateMany(where status ∈ from)` (a lost race → DECISION_RACE), and
+ * every balance move is version-optimistic-locked (a concurrent move → P2025). Both
+ * map to a 409 in the controller (isDecisionRace), identical to today.
+ */
+
+const consumers = require('./consumers');
+
+// pendingApproval can never go below zero — floor the release so a duplicated
+// decision (or a stale hold) cannot over-state `available` (leave finding #3).
+function flooredRelease(current, qty) {
+  return Math.min(qty, Math.max(0, Number(current || 0)));
+}
+
+// The shared guarded terminal transition for a LeaveTransaction APPLICATION row.
+// IDENTICAL semantics to leave.controller#decideTerminal: a conditional status flip
+// (DECISION_RACE on a lost race) + a version-locked balance move (P2025 on a
+// concurrent move). `balanceMove(currentBalance)` returns the Prisma `data` for the
+// locked update, or null to skip the balance write.
+async function applyLeaveDecision(tx, { txn, toStatus, fromStatuses, decidedBy, reason, balanceMove }) {
+  const flip = await tx.leaveTransaction.updateMany({
+    where: { id: txn.id, status: { in: fromStatuses } },
+    data: { status: toStatus, decidedAt: new Date(), decidedBy, ...(reason !== undefined ? { reason } : {}) },
+  });
+  if (flip.count === 0) {
+    const err = new Error('Leave request already decided concurrently');
+    err.code = 'DECISION_RACE';
+    throw err;
+  }
+  if (txn.leaveBalanceId && typeof balanceMove === 'function') {
+    const bal = await tx.leaveBalance.findUnique({
+      where: { id: txn.leaveBalanceId },
+      select: { id: true, version: true, pendingApproval: true, taken: true, closing: true },
+    });
+    if (bal) {
+      const data = balanceMove(bal);
+      if (data) {
+        await tx.leaveBalance.update({
+          where: { id: bal.id, version: bal.version },
+          data: { ...data, version: { increment: 1 } },
+        });
+      }
+    }
+  }
+  return tx.leaveTransaction.findUnique({ where: { id: txn.id } });
+}
+
+// Load the LeaveTransaction APPLICATION row this ApprovalRequest is gating. Tolerant
+// of an already-terminal row (a re-fired/duplicate hook is then a no-op).
+async function loadTxn(tx, approvalRequest) {
+  return tx.leaveTransaction.findFirst({
+    where: { id: approvalRequest.entityId, businessId: approvalRequest.businessId, txnType: 'APPLICATION' },
+  });
+}
+
+// onApprove — PENDING → APPROVED. Release the soft-hold into `taken`, drop `closing`.
+async function onApprove(approvalRequest, tx) {
+  const txn = await loadTxn(tx, approvalRequest);
+  if (!txn || txn.status !== 'PENDING') return; // already decided/withdrawn → no-op
+  const heldQty = Math.abs(Number(txn.quantity));
+  const decidedBy = approvalRequest.decidedBy || null;
+  await applyLeaveDecision(tx, {
+    txn, toStatus: 'APPROVED', fromStatuses: ['PENDING'], decidedBy,
+    balanceMove: (bal) => {
+      const release = flooredRelease(bal.pendingApproval, heldQty);
+      return {
+        pendingApproval: { decrement: release },
+        taken: { increment: heldQty },
+        closing: { decrement: heldQty },
+      };
+    },
+  });
+}
+
+// onReject — PENDING → REJECTED. Release the hold (floored); no units consumed.
+async function onReject(approvalRequest, tx) {
+  const txn = await loadTxn(tx, approvalRequest);
+  if (!txn || txn.status !== 'PENDING') return;
+  const heldQty = Math.abs(Number(txn.quantity));
+  const decidedBy = approvalRequest.decidedBy || null;
+  await applyLeaveDecision(tx, {
+    txn, toStatus: 'REJECTED', fromStatuses: ['PENDING'], decidedBy,
+    balanceMove: (bal) => ({ pendingApproval: { decrement: flooredRelease(bal.pendingApproval, heldQty) } }),
+  });
+}
+
+// onCancel — requester cancel/withdraw of an OPEN request: PENDING → CANCELLED,
+// release the hold (floored); no units consumed.
+async function onCancel(approvalRequest, tx) {
+  const txn = await loadTxn(tx, approvalRequest);
+  if (!txn || txn.status !== 'PENDING') return;
+  const heldQty = Math.abs(Number(txn.quantity));
+  const decidedBy = approvalRequest.decidedBy || null;
+  await applyLeaveDecision(tx, {
+    txn, toStatus: 'CANCELLED', fromStatuses: ['PENDING'], decidedBy,
+    balanceMove: (bal) => ({ pendingApproval: { decrement: flooredRelease(bal.pendingApproval, heldQty) } }),
+  });
+}
+
+const bundle = { onApprove, onReject, onCancel };
+
+function registerLeaveConsumer() {
+  return consumers.register('LEAVE', bundle);
+}
+
+// Self-register on module load (idempotent — the registry overwrites the same bundle).
+// registerConsumers.js is still the single explicit boot wiring point per §7.5, but
+// self-registration guarantees the callback fires for ANY entrypoint that loads the
+// leave controller (which requires this module) — tests, scripts, the API — without a
+// separate boot require, so the engine path can never silently no-op the balance move.
+registerLeaveConsumer();
+
+module.exports = {
+  registerLeaveConsumer,
+  bundle,
+  // exported so the controller's direct (no-engine-request) fallback path reuses the
+  // identical balance-move core, and for unit tests.
+  applyLeaveDecision,
+  flooredRelease,
+};
