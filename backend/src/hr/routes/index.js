@@ -38,6 +38,9 @@ router.use('/ess/performance', talent.essPerformance);
 // /me/payslips router uses the customer-auth middleware internally.
 router.use('/payroll', require('../payroll/payroll.routes'));
 router.use('/me/payslips', require('../payroll/mePayslips.routes'));
+// ESS profile/country surface — the authoritative country source for the ESS app
+// (tax declaration, payslip currency, separation labels gate by it; fail-closed).
+router.use('/me/profile', require('../lifecycle/routes/meProfile.routes'));
 router.use('/me/onboarding', require('../lifecycle/routes/meOnboarding.routes'));
 router.use('/me/separation', require('../lifecycle/routes/meSeparation.routes'));
 router.use('/me/documents', require('./meDocuments.routes'));

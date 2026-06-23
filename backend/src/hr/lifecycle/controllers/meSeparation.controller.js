@@ -223,9 +223,14 @@ async function getMyFnf(req, res, next) {
     // that the 6 legacy columns omit). The legacy column view is kept for
     // back-compat alongside the authoritative earnings/deductions lines.
     const snap = sep.fnfSnapshotJson && sep.fnfSnapshotJson.payRunInput;
+    // Resolve the leaver's market so the ESS gates country-specific lines (e.g.
+    // the NZ holiday-payout row) rather than relying on whether a column is set.
+    const { entity } = await resolveEmployeeEntity(businessId, employee.id);
+    const countryCode = entity && entity.countryCode ? String(entity.countryCode).toUpperCase() : null;
     res.json({
       code: sep.code,
       currencyCode: sep.currencyCode,
+      countryCode,
       status: sep.status,
       earnings: snap && snap.earnings ? snap.earnings.map((e) => ({ code: e.code, label: e.label, amountMinor: e.amountMinor })) : [],
       deductions: snap && snap.deductions ? snap.deductions.map((d) => ({ code: d.code, label: d.label, amountMinor: d.amountMinor })) : [],

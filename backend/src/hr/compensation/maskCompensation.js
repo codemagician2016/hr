@@ -124,6 +124,10 @@ function identityEnvelope(payload) {
   if (payload.id != null) out.id = payload.id;
   if (payload.employeeId != null) out.employeeId = payload.employeeId;
   if (payload.status != null) out.status = payload.status;
+  // Currency is non-sensitive display metadata (the pay currency, e.g. INR/NZD).
+  // Pass it through at EVERY visibility level so the ESS renders the right symbol
+  // (NZD for an NZ employee) instead of a hardcoded INR fallback.
+  if (payload.currencyCode != null) out.currencyCode = payload.currencyCode;
   if (payload.effectiveFrom != null) out.effectiveFrom = payload.effectiveFrom;
   if (payload.effectiveTo != null) out.effectiveTo = payload.effectiveTo;
   if (payload.isCurrent != null) out.isCurrent = payload.isCurrent;

@@ -120,8 +120,17 @@ async function resolveSelfEmployee(businessId, customer) {
 }
 
 // ── entity countryCode (drives the statutory rule set) ───────────────────────
-// Resolve the journey's market: prefer the journey.entityId; fall back to the
-// employee's current employment entity; default IN. Pure read, businessId-scoped.
+// Resolve the journey's market (global payroll: IN + NZ) so the statutory
+// validators pick the RIGHT rule set — never the wrong country's. Resolution
+// order, most-specific first:
+//   1. journey.entityId → Entity.countryCode.
+//   2. employee's current EmploymentRecord → Entity.countryCode.
+//   3. the tenant's entities — if they all operate in ONE country, use it. A
+//      single-country tenant (e.g. an NZ-only org) thus resolves correctly even
+//      before the journey's entity is pinned, instead of falsely defaulting IN.
+// Only when the tenant genuinely operates in MULTIPLE countries AND the journey
+// has not yet selected one do we fall back to IN (the historical default, kept
+// so existing single-country IN tenants are unchanged). Pure read, businessId-scoped.
 async function resolveCountryCode(businessId, { entityId, employeeId }) {
   let eid = entityId || null;
   if (!eid && employeeId) {
@@ -131,12 +140,23 @@ async function resolveCountryCode(businessId, { entityId, employeeId }) {
     });
     eid = rec ? rec.entityId : null;
   }
-  if (!eid) return 'IN';
-  const entity = await prisma.entity.findFirst({
-    where: { id: eid, businessId },
+  if (eid) {
+    const entity = await prisma.entity.findFirst({
+      where: { id: eid, businessId },
+      select: { countryCode: true },
+    });
+    if (entity && entity.countryCode) return String(entity.countryCode).toUpperCase();
+  }
+  // No entity pinned yet — derive from the tenant's distinct entity countries.
+  const entities = await prisma.entity.findMany({
+    where: { businessId, deletedAt: null },
     select: { countryCode: true },
   });
-  return entity && entity.countryCode ? String(entity.countryCode).toUpperCase() : 'IN';
+  const distinct = [...new Set(entities.map((e) => (e.countryCode || '').toUpperCase()).filter(Boolean))];
+  if (distinct.length === 1) return distinct[0];
+  // Multi-country (or no entities) tenant with no journey entity yet — keep IN as
+  // the historical default for back-compat; the operator pins the entity later.
+  return 'IN';
 }
 
 /**

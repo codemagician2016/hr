@@ -197,11 +197,14 @@ function FnFStatement({ currency }) {
   }
   if (error) return <ErrorBanner message={error.message || 'Could not load your FnF statement.'} />;
   if (!data) return null;
-  const cur = data.currencyCode || currency || 'INR';
+  const cur = data.currencyCode || currency || undefined;
+  // Country-gate the NZ-only holiday-payout line: it shows ONLY for an NZ leaver,
+  // never for an India one (the FnF response carries the resolved countryCode).
+  const isNZ = String(data.countryCode || '').toUpperCase() === 'NZ';
   const rows = [
     ['Gratuity', data.lines.gratuityAmount],
     ['Leave encashment', data.lines.leaveEncashmentAmount],
-    ['Holiday payout (NZ)', data.lines.nzHolidayPayoutAmount],
+    ...(isNZ ? [['Holiday payout', data.lines.nzHolidayPayoutAmount]] : []),
     ['Notice recovery', data.lines.noticeRecoveryAmount, true],
     ['Loan foreclosure', data.lines.loanForeclosureAmount, true],
     ['Asset recovery', data.lines.assetRecoveryAmount, true],

@@ -323,6 +323,8 @@ function revisionPayload(rev, employeeId, priorCtc) {
     isCurrent: rev.isCurrent,
     status: rev.status,
     revisionReason: rev.revisionReason,
+    // Currency drives the ESS display (NZD vs INR) — never hardcode it client-side.
+    currencyCode: rev.currencyCode || null,
     ctcAnnual: rev.ctcAnnual,
     grossMonthly: rev.grossMonthly,
     netMonthly: rev.netMonthly != null ? rev.netMonthly : null,
