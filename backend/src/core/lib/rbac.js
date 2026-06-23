@@ -47,6 +47,13 @@ const PERMISSIONS = Object.freeze({
   canManagePerformanceCycle: 'Create/configure review cycles, templates, scales; reopen/calibrate',
   canCalibrateRatings:       'Participate in calibration sessions for own org sub-tree',
   canViewTeamPerformance:    "View reports' goals + reviews (TEAM band)",
+  // Approval workflows + RBAC/hierarchy admin (Feature 10) — additive; no migration.
+  // CONFIG keys: they gate the Workflow Builder / Role Manager / Org-Chart editor.
+  // WHO may ACT on a given approval is NOT one of these — it is the engine's resolved
+  // approver set (§6.3), with the F1 scope band as the SoD backstop.
+  canManageApprovalWorkflows: 'Build approval chains (create/edit/publish workflows)',
+  canManageRoles:             'Create/edit roles & permissions',
+  canManageHierarchy:         'Edit the reporting tree (re-parent employees)',
 });
 
 const PERMISSION_KEYS = Object.freeze(Object.keys(PERMISSIONS));
@@ -74,6 +81,8 @@ const SYSTEM_ROLES = Object.freeze({
     canManageLetters: true,
     // Feature 8 — HR-Admin owns performance config + calibration + team visibility.
     canManagePerformanceCycle: true, canCalibrateRatings: true, canViewTeamPerformance: true,
+    // Feature 10 — HR-Admin owns approval-chain config, role management + the org tree.
+    canManageApprovalWorkflows: true, canManageRoles: true, canManageHierarchy: true,
     // No canEditBilling / canEditDomain / canApprovePayroll — Owner/Finance only
   },
   // Finance — payroll + compensation + statutory + billing.

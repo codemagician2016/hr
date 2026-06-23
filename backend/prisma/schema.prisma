@@ -103,6 +103,9 @@ model User {
   // HR fork — optional ESS portal identity link. An Employee.userId points
   // here only when the person has portal login (not every employee logs in).
   hrEmployee        Employee?
+  // Feature 10 §4.3 — approval delegation back-relations (out-of-office).
+  delegationsFrom   ApprovalDelegation[] @relation("DelegationFrom")
+  delegationsTo     ApprovalDelegation[] @relation("DelegationTo")
 
   @@index([businessRoleId])
   @@index([specialtyId])
@@ -522,6 +525,7 @@ model Business {
   workflowSteps            WorkflowStep[]
   approvalRequests         ApprovalRequest[]
   approvalActions          ApprovalAction[]
+  approvalDelegations      ApprovalDelegation[]
   // Child/line tables that carry the mandatory tenant FK (§1.2) and so need
   // a reciprocal collection here even though they are owned via a parent row.
   statutoryElectionHistory StatutoryElectionHistory[]
@@ -9818,6 +9822,15 @@ model WorkflowDefinition {
   name        String
   module      WorkflowModule
   entityId    String?
+  // Feature 10 §4.1 — additive selector + draft/publish refinements. NULL scopeJson
+  // = the module-wide default; multiple defs disambiguated by priority + specificity
+  // (workflowResolver.js §5.1). Only isPublished defs route real requests.
+  description String?
+  scopeJson   Json?    // {"departmentIds":[...],"employeeLevels":["IC","M1"],"locationIds":[...]}
+  priority    Int      @default(100) // lower = evaluated first when multiple match
+  isPublished Boolean  @default(false) // draft vs live
+  createdBy   String?
+  updatedBy   String?
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -9825,11 +9838,13 @@ model WorkflowDefinition {
   steps       WorkflowStep[]
   @@unique([businessId, code])
   @@index([businessId, module, isActive])
+  @@index([businessId, module, isActive, isPublished])
 }
 
 enum WorkflowModule {
   LEAVE
   EXPENSE
+  TRAVEL
   LOAN
   COMPENSATION
   OFFER
@@ -9858,8 +9873,14 @@ model WorkflowStep {
   slaHours    Int?
   onTimeoutAction TimeoutAction @default(ESCALATE)
   createdAt   DateTime @default(now())
-  @@unique([businessId, workflowDefinitionId, stepOrder])
+  // Feature 10 §4.2 — steps sharing a stepOrder form ONE parallel level. The strict
+  // unique([businessId, workflowDefinitionId, stepOrder]) is replaced (in the F10
+  // migration) by a PARTIAL unique that only fires for NON-parallel steps, so two
+  // parallel steps may share an order while a sequential step's order stays unique.
+  // Prisma cannot express a WHERE-filtered unique, so the partial index lives in raw
+  // SQL (uniq_workflowstep_seq); we keep the plain index here for lookups.
   @@index([businessId, workflowDefinitionId])
+  @@index([businessId, workflowDefinitionId, stepOrder])
 }
 
 enum ApproverType {
@@ -9934,6 +9955,31 @@ enum ApprovalDecision {
   REQUESTED_CHANGES
   DELEGATED
   ABSTAINED
+}
+
+// Feature 10 §4.3 — out-of-office "approve on my behalf". A delegation ADDS toUser
+// to the approver set for the window (it does not remove fromUser); either may act,
+// and a stand-in's ApprovalAction stamps delegatedFromUserId for the audit. SoD still
+// excludes the original requester even via a delegation loophole (§9.2).
+model ApprovalDelegation {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  fromUserId  String
+  fromUser    User     @relation("DelegationFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUserId    String
+  toUser      User     @relation("DelegationTo", fields: [toUserId], references: [id], onDelete: Cascade)
+  modules     WorkflowModule[] @default([]) // NULL/empty = all modules
+  startsAt    DateTime
+  endsAt      DateTime
+  reason      String?
+  isActive    Boolean  @default(true) // can be revoked early
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([businessId, fromUserId, isActive])
+  @@index([businessId, toUserId, isActive])
+  @@index([businessId, startsAt, endsAt])
 }
 
 // ── §19.2 Notification ──
