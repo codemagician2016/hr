@@ -28,6 +28,7 @@
 
 const prisma = require('../../../core/lib/prisma');
 const perf = require('../controllers/performance.controller');
+const cal = require('../controllers/calibration.controller');
 const { resolveAccessibleEmployeeIds } = require('../../lib/scopeResolver');
 
 let failures = 0;
@@ -63,6 +64,8 @@ async function cleanup(businessId) {
   const cyc = await prisma.reviewCycle.findMany({ where: { businessId, code: { startsWith: PREFIX } }, select: { id: true } });
   const cids = cyc.map((c) => c.id);
   if (cids.length) {
+    await prisma.calibrationAdjustment.deleteMany({ where: { businessId, session: { cycleId: { in: cids } } } }).catch(() => {});
+    await prisma.calibrationSession.deleteMany({ where: { businessId, cycleId: { in: cids } } }).catch(() => {});
     await prisma.meritRecommendation.deleteMany({ where: { businessId, cycleId: { in: cids } } }).catch(() => {});
     await prisma.performanceReview.deleteMany({ where: { businessId, reviewCycleId: { in: cids } } });
     await prisma.reviewCycle.deleteMany({ where: { id: { in: cids } } });
@@ -79,7 +82,10 @@ async function main() {
   await cleanup(businessId);
 
   const mkEmp = (code, extra = {}) => prisma.employee.create({ data: { businessId, code: `${PREFIX}-${code}`, firstName: code, lastName: 'T', status: 'ACTIVE', ...extra } });
-  const mgr = await mkEmp('MGR');
+  // DIR ── MGR ── R1, R2          ← DIR's canCalibrateRatings sub-tree
+  //        PEER (no manager)      ← OUT of DIR's tree (separate calibration finding)
+  const dir = await mkEmp('DIR');
+  const mgr = await mkEmp('MGR', { managerEmployeeId: dir.id });
   const r1 = await mkEmp('R1', { managerEmployeeId: mgr.id });
   const r2 = await mkEmp('R2', { managerEmployeeId: mgr.id });
   const peer = await mkEmp('PEER');
@@ -177,14 +183,26 @@ async function main() {
       const hrReq = await withScope(hr, 'canViewTeamPerformance', { params: { id: r1rev.id } });
       const hrRes = await call(perf.getReview, hrReq);
       assert(hrRes.body.calibratedRating != null, 'HR sees calibratedRating (not gated)');
-      // Sign-off → releasedAt set + finalRating locked.
+      // Sign-off → finalRating LOCKED, but releasedAt MUST stay null (finding 4):
+      // a single sign-off must not reveal the rating before the org-wide release.
       const soReq = await withScope(hr, 'review.signOff', { params: { id: r1rev.id }, body: { finalRating: 4 } });
       const soRes = await call(perf.signOffReview, soReq);
-      assert(soRes.statusCode === 200 && soRes.body.releasedAt != null, 'sign-off stamps releasedAt');
-      // Post-release the subject now sees finalRating.
+      assert(soRes.statusCode === 200, 'sign-off → 200 (finalRating locked)');
+      assert(soRes.body.releasedAt == null, 'sign-off does NOT stamp releasedAt (no per-instance release)');
+      const signedRow = await prisma.performanceReview.findUnique({ where: { id: r1rev.id } });
+      assert(signedRow.releasedAt == null && Number(signedRow.finalRating) === 4, 'DB: finalRating set, releasedAt still null after sign-off');
+      // Subject STILL cannot see the final rating after one sign-off (pre cycle release).
+      const subjMid = await withScope(subjectR1, 'canViewTeamPerformance', { params: { id: r1rev.id } });
+      const subjMidRes = await call(perf.getReview, subjMid);
+      assert(subjMidRes.body.finalRating == null, 'after sign-off, before cycle release: finalRating STILL absent to subject');
+      // Org-wide release flips visibility for everyone at once.
+      const relReq = await withScope(hr, 'canViewTeamPerformance', { params: { id: cycle.id }, body: {} });
+      const relRes = await call(perf.releaseCycle, relReq);
+      assert(relRes.statusCode === 200 && relRes.body.releasedInstances >= 1, 'org-wide release → releasedInstances ≥ 1');
+      // Post org-wide release the subject now sees finalRating.
       const subj2 = await withScope(subjectR1, 'canViewTeamPerformance', { params: { id: r1rev.id } });
       const subj2Res = await call(perf.getReview, subj2);
-      assert(subj2Res.body.finalRating != null, 'post-release: finalRating PRESENT to subject');
+      assert(subj2Res.body.finalRating != null, 'post org-wide release: finalRating PRESENT to subject');
     }
 
     // (f) Merit hand-off — acknowledge then close → exactly one MeritRecommendation.
@@ -203,6 +221,62 @@ async function main() {
       // Re-close idempotency: nothing further minted (already CLOSED → 409 anyway).
       const reMerits = await prisma.meritRecommendation.count({ where: { businessId, reviewInstanceId: r1rev.id } });
       assert(reMerits === 1, 'merit hand-off is idempotent (no double-mint)');
+    }
+
+    // (g) FINDING 1 — calibration session/roster bound to the actor's OWN sub-tree.
+    // DIR is a canCalibrateRatings manager (NOT HR) whose tree = MGR,R1,R2 (not PEER).
+    log('(g) Calibration scope (finding 1) — own sub-tree only:');
+    {
+      const dirCal = actor({ businessId, employeeId: dir.id, band: 'TEAM', role: 'STAFF', perms: { canCalibrateRatings: true } });
+      // DIR can open a session rooted at MGR (inside their band).
+      const okReq = await withScope(dirCal, 'canCalibrateRatings', { body: { cycleId: cycle.id, skipLevelEmployeeId: mgr.id } });
+      const okRes = await call(cal.createSession, okReq);
+      assert(okRes.statusCode === 201, 'DIR creates session rooted at MGR (in own sub-tree) → 201');
+      const sessionId = okRes.body && okRes.body.id;
+      // DIR canNOT open a session rooted at PEER (out of band) → 404.
+      const oosReq = await withScope(dirCal, 'canCalibrateRatings', { body: { cycleId: cycle.id, skipLevelEmployeeId: peer.id } });
+      const oosRes = await call(cal.createSession, oosReq);
+      assert(oosRes.statusCode === 404, 'DIR creates session rooted at PEER (out of sub-tree) → 404 (rejected)');
+      // Roster of the in-scope session excludes any out-of-tree subject (PEER).
+      const rosReq = await withScope(dirCal, 'canCalibrateRatings', { params: { id: sessionId } });
+      const rosRes = await call(cal.sessionRoster, rosReq);
+      assert(rosRes.statusCode === 200, 'DIR roster of own session → 200');
+      const rosterIds = new Set(((rosRes.body && rosRes.body.instances) || []).map((x) => x.employeeId));
+      assert(rosterIds.has(r1.id) && rosterIds.has(r2.id), 'roster includes R1,R2 (in DIR sub-tree)');
+      assert(!rosterIds.has(peer.id), 'roster EXCLUDES PEER (out-of-tree subject never disclosed)');
+      // An HR operator forges a session directly at PEER; DIR opening its roster is
+      // intersected down to DIR's own band → PEER still absent (no pre-release leak).
+      const forged = await prisma.calibrationSession.create({ data: { businessId, cycleId: cycle.id, skipLevelEmployeeId: peer.id, status: 'OPEN' } });
+      const forgedReq = await withScope(dirCal, 'canCalibrateRatings', { params: { id: forged.id } });
+      const forgedRes = await call(cal.sessionRoster, forgedReq);
+      assert(forgedRes.statusCode === 404, 'DIR roster of an out-of-band (PEER-rooted) session → 404 (out-of-scope member)');
+    }
+
+    // (h) FINDING 5 — calibrate audit ledger records the REAL actor, never 'unknown'.
+    log('(h) Calibration audit attribution (finding 5):');
+    {
+      // Fresh instance through to MANAGER_SUBMITTED so calibrate is legal.
+      const r2rev = await prisma.performanceReview.findFirst({ where: { businessId, reviewCycleId: cycle.id, employeeId: r2.id } });
+      // r2 already SELF_SUBMITTED from (e). Manager submits, then calibrate.
+      const mreq = await withScope(manager, 'review.submitMgr', { params: { id: r2rev.id }, body: { managerRating: 3, managerComments: 'ok' } });
+      const mres = await call(perf.submitManagerReview, mreq);
+      assert(mres.statusCode === 200 && mres.body.status === 'MANAGER_SUBMITTED', 'R2 manager-submit → MANAGER_SUBMITTED (setup)');
+      // A DIR session to attach the adjustment to.
+      const sess = await prisma.calibrationSession.create({ data: { businessId, cycleId: cycle.id, skipLevelEmployeeId: mgr.id, status: 'OPEN' } });
+      // HR with NO linked employee + a sessionId → must fail closed 422 (not write 'unknown').
+      const hrNoEmp = actor({ businessId, employeeId: null, band: 'ALL', role: 'BUSINESS_ADMIN', perms: { canManagePerformanceCycle: true, canCalibrateRatings: true } });
+      const badReq = await withScope(hrNoEmp, 'review.calibrate', { params: { id: r2rev.id }, body: { calibratedRating: 4, sessionId: sess.id, reason: 'bump' } });
+      const badRes = await call(perf.calibrateReview, badReq);
+      assert(badRes.statusCode === 422, 'calibrate w/ ledger + no actor employee → 422 (fail closed, not unknown)');
+      const noLeak = await prisma.calibrationAdjustment.count({ where: { businessId, sessionId: sess.id, byEmployeeId: 'unknown' } });
+      assert(noLeak === 0, "no 'unknown' attribution row written (txn rolled back)");
+      // DIR (real employee) calibrates the same instance → ledger row attributed to DIR.
+      const dirCal = actor({ businessId, employeeId: dir.id, band: 'TEAM', role: 'STAFF', perms: { canCalibrateRatings: true } });
+      const okReq = await withScope(dirCal, 'review.calibrate', { params: { id: r2rev.id }, body: { calibratedRating: 4, sessionId: sess.id, reason: 'bump' } });
+      const okRes = await call(perf.calibrateReview, okReq);
+      assert(okRes.statusCode === 200 && okRes.body.status === 'CALIBRATED', 'DIR (real employee) calibrate → 200 CALIBRATED');
+      const adj = await prisma.calibrationAdjustment.findFirst({ where: { businessId, sessionId: sess.id, reviewInstanceId: r2rev.id } });
+      assert(adj && adj.byEmployeeId === dir.id, 'ledger byEmployeeId = real actor (DIR), never the literal "unknown"');
     }
   } finally {
     await cleanup(businessId);

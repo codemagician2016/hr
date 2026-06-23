@@ -12,7 +12,8 @@
  *   #3a self-required: submitMgr requires status===SELF_SUBMITTED (or selfRequired
  *       false) — NOT_STARTED→MANAGER_SUBMITTED is rejected when self is required.
  *   #3b SoD: submitMgr/calibrate/signOff require actor ≠ subject.
- *   #3c release gate: signOff sets releasedAt; ESS hides finalRating until then.
+ *   #3c release gate: signOff LOCKS finalRating but does NOT release; the org-wide
+ *       releaseCycle stamps releasedAt and the ESS serializer hides it until then.
  */
 
 const STATUS = Object.freeze({
@@ -87,7 +88,7 @@ const TRANSITIONS = [
   {
     event: 'signOff',
     from: ['CALIBRATED'],
-    to: 'CALIBRATED', // stays CALIBRATED but locks finalRating + sets releasedAt
+    to: 'CALIBRATED', // stays CALIBRATED + locks finalRating; org-wide release sets releasedAt
     guard(ctx) {
       if (isActor(ctx, ctx.subjectEmployeeId)) return 'SoD: the subject cannot sign off their own review';
       const isReviewer = isActor(ctx, ctx.reviewerEmployeeId);

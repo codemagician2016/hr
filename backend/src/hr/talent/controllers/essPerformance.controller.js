@@ -16,6 +16,7 @@ const { evaluate } = require('../performance/reviewStateMachine');
 const { objectiveProgress, num } = require('../performance/goalRollup');
 const { serializeReviewInstance } = require('../performance/serializers');
 
+const STALE_MSG = 'This record was updated elsewhere — reload and try again';
 const SEPARATED = new Set(['TERMINATED', 'RETIRED']);
 function isSeparated(emp) {
   if (!emp) return false;
@@ -120,14 +121,23 @@ async function createCheckIn(req, res, next) {
     const kr = await prisma.keyResult.findFirst({ where: { id: req.params.id, businessId, objective: { ownerEmployeeId: employee.id } }, include: { objective: { select: { id: true } } } });
     if (!kr) return res.status(404).json({ message: 'Not found' });
     if (req.body.newValue === undefined) return res.status(400).json({ message: 'newValue is required' });
-    const out = await prisma.$transaction(async (tx) => {
-      const checkIn = await tx.goalCheckIn.create({ data: { businessId, keyResultId: kr.id, authorEmployeeId: employee.id, previousValue: kr.currentValue, newValue: req.body.newValue, confidence: req.body.confidence || kr.confidence, note: req.body.note || null } });
-      await tx.keyResult.update({ where: { id: kr.id }, data: { currentValue: req.body.newValue, confidence: req.body.confidence || kr.confidence } });
-      const fresh = await tx.objective.findUnique({ where: { id: kr.objective.id }, include: { keyResults: true } });
-      await tx.objective.update({ where: { id: kr.objective.id }, data: { progress: objectiveProgress(fresh.keyResults) } });
-      return checkIn;
-    });
-    return res.status(201).json(out);
+    try {
+      const out = await prisma.$transaction(async (tx) => {
+        const checkIn = await tx.goalCheckIn.create({ data: { businessId, keyResultId: kr.id, authorEmployeeId: employee.id, previousValue: kr.currentValue, newValue: req.body.newValue, confidence: req.body.confidence || kr.confidence, note: req.body.note || null } });
+        // Optimistic lock: guard on the version we read. A concurrent check-in that
+        // already moved currentValue bumps the version → count===0 → rollback + 409
+        // (no lost update / clobber). Mirror of the operator okr.createCheckIn path.
+        const moved = await tx.keyResult.updateMany({ where: { id: kr.id, version: kr.version }, data: { currentValue: req.body.newValue, confidence: req.body.confidence || kr.confidence, version: { increment: 1 } } });
+        if (moved.count === 0) { const err = new Error(STALE_MSG); err.stale = true; throw err; }
+        const fresh = await tx.objective.findUnique({ where: { id: kr.objective.id }, include: { keyResults: true } });
+        await tx.objective.update({ where: { id: kr.objective.id }, data: { progress: objectiveProgress(fresh.keyResults) } });
+        return checkIn;
+      });
+      return res.status(201).json(out);
+    } catch (e) {
+      if (e && e.stale) return res.status(409).json({ message: STALE_MSG });
+      throw e;
+    }
   } catch (e) { return next(e); }
 }
 

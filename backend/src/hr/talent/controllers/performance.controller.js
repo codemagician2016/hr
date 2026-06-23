@@ -14,7 +14,8 @@
 //   #2 dead version columns         → read+check+increment on every mutation (409).
 //   #3a submitMgr skipped self gate → state machine enforces self-required order.
 //   #3b no SoD                      → APPROVAL_ACTIONS + actor-identity guards.
-//   #3c calibrate leaked pre-release→ signOff sets releasedAt; serializer hides it.
+//   #3c calibrate leaked pre-release→ signOff LOCKS finalRating but does NOT release;
+//        only the org-wide releaseCycle stamps releasedAt + the serializer hides it.
 const prisma = require('../../../core/lib/prisma');
 const { scopeWhere, scopeAllows, resolveAccessibleEmployeeIds } = require('../../lib/scopeResolver');
 const { effectivePermissions } = require('../../../core/lib/rbac');
@@ -355,7 +356,12 @@ async function runTransition(req, res, next, { event, scopeAction, mutate }) {
     });
     if (out.stale) return res.status(409).json({ message: STALE_MSG });
     return res.json(serializeReviewInstance(out.updated, viewerFor(req, out.updated)));
-  } catch (e) { return next(e); }
+  } catch (e) {
+    // Fail-closed business guard raised inside a mutate (e.g. calibrate with no
+    // resolvable actor employee for the audit ledger) → 422, not a 500.
+    if (e && e.code === 'NO_ACTOR') return res.status(422).json({ message: e.message });
+    return next(e);
+  }
 }
 
 // POST /reviews/:id/self — subject submits self rating + comments.
@@ -398,13 +404,18 @@ function calibrateReview(req, res, next) {
           ? await tx.calibrationSession.findFirst({ where: { id: r.body.sessionId, businessId: instance.businessId }, select: { id: true } })
           : null;
         if (session) {
+          // Audit-grade attribution: the rating-override action MUST name a real
+          // actor employee. An HR operator with no linked Employee can't write an
+          // attributable delta → fail closed (422) rather than logging 'unknown'.
+          const actorEmp = actorEmployeeId(r);
+          if (!actorEmp) { const err = new Error('Calibration requires a linked employee for audit attribution'); err.code = 'NO_ACTOR'; throw err; }
           await tx.calibrationAdjustment.create({
             data: {
               businessId: instance.businessId, sessionId: session.id, reviewInstanceId: instance.id,
               fromRating: instance.calibratedRating != null ? instance.calibratedRating : instance.managerRating,
               toRating: r.body.calibratedRating,
               reason: r.body.reason || 'calibration adjustment',
-              byEmployeeId: actorEmployeeId(r) || 'unknown',
+              byEmployeeId: actorEmp,
             },
           });
         }
@@ -415,8 +426,12 @@ function calibrateReview(req, res, next) {
   });
 }
 
-// POST /reviews/:id/sign-off — lock finalRating, compute compositeScore×proRation,
-// set meritEligible + releasedAt (the release gate flips for THIS instance here).
+// POST /reviews/:id/sign-off — lock finalRating + compositeScore×proRation +
+// meritEligible. Sign-off does NOT flip releasedAt: the subject must not see the
+// final rating the moment a single manager/skip/HR signs off. Synchronized
+// visibility is an org-wide event — only POST /cycles/:id/release stamps
+// releasedAt (on every CALIBRATED+signed instance at once). Until then the SELF
+// serializer keeps finalRating/managerComments absent.
 function signOffReview(req, res, next) {
   return runTransition(req, res, next, {
     event: 'signOff', scopeAction: 'review.signOff',
@@ -431,7 +446,8 @@ function signOffReview(req, res, next) {
         finalRating,
         compositeScore: composite,
         meritEligible: r.body.meritEligible !== undefined ? !!r.body.meritEligible : true,
-        releasedAt: new Date(),
+        // NO releasedAt here — the org-wide release gate (releaseCycle) is the only
+        // thing that flips visibility, so all subjects learn their rating together.
         status: 'CALIBRATED', // stays CALIBRATED (locked); release is the visible change
       };
     },
