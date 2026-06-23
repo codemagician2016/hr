@@ -41,10 +41,16 @@ export const NAV_ITEMS = [
   //     → gate the nav on canManageLetters (a maker-only user would 403 there).
   //   - Issue + Register are `canGenerateLetters` → keep the maker-OR-checker gate.
   // The server is the real enforcement boundary; this just shows the right links.
-  { key: 'letters', label: 'Letters', href: '/letters', feature: 'hr', anyPermission: ['canGenerateLetters', 'canManageLetters'], group: true, icon: 'letter' },
+  // FLAG (Letters overhaul): the Letters group + its Issue child carry a numeric
+  // BADGE of pending ESS letter requests ("Letters ②"). The count is data-driven —
+  // AdminShell fetches GET /api/hr/letters/requests/count once the section is
+  // visible and passes a { letters, 'letters-issue': n } badge map to <Sidebar>,
+  // which renders <NavBadge> on this group header (when collapsed) + the Issue link.
+  // `badgeSource` documents which nav keys are badge-bearing (purely informational).
+  { key: 'letters', label: 'Letters', href: '/letters', feature: 'hr', anyPermission: ['canGenerateLetters', 'canManageLetters'], group: true, icon: 'letter', badgeSource: 'lettersRequestCount' },
   { key: 'letters-templates', label: 'Templates', href: '/letters/templates', feature: 'hr', permission: 'canManageLetters', parent: 'letters', icon: 'doc' },
   { key: 'letters-letterheads', label: 'Letterheads', href: '/letters/letterheads', feature: 'hr', permission: 'canManageLetters', parent: 'letters', icon: 'letterhead' },
-  { key: 'letters-issue', label: 'Issue', href: '/letters/issue', feature: 'hr', anyPermission: ['canGenerateLetters', 'canManageLetters'], parent: 'letters', icon: 'send' },
+  { key: 'letters-issue', label: 'Issue', href: '/letters/issue', feature: 'hr', anyPermission: ['canGenerateLetters', 'canManageLetters'], parent: 'letters', icon: 'send', badgeSource: 'lettersRequestCount' },
   { key: 'letters-register', label: 'Register', href: '/letters/register', feature: 'hr', anyPermission: ['canGenerateLetters', 'canManageLetters'], parent: 'letters', icon: 'register' },
   // ── Feature 10 (slices 10d/10e) — Approvals & Access ────────────────────────
   // FLAG FOR MERGE: these three nav items are NEW in Feature 10. Each is gated on

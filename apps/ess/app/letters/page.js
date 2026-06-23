@@ -59,6 +59,15 @@ function MyLettersInner() {
   const [reqError, setReqError] = useState(null);
   const [reqSuccess, setReqSuccess] = useState(false);
 
+  // My letter requests (pending / in-progress / fulfilled). `reqTick` re-fetches
+  // after a new request is submitted so the new PENDING row shows immediately.
+  const [reqTick, setReqTick] = useState(0);
+  const { data: reqData } = useApi(`${LETTERS_PATH}/requests`, {
+    deps: [reqTick],
+    select: (b) => (Array.isArray(b) ? b : b?.items || []),
+  });
+  const myRequests = useMemo(() => reqData || [], [reqData]);
+
   async function submitRequest(e) {
     e.preventDefault();
     setSubmitting(true);
@@ -71,6 +80,7 @@ function MyLettersInner() {
       });
       setReqSuccess(true);
       setPurpose('');
+      setReqTick((t) => t + 1); // refresh my-requests list
     } catch (err) {
       setReqError(err.message || 'Could not submit your request.');
     } finally {
@@ -169,16 +179,66 @@ function MyLettersInner() {
         </ul>
       )}
 
+      {/* My requests (pending / in-progress / fulfilled) */}
+      {myRequests.length > 0 && (
+        <div>
+          <h2 className="mb-2 flex items-center text-base font-semibold" style={{ color: 'var(--theme-text)' }}>
+            My Requests
+            <EssInfoTip text="Letters you've asked HR for. 'In review' means HR has it; 'Ready' means it's issued — tap download." label="My Requests" />
+          </h2>
+          <ul className="space-y-2">
+            {myRequests.map((r) => (
+              <li key={r.id}>
+                <div
+                  className="flex items-center justify-between rounded-xl border bg-white px-4 py-3 shadow-sm"
+                  style={{ borderColor: 'var(--theme-border)' }}
+                >
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium" style={{ color: 'var(--theme-text)' }}>
+                      {r.subject || r.templateKindLabel || r.templateKind}
+                    </div>
+                    <div className="text-xs" style={{ color: 'var(--theme-muted)' }}>
+                      {r.templateKindLabel || r.templateKind}
+                      {r.purpose ? ` · ${r.purpose}` : ''}
+                      {r.createdAt ? ` · requested ${formatDate(r.createdAt)}` : ''}
+                    </div>
+                    <div className="mt-1">
+                      <RequestStatusBadge status={r.status} />
+                    </div>
+                  </div>
+                  {r.status === 'FULFILLED' && r.letterId && (
+                    <a
+                      href={`${LETTERS_PATH}/${encodeURIComponent(r.letterId)}/download`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`Download ${r.subject || r.templateKindLabel || 'letter'} (opens in a new tab)`}
+                      className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold text-white active:scale-[0.98]"
+                      style={{ background: 'var(--theme-primary)' }}
+                    >
+                      Download
+                    </a>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Request a letter */}
       <div className="rounded-xl border bg-white p-4 shadow-sm" style={{ borderColor: 'var(--theme-border)' }}>
-        <h2 className="text-base font-semibold" style={{ color: 'var(--theme-text)' }}>Request a Letter</h2>
+        <h2 className="flex items-center text-base font-semibold" style={{ color: 'var(--theme-text)' }}>
+          Request a Letter
+          <EssInfoTip text="Pick the letter you need and (optionally) why. HR is notified and will issue it; you'll be able to download it here." label="Request a Letter" />
+        </h2>
         <p className="mt-1 text-xs" style={{ color: 'var(--theme-muted)' }}>
-          Ask HR to issue a letter. Your request lands in the HR queue.
+          Ask HR to issue a letter. Your request lands in the HR queue and appears above once issued.
         </p>
         <form onSubmit={submitRequest} className="mt-3 space-y-3">
           <div>
-            <label htmlFor="reqType" className="block text-xs font-medium" style={{ color: 'var(--theme-text)' }}>
+            <label htmlFor="reqType" className="flex items-center text-xs font-medium" style={{ color: 'var(--theme-text)' }}>
               Letter type
+              <EssInfoTip text="The kind of letter you need, e.g. a salary certificate or experience certificate." label="Letter type" />
             </label>
             <select
               id="reqType"
@@ -193,8 +253,9 @@ function MyLettersInner() {
             </select>
           </div>
           <div>
-            <label htmlFor="purpose" className="block text-xs font-medium" style={{ color: 'var(--theme-text)' }}>
-              Purpose <span style={{ color: 'var(--theme-muted)' }}>(optional)</span>
+            <label htmlFor="purpose" className="flex items-center text-xs font-medium" style={{ color: 'var(--theme-text)' }}>
+              Purpose <span className="ml-1" style={{ color: 'var(--theme-muted)' }}>(optional)</span>
+              <EssInfoTip text="Why you need the letter, e.g. 'for a visa application' or 'bank loan'. Helps HR issue the right wording." label="Purpose" />
             </label>
             <textarea
               id="purpose"
@@ -228,6 +289,44 @@ function MyLettersInner() {
         </form>
       </div>
     </div>
+  );
+}
+
+// ── ⓘ tip — accessible field-help affordance (ESS-local, themed) ─────────────
+function EssInfoTip({ text, label }) {
+  if (!text) return null;
+  return (
+    <span
+      className="ml-1 inline-flex h-4 w-4 cursor-help select-none items-center justify-center rounded-full border text-[10px] font-semibold leading-none align-middle"
+      style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-muted)' }}
+      title={text}
+      tabIndex={0}
+      role="img"
+      aria-label={`${label ? `${label}: ` : 'Help: '}${text}`}
+    >
+      i
+    </span>
+  );
+}
+
+// ESS-facing request status pill. Maps the backend lifecycle status to a friendly
+// label + tone.
+const REQUEST_STATUS_META = {
+  PENDING: { label: 'In review', bg: 'rgba(217,119,6,0.12)', fg: '#D97706' },
+  IN_PROGRESS: { label: 'In progress', bg: 'rgba(37,99,235,0.12)', fg: '#2563EB' },
+  FULFILLED: { label: 'Ready to download', bg: 'rgba(16,185,129,0.12)', fg: '#059669' },
+  REJECTED: { label: 'Declined', bg: 'rgba(220,38,38,0.12)', fg: '#DC2626' },
+  CANCELLED: { label: 'Cancelled', bg: 'rgba(107,114,128,0.12)', fg: '#6B7280' },
+};
+function RequestStatusBadge({ status }) {
+  const meta = REQUEST_STATUS_META[status] || REQUEST_STATUS_META.PENDING;
+  return (
+    <span
+      className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium"
+      style={{ background: meta.bg, color: meta.fg }}
+    >
+      {meta.label}
+    </span>
   );
 }
 

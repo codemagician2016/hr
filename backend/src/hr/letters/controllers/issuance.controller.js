@@ -398,6 +398,82 @@ async function employeeLetters(req, res, next) {
   } catch (err) { return next(err); }
 }
 
+// ── GET /requests — PENDING ESS letter requests (the Issue-area "Requests" queue) ─
+// An employee's "request a letter" creates a DocumentRequest; HR never saw it.
+// This surfaces the OPEN ones (not yet fulfilled, not rejected/cancelled) so HR can
+// action them. Scope-constrained: a non-ALL (TEAM/SELF) issuer sees only requests
+// for in-scope employees (never the whole tenant — F1 IDOR posture, mirrors the
+// register). A request is "open" iff generatedDocumentId is null AND status is not
+// REJECTED/CANCELLED (the fulfilment hook sets generatedDocumentId + APPROVED).
+const OPEN_REQUEST_WHERE = {
+  generatedDocumentId: null,
+  status: { notIn: ['REJECTED', 'CANCELLED'] },
+};
+
+// Build the scope-constrained where for the letter-requests queue. ALL ⇒ tenant
+// only; a narrower band ⇒ restrict to in-scope employeeIds (NONE ⇒ empty set →
+// matches nothing). DocumentRequest always has an employeeId (no company-wide rows),
+// so — unlike the register — we do NOT add an `employeeId: null` branch.
+async function requestScopeWhere(req, businessId) {
+  const where = { businessId, ...OPEN_REQUEST_WHERE };
+  let scope = req.scope;
+  if (!scope) scope = await resolveAccessibleEmployeeIds(req.user, 'canGenerateLetters');
+  if (scope && scope.kind !== 'ALL') {
+    const ids = scope.kind === 'IDS' && scope.ids ? [...scope.ids] : [];
+    where.employeeId = { in: ids };
+  }
+  return where;
+}
+
+const REQUEST_KIND_LABELS = {
+  OFFER_LETTER: 'Offer Letter', APPOINTMENT_LETTER: 'Appointment Letter',
+  CONFIRMATION_LETTER: 'Confirmation Letter', PROMOTION_LETTER: 'Promotion Letter',
+  RELIEVING_LETTER: 'Relieving Letter', EXPERIENCE_LETTER: 'Experience Certificate',
+  SALARY_CERTIFICATE: 'Salary Certificate', WARNING_LETTER: 'Warning Letter',
+  PAYSLIP: 'Payslip', FORM16: 'Form 16', FNF_STATEMENT: 'Full & Final Statement',
+  POLICY_ACK: 'Policy Acknowledgement', OTHER: 'Letter',
+};
+
+async function requestsQueue(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const where = await requestScopeWhere(req, businessId);
+    const rows = await prisma.documentRequest.findMany({
+      where,
+      orderBy: { createdAt: 'asc' }, // oldest first — work the queue FIFO
+      take: 200,
+      select: {
+        id: true, templateKind: true, purpose: true, status: true, createdAt: true,
+        employee: { select: { id: true, firstName: true, lastName: true, code: true } },
+      },
+    });
+    const items = rows.map((r) => ({
+      id: r.id,
+      templateKind: r.templateKind,
+      templateKindLabel: REQUEST_KIND_LABELS[r.templateKind] || r.templateKind,
+      purpose: r.purpose || null,
+      status: r.status,
+      createdAt: r.createdAt,
+      employee: r.employee ? {
+        id: r.employee.id,
+        name: [r.employee.firstName, r.employee.lastName].filter(Boolean).join(' ').trim(),
+        code: r.employee.code,
+      } : null,
+    }));
+    return res.json({ items, total: items.length });
+  } catch (err) { return next(err); }
+}
+
+// ── GET /requests/count — pending-request badge count (scope-constrained) ─────
+async function requestsCount(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const where = await requestScopeWhere(req, businessId);
+    const count = await prisma.documentRequest.count({ where });
+    return res.json({ count });
+  } catch (err) { return next(err); }
+}
+
 module.exports = {
   preview,
   issue,
@@ -407,5 +483,7 @@ module.exports = {
   getOne,
   download,
   employeeLetters,
-  _internals: { toCsv, publicRow, letterBytes, resolveIssuers, issuerName },
+  requestsQueue,
+  requestsCount,
+  _internals: { toCsv, publicRow, letterBytes, resolveIssuers, issuerName, requestScopeWhere },
 };

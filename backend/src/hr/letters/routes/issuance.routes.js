@@ -50,6 +50,20 @@ router.get('/employees/:employeeId/letters',
   withEmployeeScope('canGenerateLetters', { idParam: 'employeeId' }),
   c.employeeLetters);
 
+// ── ESS letter-request queue (the Issue-area "Requests" tab + nav badge) ──────
+// withEmployeeScope populates req.scope so a non-ALL issuer only sees in-scope
+// employees' requests. Literal /requests* paths are declared BEFORE the /:id
+// family so "requests" is never captured as an :id.
+router.get('/requests/count',
+  requirePermission('canGenerateLetters'),
+  withEmployeeScope('canGenerateLetters'),
+  c.requestsCount);
+
+router.get('/requests',
+  requirePermission('canGenerateLetters'),
+  withEmployeeScope('canGenerateLetters'),
+  c.requestsQueue);
+
 // ── :id family ────────────────────────────────────────────────────────────────
 router.post('/:id/reissue',
   requirePermission('canGenerateLetters'),

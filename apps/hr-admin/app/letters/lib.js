@@ -62,6 +62,36 @@ export function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// ── ⓘ InfoTip — a tiny accessible field-help affordance ──────────────────────
+// A circled "i" that reveals help text on hover/focus (native `title` for hover,
+// an aria-label for screen readers). Used on every field across the Letters
+// surfaces (Issue / Templates / Letterheads / Register / Request) so a layman
+// knows what each input does.
+export function InfoTip({ text, label }) {
+  if (!text) return null;
+  return (
+    <span
+      className="ml-1 inline-flex h-4 w-4 cursor-help select-none items-center justify-center rounded-full border border-gray-300 text-[10px] font-semibold leading-none text-gray-500 align-middle hover:border-gray-400 hover:text-gray-700"
+      title={text}
+      tabIndex={0}
+      role="img"
+      aria-label={`${label ? `${label}: ` : 'Help: '}${text}`}
+    >
+      i
+    </span>
+  );
+}
+
+// A label row with an inline ⓘ tip — the canonical "field label + help" header.
+export function LabelWithTip({ label, tip, htmlFor, className }) {
+  return (
+    <label htmlFor={htmlFor} className={className || 'block text-sm font-medium text-gray-700 mb-1'}>
+      {label}
+      <InfoTip text={tip} label={label} />
+    </label>
+  );
+}
+
 export const LETTER_CATEGORIES = [
   'EXPERIENCE', 'BONAFIDE', 'EMPLOYMENT_PROOF', 'SALARY_PROOF', 'BANK', 'CONTRACT', 'CUSTOM',
 ];

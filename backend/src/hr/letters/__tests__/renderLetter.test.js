@@ -58,6 +58,19 @@ async function makeA4Fixture({ rotate = 0, width = 595.28, height = 841.89 } = {
   return Buffer.from(await doc.save());
 }
 
+// A letterhead whose MediaBox does NOT start at (0,0) — mimics a real design-tool
+// export. The header is drawn relative to the page's OWN origin so it sits at the
+// visible top; the engine must translate the body by the same origin.
+async function makeOffsetFixture({ ox = 50, oy = 30, width = 595.28, height = 841.89 } = {}) {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([width, height]);
+  page.setMediaBox(ox, oy, width, height);
+  const f = await doc.embedFont(StandardFonts.Helvetica);
+  page.drawRectangle({ x: ox, y: oy + height - 80, width, height: 80, color: rgb(0.12, 0.23, 0.37) });
+  page.drawText('OFFSET LETTERHEAD', { x: ox + 40, y: oy + height - 50, size: 18, font: f, color: rgb(1, 1, 1) });
+  return Buffer.from(await doc.save());
+}
+
 // Count the pages of a saved PDF buffer.
 async function pageCount(buf) {
   const d = await PDFDocument.load(buf);
@@ -257,6 +270,53 @@ async function main() {
   check('wrapBody: returns multiple lines for oversize token', wrapped.length >= 2);
   check('wrapBody: preserves a blank line (paragraph gap)', wrapped.some((l) => l.text === ''));
 
+  // 11) THE LETTERHEAD-OVERLAY BUG (overhaul): a real letterhead exported from a
+  //     design tool carries a non-zero MediaBox ORIGIN (e.g. [50 30 645 872]).
+  //     page.getSize() returns dimensions only, so before the fix the body was
+  //     drawn in absolute (0,0)-relative space and SCATTERED over the stationery.
+  //     With an EMPTY layout (admin uploaded but never opened the position-picker)
+  //     the engine must default to sensible A4 body margins AND translate by the
+  //     MediaBox origin, so the body lands as clean wrapped text INSIDE the
+  //     writing-area band on the visible page.
+  const OX = 50, OY = 30, PW = 595.28, PH = 841.89;
+  const offsetLh = await makeOffsetFixture({ ox: OX, oy: OY, width: PW, height: PH });
+  const cleanBody = [
+    'To Whomsoever It May Concern,',
+    '',
+    'This is to certify that Asha Rao was employed with Acme Technologies Pvt Ltd',
+    'from 01/04/2021 and her conduct was found to be satisfactory throughout her tenure.',
+    '',
+    'We wish her continued success.',
+  ].join('\n');
+  const offsetOut = await renderLetter({
+    letterheadPdf: offsetLh, layout: {}, // EMPTY layout → default writing area
+    bodyText: cleanBody, fields: { date: '24/06/2026', refNo: 'ACME/HR/2026/0007' },
+    fontBytes, fontBoldBytes,
+  });
+  check('letterhead-overlay: renders to a valid %PDF', isPdf(offsetOut));
+  const offPos = extractTextPositions(offsetOut);
+  // Default writing area is x:0.10 w:0.80 / y:0.26 h:0.56 (normalized, top-left).
+  // On the visible page (origin OX/OY) that is the absolute band:
+  //   x ∈ [OX+0.10·PW, OX+0.90·PW]   (left gutter .. right gutter)
+  //   y ∈ [OY+(1-0.82)·PH, OY+(1-0.26)·PH] = baselines within the body column.
+  const bandXMin = OX + 0.10 * PW - 1;
+  const bandXMax = OX + 0.90 * PW + 1;
+  const bandYMin = OY + (1 - 0.82) * PH - 12; // a touch of slack for the last baseline
+  const bandYMax = OY + (1 - 0.26) * PH + 1;
+  // Every drawn glyph run must sit inside the visible page AND inside the writing
+  // band — i.e. NOT scattered over the header (high y) or off the left edge (x<OX).
+  const bodyRuns = offPos.filter((p) => p.y < OY + 0.84 * PH); // exclude any field anchors up top
+  const allInBand = bodyRuns.length > 0 && bodyRuns.every(
+    (p) => p.x >= bandXMin && p.x <= bandXMax && p.y >= bandYMin && p.y <= bandYMax
+  );
+  check('letterhead-overlay: body text lands INSIDE the writing-area band (origin-translated, not scattered)', allInBand);
+  // And specifically: the body x-origin must be translated by the MediaBox x0 (it
+  // must NOT start near x≈0 — that would be the pre-fix scatter at the page edge).
+  // Use the body-only runs (the stationery's OWN header text is at high y and is
+  // part of the underlay, not the drawn body).
+  const minBodyX = bodyRuns.length ? Math.min(...bodyRuns.map((p) => p.x)) : 0;
+  check('letterhead-overlay: body x-origin honours the MediaBox lower-left origin', minBodyX >= OX + 0.10 * PW - 1);
+
   // ── report ──────────────────────────────────────────────────────────────
   console.log('');
   console.log(`renderLetter test: ${passed} passed, ${failed} failed of ${passed + failed} assertions.`);
@@ -289,6 +349,27 @@ function extractTextYs(buf) {
     while ((m = tmRe.exec(txt))) ys.push(Number(m[6]));
   }
   return ys;
+}
+
+// Like extractTextYs but returns {x, y} pairs from Tm/Td text-positioning ops
+// (used by the letterhead-overlay band assertions).
+function extractTextPositions(buf) {
+  const s = buf.toString('latin1');
+  const pts = [];
+  const streamRe = /stream\r?\n([\s\S]*?)\r?\nendstream/g;
+  let blk;
+  while ((blk = streamRe.exec(s))) {
+    const raw = Buffer.from(blk[1], 'latin1');
+    let txt = null;
+    try { txt = zlib.inflateSync(raw).toString('latin1'); } catch (_e) { txt = null; }
+    if (!txt) continue;
+    let m;
+    const tdRe = /(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+Td/g;
+    while ((m = tdRe.exec(txt))) pts.push({ x: Number(m[1]), y: Number(m[2]) });
+    const tmRe = /(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+Tm/g;
+    while ((m = tmRe.exec(txt))) pts.push({ x: Number(m[5]), y: Number(m[6]) });
+  }
+  return pts;
 }
 
 async function assertYFlip(buf) {

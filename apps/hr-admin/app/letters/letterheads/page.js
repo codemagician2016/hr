@@ -16,6 +16,7 @@ import Link from 'next/link';
 import { ErrorBanner, PrimaryButton, TextInput, DocumentDropzone } from '@hr/ui';
 import { get, post, del, request } from '@/lib/api';
 import { asList, PageHeader, DataTable, StatusBadge, ActionButton } from '@/lib/ui';
+import { InfoTip } from '../lib';
 
 // PUT helper (the shared api lib exposes get/post/patch/del + request; the
 // letterheads endpoints use PUT for both layout and metadata updates).
@@ -91,11 +92,11 @@ function UploadPanel({ onCreated }) {
         </p>
       )}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-        <TextInput label="Code" value={code} onChange={setCode} placeholder="ACME-DEFAULT" />
-        <TextInput label="Name" value={name} onChange={setName} placeholder="Acme default stationery" />
+        <TextInput label={<>Code <InfoTip text="A short unique code for this letterhead (e.g. ACME-DEFAULT)." label="Code" /></>} value={code} onChange={setCode} placeholder="ACME-DEFAULT" />
+        <TextInput label={<>Name <InfoTip text="A friendly name shown when picking a letterhead (e.g. 'Acme default stationery')." label="Name" /></>} value={name} onChange={setName} placeholder="Acme default stationery" />
       </div>
       <DocumentDropzone
-        label="A4 letterhead PDF"
+        label={<>A4 letterhead PDF <InfoTip text="Upload your printed stationery as an A4 PDF. Page 1 becomes the background; the letter body is laid out cleanly inside the writing area on top of it. Open the position-picker after upload to fine-tune where the body sits." label="A4 letterhead PDF" /></>}
         hint="PDF up to 10 MB — page 1 is used as the stationery underlay"
         accept="application/pdf"
         busy={busy}

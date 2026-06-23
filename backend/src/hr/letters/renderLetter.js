@@ -35,8 +35,21 @@ const fontkit = require('@pdf-lib/fontkit');
 // ── normalized-layout defaults ───────────────────────────────────────────────
 // All rects are { x, y, w, h } in [0,1], origin TOP-LEFT (the visual-picker
 // convention). Sensible fallbacks so a partial / missing layout never throws.
+//
+// DEFAULT_WRITING_AREA is the "admin uploaded a letterhead but never opened the
+// position-picker" case — we MUST still render the body cleanly inside the
+// stationery's writing area rather than scattering it over the header/footer.
+// These are conventional A4 business-letter body margins, expressed normalized so
+// they hold for any page size the engine reads at render:
+//   - x 0.10 / w 0.80  → ~20mm L/R gutters on A4 (210mm wide).
+//   - y 0.26           → top edge sits BELOW a typical letterhead header band
+//                        (logo + address strip occupy the top ~25%).
+//   - h 0.56           → bottom edge (0.26+0.56 = 0.82) stays ABOVE a typical
+//                        footer band (statutory strip lives in the bottom ~18%).
+// The result is a clean, wrapped single column of body text that never collides
+// with the printed stationery.
 const DEFAULT_WRITING_AREA = {
-  x: 0.1, y: 0.28, w: 0.8, h: 0.55, align: 'left', fontSize: 11, lineGap: 4,
+  x: 0.1, y: 0.26, w: 0.8, h: 0.56, align: 'left', fontSize: 11, lineGap: 4,
 };
 const DEFAULT_FIELD_SIZE = 10;
 
@@ -102,17 +115,28 @@ async function renderLetter({
 
   const page0 = doc.getPage(0);
 
-  // ── helper: geometry for a page, honouring rotation ────────────────────────
-  // page.getSize() returns the UN-rotated media box. When a page is rotated 90°
-  // /270° its VISUAL width/height swap. For drawing we work in the page's own
-  // (unrotated) coordinate space and let the viewer apply the rotation, so the
-  // visible-area dimensions we wrap text to must account for that swap.
+  // ── helper: geometry for a page, honouring rotation + MediaBox origin ──────
+  // page.getSize() returns the UN-rotated media box DIMENSIONS only — it discards
+  // the MediaBox lower-left ORIGIN. Real-world letterheads exported from design
+  // tools (Canva/InDesign/Word) frequently carry a non-zero MediaBox origin (e.g.
+  // [50 30 645 872] instead of [0 0 595 842]). The letterhead's OWN printed
+  // content is laid out relative to that origin, but pdf-lib's drawText places our
+  // body in absolute page space — so if we ignore the origin our body lands offset
+  // by (−x0, −y0) and SCATTERS over the stationery (the reported bug). We therefore
+  // read the real MediaBox and translate every drawn rect by (x0, y0).
+  //
+  // When a page is rotated 90°/270° its VISUAL width/height swap. We work in the
+  // page's own (unrotated) coordinate space and let the viewer apply the rotation,
+  // so the visible-area dimensions we wrap text to must account for that swap.
   function geom(page) {
     const { width: mw, height: mh } = page.getSize();
+    const { x0, y0 } = mediaBoxOrigin(page);
     const rot = ((page.getRotation().angle % 360) + 360) % 360;
     const swapped = rot === 90 || rot === 270;
     return {
       page,
+      // MediaBox lower-left origin (absolute page-space offset to add to every draw).
+      x0, y0,
       // visible (rotation-applied) dimensions used for normalized→absolute math
       visW: swapped ? mh : mw,
       visH: swapped ? mw : mh,
@@ -120,8 +144,10 @@ async function renderLetter({
     };
   }
 
-  // Convert a normalized top-left rect → absolute bottom-left pdf-lib coords.
-  // absY_bottomLeft = visH − (yNorm·visH) − heightPt.   (Gotcha #1)
+  // Convert a normalized top-left rect → absolute bottom-left pdf-lib coords,
+  // translated by the page's MediaBox lower-left origin (g.x0/g.y0) so a non-zero-
+  // origin letterhead still lands the body inside the writing area.
+  // absY_bottomLeft = y0 + visH − (yNorm·visH) − heightPt.   (Gotcha #1)
   function absRect(g, rect) {
     const xN = clamp01(num(rect.x, 0));
     const yN = clamp01(num(rect.y, 0));
@@ -129,12 +155,12 @@ async function renderLetter({
     const hN = clamp01(num(rect.h, 0));
     const wPt = wN * g.visW;
     const hPt = hN * g.visH;
-    const xPt = xN * g.visW;
+    const xPt = g.x0 + xN * g.visW;
     const yTopPt = yN * g.visH;
     return {
       x: xPt,
-      yTop: g.visH - yTopPt, // top edge in bottom-left origin
-      yBottom: g.visH - yTopPt - hPt, // bottom edge in bottom-left origin
+      yTop: g.y0 + g.visH - yTopPt, // top edge in bottom-left origin
+      yBottom: g.y0 + g.visH - yTopPt - hPt, // bottom edge in bottom-left origin
       w: wPt,
       h: hPt,
     };
@@ -200,6 +226,11 @@ async function renderLetter({
       const { width, height } = page0.getSize();
       added = doc.addPage([width, height]);
       added.setRotation(page0.getRotation());
+      // Mirror page 1's MediaBox ORIGIN so the body lands in the same place on a
+      // blank continuation as it does on the stationery (a non-zero-origin
+      // letterhead must not shift the body between pages).
+      const { x0, y0 } = mediaBoxOrigin(page0);
+      if (x0 || y0) added.setMediaBox(x0, y0, width, height);
     }
     return added;
   }
@@ -228,8 +259,8 @@ async function renderLetter({
       const wmSize = Math.max(28, Math.floor(gp.visW / 9));
       const tw = safeWidth(fontBold, wmText, wmSize);
       p.drawText(wmText, {
-        x: (gp.visW - tw * 0.7) / 2,
-        y: gp.visH / 2,
+        x: gp.x0 + (gp.visW - tw * 0.7) / 2,
+        y: gp.y0 + gp.visH / 2,
         size: wmSize,
         font: fontBold,
         color: rgb(0.85, 0.1, 0.1),
@@ -308,6 +339,23 @@ function wrapBody(bodyText, font, size, maxWidth) {
 }
 
 // ── small utils ───────────────────────────────────────────────────────────────
+// Read a page's MediaBox lower-left ORIGIN (x0, y0). pdf-lib's page.getSize()
+// returns width/height only, so we go to the MediaBox dictionary entry. A page
+// without an explicit MediaBox (inherited) or any read error defaults to (0, 0)
+// — the legacy assumption, kept safe.
+function mediaBoxOrigin(page) {
+  try {
+    const node = page && page.node;
+    const mb = node && typeof node.MediaBox === 'function' ? node.MediaBox() : null;
+    if (mb && typeof mb.asArray === 'function') {
+      const arr = mb.asArray();
+      const x0 = arr[0] && typeof arr[0].asNumber === 'function' ? arr[0].asNumber() : Number(arr[0]) || 0;
+      const y0 = arr[1] && typeof arr[1].asNumber === 'function' ? arr[1].asNumber() : Number(arr[1]) || 0;
+      return { x0: Number.isFinite(x0) ? x0 : 0, y0: Number.isFinite(y0) ? y0 : 0 };
+    }
+  } catch (_e) { /* fall through to origin */ }
+  return { x0: 0, y0: 0 };
+}
 function toUint8(b) {
   if (b instanceof Uint8Array) return b;
   if (Buffer.isBuffer(b)) return new Uint8Array(b.buffer, b.byteOffset, b.byteLength);
