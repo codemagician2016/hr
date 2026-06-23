@@ -20,6 +20,7 @@ import { ErrorBanner, PrimaryButton, TextInput, Spinner } from '@hr/ui';
 import { get, request } from '@/lib/api';
 import { asList, PageHeader, Tabs, DataTable } from '@/lib/ui';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
+import BillingTab from '@/components/BillingTab';
 
 const STYLE_OPTIONS = FIXED_STYLE_KEYS.map((key) => ({
   key,
@@ -35,6 +36,23 @@ function normalizeHex(value) {
   if (!HEX_RE.test(String(value || '').trim())) return null;
   const v = String(value).trim();
   return (v.startsWith('#') ? v : `#${v}`).toUpperCase();
+}
+
+// Subscription.themeColors is persisted as a JSON STRING (e.g.
+// '{"primary":"#4F46E5","colorKey":"indigo"}'). The resolve payload returns it
+// verbatim, so parse it here; tolerate an already-parsed object or junk.
+function parseThemeColors(value) {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
 }
 
 // ─── HexColorInput ───────────────────────────────────────────────────────────
@@ -187,7 +205,14 @@ function LogoUploader({ logoUrl, onChange, disabled }) {
           )}
         </div>
       ) : (
-        <TextInput label="Logo URL" value={logoUrl} onChange={onChange} placeholder="https://…/logo.png" />
+        <div>
+          <TextInput label="Logo URL" value={logoUrl} onChange={onChange} placeholder="https://…/logo.png" />
+          <p className="text-xs text-gray-500 mt-1">
+            {uploadDisabled
+              ? 'Direct uploads aren’t available on this server yet — paste a public image URL (e.g. from your website or a file host).'
+              : 'Paste a public link to your logo, or switch to Upload.'}
+          </p>
+        </div>
       )}
 
       {uploadError && <p className="text-xs text-red-600 mt-2">{uploadError}</p>}
@@ -279,19 +304,28 @@ function BrandingTab() {
   useEffect(() => {
     setLoading(true);
     Promise.all([
-      get('/api/tenant/resolve'),
+      // Brand is optional — on an admin origin /api/tenant/resolve can 404
+      // (no tenant host context). Mirror AdminShell and swallow it so the
+      // whole load doesn't fail; we fall back to defaults and the saved theme
+      // still round-trips via /api/auth/me + the next resolve.
+      get('/api/tenant/resolve').catch(() => ({})),
       get('/api/auth/me').catch(() => null),
     ])
       .then(([res, me]) => {
         const brand = res?.brand || res?.subscription || res || {};
         const hr = res?.hrTheme || res?.theme || {};
-        setStyleKey(brand.styleKey || hr.styleKey || brand.themeStyle || 'indigo');
-        const ck = brand.colorKey || hr.colorKey || '';
+        // themeColors arrives as a JSON STRING from /api/tenant/resolve's
+        // `subscription.themeColors` (it's persisted as JSON). Parse it so
+        // `primary` and the curated `colorKey` round-trip; tolerate an already-
+        // parsed object (brand.themeColors) or a bad/empty value.
+        const tc = parseThemeColors(brand.themeColors ?? hr.themeColors);
+        setStyleKey(brand.styleKey || hr.styleKey || brand.themeStyle || hr.themeStyle || 'indigo');
+        const ck = tc.colorKey || brand.colorKey || hr.colorKey || '';
         setColorKey(ck || 'indigo');
         // A stored primary that isn't a curated color surfaces as the custom hex.
-        const storedPrimary = brand.themeColors?.primary || brand.primary || hr.primary;
+        const storedPrimary = tc.primary || brand.primary || hr.primary;
         if (!ck && storedPrimary && HEX_RE.test(storedPrimary)) setCustomHex(normalizeHex(storedPrimary));
-        setLogoUrl(brand.logoUrl || hr.logoUrl || res?.business?.logoUrl || '');
+        setLogoUrl(brand.logoUrl || hr.logoUrl || res?.content?.logoUrl || res?.business?.logoUrl || '');
         const session = me?.user || me;
         setCanEdit(hasPermission(permissionsFromSession(session), 'canEditBranding'));
       })
@@ -492,18 +526,41 @@ function RolesTab() {
   );
 }
 
-const TABS = [
-  { key: 'branding', label: 'Branding' },
-  { key: 'roles', label: 'Roles' },
-];
-
 export default function SettingsPage() {
-  const [tab, setTab] = useState('branding');
+  const [perms, setPerms] = useState(null); // null = not resolved → allow-all
+  const [tab, setTab] = useState(null);
+
+  // Resolve the operator's permissions once so tab visibility matches what each
+  // tab can actually do (e.g. a Finance role sees Billing but not Branding).
+  useEffect(() => {
+    get('/api/auth/me')
+      .then((me) => setPerms(permissionsFromSession(me?.user || me)))
+      .catch(() => setPerms(null)); // unknown → allow-all (tabs all visible)
+  }, []);
+
+  // Branding is the default/landing tab and stays visible to everyone (it shows
+  // read-only without canEditBranding). Billing only appears for billing-capable
+  // operators. Roles is an overview anyone in Settings can see.
+  const tabs = useMemo(() => {
+    const out = [{ key: 'branding', label: 'Branding' }];
+    if (perms === null || hasPermission(perms, 'canEditBilling')) out.push({ key: 'billing', label: 'Billing' });
+    out.push({ key: 'roles', label: 'Roles' });
+    return out;
+  }, [perms]);
+
+  // Default to the first available tab once permissions resolve.
+  useEffect(() => {
+    if (tab === null || !tabs.some((t) => t.key === tab)) setTab(tabs[0]?.key || 'branding');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabs]);
+
+  const active = tab || 'branding';
+
   return (
     <div>
       <PageHeader
         title="Settings"
-        subtitle="Branding, domain and roles"
+        subtitle="Branding, billing, domain and roles"
         actions={
           <Link
             href="/settings/domain"
@@ -513,9 +570,10 @@ export default function SettingsPage() {
           </Link>
         }
       />
-      <Tabs tabs={TABS} active={tab} onChange={setTab} />
-      {tab === 'branding' && <BrandingTab />}
-      {tab === 'roles' && <RolesTab />}
+      <Tabs tabs={tabs} active={active} onChange={setTab} />
+      {active === 'branding' && <BrandingTab />}
+      {active === 'billing' && <BillingTab />}
+      {active === 'roles' && <RolesTab />}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { protect, requireRole } = require('../../core/middleware/auth.middleware');
+const { protect, requireRole, requireStaff, requirePermission } = require('../../core/middleware/auth.middleware');
 const { ROLES } = require('../../core/lib/roles');
 const { requireVertical } = require('../../core/middleware/requireVertical');
 const {
@@ -71,10 +71,20 @@ router.patch('/users/:id/role', protect, requireRole(ROLES.BUSINESS_ADMIN), assi
 router.patch('/settings', protect, requireRole(ROLES.BUSINESS_ADMIN), validateBody(updateBusinessSettingsSchema), updateSettings);
 
 // Feature 3 — self-service subdomain (URL) change + domain readiness/config.
-// Owner-only (BUSINESS_ADMIN). PATCH /settings silently drops slug, so this is
-// the dedicated, audited slug-change path.
-router.patch('/slug', protect, requireRole(ROLES.BUSINESS_ADMIN), validateBody(changeSlugSchema), changeSlug);
-router.get('/domain-config', protect, requireRole(ROLES.BUSINESS_ADMIN), getDomainConfig);
+// The WRITE (slug change) is gated on the canEditDomain PERMISSION, not the
+// account-level BUSINESS_ADMIN role, so it agrees with the hr-admin UI (which
+// shows/hides the "Change address" control on canEditDomain). This lets a
+// custom Owner-role operator (account role STAFF + canEditDomain) change the
+// address, while an HR-Admin (no canEditDomain) is read-only on both sides.
+// SUPER_ADMIN + legacy BUSINESS_ADMIN keep full access via effectivePermissions
+// (LEGACY_ROLE_PERMS → all true). PATCH /settings silently drops slug, so this
+// is the dedicated, audited slug-change path.
+router.patch('/slug', protect, requirePermission('canEditDomain'), validateBody(changeSlugSchema), changeSlug);
+// domain-config is a READ that the Domain settings page needs even for
+// read-only viewers (to render the live subdomain suffix). Allow any operator
+// (STAFF/BUSINESS_ADMIN/SUPER_ADMIN); the page degrades the edit controls on
+// canEditDomain client-side, and every WRITE route re-checks the permission.
+router.get('/domain-config', protect, requireStaff, getDomainConfig);
 // Read the feature catalog + current admin overrides + resolved effective
 // state. Drives the admin Features Settings panel. Patch happens via the
 // existing /settings endpoint (featureFlags is one of the accepted fields).

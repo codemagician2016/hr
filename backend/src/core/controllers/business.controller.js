@@ -91,22 +91,74 @@ function parsePageSize(value, fallback = 25, max = 100) {
   return Math.min(parsed, max);
 }
 
-// GET /api/business/check-slug?slug=acme-barber — public availability check
+// Build up to 3 free, available slug suggestions near a desired slug. Used to
+// turn a "reserved"/"taken" dead end into actionable options the operator can
+// click. Tries numeric suffixes first (acme-1), then a couple of common words
+// (acme-hr, acme-team), and finally a short random suffix — skipping any that
+// are themselves reserved or already taken. Best-effort: never throws.
+async function suggestAvailableSlugs(base, { limit = 3 } = {}) {
+  const root = String(base || '').replace(/-+$/, '') || 'team';
+  const candidates = [
+    `${root}-1`, `${root}-2`, `${root}-hr`, `${root}-team`, `${root}-co`,
+    `${root}-${crypto.randomBytes(2).toString('hex')}`,
+  ];
+  const out = [];
+  for (const candidate of candidates) {
+    const norm = slugify(candidate);
+    if (!norm || norm === root || out.includes(norm)) continue;
+    if (RESERVED_SLUGS.has(norm)) continue;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const taken = await prisma.business.findUnique({ where: { slug: norm }, select: { id: true } });
+      if (!taken) out.push(norm);
+    } catch {
+      // DB hiccup — skip this candidate rather than fail the whole check.
+    }
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+// Human-readable copy for each machine reason — kept here so any non-UI caller
+// (emails, logs) gets a sentence, while clients branch on the stable `reason`.
+const SLUG_REASON_MESSAGES = {
+  invalid: 'Use letters, numbers and hyphens only.',
+  reserved: 'This name is reserved.',
+  taken: 'Already in use.',
+};
+
+// GET /api/business/check-slug?slug=acme-barber — public availability check.
+// Returns a STABLE machine `reason` ('invalid' | 'reserved' | 'taken' | null)
+// so clients can branch reliably, plus a human `message` for display/logging
+// and `suggestions` (free alternatives) when the slug is reserved or taken.
 async function checkSlug(req, res) {
   const raw = String(req.query.slug || '').trim();
   if (!raw) return res.status(400).json({ message: 'slug is required' });
 
   const normalized = slugify(raw);
-  if (!normalized) return res.json({ slug: '', available: false, reason: 'Invalid slug' });
+  if (!normalized) {
+    return res.json({
+      slug: '', available: false, reason: 'invalid', message: SLUG_REASON_MESSAGES.invalid, suggestions: [],
+    });
+  }
   if (RESERVED_SLUGS.has(normalized)) {
-    return res.json({ slug: normalized, available: false, reason: 'This name is reserved' });
+    return res.json({
+      slug: normalized,
+      available: false,
+      reason: 'reserved',
+      message: SLUG_REASON_MESSAGES.reserved,
+      suggestions: await suggestAvailableSlugs(normalized),
+      url: `https://${hostForSlug(normalized)}`,
+    });
   }
 
   const existing = await prisma.business.findUnique({ where: { slug: normalized } });
   res.json({
     slug: normalized,
     available: !existing,
-    reason: existing ? 'Already in use' : null,
+    reason: existing ? 'taken' : null,
+    message: existing ? SLUG_REASON_MESSAGES.taken : null,
+    suggestions: existing ? await suggestAvailableSlugs(normalized) : [],
     // The real provisioned host ({slug}-staging.drifthr.com), not {slug}.PLATFORM_DOMAIN —
     // keeps the availability preview consistent with what gets provisioned.
     url: `https://${hostForSlug(normalized)}`,
