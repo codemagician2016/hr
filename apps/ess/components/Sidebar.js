@@ -20,6 +20,8 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useSession } from '@/components/AppShell';
 import { useTenant } from '@/components/TenantProvider';
+import { useProfile } from '@/lib/useProfile';
+import { useApi } from '@/lib/useApi';
 
 // ── icon set (single-path line icons, 24x24 viewBox) ─────────────────────────
 const ICONS = {
@@ -36,6 +38,7 @@ const ICONS = {
   tax: 'M9 7h6M9 11h6M9 15h4M6 3h12v18H6z',
   chart: 'M3 17l6-6 4 4 8-8M14 7h7v7',
   exit: 'M16 17l5-5-5-5M21 12H9M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4',
+  onboarding: 'M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11',
 };
 
 function Icon({ name, className }) {
@@ -108,16 +111,37 @@ export default function Sidebar({ onNavigate }) {
   const pathname = usePathname() || '/';
   const me = useSession();
   const { tenant, theme } = useTenant();
+  // Rich profile (designation/code) for the subtitle — the bare session carries
+  // only name/email (audit #58). Falls back to the session shape while loading.
+  const { profile } = useProfile();
+  // Outstanding tasks → conditional Onboarding nav entry (audit #60). Best-effort:
+  // any error simply omits the entry, never breaks the rail.
+  const { data: tasks } = useApi('/api/hr/me/tasks', {
+    select: (b) => (Array.isArray(b) ? b : b?.items || b?.tasks || []),
+  });
+  const hasOnboarding = Array.isArray(tasks) && tasks.some((t) => t.kind === 'ONBOARDING');
 
-  const fullName = nameFromSession(me);
+  const fullName = profile?.name || nameFromSession(me);
   const emp = me?.employee || me?.customer || me || {};
   const subtitle =
+    profile?.designation || profile?.employeeCode ||
     emp.designation?.name || emp.designation || emp.designationName ||
     emp.employeeCode || emp.code || null;
   const business = tenant?.business || {};
   const businessName = business.name || business.displayName || null;
   const logoUrl = theme?.logoUrl || business.logoUrl || null;
-  const avatarUrl = emp.avatarUrl || emp.photoUrl || emp.photo || null;
+  const avatarUrl = profile?.photoUrl || emp.avatarUrl || emp.photoUrl || emp.photo || null;
+
+  // Inject a conditional "Onboarding" item (top of the rail) only while an
+  // onboarding journey is in progress for this employee — otherwise it stays off
+  // so the chrome never advertises a flow the employee has already finished.
+  const navItems = hasOnboarding
+    ? [
+        NAV[0],
+        { type: 'item', href: '/onboarding', label: 'Onboarding', icon: 'onboarding' },
+        ...NAV.slice(1),
+      ]
+    : NAV;
 
   // Groups start expanded when they contain the active route; the user can toggle.
   const [open, setOpen] = useState(() => {
@@ -171,7 +195,7 @@ export default function Sidebar({ onNavigate }) {
       {/* Navigation */}
       <nav className="ess-nav" aria-label="Primary">
         <ul className="ess-nav-list">
-          {NAV.map((n) => {
+          {navItems.map((n) => {
             if (n.type === 'item') {
               const active = pathMatches(pathname, n.href);
               return (

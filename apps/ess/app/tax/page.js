@@ -6,20 +6,16 @@
 //           HRA, home-loan interest, etc.).
 //   NZ    : IRD tax code election + KiwiSaver contribution rate.
 //
-// The form picks the jurisdiction from the employee's country / the tenant's
-// country (defaults to IN). On submit it POSTs the declaration to the stub path
-// below.
-//
-// TODO(tax): /api/hr/me/tax-declaration is NOT yet implemented in the backend.
-// When the route lands (GET to prefill the saved declaration, POST/PUT to save)
-// it should accept the exact body shapes built in buildPayload() below. Until
-// then a 404/405 is shown as a friendly "saved locally for now" note rather
-// than a hard error, so the page is fully shippable.
+// The form picks the jurisdiction from the employee's RESOLVED country (the
+// backend gates IN vs NZ; fail-closed). It prefills from the saved declaration
+// (GET) and persists on submit (POST) — both at /api/hr/me/tax-declaration, which
+// writes onto the employee's StatutoryProfile (audit #57: the page could collect
+// a declaration but had nowhere to persist it, so every submission was lost).
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { ErrorBanner } from '@hr/ui';
-import { apiPost } from '@/lib/api';
+import { apiGet, apiPost } from '@/lib/api';
 import { useCountry } from '@/lib/useCountry';
 
 const TAX_PATH = '/api/hr/me/tax-declaration';
@@ -81,6 +77,30 @@ function TaxInner() {
   const [note, setNote] = useState(null);
   const [success, setSuccess] = useState(false);
 
+  // Prefill from the saved declaration (GET). Seeds the regime/80C (IN) or tax
+  // code/KiwiSaver (NZ) so the employee sees + edits their current election, not
+  // a blank form. Best-effort: a missing/empty declaration leaves the defaults.
+  useEffect(() => {
+    let alive = true;
+    apiGet(TAX_PATH)
+      .then((res) => {
+        if (!alive) return;
+        const d = res && res.declaration;
+        if (!d) return;
+        if (d.country === 'IN') {
+          if (d.regime) setRegime(d.regime);
+          if (d.investments && d.investments.sec80c != null) {
+            setIndia((s) => ({ ...s, sec80c: String(d.investments.sec80c || '') }));
+          }
+        } else if (d.country === 'NZ') {
+          if (d.taxCode) setTaxCode(d.taxCode);
+          if (d.kiwiSaverRate != null) setKiwiSaver(String(d.kiwiSaverRate));
+        }
+      })
+      .catch(() => { /* prefill is best-effort — keep the defaults on error */ });
+    return () => { alive = false; };
+  }, []);
+
   function buildPayload() {
     if (country === 'NZ') {
       return { country: 'NZ', taxCode, kiwiSaverRate: Number(kiwiSaver) };
@@ -110,12 +130,9 @@ function TaxInner() {
       await apiPost(TAX_PATH, payload);
       setSuccess(true);
     } catch (err) {
-      // Endpoint not yet wired — degrade gracefully, stay shippable.
-      if (err.status === 404 || err.status === 405 || err.status === 501) {
-        setNote('Tax declaration capture is being enabled for your organisation. Your selections are ready to submit once it goes live.');
-      } else {
-        setError(err.message || 'Could not submit your tax declaration.');
-      }
+      // 422 carries a friendly validation message from the backend (wrong-country
+      // payload, invalid tax code / KiwiSaver rate, jurisdiction not set up).
+      setError(err.message || 'Could not submit your tax declaration.');
     } finally {
       setSubmitting(false);
     }

@@ -12,7 +12,7 @@ import { useMemo } from 'react';
 import AppShell, { useSession } from '@/components/AppShell';
 import { useTenant } from '@/components/TenantProvider';
 import { useApi } from '@/lib/useApi';
-import { money, formatPeriod, formatDate, employeeIdOf } from '@/lib/format';
+import { money, formatPeriod, formatDate } from '@/lib/format';
 
 const TILES = [
   { href: '/payslips', title: 'Payslips', sub: 'View & download', icon: 'M6 2h9l5 5v15H6zM15 2v5h5' },
@@ -49,7 +49,6 @@ function DashboardInner() {
   const employee = me?.employee || me?.customer || me || {};
   const firstName = employee.firstName || (employee.name || '').split(' ')[0] || 'there';
   const businessName = tenant?.business?.name || tenant?.business?.displayName;
-  const empId = employeeIdOf(me);
 
   // Latest payslip (first item of the employee's own payslips).
   const { data: payslips } = useApi('/api/hr/me/payslips', {
@@ -57,21 +56,25 @@ function DashboardInner() {
   });
   const latest = payslips?.[0];
 
-  // Leave balances.
-  const { data: balances } = useApi(
-    empId ? `/api/hr/leave/employees/${encodeURIComponent(empId)}/balances` : null,
-    { select: (b) => (Array.isArray(b) ? b : b?.items || b?.balances || []) }
-  );
+  // Leave balances — self-derived (audit #54/#55: the old card hit the operator
+  // /api/hr/leave/employees/:id surface with a client-derived id → 401/wrong id).
+  const { data: balances } = useApi('/api/hr/me/leave/balances', {
+    select: (b) => (Array.isArray(b) ? b : b?.items || b?.balances || []),
+  });
   const totalLeave = useMemo(() => {
     if (!balances) return null;
     return balances.reduce((acc, b) => acc + Number(b.available ?? b.balance ?? b.remaining ?? 0), 0);
   }, [balances]);
 
-  // Pending tasks (best-effort; not yet a guaranteed route → silent on 404).
+  // Pending self-service tasks (onboarding / unsigned e-sign / asset acks). The
+  // real /api/hr/me/tasks feed (audit #56); deep-links to the most relevant task.
   const { data: tasks } = useApi('/api/hr/me/tasks', {
     select: (b) => (Array.isArray(b) ? b : b?.items || b?.tasks || []),
   });
-  const pendingCount = Array.isArray(tasks) ? tasks.length : 0;
+  const pendingTasks = Array.isArray(tasks) ? tasks : [];
+  const pendingCount = pendingTasks.length;
+  const onboardingTask = pendingTasks.find((t) => t.kind === 'ONBOARDING') || null;
+  const tasksHref = pendingTasks[0]?.href || '/profile';
 
   // Next payday — prefer an explicit field on the latest payslip / pay calendar.
   const nextPayday =
@@ -112,8 +115,62 @@ function DashboardInner() {
           label="Pending tasks"
           value={pendingCount > 0 ? `${pendingCount}` : '0'}
           sub={pendingCount > 0 ? 'need your action' : 'all caught up'}
+          href={pendingCount > 0 ? tasksHref : undefined}
         />
       </section>
+
+      {/* Onboarding call-to-action — only when an onboarding journey is in
+          progress for this employee (audit #60: there was no in-app entry point). */}
+      {onboardingTask && (
+        <Link
+          href="/onboarding"
+          className="block rounded-2xl border p-4 shadow-sm transition active:scale-[0.99]"
+          style={{ borderColor: 'var(--theme-primary)', background: 'var(--theme-primary-soft, #f0fdfa)' }}
+        >
+          <div className="flex items-center gap-3">
+            <div
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+              style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"
+                   stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
+              </svg>
+            </div>
+            <div className="min-w-0">
+              <div className="text-sm font-semibold" style={{ color: 'var(--theme-text)' }}>
+                {onboardingTask.title || 'Complete your onboarding'}
+              </div>
+              <div className="text-xs" style={{ color: 'var(--theme-muted)' }}>
+                {onboardingTask.sub || 'A few steps to get you ready for day one'}
+              </div>
+            </div>
+            <span className="ml-auto text-sm font-medium" style={{ color: 'var(--theme-primary)' }} aria-hidden="true">→</span>
+          </div>
+        </Link>
+      )}
+
+      {/* Pending tasks list — a friendly, deep-linked breakdown (not a dead count). */}
+      {pendingCount > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--theme-muted)' }}>
+            Needs your attention
+          </h2>
+          <ul className="overflow-hidden rounded-2xl border bg-white shadow-sm" style={{ borderColor: 'var(--theme-border)' }}>
+            {pendingTasks.map((t) => (
+              <li key={t.id} className="border-b last:border-b-0" style={{ borderColor: 'var(--theme-border)' }}>
+                <Link href={t.href || '/profile'} className="flex items-center justify-between px-4 py-3 transition active:scale-[0.99]">
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium" style={{ color: 'var(--theme-text)' }}>{t.title}</span>
+                    {t.sub && <span className="block truncate text-xs" style={{ color: 'var(--theme-muted)' }}>{t.sub}</span>}
+                  </span>
+                  <span className="ml-3 text-sm" style={{ color: 'var(--theme-primary)' }} aria-hidden="true">→</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="space-y-3">
         <h2 className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--theme-muted)' }}>

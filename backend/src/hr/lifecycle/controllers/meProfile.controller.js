@@ -78,44 +78,84 @@ async function resolveEmployeeCountry(businessId, employeeId) {
   return null;
 }
 
-// GET /api/hr/me/profile — { employeeId, countryCode, payCurrency }.
-// countryCode is null when it cannot be authoritatively resolved (fail-closed).
+// GET /api/hr/me/profile — country/currency gate PLUS the employee's profile
+// details (audit #58: the ESS profile page + Sidebar previously had only the
+// sparse customer session, so code/phone/dept/designation/location/DOJ were blank).
+//
+// Backwards-compatible: the original { employeeId, countryCode, payCurrency } keys
+// are unchanged (useCountry / fail-closed gating still works); the extra profile
+// fields are additive. countryCode stays null when it cannot be authoritatively
+// resolved (fail-closed).
 async function getMyProfile(req, res, next) {
   try {
     const { businessId } = req.customer;
-    const emp = await resolveSelfEmployee(businessId, req.customer);
-    if (!emp) return res.json({ employeeId: null, countryCode: null, payCurrency: null });
+    const self = await resolveSelfEmployee(businessId, req.customer);
+    if (!self) {
+      return res.json({ employeeId: null, countryCode: null, payCurrency: null, profile: null });
+    }
 
-    // 1. StatutoryProfile.
+    // Full employee row (denormalized identity/contact) + the current employment
+    // record with its dept/designation/location/entity names. One self-scoped read.
+    const emp = await prisma.employee.findFirst({
+      where: { id: self.id, businessId, deletedAt: null },
+      select: {
+        id: true, code: true, firstName: true, middleName: true, lastName: true,
+        preferredName: true, workEmail: true, personalEmail: true, phone: true,
+        photoUrl: true, countryCode: true, hireDate: true, status: true,
+        city: true, stateCode: true,
+      },
+    });
+    if (!emp) return res.json({ employeeId: null, countryCode: null, payCurrency: null, profile: null });
+
+    const rec = await prisma.employmentRecord.findFirst({
+      where: { businessId, employeeId: emp.id, isCurrent: true },
+      select: {
+        entityId: true,
+        entity: { select: { tradeName: true, legalName: true, countryCode: true, payCurrency: true } },
+        department: { select: { name: true } },
+        designation: { select: { title: true } },
+        location: { select: { name: true } },
+      },
+    });
+
+    // 1. StatutoryProfile → 2. Employee.countryCode → 3. current entity (fail-closed).
     const sp = await prisma.statutoryProfile.findFirst({
       where: { businessId, employeeId: emp.id },
       select: { countryCode: true },
     });
     let countryCode = sp && normCc(sp.countryCode);
     let payCurrency = null;
-
-    // 2. Employee.countryCode (denormalized).
     if (!countryCode) countryCode = normCc(emp.countryCode);
-
-    // 3. current EmploymentRecord → Entity.
-    if (!countryCode || !payCurrency) {
-      const rec = await prisma.employmentRecord.findFirst({
-        where: { businessId, employeeId: emp.id, isCurrent: true },
-        select: { entityId: true },
-      });
-      if (rec && rec.entityId) {
-        const entity = await prisma.entity.findFirst({
-          where: { id: rec.entityId, businessId },
-          select: { countryCode: true, payCurrency: true },
-        });
-        if (entity) {
-          if (!countryCode) countryCode = normCc(entity.countryCode);
-          if (!payCurrency) payCurrency = entity.payCurrency || null;
-        }
-      }
+    if (rec && rec.entity) {
+      if (!countryCode) countryCode = normCc(rec.entity.countryCode);
+      if (!payCurrency) payCurrency = rec.entity.payCurrency || null;
     }
 
-    return res.json({ employeeId: emp.id, countryCode: countryCode || null, payCurrency: payCurrency || null });
+    const fullName = [emp.firstName, emp.middleName, emp.lastName].filter(Boolean).join(' ').trim() || null;
+    const profile = {
+      employeeId: emp.id,
+      name: fullName,
+      preferredName: emp.preferredName || null,
+      employeeCode: emp.code || null,
+      email: emp.workEmail || emp.personalEmail || req.customer.email || null,
+      personalEmail: emp.personalEmail || null,
+      phone: emp.phone || null,
+      photoUrl: emp.photoUrl || null,
+      department: rec && rec.department ? rec.department.name : null,
+      designation: rec && rec.designation ? rec.designation.title : null,
+      location: rec && rec.location ? rec.location.name : null,
+      entity: rec && rec.entity ? (rec.entity.tradeName || rec.entity.legalName) : null,
+      dateOfJoining: emp.hireDate || null,
+      countryCode: countryCode || null,
+      status: emp.status || null,
+    };
+
+    return res.json({
+      employeeId: emp.id,
+      countryCode: countryCode || null,
+      payCurrency: payCurrency || null,
+      profile,
+    });
   } catch (e) { return next(e); }
 }
 

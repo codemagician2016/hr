@@ -59,6 +59,15 @@ router.use('/me/letters', require('../letters/routes/me-letters.routes'));
 // ESS compensation (CTC breakup waterfall + history + letters). Customer session;
 // SELF_ONLY; no `:id` path → cross-employee leakage is structurally impossible.
 router.use('/me/compensation', require('./meCompensation.routes'));
+// ESS self-service surfaces (Wave G) — customer session, SELF_ONLY (the subject is
+// resolved from the session; no employeeId is ever accepted from the client, so a
+// cross-employee read/write is structurally impossible). These mirror the operator
+// attendance/leave domains but authenticate the CUSTOMER session and derive the
+// employee server-side, fixing the ESS pages that 401'd against the operator API.
+router.use('/me/attendance', require('./meAttendance.routes'));
+router.use('/me/leave', require('./meLeave.routes'));
+router.use('/me/tax-declaration', require('./meTax.routes'));
+router.use('/me/tasks', require('./meTasks.routes'));
 
 // Reports / analytics — read-only payroll register, statutory summary,
 // headcount & attrition, leave liability. RBAC: canViewPayrollReports.
