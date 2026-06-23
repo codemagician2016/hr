@@ -62,7 +62,25 @@ function isAdminHost(host) {
 }
 
 function isUnifiedAdminHost(host) {
-  return typeof host === 'string' && host.startsWith('app.');
+  return typeof host === 'string' && (host.startsWith('app.') || host.startsWith('app-'));
+}
+
+// The hr-admin (tenant admin) base URL for THIS environment. Prefer an explicit
+// env var; otherwise DERIVE it from the platform domain so staging never bounces
+// to the production admin host:
+//   staging.drifthr.com → https://app-staging.drifthr.com  (1-level hyphenated, SSL-covered)
+//   drifthr.com         → https://app.drifthr.com
+function hrAdminBase() {
+  if (process.env.NEXT_PUBLIC_HR_ADMIN_URL) return process.env.NEXT_PUBLIC_HR_ADMIN_URL;
+  const pd = (process.env.NEXT_PUBLIC_PLATFORM_DOMAIN || 'drifthr.com').trim();
+  const firstDot = pd.indexOf('.');
+  // Apex (no leading sub-label, e.g. "drifthr.com") → app.<apex>; a sub-labelled
+  // staging domain ("staging.drifthr.com") → app-<sub>.<apex> (hyphenated host).
+  if (firstDot <= 0) return 'https://app.drifthr.com';
+  const sub = pd.slice(0, firstDot);
+  const apex = pd.slice(firstDot + 1);
+  if (!apex.includes('.')) return 'https://app.drifthr.com'; // pd was already an apex like "drifthr.com"
+  return `https://app-${sub}.${apex}`;
 }
 
 function isAllowedOnAdminHost(pathname) {
@@ -107,7 +125,7 @@ export function middleware(request) {
   // Redirect those away so the old Sitepresso tenant admin is unreachable.
   if (!isUnifiedAdminHost(host) && !isAdminHost(host)
       && /^\/[^/]+\/(admin|staff|rider)(?=($|[/?#]))/.test(request.nextUrl.pathname)) {
-    const hrAdmin = process.env.NEXT_PUBLIC_HR_ADMIN_URL || 'https://app.drifthr.com';
+    const hrAdmin = hrAdminBase();
     return NextResponse.redirect(new URL('/', hrAdmin));
   }
 
