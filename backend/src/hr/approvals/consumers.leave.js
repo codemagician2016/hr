@@ -29,6 +29,11 @@
  */
 
 const consumers = require('./consumers');
+// Feature 16 — the leave→attendance EAGER bridge: on the APPROVED transition we
+// stamp ON_LEAVE Attendance rows (so an approved LWP day is a frozen-eligible LOP
+// day even if the nightly derive never runs). Lives behind a single guard in the
+// SHARED decision core so BOTH the engine path and the legacy direct path bridge.
+const { stampLeaveAttendanceOnApproval } = require('../leave/leaveToAttendance');
 
 // pendingApproval can never go below zero — floor the release so a duplicated
 // decision (or a stale hold) cannot over-state `available` (leave finding #3).
@@ -66,6 +71,29 @@ async function applyLeaveDecision(tx, { txn, toStatus, fromStatuses, decidedBy, 
       }
     }
   }
+
+  // Feature 16 — EAGER leave→attendance bridge. ONLY on the APPROVED transition,
+  // ONLY for an APPLICATION row (an accrual/lapse/opening txn has no span). Stamps
+  // ON_LEAVE Attendance rows for the leave's working days, in THIS tx, never
+  // overwriting a frozen day (RETRO_LWP_DEFERRED). Reuses the SAME working-day
+  // netting the apply path used, so an approved LWP day reliably becomes a
+  // frozen-eligible LOP day even when no nightly derivation runs. Paid leave is
+  // also stamped (lopFraction 0) so the attendance grid shows it and it can NEVER
+  // produce LOP. Best-effort: a stamp miss must not roll back the approval, so we
+  // swallow + log (the nightly recompute is the reconciler).
+  if (toStatus === 'APPROVED' && txn.txnType === 'APPLICATION') {
+    try {
+      const res = await stampLeaveAttendanceOnApproval(tx, txn);
+      if (res && res.deferred && res.deferred.length) {
+        // eslint-disable-next-line no-console
+        console.warn(`[leaveToAttendance] RETRO_LWP_DEFERRED for txn ${txn.id}: ${res.deferred.length} locked day(s) deferred to next open period`);
+      }
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[leaveToAttendance] stamp failed for txn', txn.id, e && e.message);
+    }
+  }
+
   return tx.leaveTransaction.findUnique({ where: { id: txn.id } });
 }
 

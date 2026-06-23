@@ -83,6 +83,8 @@ function daysInclusive(from, to) {
  */
 function prorataOnJoin(policy, joinDate, periodStart, periodEnd, { grain = 0.5 } = {}) {
   const p = policy || {};
+  // Feature 16 — NONE accrual (LWP): no opening grant, ever.
+  if (p.accrualMethod === 'NONE') return 0;
   if (p.accrualProrateOnJoin === false) {
     // No proration: an UPFRONT policy still grants the full entitlement.
     if (p.accrualMethod === 'UPFRONT_ANNUAL') return roundToGrain(num(p.entitlementPerYear), grain);
@@ -130,6 +132,8 @@ function prorataOnJoin(policy, joinDate, periodStart, periodEnd, { grain = 0.5 }
  */
 function accrueForPeriod(policy, accrualRules, ctx = {}) {
   const p = policy || {};
+  // Feature 16 — NONE accrual (LWP / no-balance types): never grant any units.
+  if (p.accrualMethod === 'NONE') return { units: 0, vested: true, rate: 0, capped: false, skipped: true };
   const grain = num(ctx.grain, 0.5) || 0.5;
   const tenureMonths = num(ctx.tenureMonths);
   const eligibilityFactor = ctx.eligibilityFactor == null ? 1 : num(ctx.eligibilityFactor, 1);

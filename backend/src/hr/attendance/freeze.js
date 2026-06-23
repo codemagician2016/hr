@@ -54,12 +54,19 @@ function round2(n) { return Math.round(n * 100) / 100; }
  * the employee, which would drop them from payroll entirely). The caller decides
  * whether to gate on the warning.
  */
-function rollupEmployee(rows, periodStart, periodEnd) {
+function rollupEmployee(rows, periodStart, periodEnd, opts = {}) {
   const calendarDays = daysBetweenInclusive(utcDay(periodStart), utcDay(periodEnd));
   let weeklyOffDays = 0;
   let holidayDays = 0;
   let paidLeaveDays = 0;
   let lopDays = 0;
+  // Feature 16 — LOP provenance split. lwpDays = approved unpaid-leave LOP
+  // (ON_LEAVE rows whose covering type affectsLOP → a positive lopFraction on an
+  // ON_LEAVE day); absentDays = AWOL/unauthorised LOP (status ABSENT). Both are
+  // SUBSETS of lopDays; the payableDays/lopDays math below is UNCHANGED — these are
+  // pure provenance so the run review reads "12 payable, 3 LWP, 1 absent".
+  let lwpDays = 0;
+  let absentDays = 0;
   let overtimeHours = 0;
   const attendanceIds = [];
   const anomalies = [];
@@ -75,13 +82,33 @@ function rollupEmployee(rows, periodStart, periodEnd) {
     if (a.status === 'ON_LEAVE') paidLeaveDays += (1 - lop);
     if (a.status === 'HALF_DAY' && lop < 1) paidLeaveDays += 0; // half-day worked is presence, not paid leave
 
+    // LOP provenance: an ON_LEAVE day with a positive LOP is an APPROVED unpaid
+    // leave (LWP) — only the affectsLOP fraction is unpaid (so a 0.5 SL + 0.5 LWP
+    // day contributes 0.5 to lwpDays, matching its 0.5 lopFraction). An ABSENT day
+    // is unauthorised LOP. HALF_DAY shortfalls/missing-punch LOP are neither.
+    if (a.status === 'ON_LEAVE' && lop > 0) lwpDays += lop;
+    if (a.status === 'ABSENT') absentDays += lop;
+
     // otEquivalentHours is stashed on exceptionsJson by the derivation service.
     const ex = a.exceptionsJson || {};
     overtimeHours += toNum(ex.otEquivalentHours);
   }
 
   lopDays = round4(lopDays);
+  lwpDays = round4(lwpDays);
+  absentDays = round4(absentDays);
   let payableDays = round4(calendarDays - lopDays);
+  // standardDays = the proration denominator the engine will use. Default to the
+  // calendar length (India CALENDAR_DAYS basis); the caller may freeze a different
+  // basis (FIXED_30 → 30, WORKING_DAYS → calendar−weekoff−holiday) via opts.basis
+  // so the denominator is frozen with the inputs (immutable, part of inputHash).
+  let standardDays = round4(calendarDays);
+  const basis = opts.prorationBasis || null;
+  if (basis === 'THIRTY_DAY_STANDARD' || basis === 'FIXED_30') {
+    standardDays = 30;
+  } else if (basis === 'WORKING_DAYS') {
+    standardDays = round4(calendarDays - weeklyOffDays - holidayDays);
+  }
 
   // H3 — no attendance rows at all: open-attendance / no-data. Pay calendar days
   // (lopDays is already 0 here) but flag it loudly so it isn't a silent full-pay.
@@ -100,6 +127,9 @@ function rollupEmployee(rows, periodStart, periodEnd) {
     holidayDays: round4(holidayDays),
     paidLeaveDays: round4(paidLeaveDays),
     lopDays,
+    lwpDays,
+    absentDays,
+    standardDays,
     overtimeHours: round2(overtimeHours),
     payableDays,
     attendanceIds,
@@ -116,10 +146,13 @@ function rollupEmployee(rows, periodStart, periodEnd) {
  * @param {Date|string} periodEnd
  * @param {string[]} employeeIds   employees to freeze (the run's headcount)
  * @param {object=}  tx            optional Prisma transaction client
+ * @param {object=}  opts          { prorationBasis } — Feature 16: the entity's
+ *                                  salary-proration denominator policy (ProrationMethod),
+ *                                  frozen into AttendancePayInput.standardDays.
  * @returns {Promise<{ frozen:number, lockedAttendance:number, lockedTimesheets:number,
  *                      anomalies:Array<{ employeeId, code, severity, message }> }>}
  */
-async function freezeAttendance(payRunId, businessId, periodStart, periodEnd, employeeIds, tx) {
+async function freezeAttendance(payRunId, businessId, periodStart, periodEnd, employeeIds, tx, opts = {}) {
   const db = tx || prisma;
   const from = utcDay(periodStart);
   const to = utcDay(periodEnd);
@@ -127,6 +160,7 @@ async function freezeAttendance(payRunId, businessId, periodStart, periodEnd, em
   if (!payRunId || !businessId || ids.length === 0) {
     return { frozen: 0, lockedAttendance: 0, lockedTimesheets: 0 };
   }
+  const prorationBasis = opts.prorationBasis || null;
 
   const now = new Date();
   let frozen = 0;
@@ -140,7 +174,7 @@ async function freezeAttendance(payRunId, businessId, periodStart, periodEnd, em
       select: { id: true, status: true, lopFraction: true, exceptionsJson: true },
     });
 
-    const roll = rollupEmployee(rows, from, to);
+    const roll = rollupEmployee(rows, from, to, { prorationBasis });
     for (const a of roll.anomalies || []) anomalies.push({ employeeId, ...a });
 
     const data = {
@@ -149,6 +183,9 @@ async function freezeAttendance(payRunId, businessId, periodStart, periodEnd, em
       calendarDays: roll.calendarDays,
       payableDays: roll.payableDays,
       lopDays: roll.lopDays,
+      lwpDays: roll.lwpDays,
+      absentDays: roll.absentDays,
+      standardDays: roll.standardDays,
       paidLeaveDays: roll.paidLeaveDays,
       weeklyOffDays: roll.weeklyOffDays,
       holidayDays: roll.holidayDays,
@@ -157,6 +194,7 @@ async function freezeAttendance(payRunId, businessId, periodStart, periodEnd, em
       sourceJson: {
         attendanceIds: roll.attendanceIds,
         basis: 'attendance-rollup',
+        prorationBasis: prorationBasis || 'CALENDAR_DAYS',
         dayCount: rows.length,
       },
     };

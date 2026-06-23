@@ -49,6 +49,51 @@ async function resolveActiveSelfId(req) {
 
 const noEmployee = (res) => res.status(404).json({ message: 'No active employee record for this account' });
 
+// Feature 16 — ESS pay-reduction ESTIMATE for an LWP application. Best-effort and
+// clearly labelled an estimate (the payslip is authoritative). Reduction ≈
+// currentMonthlyGross × lwpUnits ÷ standardDays, where standardDays follows the
+// entity's prorationBasis (CALENDAR_DAYS default = days in the leave's month).
+// Returns null when no current compensation is on file (nothing to estimate from).
+async function estimateLwpReduction(businessId, employeeId, units, startDate) {
+  try {
+    const employment = await prisma.employmentRecord.findFirst({
+      where: { businessId, employeeId, isCurrent: true },
+      select: { entityId: true, entity: { select: { prorationBasis: true, payCurrency: true } } },
+    });
+    const comp = await prisma.compensationRevision.findFirst({
+      where: { businessId, employeeId, isCurrent: true },
+      select: { grossMonthly: true, ctcAnnual: true },
+      orderBy: { effectiveFrom: 'desc' },
+    });
+    if (!comp) return null;
+    let grossMonthly = comp.grossMonthly != null ? Number(comp.grossMonthly) : null;
+    if (grossMonthly == null && comp.ctcAnnual != null) grossMonthly = Number(comp.ctcAnnual) / 12;
+    if (!grossMonthly || grossMonthly <= 0) return null;
+
+    const d = startDate instanceof Date ? startDate : new Date(startDate);
+    const daysInMonth = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+    const basis = employment && employment.entity ? employment.entity.prorationBasis : null;
+    let standardDays = daysInMonth;
+    if (basis === 'THIRTY_DAY_STANDARD') standardDays = 30;
+    // WORKING_DAYS estimate is approximated by calendar days here (the exact
+    // working-day denominator is only known at freeze); CALENDAR_DAYS is the default.
+
+    const perDay = grossMonthly / standardDays;
+    const reduction = Math.round(perDay * units * 100) / 100;
+    return {
+      estimate: true,
+      currency: (employment && employment.entity && employment.entity.payCurrency) || null,
+      reductionAmount: reduction,
+      perDayAmount: Math.round(perDay * 100) / 100,
+      days: units,
+      standardDays,
+      note: 'Estimate only — your payslip is authoritative.',
+    };
+  } catch (_e) {
+    return null; // estimate is non-critical; never block the apply
+  }
+}
+
 // ── GET /me/leave/types — leave types the employee may apply for ──────────────
 async function listTypes(req, res, next) {
   try {
@@ -58,7 +103,7 @@ async function listTypes(req, res, next) {
       orderBy: { name: 'asc' },
       select: {
         id: true, code: true, name: true, category: true, unit: true,
-        isPaid: true, requiresReason: true, color: true,
+        isPaid: true, affectsLOP: true, requiresReason: true, color: true,
       },
     });
     res.json({ items });
@@ -159,7 +204,11 @@ async function applyForLeave(req, res, next) {
       return res.status(status).json({ message: first.message, reason: first.code, errors: verdict.errors });
     }
 
-    const balance = ctx.balance;
+    // Feature 16 — LWP / UNPAID applies with NO balance (no row to draw/hold). Take
+    // the no-balance branch explicitly: leaveBalanceId=null, no soft-hold, quantity
+    // retained for audit. An UNPAID apply must NEVER touch a LeaveBalance.
+    const isUnpaidLwp = ctx.leaveType.category === 'UNPAID' || ctx.leaveType.affectsLOP === true;
+    const balance = isUnpaidLwp ? null : ctx.balance;
     const start = toDate(startDate);
     const end = toDate(endDate);
 
@@ -191,7 +240,11 @@ async function applyForLeave(req, res, next) {
       return created;
     });
 
-    res.status(201).json({ ...txn, dayBreakdown: netted.dayBreakdown, units });
+    // Feature 16 — ESS LWP pay-reduction ESTIMATE (labelled an estimate; the payslip
+    // is authoritative). Reduction ≈ currentMonthlyGross × units ÷ standardDays.
+    const payEstimate = isUnpaidLwp ? await estimateLwpReduction(businessId, employeeId, units, start) : null;
+
+    res.status(201).json({ ...txn, dayBreakdown: netted.dayBreakdown, units, unpaid: isUnpaidLwp, payEstimate });
   } catch (e) {
     if (e && e.code === 'P2025') {
       return res.status(409).json({ message: 'Balance changed concurrently; please retry', reason: 'CONCURRENT_UPDATE' });

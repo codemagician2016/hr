@@ -491,6 +491,66 @@ const rules = {
     eligibilityYears: 5,
     taxExemptCapRupees: 2000000,
   },
+
+  // Feature 16 — India statutory LEAVE framework (govt-rule floors).
+  // India has NO single central leave statute; entitlements come from the state
+  // Shops & Establishments Acts and the Factories Act 1948 (factory workers). We
+  // encode the per-state MINIMUM days/year for EL/SL/CL as POLICY FLOORS — a tenant
+  // may grant MORE, never less. Effective-dated (`versions[]`) and resolved per
+  // state, mirroring `professionalTax.states` exactly, so the floor is *resolved*,
+  // never hard-coded in the UI. `*` is the national default for unmapped states
+  // (a defensible S&E-Acts baseline matching factoHR/greytHR/Keka defaults). LWP is
+  // intentionally absent (an UNPAID, contractual type with no floor / no balance).
+  //
+  // Basis citations:
+  //   EL — Factories Act §79: 1 day per 20 worked (~12–18/yr); S&E Acts 12–21/yr.
+  //   SL — S&E Acts ~7–12/yr (state-varying); ESI sickness-benefit overlay.
+  //   CL — S&E Acts ~7–12/yr; use-it-or-lose-it (lapses at year end).
+  leaveStatutoryFramework: {
+    effectiveFrom: '2000-01-01',
+    states: {
+      '*': {
+        versions: [
+          { effectiveFrom: '2000-01-01', EL: 15, SL: 7, CL: 7 },
+        ],
+      },
+      MH: { // Maharashtra S&E Act 2017
+        versions: [
+          { effectiveFrom: '2017-12-19', EL: 21, SL: 8, CL: 8 }, // 21d EL after 240d worked; 8 SL + 8 CL
+        ],
+      },
+      KA: { // Karnataka S&E Act 1961
+        versions: [
+          { effectiveFrom: '2000-01-01', EL: 18, SL: 12, CL: 0 }, // 1 EL / 20 worked; 12 combined SL/CL — split conservatively
+        ],
+      },
+      TN: { // Tamil Nadu S&E Act 1947
+        versions: [
+          { effectiveFrom: '2000-01-01', EL: 12, SL: 12, CL: 0 }, // 12 EL + 12 SL/CL combined
+        ],
+      },
+      DL: { // Delhi S&E Act 1954
+        versions: [
+          { effectiveFrom: '2000-01-01', EL: 15, SL: 12, CL: 0 }, // 1 EL / 20 worked (~15); 12 SL+CL combined
+        ],
+      },
+      TG: { // Telangana S&E Act 1988
+        versions: [
+          { effectiveFrom: '2000-01-01', EL: 15, SL: 12, CL: 0 },
+        ],
+      },
+      GJ: { // Gujarat S&E Act 2019
+        versions: [
+          { effectiveFrom: '2019-05-01', EL: 18, SL: 7, CL: 7 },
+        ],
+      },
+      WB: { // West Bengal S&E Act 1963
+        versions: [
+          { effectiveFrom: '2000-01-01', EL: 14, SL: 14, CL: 0 },
+        ],
+      },
+    },
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -506,6 +566,57 @@ function resolveVersion(versions, asOf) {
     }
   }
   return chosen;
+}
+
+/**
+ * Feature 16 — resolveLeaveFloor(stateCode, category, asOf) → minimum days/year.
+ *
+ * Resolves the India statutory leave floor for a (state, EL|SL|CL) as of a date.
+ * Falls back to the national '*' default when the state is unmapped, and returns
+ * null for a category with no statutory floor (LWP / anything not EL/SL/CL). The
+ * admin policy gate rejects an entitlementPerYear BELOW this value (granting ABOVE
+ * is always allowed). Effective-dated exactly like professionalTax (latest
+ * effectiveFrom ≤ asOf wins).
+ *
+ * @param {string} stateCode  IN state (MH/KA/TN/…); case-insensitive; '*' default
+ * @param {string} category   'EL' | 'SL' | 'CL' (or LeaveCategory ANNUAL/SICK/CASUAL)
+ * @param {string=} asOf      YYYY-MM-DD; defaults to today
+ * @returns {number|null} floor in days/year, or null when no floor applies
+ */
+const LEAVE_CATEGORY_TO_FLOOR_KEY = Object.freeze({
+  EL: 'EL', ANNUAL: 'EL', PRIVILEGE: 'EL',
+  SL: 'SL', SICK: 'SL',
+  CL: 'CL', CASUAL: 'CL',
+});
+
+function resolveLeaveFloor(stateCode, category, asOf) {
+  const key = LEAVE_CATEGORY_TO_FLOOR_KEY[String(category || '').toUpperCase()];
+  if (!key) return null; // LWP / non-floored category
+  const fw = rules.leaveStatutoryFramework;
+  const state = String(stateCode || '*').toUpperCase();
+  const cfg = (fw.states[state] || fw.states['*']);
+  if (!cfg) return null;
+  const when = asOf ? String(asOf) : new Date().toISOString().slice(0, 10);
+  const version = resolveVersion(cfg.versions, when);
+  if (!version || version[key] == null) return null;
+  return Number(version[key]);
+}
+
+/**
+ * resolveLeaveFramework(stateCode, asOf) → { EL, SL, CL } resolved floors for the
+ * admin "Statutory framework" panel (the read endpoint). Unmapped categories are
+ * null. Pure read; India-only (the caller 404s for non-IN tenants).
+ */
+function resolveLeaveFramework(stateCode, asOf) {
+  return {
+    stateCode: String(stateCode || '*').toUpperCase(),
+    asOf: asOf ? String(asOf) : new Date().toISOString().slice(0, 10),
+    floors: {
+      EL: resolveLeaveFloor(stateCode, 'EL', asOf),
+      SL: resolveLeaveFloor(stateCode, 'SL', asOf),
+      CL: resolveLeaveFloor(stateCode, 'CL', asOf),
+    },
+  };
 }
 
 /** period -> the as-of date string used for rule resolution (period end). */
@@ -1113,6 +1224,9 @@ module.exports = {
   country: 'IN',
   rules,
   compute,
+  // Feature 16 — India statutory leave-floor resolvers (effective-dated, per state).
+  resolveLeaveFloor,
+  resolveLeaveFramework,
   // Pure pillar helpers (testable in isolation; same integer-paise semantics):
   _internals: {
     computeStatutoryWages,
@@ -1126,5 +1240,7 @@ module.exports = {
     roundToRupeeNearest,
     roundToRupeeUp,
     resolveVersion,
+    resolveLeaveFloor,
+    resolveLeaveFramework,
   },
 };

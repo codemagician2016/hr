@@ -617,9 +617,23 @@ function EmployeeVarianceDrawer({ run, employeeId, onClose }) {
           <div className="grid grid-cols-2 gap-2 text-xs">
             <div>Gross: <b>{moneyish(line.grossEarnings, run.currencyCode)}</b></div>
             <div>Net: <b>{moneyish(line.netPay, run.currencyCode)}</b></div>
-            <div>Payable days: <b>{String(line.payableDays)}</b></div>
-            <div>LOP days: <b>{String(line.lopDays)}</b></div>
+            <div className="flex items-center">Payable days: <b className="ml-1">{String(line.payableDays)}</b><InfoTip text="Days actually paid (present + paid-leave + weekly-off + holidays). Salary is prorated by payable ÷ standard days." /></div>
+            <div className="flex items-center">LOP days: <b className="ml-1">{String(line.lopDays)}</b><InfoTip text="Loss-of-Pay days that reduced this salary pro-rata. LOP = approved unpaid leave (LWP) + unauthorised absence. It is shown as a reduction, not a separate deduction." /></div>
           </div>
+          {Number(line.lopDays) > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {Number(line.lwpDays) > 0 && (
+                <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-amber-200">
+                  {line.lwpDays} LWP (approved unpaid)
+                </span>
+              )}
+              {Number(line.lopDays) - Number(line.lwpDays || 0) > 0 && (
+                <span className="inline-flex items-center rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-700 ring-1 ring-rose-200">
+                  {Math.round((Number(line.lopDays) - Number(line.lwpDays || 0)) * 1e4) / 1e4} absent / other
+                </span>
+              )}
+            </div>
+          )}
           <div>
             <div className="text-xs font-semibold text-gray-700 mb-1">Components</div>
             <ul className="text-xs space-y-0.5">

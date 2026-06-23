@@ -37,13 +37,32 @@ const LEAVE_TYPE_FIELDS = [
 ];
 const LEAVE_POLICY_FIELDS = [
   'leaveTypeId', 'entityId', 'code', 'name', 'accrualMethod', 'entitlementPerYear',
+  'statutoryFloorPerYear', // Feature 16 — as-authored India floor stamp
   'accrualFrequency', 'accrualProrateOnJoin', 'carryForwardCap', 'carryForwardExpiryMonths',
   'maxBalanceCap', 'maxConsecutive', 'minNoticeDays', 'allowNegative', 'negativeCap',
   'minTenureMonths', 'appliesToEmploymentTypes', 'genderRestriction', 'encashOnExit',
   'encashFormula', 'maxEncashCap', 'workflowDefinitionId', 'isActive',
 ];
 
+// Feature 16 — the India statutory-leave floor resolver lives in the IN compliance
+// module (effective-dated, per state), exactly like professional-tax. We require it
+// directly (the leave config gate is India-only; an NZ tenant never hits the floor
+// gate because NZ types carry no EL/SL/CL category floor).
+const indiaModule = require('../payroll/compliance/india');
+
 const DUP_MSG = 'A record with that code already exists';
+
+// Map a config-validation error (string code or {code,message,...}) to an HTTP
+// response. Floor/coherence violations are 422 (semantically invalid config).
+function sendConfigError(res, err) {
+  const obj = typeof err === 'string' ? { code: err } : (err || {});
+  const messages = {
+    INCOHERENT_LEAVE_TYPE: 'A paid leave type cannot also reduce pay (affectsLOP). Use an UNPAID type for Leave Without Pay.',
+    LEAVE_BELOW_STATUTORY_FLOOR: obj.message || 'Entitlement is below the statutory floor for this state/category.',
+    LWP_NO_ENTITLEMENT: obj.message || 'A Leave-Without-Pay / no-accrual policy must not have an entitlement.',
+  };
+  return res.status(422).json({ ...obj, reason: obj.code, message: obj.message || messages[obj.code] || 'Invalid leave configuration' });
+}
 
 function picker(fields, dates = []) {
   return (body) => {
@@ -54,9 +73,91 @@ function picker(fields, dates = []) {
   };
 }
 
+// ── Feature 16 — leave-config coherence + India statutory-floor gates ────────
+
+// Coerce LeaveType flag coherence (UNPAID ⇒ isPaid=false ∧ affectsLOP=true) and
+// reject an incoherent paid-but-affectsLOP type. Mutates `body` in place to
+// SERVER-FORCE the unpaid invariants. Returns an error code string or null.
+function validateLeaveTypeBody(body, existing = {}) {
+  const category = body.category != null ? body.category : existing.category;
+  const isPaid = body.isPaid != null ? body.isPaid : existing.isPaid;
+  const affectsLOP = body.affectsLOP != null ? body.affectsLOP : existing.affectsLOP;
+
+  if (category === 'UNPAID') {
+    // Server-FORCE the unpaid invariants so an admin can't accidentally make LWP paid.
+    body.isPaid = false;
+    body.affectsLOP = true;
+    if (body.sandwichPolicy == null && existing.sandwichPolicy == null) {
+      // A public holiday inside an unpaid block must NOT become unpaid → EXCLUSIVE.
+      body.sandwichPolicy = 'EXCLUSIVE';
+    }
+    return null;
+  }
+  // A PAID type that also reduces pay (affectsLOP) is incoherent (it would both pay
+  // the day AND dock it). Block it.
+  if (isPaid === true && affectsLOP === true) {
+    return 'INCOHERENT_LEAVE_TYPE';
+  }
+  return null;
+}
+
+// India statutory-floor gate for a LeavePolicy. Re-resolves the floor LIVE from
+// india.leaveStatutoryFramework (effective-dated, per state) so a floor change
+// re-validates; granting ABOVE the floor is always allowed. LWP/NONE policies must
+// carry no entitlement. Returns { code, ... } or null. Reads the leave type +
+// (optional) entity state to resolve the floor. India-only (NZ types have no
+// EL/SL/CL category → resolveLeaveFloor returns null → no gate).
+async function validateLeavePolicyBody(businessId, body, existing = {}) {
+  const leaveTypeId = body.leaveTypeId || existing.leaveTypeId;
+  const accrualMethod = body.accrualMethod || existing.accrualMethod;
+  const entitlement = body.entitlementPerYear != null ? Number(body.entitlementPerYear) : null;
+
+  const type = leaveTypeId
+    ? await prisma.leaveType.findFirst({ where: { id: leaveTypeId, businessId, deletedAt: null } })
+    : null;
+
+  // LWP / NONE-accrual policy: never carries an entitlement or accrues a balance.
+  if (accrualMethod === 'NONE' || (type && type.category === 'UNPAID')) {
+    if (entitlement != null && entitlement > 0) {
+      return { code: 'LWP_NO_ENTITLEMENT', message: 'A Leave-Without-Pay / no-accrual policy must not have an entitlementPerYear.' };
+    }
+    return null;
+  }
+
+  // Resolve the entity's state (PT state / address state) to pick the floor.
+  let stateCode = null;
+  const entityId = body.entityId || existing.entityId;
+  if (entityId) {
+    const entity = await prisma.entity.findFirst({
+      where: { id: entityId, businessId }, select: { stateCode: true, countryCode: true },
+    });
+    if (entity && entity.countryCode !== 'IN') return null; // floor gate is India-only
+    stateCode = entity ? entity.stateCode : null;
+  }
+
+  if (!type) return null;
+  const floor = indiaModule.resolveLeaveFloor(stateCode, type.category, new Date().toISOString().slice(0, 10));
+  if (floor == null) return null; // no statutory floor for this category (e.g. NZ/COMP_OFF)
+
+  // Stamp the as-authored floor for audit.
+  body.statutoryFloorPerYear = floor;
+
+  if (entitlement != null && entitlement < floor) {
+    return {
+      code: 'LEAVE_BELOW_STATUTORY_FLOOR',
+      message: `Entitlement ${entitlement} is below the statutory floor of ${floor} day(s)/yr for ${type.category} in ${stateCode || 'this state'}.`,
+      floor, given: entitlement, stateCode, category: type.category,
+    };
+  }
+  return null;
+}
+
 // ── Config CRUD factory (LeaveType, LeavePolicy) ────────────────────────────
 // Mirrors org.controller's crud(): tenant-scoped, soft-deleted, P2002 -> 409.
-function configCrud(model, { fields, required = [] }) {
+// `validate(body, { businessId, existing })` (optional) runs BEFORE create/update;
+// it may MUTATE body (server-forced coherence) and returns an error {code,message}
+// (or string) to reject with 400/409, or null to proceed.
+function configCrud(model, { fields, required = [], validate = null } = {}) {
   const pick = picker(fields);
   return {
     list: async (req, res, next) => {
@@ -87,6 +188,10 @@ function configCrud(model, { fields, required = [] }) {
             return res.status(400).json({ message: `${r} is required` });
           }
         }
+        if (validate) {
+          const err = await validate(req.body, { businessId, existing: {} });
+          if (err) return sendConfigError(res, err);
+        }
         const item = await prisma[model].create({ data: { ...pick(req.body), businessId } });
         res.status(201).json(item);
       } catch (e) { if (e.code === 'P2002') return res.status(409).json({ message: DUP_MSG }); next(e); }
@@ -98,6 +203,10 @@ function configCrud(model, { fields, required = [] }) {
           where: { id: req.params.id, businessId, deletedAt: null },
         });
         if (!existing) return res.status(404).json({ message: 'Not found' });
+        if (validate) {
+          const err = await validate(req.body, { businessId, existing });
+          if (err) return sendConfigError(res, err);
+        }
         const item = await prisma[model].update({ where: { id: req.params.id }, data: pick(req.body) });
         res.json(item);
       } catch (e) { if (e.code === 'P2002') return res.status(409).json({ message: DUP_MSG }); next(e); }
@@ -119,11 +228,34 @@ function configCrud(model, { fields, required = [] }) {
 const leaveTypes = configCrud('leaveType', {
   fields: LEAVE_TYPE_FIELDS,
   required: ['code', 'name', 'category'],
+  // Feature 16 — coherence: UNPAID ⇒ isPaid=false ∧ affectsLOP=true (server-forced);
+  // a paid type with affectsLOP=true is rejected (INCOHERENT_LEAVE_TYPE).
+  validate: (body, { existing }) => validateLeaveTypeBody(body, existing),
 });
 const leavePolicies = configCrud('leavePolicy', {
   fields: LEAVE_POLICY_FIELDS,
   required: ['leaveTypeId', 'code', 'name', 'accrualMethod'],
+  // Feature 16 — India statutory-floor gate (re-resolved live) + LWP_NO_ENTITLEMENT.
+  validate: (body, { businessId, existing }) => validateLeavePolicyBody(businessId, body, existing),
 });
+
+// Feature 16 — GET /statutory-framework?stateCode= — the resolved EL/SL/CL floors
+// for the admin "Statutory framework" panel. India-only (404 for non-IN tenants);
+// pure read from india.leaveStatutoryFramework (effective-dated, per state).
+async function getStatutoryFramework(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    // India-only: gate on the tenant's HR country (Feature 14 single-country lock).
+    const biz = await prisma.business.findUnique({ where: { id: businessId }, select: { hrCountry: true } });
+    if (biz && biz.hrCountry && biz.hrCountry !== 'IN') {
+      return res.status(404).json({ message: 'Statutory leave framework is India-only', reason: 'NOT_INDIA_TENANT' });
+    }
+    const stateCode = req.query.stateCode || null;
+    const asOf = req.query.asOf || new Date().toISOString().slice(0, 10);
+    const framework = indiaModule.resolveLeaveFramework(stateCode, asOf);
+    res.json(framework);
+  } catch (e) { next(e); }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LEAVE REQUEST FLOW  (LeaveTransaction, txnType = APPLICATION)
@@ -192,7 +324,15 @@ async function createRequest(req, res, next) {
       return res.status(status).json({ message: first.message, reason: first.code, errors: verdict.errors });
     }
 
-    const balance = ctx.balance;
+    // Feature 16 — LWP / UNPAID is the ONE type that applies with NO balance: it
+    // has no LeaveBalance row (accrualMethod NONE → never minted), so there is
+    // nothing to draw from or soft-hold. We take the NO-BALANCE branch explicitly
+    // (leaveBalanceId=null, no pendingApproval hold), keeping quantity=-units for
+    // audit/reporting only. A defensive assertion: an UNPAID apply must NEVER touch
+    // a LeaveBalance (a bug that held a non-existent balance would otherwise corrupt
+    // a paid type's row that happened to be returned by the newest-balance fallback).
+    const isUnpaidLwp = ctx.leaveType.category === 'UNPAID' || ctx.leaveType.affectsLOP === true;
+    const balance = isUnpaidLwp ? null : ctx.balance;
     const start = toDate(startDate);
     const end = toDate(endDate);
 
@@ -205,7 +345,7 @@ async function createRequest(req, res, next) {
           leaveBalanceId: balance ? balance.id : null,
           txnType: 'APPLICATION',
           unit: ctx.leaveType.unit,
-          quantity: -units, // signed: application consumes balance
+          quantity: -units, // signed: application consumes balance (audit only for LWP)
           startDate: start,
           endDate: end,
           startHalf,
@@ -217,7 +357,7 @@ async function createRequest(req, res, next) {
       });
       // Soft-hold the requested units so concurrent requests see them reserved.
       // version optimistic-lock: a concurrent apply that raced our read fails and
-      // retries against the reduced available (QA 11).
+      // retries against the reduced available (QA 11). LWP has no balance → skipped.
       if (balance) {
         await tx.leaveBalance.update({
           where: { id: balance.id, version: balance.version },
@@ -944,6 +1084,7 @@ async function reportsSummary(req, res, next) {
 module.exports = {
   leaveTypes,
   leavePolicies,
+  getStatutoryFramework, // Feature 16
   createRequest,
   listRequests,
   getRequest,
