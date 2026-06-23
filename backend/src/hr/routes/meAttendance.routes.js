@@ -25,6 +25,9 @@ router.get('/punches', c.listPunches);
 // Dashboard rollup (own daily summary buckets)
 router.get('/summary', c.summary);
 
+// Per-day rollup rows (own "Attendance Details" table — one row per civil day)
+router.get('/days', c.listDays);
+
 // Timesheets (read + self-submit)
 router.get('/timesheets', c.listTimesheets);
 router.get('/timesheets/:id', c.getTimesheet);

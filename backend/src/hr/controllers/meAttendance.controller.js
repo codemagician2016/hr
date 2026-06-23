@@ -176,6 +176,52 @@ async function summary(req, res, next) {
   } catch (e) { next(e); }
 }
 
+// ── GET /me/attendance/days?from=&to= — own PER-DAY rollup rows ───────────────
+// One row per civil day in range from the Attendance table (the authoritative
+// per-day rollup the recompute writes). `summary` above groups by status for the
+// dashboard donut; this returns the individual day rows the ESS "Attendance
+// Details" table renders (date, status, firstIn/lastOut, workedMinutes, shift).
+// SELF_ONLY: employeeId is the session's; the query carries only from/to.
+async function listDays(req, res, next) {
+  try {
+    const emp = await resolveActiveSelf(req);
+    if (!emp) return res.json({ items: [] });
+    const { businessId } = req.customer;
+    const { from, to } = req.query;
+    const where = { businessId, employeeId: emp.id };
+    if (from || to) {
+      where.date = {};
+      if (from) where.date.gte = utcDay(from);
+      if (to) where.date.lte = utcDay(to);
+    }
+    const rows = await prisma.attendance.findMany({
+      where,
+      orderBy: { date: 'asc' },
+      select: {
+        id: true, date: true, status: true, shiftPatternId: true,
+        firstIn: true, lastOut: true, workedMinutes: true, breakMinutes: true,
+        overtimeMinutes: true, lopFraction: true, isLocked: true,
+      },
+    });
+    // Resolve shift labels for the patterns referenced (small set, one query).
+    const patternIds = [...new Set(rows.map((r) => r.shiftPatternId).filter(Boolean))];
+    let patternsById = {};
+    if (patternIds.length) {
+      const patterns = await prisma.shiftPattern.findMany({
+        where: { businessId, id: { in: patternIds } },
+        select: { id: true, name: true, code: true, startTime: true, endTime: true, isFlexi: true, isNightShift: true },
+      });
+      patternsById = Object.fromEntries(patterns.map((p) => [p.id, p]));
+    }
+    const items = rows.map((r) => ({
+      ...r,
+      lopFraction: Number(r.lopFraction || 0),
+      shift: r.shiftPatternId ? (patternsById[r.shiftPatternId] || null) : null,
+    }));
+    res.json({ items });
+  } catch (e) { next(e); }
+}
+
 // ── GET /me/attendance/timesheets — own timesheets ────────────────────────────
 async function listTimesheets(req, res, next) {
   try {
@@ -340,6 +386,7 @@ module.exports = {
   createPunch,
   listPunches,
   summary,
+  listDays,
   listTimesheets,
   getTimesheet,
   submitTimesheet,
