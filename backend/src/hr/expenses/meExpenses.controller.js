@@ -110,20 +110,33 @@ async function createClaim(req, res, next) {
       if (!cat) return res.status(400).json({ message: 'categoryId does not reference a valid category' });
     }
 
-    const claim = await prisma.$transaction(async (tx) => {
-      const claimNumber = await service.mintClaimNumber(tx, businessId);
-      return tx.expenseClaim.create({
-        data: {
-          businessId, employeeId, status: 'DRAFT', claimType, travelRequestId,
-          claimNumber,
-          categoryId: b.categoryId || null,
-          amount: '0', // header amount is the sum of lines, set on submit
-          currencyCode: b.currencyCode || 'INR',
-          description: b.description || null,
-          expenseDate: b.expenseDate ? new Date(b.expenseDate) : null,
-        },
-      });
-    });
+    // Mint EXP-#### atomically (allocateCode) inside the insert tx. The new
+    // @@unique([businessId, claimNumber]) is the backstop: should the seeded counter ever
+    // collide with a pre-existing legacy claim, the insert throws P2002 — we bump the
+    // counter (allocateCode reads the now-incremented nextValue) and retry a few times.
+    let claim;
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        claim = await prisma.$transaction(async (tx) => {
+          const claimNumber = await service.mintClaimNumber(tx, businessId);
+          return tx.expenseClaim.create({
+            data: {
+              businessId, employeeId, status: 'DRAFT', claimType, travelRequestId,
+              claimNumber,
+              categoryId: b.categoryId || null,
+              amount: '0', // header amount is the sum of lines, set on submit
+              currencyCode: b.currencyCode || 'INR',
+              description: b.description || null,
+              expenseDate: b.expenseDate ? new Date(b.expenseDate) : null,
+            },
+          });
+        });
+        break;
+      } catch (err) {
+        if (err && err.code === 'P2002' && attempt < 5) continue; // counter advanced; retry
+        throw err;
+      }
+    }
     res.status(201).json(claim);
   } catch (e) { next(e); }
 }
@@ -191,14 +204,24 @@ async function addLine(req, res, next) {
       }
     }
 
-    // Evaluate the line against the active policy (live verdict).
+    // The cap-driving dimensions (nights / distanceKm / durationBand) are CLIENT-supplied
+    // and feed straight into the policy caps, so derive/bound them against the trip BEFORE
+    // they touch the engine or the DB. An inflated band/nights/distance is rejected here —
+    // it can never be persisted, so it can never later read "within policy" at submit.
+    const sane = service.sanitizeTripDimensions(
+      { distanceKm: b.distanceKm, nights: b.nights, durationBand: b.durationBand },
+      claim.travelRequest,
+    );
+    if (!sane.ok) return res.status(400).json({ message: sane.reason, reason: 'POLICY_DIMENSION_INVALID' });
+
+    // Evaluate the line against the active policy (live verdict) using the SANITISED dims.
     const ctx = await policyCtx(businessId, employeeId, claim.travelRequest);
     const lineForEval = {
       amount, categoryId: b.categoryId || null,
       transportMode: b.transportMode || null,
-      distanceKm: b.distanceKm != null ? Number(b.distanceKm) : null,
-      nights: b.nights != null ? Number(b.nights) : null,
-      durationBand: b.durationBand || null,
+      distanceKm: sane.value.distanceKm,
+      nights: sane.value.nights,
+      durationBand: sane.value.durationBand,
       receiptUrl,
     };
     const verdict = await service.evaluateOneLine(businessId, employeeId, lineForEval, ctx);
@@ -212,9 +235,9 @@ async function addLine(req, res, next) {
         categoryId: b.categoryId || null,
         expenseDate: b.expenseDate ? new Date(b.expenseDate) : null,
         transportMode: b.transportMode || null,
-        distanceKm: b.distanceKm != null ? String(b.distanceKm) : null,
-        nights: b.nights != null ? Number(b.nights) : null,
-        durationBand: b.durationBand || null,
+        distanceKm: sane.value.distanceKm != null ? String(sane.value.distanceKm) : null,
+        nights: sane.value.nights,
+        durationBand: sane.value.durationBand,
         policyStatus: verdict.verdict,
         policyReason: verdict.reason,
         appliedCap: verdict.appliedCap != null ? String(verdict.appliedCap) : null,
@@ -266,10 +289,22 @@ async function submitClaim(req, res, next) {
     const evaluated = [];
     let total = 0;
     for (const l of claim.lines) {
+      // RE-DERIVE (never re-trust) the cap-driving dimensions from the trip. A persisted
+      // line whose band/nights/distance no longer fits the trip (trip changed after the
+      // line was added, or a line minted before this guard existed) is treated as a HARD
+      // blocker here — the over-cap bill can never enter the chain flagged "within policy".
+      const sane = service.sanitizeTripDimensions(
+        { distanceKm: l.distanceKm != null ? Number(l.distanceKm) : null, nights: l.nights, durationBand: l.durationBand },
+        claim.travelRequest,
+      );
+      if (!sane.ok) {
+        evaluated.push({ lineId: l.id, verdict: 'AUTO_REJECTED', appliedCap: null, reason: sane.reason });
+        continue;
+      }
       const lineForEval = {
         amount: Number(l.amount), categoryId: l.categoryId,
-        transportMode: l.transportMode, distanceKm: l.distanceKm != null ? Number(l.distanceKm) : null,
-        nights: l.nights, durationBand: l.durationBand, receiptUrl: l.receiptUrl,
+        transportMode: l.transportMode, distanceKm: sane.value.distanceKm,
+        nights: sane.value.nights, durationBand: sane.value.durationBand, receiptUrl: l.receiptUrl,
       };
       const v = await service.evaluateOneLine(businessId, employeeId, lineForEval, ctx);
       evaluated.push({ lineId: l.id, ...v });
@@ -464,13 +499,26 @@ async function previewPolicy(req, res, next) {
       trip = await prisma.travelRequest.findFirst({ where: { id: b.travelRequestId, businessId, employeeId } });
     }
     const ctx = await policyCtx(businessId, employeeId, trip);
+    // Preview must not lie: sanitise the cap-driving dims exactly as add/submit will, so the
+    // badge reflects the server truth. An out-of-bounds dim surfaces as an AUTO_REJECTED
+    // verdict (the same block submit applies) rather than a falsely "within policy" preview.
+    const sane = service.sanitizeTripDimensions(
+      { distanceKm: b.distanceKm, nights: b.nights, durationBand: b.durationBand },
+      trip,
+    );
+    if (!sane.ok) {
+      return res.json({
+        verdict: { verdict: 'AUTO_REJECTED', appliedCap: null, reason: sane.reason },
+        cityTier: ctx.cityTier, gradeRank: ctx.gradeRank, currencyCode: ctx.currencyCode,
+      });
+    }
     const line = {
       amount: b.amount != null ? Number(b.amount) : null,
       categoryId: b.categoryId || null,
       transportMode: b.transportMode || null,
-      distanceKm: b.distanceKm != null ? Number(b.distanceKm) : null,
-      nights: b.nights != null ? Number(b.nights) : null,
-      durationBand: b.durationBand || null,
+      distanceKm: sane.value.distanceKm,
+      nights: sane.value.nights,
+      durationBand: sane.value.durationBand,
       receiptUrl: b.hasReceipt ? 'present' : null,
     };
     const verdict = await service.evaluateOneLine(businessId, employeeId, line, ctx);

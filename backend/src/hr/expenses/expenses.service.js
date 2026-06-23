@@ -15,7 +15,7 @@
  */
 
 const prisma = require('../../core/lib/prisma');
-const { allocateCode } = require('../lifecycle/lib/codes');
+const { format, SCOPE_DEFAULTS } = require('../lifecycle/lib/codes');
 const engine = require('../approvals/engine');
 const { evaluateLine, rollupVerdict } = require('./policyEngine');
 // Self-register the EXPENSE + TRAVEL consumer bundles (idempotent) so any entrypoint
@@ -24,11 +24,49 @@ require('../approvals/consumers.expense');
 require('../approvals/consumers.travel');
 
 // ── code minting (atomic, race-safe) ────────────────────────────────────────
+// Mint a per-tenant sequential human code (EXP-####, TRV-####) inside the caller's tx.
+// The lifecycle allocateCode does a plain findFirst+increment, which two concurrent
+// transactions can read-modify-write onto the SAME nextValue and re-collide (caught only
+// by the new @@unique([businessId, claimNumber]) + a P2002 retry). To make minting
+// genuinely atomic — not merely backstopped — we row-LOCK the NumberSequence row
+// (SELECT … FOR UPDATE, the letters.service pattern) so concurrent minters serialize on
+// the lock and each reads a fresh value. The row is created on first use (P2002-safe via
+// the @@unique([businessId, entityId, scope, periodKey])); a creation race is re-thrown
+// for the caller's retry, after which the lock path takes over.
+async function mintCode(tx, businessId, scope) {
+  const dflt = SCOPE_DEFAULTS[scope] || {};
+  const prefix = dflt.prefix != null ? dflt.prefix : `${scope}-`;
+  const padding = dflt.padding != null ? dflt.padding : 6;
+
+  // Lock the existing tenant-wide (entityId NULL, periodKey NULL) sequence row.
+  const locked = await tx.$queryRaw`
+    SELECT "id", "nextValue", "prefix", "padding" FROM "NumberSequence"
+    WHERE "businessId" = ${businessId}
+      AND "entityId" IS NULL
+      AND "scope" = ${scope}
+      AND "periodKey" IS NULL
+    FOR UPDATE`;
+
+  if (Array.isArray(locked) && locked.length) {
+    const row = locked[0];
+    const value = Number(row.nextValue);
+    await tx.numberSequence.update({ where: { id: row.id }, data: { nextValue: value + 1 } });
+    return format(row.prefix || prefix, value, row.padding || padding);
+  }
+
+  // No row yet → create it at nextValue:2 and use 1 (a concurrent create races on the
+  // @@unique → P2002, which we let propagate so the caller retries onto the lock path).
+  await tx.numberSequence.create({
+    data: { businessId, entityId: null, scope, prefix, padding, nextValue: 2, periodKey: null },
+  });
+  return format(prefix, 1, padding);
+}
+
 async function mintClaimNumber(tx, businessId) {
-  return allocateCode(tx, { businessId, scope: 'EXP' });
+  return mintCode(tx, businessId, 'EXP');
 }
 async function mintTravelNumber(tx, businessId) {
-  return allocateCode(tx, { businessId, scope: 'TRV' });
+  return mintCode(tx, businessId, 'TRV');
 }
 
 // ── employee level (Grade.rank) ─────────────────────────────────────────────
@@ -110,6 +148,99 @@ function bandFromHours(hours) {
   if (h >= 24) return 'FULL_24H';
   if (h >= 12) return 'HALF_12H';
   return 'HALF_DAY';
+}
+
+// Per-diem bands ordered by allowance SIZE (FULL_24H is the most generous). A claimant
+// must never get a band MORE generous than the trip's real duration justifies, so we
+// rank them and reject a band whose rank exceeds the trip's server-derived band.
+const BAND_RANK = Object.freeze({ HALF_DAY: 0, HALF_12H: 1, FULL_24H: 2 });
+
+// A self-drive line can never sanely exceed this distance for a single bill. Bounds the
+// SELF_CAR mileage cap (perKmRate × distanceKm) so it cannot be inflated without limit.
+// (A real cross-country leg is well under this; it is a guard-rail, not a policy figure.)
+const MAX_DISTANCE_KM = 5000;
+
+// ── trip-dimension sanitiser (THE server-side HARD invariant for F11 §8) ─────
+// nights / distanceKm / durationBand arrive on each bill line from the CLIENT and feed
+// straight into the policy caps (hotel = nightlyCap × nights, mileage = perKmRate ×
+// distanceKm, per-diem cap selected BY band). Left untrusted they let a claimant inflate
+// a dimension until an over-cap bill reads "within policy" and slips past the HARD submit
+// block. This derives/bounds every cap-driving dimension from the TRIP itself:
+//
+//   • durationBand — bounded by the trip's real duration (bandFromHours); a band more
+//       generous than the trip justifies is REJECTED ({ ok:false }). With no trip we fall
+//       back to the trip-less max (HALF_DAY) so a standalone claim cannot pick FULL_24H.
+//   • nights       — clamped to ceil(durationHours / 24) (a trip spanning N hours can bill
+//       at most that many hotel nights). Defaults to 1 with no trip.
+//   • distanceKm   — clamped to [0, MAX_DISTANCE_KM]; negatives → 0, NaN → null.
+//
+// Returns { ok, value?, reason? }. ok:false means the line must be REJECTED (400) — the
+// caller never persists or evaluates it. ok:true returns the SANITISED dimensions to use
+// in place of the client's. Pure (no I/O), so it runs identically on add + on submit.
+function tripDurationHours(trip) {
+  if (!trip) return null;
+  if (trip.durationHours != null && !Number.isNaN(Number(trip.durationHours))) return Math.max(1, Number(trip.durationHours));
+  if (trip.startAt && trip.endAt) {
+    const ms = new Date(trip.endAt) - new Date(trip.startAt);
+    if (!Number.isNaN(ms) && ms >= 0) return Math.max(1, Math.round(ms / 3600000));
+  }
+  return null;
+}
+
+function sanitizeTripDimensions(raw, trip) {
+  const out = {};
+  const hours = tripDurationHours(trip); // null for a standalone (trip-less) reimbursement
+
+  // durationBand — derive the trip's max-justifiable band; reject a more generous pick.
+  const maxBand = hours != null ? bandFromHours(hours) : 'HALF_DAY';
+  if (raw.durationBand != null && raw.durationBand !== '') {
+    if (!(raw.durationBand in BAND_RANK)) {
+      return { ok: false, reason: `Unknown per-diem band ${raw.durationBand}` };
+    }
+    if (BAND_RANK[raw.durationBand] > BAND_RANK[maxBand]) {
+      return {
+        ok: false,
+        reason: hours != null
+          ? `Per-diem band ${raw.durationBand} exceeds the trip's ${hours}h duration (max ${maxBand})`
+          : `Per-diem band ${raw.durationBand} is not allowed on a standalone claim (max ${maxBand})`,
+      };
+    }
+    out.durationBand = raw.durationBand;
+  } else {
+    out.durationBand = null;
+  }
+
+  // nights — bound by ceil(durationHours / 24); default 1 night, 0/neg rejected upstream.
+  if (raw.nights != null && raw.nights !== '') {
+    const n = Math.floor(Number(raw.nights));
+    if (Number.isNaN(n) || n < 0) return { ok: false, reason: 'nights must be a non-negative integer' };
+    const maxNights = hours != null ? Math.max(1, Math.ceil(hours / 24)) : 1;
+    if (n > maxNights) {
+      return {
+        ok: false,
+        reason: hours != null
+          ? `nights ${n} exceeds the trip's duration (max ${maxNights} night(s) for ${hours}h)`
+          : `nights ${n} is not allowed on a standalone claim (max ${maxNights})`,
+      };
+    }
+    out.nights = n;
+  } else {
+    out.nights = null;
+  }
+
+  // distanceKm — clamp to a sane maximum; reject a non-numeric / negative value.
+  if (raw.distanceKm != null && raw.distanceKm !== '') {
+    const d = Number(raw.distanceKm);
+    if (Number.isNaN(d) || d < 0) return { ok: false, reason: 'distanceKm must be a non-negative number' };
+    if (d > MAX_DISTANCE_KM) {
+      return { ok: false, reason: `distanceKm ${d} exceeds the maximum allowed ${MAX_DISTANCE_KM}km for a single line` };
+    }
+    out.distanceKm = d;
+  } else {
+    out.distanceKm = null;
+  }
+
+  return { ok: true, value: out };
 }
 
 // ── evaluate one line against the policy, building the ctx the engine needs ──
@@ -197,8 +328,12 @@ module.exports = {
   loadCategoryPolicy,
   monthToDateForCategory,
   bandFromHours,
+  sanitizeTripDimensions,
+  tripDurationHours,
   evaluateOneLine,
   buildPolicySnapshot,
   openClaimApproval,
   openTripApproval,
+  MAX_DISTANCE_KM,
+  BAND_RANK,
 };
