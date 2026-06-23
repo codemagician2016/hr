@@ -13,6 +13,7 @@
     "@hr/types": "file:../../packages/types",
     "@hr/ui": "file:../../packages/ui",
     "next": "14.2.20",
+    "pdfjs-dist": "3.11.174",
     "react": "^18",
     "react-dom": "^18"
   },

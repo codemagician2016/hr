@@ -24,6 +24,10 @@ router.use('/onboarding', require('../lifecycle/routes/onboarding.routes'));
 router.use('/separations', require('../lifecycle/routes/offboarding.routes'));
 router.use('/esign', require('../lifecycle/routes/esign.routes'));
 
+// Letters & communication (Feature 9) — letterhead manager + visual position-picker
+// (slice 9C). RBAC: canManageLetters; tenant-scoped (cross-tenant id ⇒ 404).
+router.use('/letters/letterheads', require('../letters/routes/letterheads.routes'));
+
 // Talent (recruitment/ATS + performance). RBAC: recruitment -> canManageEmployees;
 // performance -> canViewEmployees (read) / canManageEmployees (write). The offer
 // pre-flight reuses the payroll engine's India 50% wage check.
