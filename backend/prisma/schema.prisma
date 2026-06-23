@@ -8285,6 +8285,12 @@ model ExpenseClaim {
   version       Int      @default(0)
   lines         ExpenseClaimLine[]
 
+  // claimNumber (EXP-####) is a human-facing reference used on payment refs / payslips,
+  // so it MUST be unique per tenant — the DB backstop the legacy P2002 retry relied on
+  // but never had. It stays nullable (legacy/in-flight DRAFTs carry NULL); on Postgres a
+  // composite unique index treats every NULL as distinct, so any number of NULL rows
+  // coexist while a duplicate non-null EXP-#### is rejected.
+  @@unique([businessId, claimNumber])
   @@index([businessId, employeeId])
   @@index([businessId, status])
   @@index([businessId, categoryId])
