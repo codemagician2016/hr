@@ -41,34 +41,45 @@ function categoryLabel(value) {
 function UploadPanel({ onCreated }) {
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
+  const [file, setFile] = useState(null); // { fileBase64, fileName, ... } — chosen, not yet uploaded
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [warning, setWarning] = useState('');
 
-  const onFile = useCallback(async (payload) => {
+  // Choosing a file just STAGES it — we don't validate/upload here (that fought
+  // the user: a memoized closure could see empty code/name, and it forced an
+  // order: fill fields THEN pick). Validation + upload happen on the button.
+  const onFile = useCallback((payload) => {
     setError('');
     setWarning('');
-    if (!code.trim() || !name.trim()) {
-      setError('Enter a code and a name before choosing a file.');
-      return;
-    }
+    setFile(payload || null);
+  }, []);
+
+  const canSubmit = !!(code.trim() && name.trim() && file && !busy);
+
+  const submit = useCallback(async () => {
+    if (!code.trim() || !name.trim()) { setError('Enter a code and a name.'); return; }
+    if (!file || !file.fileBase64) { setError('Choose an A4 letterhead PDF.'); return; }
     setBusy(true);
+    setError('');
+    setWarning('');
     try {
       const created = await post('/api/hr/letters/letterheads', {
         code: code.trim(),
         name: name.trim(),
-        fileBase64: payload.fileBase64,
+        fileBase64: file.fileBase64,
       });
       if (created.warning) setWarning(created.warning);
       setCode('');
       setName('');
+      setFile(null);
       if (onCreated) onCreated(created);
     } catch (e) {
       setError(e.message || 'Upload failed.');
     } finally {
       setBusy(false);
     }
-  }, [code, name, onCreated]);
+  }, [code, name, file, onCreated]);
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-5 mb-6">
@@ -90,6 +101,16 @@ function UploadPanel({ onCreated }) {
         busy={busy}
         onFile={onFile}
       />
+      {file && (
+        <p className="mt-2 text-xs text-emerald-700">
+          Selected: {file.fileName || 'letterhead.pdf'} — ready to upload.
+        </p>
+      )}
+      <div className="mt-4">
+        <PrimaryButton onClick={submit} disabled={!canSubmit} loading={busy}>
+          Upload letterhead
+        </PrimaryButton>
+      </div>
     </div>
   );
 }
