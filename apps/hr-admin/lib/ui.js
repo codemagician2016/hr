@@ -52,7 +52,7 @@ export function Tabs({ tabs, active, onChange }) {
 // `rowKey` resolves a stable key per row. Renders Spinner / Empty states.
 export function DataTable({ columns, rows, loading, emptyText = 'Nothing here yet.', rowKey, caption }) {
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white overflow-x-auto">
+    <div className="rounded-2xl border border-gray-200 bg-white overflow-x-auto shadow-sm">
       {loading ? (
         <div className="py-12 flex justify-center">
           <Spinner />

@@ -10,28 +10,28 @@
 // "allow all" so the console stays usable before the session resolves.
 
 export const NAV_ITEMS = [
-  { key: 'dashboard', label: 'Dashboard', href: '/' },
-  { key: 'people', label: 'People', href: '/people', feature: 'hr', permission: 'canViewEmployees' },
+  { key: 'dashboard', label: 'Dashboard', href: '/', icon: 'dashboard' },
+  { key: 'people', label: 'People', href: '/people', feature: 'hr', permission: 'canViewEmployees', icon: 'people' },
   // Employee lifecycle (Feature 4). The onboarding pipeline + checklist tasks are
   // visible to anyone who can view employees (a Manager sees only their reporting
   // sub-tree, server-scoped); separations are gated on canRunSeparation (HR-Admin/
   // Owner). The server is the real enforcement boundary — this just hides nav.
-  { key: 'onboarding', label: 'Onboarding', href: '/onboarding', feature: 'hr', permission: 'canViewEmployees' },
-  { key: 'separations', label: 'Separations', href: '/separations', feature: 'hr', permission: 'canRunSeparation' },
-  { key: 'org', label: 'Org', href: '/org', feature: 'hr', permission: 'canViewEmployees' },
-  { key: 'leave', label: 'Leave', href: '/leave', feature: 'leave', permission: 'canApproveLeave' },
-  { key: 'attendance', label: 'Attendance', href: '/attendance', feature: 'attendance', permission: 'canManageAttendance' },
-  { key: 'compensation', label: 'Compensation', href: '/compensation', feature: 'hr', permission: 'canViewCompensation' },
-  { key: 'expenses', label: 'Expenses', href: '/expenses', feature: 'hr', permission: 'canViewEmployees' },
-  { key: 'loans', label: 'Loans', href: '/loans', feature: 'hr', permission: 'canViewEmployees' },
-  { key: 'documents', label: 'Documents', href: '/documents', feature: 'hr', permission: 'canViewEmployees' },
+  { key: 'onboarding', label: 'Onboarding', href: '/onboarding', feature: 'hr', permission: 'canViewEmployees', icon: 'onboarding' },
+  { key: 'separations', label: 'Separations', href: '/separations', feature: 'hr', permission: 'canRunSeparation', icon: 'exit' },
+  { key: 'org', label: 'Org', href: '/org', feature: 'hr', permission: 'canViewEmployees', icon: 'org' },
+  { key: 'leave', label: 'Leave', href: '/leave', feature: 'leave', permission: 'canApproveLeave', icon: 'leaf' },
+  { key: 'attendance', label: 'Attendance', href: '/attendance', feature: 'attendance', permission: 'canManageAttendance', icon: 'clock' },
+  { key: 'compensation', label: 'Compensation', href: '/compensation', feature: 'hr', permission: 'canViewCompensation', icon: 'coin' },
+  { key: 'expenses', label: 'Expenses', href: '/expenses', feature: 'hr', permission: 'canViewEmployees', icon: 'receipt' },
+  { key: 'loans', label: 'Loans', href: '/loans', feature: 'hr', permission: 'canViewEmployees', icon: 'loan' },
+  { key: 'documents', label: 'Documents', href: '/documents', feature: 'hr', permission: 'canViewEmployees', icon: 'doc' },
   // Performance & Goals (Feature 8). Visible to Managers (TEAM band — their reports'
   // goals/reviews, server-scoped) + HR-Admin (cycle config behind
   // canManagePerformanceCycle, hidden via hasPermission on the page). Server is the
   // real boundary; this just shows the tab to anyone with team-performance read.
-  { key: 'performance', label: 'Performance', href: '/performance', feature: 'hr', permission: 'canViewTeamPerformance' },
-  { key: 'payroll', label: 'Payroll', href: '/payroll', feature: 'payroll', permission: 'canRunPayroll' },
-  { key: 'reports', label: 'Reports', href: '/reports', feature: 'payroll', permission: 'canViewPayrollReports' },
+  { key: 'performance', label: 'Performance', href: '/performance', feature: 'hr', permission: 'canViewTeamPerformance', icon: 'chart' },
+  { key: 'payroll', label: 'Payroll', href: '/payroll', feature: 'payroll', permission: 'canRunPayroll', icon: 'wallet' },
+  { key: 'reports', label: 'Reports', href: '/reports', feature: 'payroll', permission: 'canViewPayrollReports', icon: 'report' },
   // Letters & Communication (Feature 9). The group header is gated on EITHER key:
   // canGenerateLetters (the maker/issue key) OR canManageLetters (the config/
   // checker/revoke key), so both a maker-only HR-Admin and a config-only checker
@@ -41,16 +41,90 @@ export const NAV_ITEMS = [
   //     → gate the nav on canManageLetters (a maker-only user would 403 there).
   //   - Issue + Register are `canGenerateLetters` → keep the maker-OR-checker gate.
   // The server is the real enforcement boundary; this just shows the right links.
-  { key: 'letters', label: 'Letters', href: '/letters', feature: 'hr', anyPermission: ['canGenerateLetters', 'canManageLetters'], group: true },
-  { key: 'letters-templates', label: 'Templates', href: '/letters/templates', feature: 'hr', permission: 'canManageLetters', parent: 'letters' },
-  { key: 'letters-letterheads', label: 'Letterheads', href: '/letters/letterheads', feature: 'hr', permission: 'canManageLetters', parent: 'letters' },
-  { key: 'letters-issue', label: 'Issue', href: '/letters/issue', feature: 'hr', anyPermission: ['canGenerateLetters', 'canManageLetters'], parent: 'letters' },
-  { key: 'letters-register', label: 'Register', href: '/letters/register', feature: 'hr', anyPermission: ['canGenerateLetters', 'canManageLetters'], parent: 'letters' },
+  { key: 'letters', label: 'Letters', href: '/letters', feature: 'hr', anyPermission: ['canGenerateLetters', 'canManageLetters'], group: true, icon: 'letter' },
+  { key: 'letters-templates', label: 'Templates', href: '/letters/templates', feature: 'hr', permission: 'canManageLetters', parent: 'letters', icon: 'doc' },
+  { key: 'letters-letterheads', label: 'Letterheads', href: '/letters/letterheads', feature: 'hr', permission: 'canManageLetters', parent: 'letters', icon: 'letterhead' },
+  { key: 'letters-issue', label: 'Issue', href: '/letters/issue', feature: 'hr', anyPermission: ['canGenerateLetters', 'canManageLetters'], parent: 'letters', icon: 'send' },
+  { key: 'letters-register', label: 'Register', href: '/letters/register', feature: 'hr', anyPermission: ['canGenerateLetters', 'canManageLetters'], parent: 'letters', icon: 'register' },
   // Settings groups Branding, Roles, Domain and Billing. Show it to anyone who
   // can manage ANY of those — a Finance role (canEditBilling, no canEditBranding)
   // must still reach the Billing tab. Per-tab/per-action gating happens inside.
-  { key: 'settings', label: 'Settings', href: '/settings', anyPermission: ['canEditBranding', 'canEditBilling', 'canEditDomain'] },
+  { key: 'settings', label: 'Settings', href: '/settings', anyPermission: ['canEditBranding', 'canEditBilling', 'canEditDomain'], icon: 'settings' },
 ];
+
+// ── Sidebar grouping ─────────────────────────────────────────────────────────
+// The flat NAV_ITEMS above are the source of truth for routes + permission
+// gating (visibleNavItems). For the polished sidebar we ALSO arrange the visible
+// items into collapsible sections (like the ESS portal). Grouping is purely
+// presentational — it never adds/removes a route and never changes who can see
+// what; it just decides which section header a visible item lives under.
+//
+// Each group lists the item `key`s it owns, in display order. A key that isn't
+// in any group renders as a top-level item (e.g. Dashboard). Letters keeps its
+// own native parent/child structure (group:true + parent:'letters') and is
+// emitted as its own expandable section, so it is intentionally omitted here.
+export const NAV_GROUPS = [
+  { key: 'people-org', label: 'People & Org', icon: 'people', items: ['people', 'org'] },
+  { key: 'talent', label: 'Talent', icon: 'onboarding', items: ['onboarding', 'separations', 'performance'] },
+  { key: 'time', label: 'Time', icon: 'calendar', items: ['leave', 'attendance'] },
+  { key: 'pay', label: 'Pay', icon: 'wallet', items: ['compensation', 'payroll', 'expenses', 'loans', 'reports'] },
+];
+
+// Build the grouped sidebar tree from the already-permission-filtered flat list.
+// Input: the array returned by visibleNavItems (so gating is already applied).
+// Output: an ordered array of nodes, each either
+//   { type: 'item', ...navItem }                          — a standalone link
+//   { type: 'group', key, label, icon, children: [item] } — a collapsible section
+// Empty groups (every child gated away) are dropped, so a Manager who can't see
+// any Pay item never sees an empty "Pay" header.
+export function buildNavTree(visibleItems) {
+  const byKey = new Map(visibleItems.map((i) => [i.key, i]));
+  const consumed = new Set();
+  const tree = [];
+
+  // Dashboard (or any ungrouped, non-Letters top-level item) stays standalone
+  // and renders first — but we walk groups in declared order and interleave
+  // standalone items by their original position. Simplest faithful approach:
+  // emit Dashboard first if present, then the groups, then Letters, then any
+  // leftover standalone items in original order.
+  const dash = byKey.get('dashboard');
+  if (dash) { tree.push({ type: 'item', ...dash }); consumed.add('dashboard'); }
+
+  for (const g of NAV_GROUPS) {
+    const children = g.items.map((k) => byKey.get(k)).filter(Boolean);
+    if (children.length === 0) continue;
+    children.forEach((c) => consumed.add(c.key));
+    tree.push({ type: 'group', key: g.key, label: g.label, icon: g.icon, children });
+  }
+
+  // Letters — native parent/child section (header + its sub-links).
+  const lettersParent = byKey.get('letters');
+  if (lettersParent) {
+    const children = visibleItems.filter((i) => i.parent === 'letters');
+    consumed.add('letters');
+    children.forEach((c) => consumed.add(c.key));
+    tree.push({
+      type: 'group',
+      key: 'letters',
+      label: lettersParent.label,
+      icon: lettersParent.icon || 'letter',
+      // The section header is itself a destination (/letters); expose it so the
+      // group toggle also offers the overview link via the first child.
+      href: lettersParent.href,
+      children,
+    });
+  }
+
+  // Any remaining standalone visible items (e.g. Documents, Settings) in their
+  // original flat order, so nothing a user is entitled to ever disappears.
+  for (const item of visibleItems) {
+    if (consumed.has(item.key) || item.parent) continue;
+    consumed.add(item.key);
+    tree.push({ type: 'item', ...item });
+  }
+
+  return tree;
+}
 
 // Full-access permission map for the legacy operator enum (mirrors
 // backend rbac.js LEGACY_ROLE_PERMS: SUPER_ADMIN/BUSINESS_ADMIN → all true).
