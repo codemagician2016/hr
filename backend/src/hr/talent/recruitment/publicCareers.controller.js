@@ -36,18 +36,55 @@ function validateResumeDataUrl(dataUrl) {
   return { ok: true, mime, bytes: decodedBytes };
 }
 
-// ── tiny in-memory rate-limit (per IP+email; best-effort DoS dampener) ────────
-// A real deployment fronts this with the platform's edge rate-limit; this is a
-// process-local backstop so a single instance cannot be trivially flooded.
-const RL_WINDOW_MS = 60 * 1000;
-const RL_MAX = 5;
+// ── rate-limit (DoS dampener for the UNAUTH apply endpoint) ───────────────────
+// The previous key was `${leftmost-XFF}:${email}` — both halves are fully client-
+// controlled (the leftmost X-Forwarded-For token is never stripped behind a single
+// trusted proxy hop, and the email rotates per request), so it was trivially
+// bypassable. We now key on THREE independent, harder-to-spoof dimensions, and a
+// request is throttled if ANY of them is exceeded:
+//   (1) per (tenant, job, normalized-email) — caps one applicant rotating IPs.
+//   (2) per coarse trusted-IP bucket          — caps one source rotating emails.
+//   (3) per (tenant, job) global ceiling      — bounds total writes for a job.
+// `req.ip` is used (NOT raw XFF): with `app.set('trust proxy', 1)` Express resolves
+// it to the real client across the single trusted hop, so it cannot be spoofed by
+// prepending tokens. A real deployment still fronts this with the edge rate-limit;
+// this is the process-local backstop and a shared store is the production upgrade.
+const RL_WINDOW_MS = 60 * 1000;          // 1-minute sliding window
+const RL_PER_APPLICANT = 5;              // (tenant,job,email) per window
+const RL_PER_IP = 10;                    // coarse-IP bucket per window
+const RL_PER_JOB = 60;                   // (tenant,job) global ceiling per window
 const rlBucket = new Map();
-function rateLimited(key) {
-  const now = Date.now();
+
+// Bucketise the trusted client IP coarsely so an attacker who only controls the
+// host portion of a /24 (or a /48 of v6) cannot defeat the IP dimension by walking
+// neighbouring addresses. IPv4 → /24; IPv6 → first 3 hextets (~/48).
+function coarseIpBucket(ip) {
+  const s = String(ip || '').replace(/^::ffff:/i, ''); // unwrap v4-mapped v6
+  if (s.includes('.')) return s.split('.').slice(0, 3).join('.') + '.0/24';
+  if (s.includes(':')) return s.split(':').slice(0, 3).join(':') + '::/48';
+  return s || 'unknown';
+}
+
+// Sliding-window counter for a single key. Returns true when the key is at/over
+// `max` for the current window (and does NOT record the over-limit hit).
+function hit(key, max, now) {
   const arr = (rlBucket.get(key) || []).filter((t) => now - t < RL_WINDOW_MS);
-  if (arr.length >= RL_MAX) { rlBucket.set(key, arr); return true; }
+  if (arr.length >= max) { rlBucket.set(key, arr); return true; }
   arr.push(now); rlBucket.set(key, arr);
   return false;
+}
+
+// Throttle an apply across all three dimensions. Trusted IP comes from req.ip; the
+// email is tenant+job scoped and normalised so case/rotation can't fork the key.
+function applyRateLimited({ ip, businessId, jobId, email }) {
+  const now = Date.now();
+  const bucket = coarseIpBucket(ip);
+  const lcEmail = String(email || '').trim().toLowerCase();
+  // evaluate all three so each window-counter is advanced consistently.
+  const overApplicant = hit(`a:${businessId}:${jobId}:${lcEmail}`, RL_PER_APPLICANT, now);
+  const overIp = hit(`i:${bucket}`, RL_PER_IP, now);
+  const overJob = hit(`j:${businessId}:${jobId}`, RL_PER_JOB, now);
+  return overApplicant || overIp || overJob;
 }
 
 async function resolveBusiness(slug) {
@@ -120,21 +157,29 @@ async function publicApply(req, res, next) {
     if (!firstName || !lastName || !email) return res.status(400).json({ message: 'firstName, lastName and email are required' });
     if (!consent) return res.status(422).json({ message: 'Consent to data processing is required to apply' });
 
-    const ip = (req.headers['x-forwarded-for'] || req.ip || '').toString().split(',')[0].trim();
-    if (rateLimited(`${ip}:${String(email).toLowerCase()}`)) {
+    // Rate-limit on the TRUSTED client IP (req.ip, resolved across the single proxy
+    // hop) + tenant/job/email + a per-job ceiling — never the spoofable raw XFF.
+    if (applyRateLimited({ ip: req.ip, businessId: biz.id, jobId: job.id, email })) {
       return res.status(429).json({ message: 'Too many applications. Please try again in a minute.' });
     }
 
-    // resume upload (optional) — validate caps BEFORE storing
+    // resume upload (optional) — validate caps BEFORE storing.
     let resumeUrl = null;
     if (resumeDataUrl) {
       const chk = validateResumeDataUrl(resumeDataUrl);
       if (!chk.ok) return res.status(chk.status).json({ message: chk.message });
-      if (s3.isConfigured()) {
-        try { const up = await s3.uploadDataUrl({ dataUrl: resumeDataUrl, businessId: biz.id, scope: 'resume' }); resumeUrl = up.url; }
-        catch { resumeUrl = null; }
-      } else {
-        resumeUrl = resumeDataUrl; // dev/test fallback (real URL, hashable)
+      if (!s3.isConfigured()) {
+        // NEVER inline the raw base64 data URL into Candidate.resumeUrl (@db.Text,
+        // unbounded): an unauthenticated caller rotating emails would write an
+        // unbounded stream of ~10MB blobs and exhaust DB storage. Require a bounded
+        // external store for public uploads; reject (not inline) when it is absent.
+        return res.status(503).json({ message: 'Resume uploads are temporarily unavailable. Please apply without a resume, or try again later.' });
+      }
+      try {
+        const up = await s3.uploadDataUrl({ dataUrl: resumeDataUrl, businessId: biz.id, scope: 'resume' });
+        resumeUrl = up.url;
+      } catch {
+        return res.status(503).json({ message: 'Resume upload failed. Please apply without a resume, or try again later.' });
       }
     }
 
@@ -186,5 +231,5 @@ async function publicApply(req, res, next) {
 
 module.exports = {
   publicBoard, publicJobDetail, publicApply,
-  _internals: { validateResumeDataUrl, publicQuestion, rateLimited },
+  _internals: { validateResumeDataUrl, publicQuestion, applyRateLimited, coarseIpBucket },
 };

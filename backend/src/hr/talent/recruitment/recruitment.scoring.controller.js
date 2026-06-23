@@ -19,6 +19,8 @@
 const prisma = require('../../../core/lib/prisma');
 const scoring = require('./scoring');
 const { notifyHrEvent } = require('../../integrations/notifications');
+// Feature 12 — F1 recruitment read-scope (requisition-scoped merit list).
+const { scopeAllowsJob } = require('./recruitmentScope');
 
 // reuse the esign provider + onboarding seam from the spine
 let esign;
@@ -118,8 +120,8 @@ const pickQ = picker(Q_FIELDS);
 async function listScreeningQuestions(req, res, next) {
   try {
     const { businessId } = req.user;
-    const job = await prisma.job.findFirst({ where: { id: req.params.jobId, businessId, deletedAt: null }, select: { id: true } });
-    if (!job) return res.status(404).json({ message: 'Job not found' });
+    const job = await prisma.job.findFirst({ where: { id: req.params.jobId, businessId, deletedAt: null }, select: { id: true, hiringManagerId: true } });
+    if (!job || !scopeAllowsJob(req.recruitmentScope, job)) return res.status(404).json({ message: 'Job not found' });
     const items = await prisma.screeningQuestion.findMany({
       where: { businessId, jobId: req.params.jobId, deletedAt: null },
       include: { options: { orderBy: { sortOrder: 'asc' } } },
@@ -557,15 +559,39 @@ async function saveMyScorecard(req, res, next) {
       return res.status(409).json({ message: 'This scorecard was modified elsewhere. Reload and retry.' });
     }
     const ratings = Array.isArray(req.body.ratings) ? req.body.ratings : [];
+
+    // The ONLY valid skills for this card are those of the interview's scorecard
+    // template (snapshotted on the card as templateId; the interview's template is
+    // the backstop). Build the allowed set so a panellist cannot forge a skillId
+    // that does not belong to the template — and so weight/scale/name are always
+    // taken from the template, never from the (client-controlled) request body.
+    const iv = await prisma.interview.findFirst({ where: { id: card.interviewId, businessId }, select: { scorecardTemplateId: true } });
+    const templateId = card.templateId || (iv && iv.scorecardTemplateId) || null;
+    const tplSkills = templateId
+      ? await prisma.scorecardSkill.findMany({ where: { businessId, templateId } })
+      : [];
+    const allowed = new Map(tplSkills.map((s) => [s.id, s]));
+
+    // 422 on any rating whose skillId is not part of this card's template (a
+    // forged/foreign skill). An empty `ratings` array is a no-op (draft save).
+    for (const r of ratings) {
+      if (!r || !r.skillId) continue;
+      if (!allowed.has(r.skillId)) {
+        return res.status(422).json({ message: `Unknown skillId for this scorecard: ${r.skillId}. Ratings must reference a skill on the interview's scorecard template.` });
+      }
+    }
+
     const updated = await prisma.$transaction(async (tx) => {
-      // upsert each rating against the (scorecardId, skillId) unique key
+      // upsert each rating against the (scorecardId, skillId) unique key. Every
+      // snapshot field (skillName/weight/scaleMin/scaleMax) comes from the TEMPLATE
+      // skill — client-supplied skillName/weight/scaleMin/scaleMax are ignored.
       for (const r of ratings) {
-        if (!r.skillId) continue;
-        const skill = await tx.scorecardSkill.findFirst({ where: { id: r.skillId, businessId } });
-        const skillName = skill ? skill.name : (r.skillName || 'Skill');
-        const weight = skill ? skill.weight : (r.weight ?? 1);
-        const scaleMin = skill ? skill.scaleMin : 1;
-        const scaleMax = skill ? skill.scaleMax : 10;
+        if (!r || !r.skillId) continue;
+        const skill = allowed.get(r.skillId); // guaranteed present (validated above)
+        const skillName = skill.name;
+        const weight = skill.weight;
+        const scaleMin = skill.scaleMin;
+        const scaleMax = skill.scaleMax;
         let score = Number(r.score);
         if (!Number.isFinite(score)) score = scaleMin;
         score = Math.max(scaleMin, Math.min(scaleMax, Math.round(score)));
@@ -635,6 +661,9 @@ async function meritList(req, res, next) {
     const { businessId } = req.user;
     const job = await prisma.job.findFirst({ where: { id: req.params.jobId, businessId, deletedAt: null } });
     if (!job) return res.status(404).json({ message: 'Job not found' });
+    // F1 scope — a scoped recruiter cannot pull the merit list (candidate PII +
+    // scores + reject reasons) for a requisition they do not own.
+    if (!scopeAllowsJob(req.recruitmentScope, job)) return res.status(404).json({ message: 'Job not found' });
 
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10) || 25));
