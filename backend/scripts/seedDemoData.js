@@ -697,12 +697,10 @@ async function main() {
   const runTaxYear = taxYearFor(RY, RM, 4);
   const runCode = `PR-${periodStart.slice(0, 7)}-${COUNTRY}`;
 
-  // Relax four-eyes for this single-operator demo tenant (persisted config).
-  await up('varianceThreshold', { businessId },
-    { businessId, config: { allowSingleOperator: true } },
-    { config: { allowSingleOperator: true } },
-  );
-
+  // Four-eyes is PRESERVED on the demo tenant: we approve the seeded run as a
+  // distinct `checker` user (maker=operator ≠ checker), so the demo keeps a real
+  // maker-checker gate for testing. We deliberately do NOT set
+  // allowSingleOperator — that would silently disable maker-checker for the tenant.
   const payEmployees = employees;
   let publishedPayslips = 0;
   let payrollMode = 'real-service';
@@ -730,7 +728,9 @@ async function main() {
     }
     let cur = await prisma.payRun.findUnique({ where: { id: payRun.id } });
     if (cur.status === 'COMPUTED' || cur.status === 'REVIEW') {
-      await payrollService.approveRun({ businessId, actorId: operator.id, payRunId: payRun.id });
+      // Approve as the CHECKER (≠ operator/maker) so the real maker-checker SoD
+      // gate is satisfied legitimately and stays ENABLED for the tenant.
+      await payrollService.approveRun({ businessId, actorId: checker.id, payRunId: payRun.id });
     }
     cur = await prisma.payRun.findUnique({ where: { id: payRun.id } });
     if (cur.status === 'APPROVED') {

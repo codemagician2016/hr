@@ -280,6 +280,10 @@ async function main() {
         data: {
           status: 'DRAFT', computedAt: null, computedBy: null, approvedAt: null, approvedBy: null,
           lockedAt: null, lockedBy: null, complianceVersionId: null,
+          // Clear the staleness anchor too (as reopenRun does), so a fresh
+          // compute→approve re-anchors instead of tripping STALE_TOTALS against
+          // a prior run's hash. (Manual reset bypasses reopenRun.)
+          totalsHash: null,
         },
       });
     });
