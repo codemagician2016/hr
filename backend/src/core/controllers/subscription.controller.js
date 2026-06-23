@@ -826,10 +826,15 @@ function customDomainStatusFrom({ dnsState, cloudflareState, cloudflareError, pr
   };
 }
 
-// Sanitise a themeColors payload — accepts #RGB / #RRGGBB, drops anything
-// else. Empty object → null (don't persist clutter).
+// Sanitise a themeColors payload — accepts #RGB / #RRGGBB hex values for the
+// colour slots, plus an optional curated `colorKey` (one of the 12 brand
+// colours) so the Settings → Branding swatch picker round-trips on reload.
+// Anything else is dropped; empty object → null (don't persist clutter).
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const COLOR_KEYS = ['primary', 'accent', 'surface', 'bg', 'text'];
+// Curated brand-colour keys from the theme engine (indigo/blue/…); the picker
+// stores the chosen swatch here so it can re-highlight it after a reload.
+const CURATED_COLOR_KEYS = new Set(require('@hr/theme-engine').COLOR_KEYS);
 function sanitizeThemeColors(input) {
   if (!input || typeof input !== 'object') return null;
   const out = {};
@@ -837,6 +842,10 @@ function sanitizeThemeColors(input) {
     const v = input[k];
     if (typeof v === 'string' && HEX_RE.test(v.trim())) out[k] = v.trim().toUpperCase();
   }
+  // Preserve a valid curated swatch key alongside the hex so the swatch UI can
+  // re-select it. A freeform/custom hex sends colorKey:null → not persisted.
+  const colorKey = typeof input.colorKey === 'string' ? input.colorKey.trim().toLowerCase() : null;
+  if (colorKey && CURATED_COLOR_KEYS.has(colorKey)) out.colorKey = colorKey;
   return Object.keys(out).length === 0 ? null : JSON.stringify(out);
 }
 
@@ -1396,9 +1405,19 @@ async function getBilling(req, res) {
     return res.status(400).json({ message: 'You must set up your business first' });
   }
 
-  const subscription = await getBusinessSubscription(req.user.businessId);
+  let subscription = await getBusinessSubscription(req.user.businessId);
   if (!subscription) {
-    return res.status(404).json({ message: 'No subscription found' });
+    // Self-heal: every business must have a subscription. A signup race (or a
+    // legacy tenant created before subscription provisioning was atomic) can
+    // leave a business with none, which broke billing + portal routing. Mint a
+    // free-tier subscription (idempotent) and re-read it instead of 404-ing.
+    await ensureBusinessSubscription(req.user.businessId).catch((err) => {
+      console.error('[getBilling] ensureBusinessSubscription failed:', err?.message || err);
+    });
+    subscription = await getBusinessSubscription(req.user.businessId);
+    if (!subscription) {
+      return res.status(404).json({ message: 'No subscription found' });
+    }
   }
 
   if (!isPaddleConfigured()) {
@@ -1473,6 +1492,12 @@ async function getBillingWorkspace(req, res) {
   }
 
   try {
+    // Guarantee a subscription exists before building the workspace (mirrors
+    // getBilling) so a tenant with a missing subscription row sees the free
+    // plan + upgrade options rather than an error.
+    await ensureBusinessSubscription(req.user.businessId).catch((err) => {
+      console.error('[getBillingWorkspace] ensureBusinessSubscription failed:', err?.message || err);
+    });
     const workspace = await buildBillingWorkspace({
       businessId: req.user.businessId,
       transactionLimit: 8,

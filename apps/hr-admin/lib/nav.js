@@ -43,7 +43,10 @@ export const NAV_ITEMS = [
   { key: 'letters-letterheads', label: 'Letterheads', href: '/letters/letterheads', feature: 'hr', anyPermission: ['canGenerateLetters', 'canManageLetters'], parent: 'letters' },
   { key: 'letters-issue', label: 'Issue', href: '/letters/issue', feature: 'hr', anyPermission: ['canGenerateLetters', 'canManageLetters'], parent: 'letters' },
   { key: 'letters-register', label: 'Register', href: '/letters/register', feature: 'hr', anyPermission: ['canGenerateLetters', 'canManageLetters'], parent: 'letters' },
-  { key: 'settings', label: 'Settings', href: '/settings', permission: 'canEditBranding' },
+  // Settings groups Branding, Roles, Domain and Billing. Show it to anyone who
+  // can manage ANY of those — a Finance role (canEditBilling, no canEditBranding)
+  // must still reach the Billing tab. Per-tab/per-action gating happens inside.
+  { key: 'settings', label: 'Settings', href: '/settings', anyPermission: ['canEditBranding', 'canEditBilling', 'canEditDomain'] },
 ];
 
 // Full-access permission map for the legacy operator enum (mirrors

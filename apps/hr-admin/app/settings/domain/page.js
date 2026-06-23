@@ -136,14 +136,17 @@ function useDomainStatus({ enabled, intervalMs = 20000 }) {
       }
       const res = await tickRef.current?.();
       if (stopped) return;
-      const s = res?.customDomainStatus;
+      // GET /api/subscription/custom-domain/status returns { status, domain }
+      // (NOT customDomainStatus/customDomain) — read `status` so the poll stops
+      // once the domain settles (ACTIVE/FAILED/NONE).
+      const s = res?.status;
       if (settled(s)) return; // terminal — stop polling
       schedule();
     };
 
     const onVisible = () => {
       if (typeof document !== 'undefined' && !document.hidden) {
-        const s = status?.customDomainStatus;
+        const s = status?.status;
         if (!settled(s)) run();
       }
     };
@@ -321,13 +324,29 @@ function SubdomainSection({ currentSlug, suffix, readOnly, onChanged }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debounced, currentSlug, readOnly]);
 
+  // Branch on the STABLE machine `reason` the backend returns
+  // ('invalid' | 'reserved' | 'taken' | null) — not on the human sentence.
+  // Reserved/taken offer clickable suggestions; both are tone 'warn' so the
+  // "Try:" chips render for either.
   const verdict = useMemo(() => {
     if (isSame) return null;
     if (checking || !check) return null;
     if (check.available) return { tone: 'ok', text: 'Available — this address is free.' };
+    const hasSuggestions = Array.isArray(check.suggestions) && check.suggestions.length > 0;
     if (check.reason === 'reserved')
-      return { tone: 'warn', text: 'Reserved — that word is held back. Try one of the suggestions below.' };
-    if (check.reason === 'taken') return { tone: 'bad', text: 'Taken — another business already uses this address.' };
+      return {
+        tone: 'warn',
+        text: hasSuggestions
+          ? 'Reserved — that word is held back. Try one of the suggestions below.'
+          : 'Reserved — that word is held back. Pick a different address.',
+      };
+    if (check.reason === 'taken')
+      return {
+        tone: 'warn',
+        text: hasSuggestions
+          ? 'Taken — another business already uses this address. Try one of these.'
+          : 'Taken — another business already uses this address. Pick a different one.',
+      };
     return { tone: 'bad', text: 'Not a valid address — use letters, numbers and hyphens.' };
   }, [check, checking, isSame]);
 
@@ -742,8 +761,11 @@ function CustomDomainSection({ enabled, subdomainSuffix, readOnly }) {
   const [actionError, setActionError] = useState('');
   const [verifying, setVerifying] = useState(false);
 
-  const s = status?.customDomainStatus || 'NONE';
-  const domain = status?.customDomain || '';
+  // The status endpoint returns { status, domain } — not customDomainStatus/
+  // customDomain. Reading the right keys is what makes a connected domain show
+  // up and lets the poll terminate.
+  const s = status?.status || 'NONE';
+  const domain = status?.domain || '';
   const connected = s !== 'NONE' && !!domain;
 
   async function verifyNow() {
@@ -765,7 +787,7 @@ function CustomDomainSection({ enabled, subdomainSuffix, readOnly }) {
     try {
       await request('/api/subscription/custom-domain', { method: 'DELETE' });
       setDisconnectOpen(false);
-      setStatus({ customDomainStatus: 'NONE', customDomain: '' });
+      setStatus({ status: 'NONE', domain: '' });
     } catch (err) {
       setActionError(err.data?.message || err.message || 'Could not disconnect just now. Please try again.');
     } finally {
@@ -937,8 +959,8 @@ export default function DomainSettingsPage() {
   const suffix = config?.subdomainSuffix || `.${platformDomain}`;
   const slug = business?.slug || '';
   const subdomainHost = `${slug}${suffix}`;
-  const customDomainActive = domainStatus?.customDomainStatus === 'ACTIVE';
-  const customDomain = domainStatus?.customDomain || '';
+  const customDomainActive = domainStatus?.status === 'ACTIVE';
+  const customDomain = domainStatus?.domain || '';
 
   if (loading) return <Spinner />;
 
