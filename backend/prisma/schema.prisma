@@ -243,6 +243,23 @@ model Business {
   // this changes — products keep their own currency snapshot.
   defaultCurrency          String?
   currencyChangedAt        DateTime? // rate-limit guard — updated on every manual currency change
+  // ── F14 — HR single-country mode (the AUTHORITATIVE selector) ──────────────
+  // The ONE country a tenant operates HR/payroll in. Set ONCE at HR setup
+  // (POST /api/hr/setup/country) and then immutable. Distinct from `country`
+  // (storefront/billing, ISO-2, L129) and the soft `region` hint (L136). Every
+  // payroll/tax/leave/statutory/letter/currency/UI decision routes off THIS
+  // field via hr/tenant/countryContext.js. NULL = HR not yet set up.
+  hrCountry                String?   @db.Char(2) // 'IN' (v1). 'NZ' added in roadmap §12.
+  // Locked pay/display currency derived from hrCountry at setup. Denormalized so
+  // reads never re-derive. INR for IN.
+  hrCurrency               String?   @db.Char(3) // 'INR' (v1)
+  // Audit + lock guard. Once set, hrCountrySetAt is non-null and the setup
+  // endpoint refuses to change hrCountry (409). Mirrors currencyChangedAt above.
+  hrCountrySetAt           DateTime?
+  // Backfill quarantine: TRUE when the migration found >1 distinct entity
+  // country (a legacy mixed tenant) and could not auto-stamp. Such tenants are
+  // BLOCKED from HR writes until a super-admin resolves them. Expected: 0 in prod.
+  hrCountryAmbiguous       Boolean   @default(false)
   // Subscription billing profile. Separate from storefront contact/address:
   // a customer may buy Sitepresso for a registered company while the public
   // site shows a clinic/shop/location address.

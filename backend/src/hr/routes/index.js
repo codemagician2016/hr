@@ -12,6 +12,13 @@ const router = express.Router();
 // this aggregator is loaded exactly once from backend/src/index.js at app start.
 require('../approvals/registerConsumers');
 
+// FLAG (Feature 14 — shared edit): tenant single-country mode. The operator
+// surface — POST /setup/country (set the HR country ONCE, the only writer) +
+// GET /country-context (capability matrix the hr-admin app gates every
+// country-specific surface off). Mounted at the aggregator root so the paths are
+// /api/hr/setup/country and /api/hr/country-context.
+router.use('/', require('./countryContext.routes'));
+
 router.use('/employees', require('./employee.routes'));
 // Company Profile settings — business legal/registration profile, the OPTIONAL
 // company-document vault (licences/tax reports/financials/registration+GST
@@ -92,6 +99,10 @@ router.use('/me/compensation', require('./meCompensation.routes'));
 // employee server-side, fixing the ESS pages that 401'd against the operator API.
 router.use('/me/attendance', require('./meAttendance.routes'));
 router.use('/me/leave', require('./meLeave.routes'));
+// FLAG (Feature 14 — shared edit): ESS capability matrix for the signed-in
+// employee's tenant. Customer session; the ESS app gates onboarding statutory /
+// tax / currency surfaces off it.
+router.use('/me/country-context', require('./meCountryContext.routes'));
 router.use('/me/tax-declaration', require('./meTax.routes'));
 router.use('/me/tasks', require('./meTasks.routes'));
 // FLAG (Feature 11 — shared edit): ESS reimbursement/claims + travel. Customer session,

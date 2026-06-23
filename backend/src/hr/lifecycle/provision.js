@@ -31,6 +31,10 @@
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const livePrisma = require('../../core/lib/prisma');
+// Feature 14: the provisioned Entity/StatutoryProfile/comp basis follow the TENANT
+// country (the single source of truth), not the job/offer/entity guess. Replaces
+// the `entity.countryCode || job.countryCode || 'IN'` + `NZ ? 'NZD' : 'INR'` leak.
+const { tenantCountry, tenantCurrency, assertCountry } = require('../tenant/countryContext');
 const { advanceJourney } = require('./journeyEngine');
 const { allocateCode } = require('./lib/codes');
 // offerWageCheck (the India Code-on-Wages 50% Basic+DA guard) is exported under
@@ -305,8 +309,13 @@ async function provisionEmployee({ journeyId, actorId } = {}, prismaOrTx) {
       : await tx.entity.findFirst({ where: { businessId, status: 'ACTIVE' }, orderBy: { createdAt: 'asc' } });
     if (!entity) throw new ProvisionError('No entity resolved for the hire', { status: 422, reason: 'precondition' });
     entityId = entity.id;
-    const countryCode = (entity.countryCode || (job && job.countryCode) || 'IN').toUpperCase();
-    const currencyCode = offer.currencyCode || entity.payCurrency || (countryCode === 'NZ' ? 'NZD' : 'INR');
+    // Feature 14 — the hire's market is the TENANT country, full stop. The pinned
+    // entity's countryCode is asserted to equal it (tripwire; in a single-country
+    // tenant this always holds). Currency is the tenant currency, never an
+    // offer/entity override that could leak NZD into an IN tenant.
+    const countryCode = await tenantCountry(businessId);
+    if (entity.countryCode) await assertCountry(businessId, entity.countryCode);
+    const currencyCode = await tenantCurrency(businessId);
 
     // Dates + status. PROBATION when a probation window applies (default 90d for
     // a permanent hire unless the offer/journey says otherwise), else ACTIVE.

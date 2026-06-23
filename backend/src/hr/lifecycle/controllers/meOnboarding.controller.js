@@ -23,6 +23,10 @@
 const crypto = require('crypto');
 const prisma = require('../../../core/lib/prisma');
 const s3 = require('../../../core/lib/s3');
+// Feature 14: the tenant HR country is the SINGLE source of truth for the
+// statutory rule set. Replaces the old per-entity guessing + "multi-country → IN"
+// default. The per-entity read is kept ONLY as a fail-closed tripwire.
+const { tenantCountry, assertCountry } = require('../../tenant/countryContext');
 const { validateStatutory } = require('../validators');
 const { advanceJourney } = require('../journeyEngine');
 
@@ -119,19 +123,20 @@ async function resolveSelfEmployee(businessId, customer) {
   return byUser || null;
 }
 
-// ── entity countryCode (drives the statutory rule set) ───────────────────────
-// Resolve the journey's market (global payroll: IN + NZ) so the statutory
-// validators pick the RIGHT rule set — never the wrong country's. Resolution
-// order, most-specific first:
-//   1. journey.entityId → Entity.countryCode.
-//   2. employee's current EmploymentRecord → Entity.countryCode.
-//   3. the tenant's entities — if they all operate in ONE country, use it. A
-//      single-country tenant (e.g. an NZ-only org) thus resolves correctly even
-//      before the journey's entity is pinned, instead of falsely defaulting IN.
-// Only when the tenant genuinely operates in MULTIPLE countries AND the journey
-// has not yet selected one do we fall back to IN (the historical default, kept
-// so existing single-country IN tenants are unchanged). Pure read, businessId-scoped.
-async function resolveCountryCode(businessId, { entityId, employeeId }) {
+// ── tenant HR country (drives the statutory rule set) ────────────────────────
+// Feature 14: ONE country per tenant. The statutory validators pick their rule
+// set off `Business.hrCountry` (the single source of truth), NOT a per-entity
+// guess with a "multi-country → IN" default (deleted — impossible under one
+// -country tenants). The pinned entity's countryCode is read ONLY as a fail
+// -closed TRIPWIRE: if it ever disagrees with the tenant country it is a bad
+// backfill / quarantined tenant, so we throw rather than silently serve the wrong
+// market. Pure read, businessId-scoped. Fail-closed: a pre-setup / ambiguous
+// tenant throws (HR_NOT_SET_UP / HR_COUNTRY_AMBIGUOUS), never a default market.
+async function resolveCountryCode(businessId, { entityId, employeeId } = {}) {
+  const country = await tenantCountry(businessId);
+  // Tripwire: if a journey/employee is pinned to an entity, that entity's country
+  // MUST equal the tenant country. In a single-country tenant this always holds;
+  // a mismatch surfaces a data bug instead of leaking the wrong rule set.
   let eid = entityId || null;
   if (!eid && employeeId) {
     const rec = await prisma.employmentRecord.findFirst({
@@ -145,18 +150,9 @@ async function resolveCountryCode(businessId, { entityId, employeeId }) {
       where: { id: eid, businessId },
       select: { countryCode: true },
     });
-    if (entity && entity.countryCode) return String(entity.countryCode).toUpperCase();
+    if (entity && entity.countryCode) await assertCountry(businessId, entity.countryCode);
   }
-  // No entity pinned yet — derive from the tenant's distinct entity countries.
-  const entities = await prisma.entity.findMany({
-    where: { businessId, deletedAt: null },
-    select: { countryCode: true },
-  });
-  const distinct = [...new Set(entities.map((e) => (e.countryCode || '').toUpperCase()).filter(Boolean))];
-  if (distinct.length === 1) return distinct[0];
-  // Multi-country (or no entities) tenant with no journey entity yet — keep IN as
-  // the historical default for back-compat; the operator pins the entity later.
-  return 'IN';
+  return country;
 }
 
 /**

@@ -46,6 +46,9 @@ const s3 = require('../../core/lib/s3');
 const { writeAudit } = require('../../core/lib/audit');
 const { allocateCode } = require('../lifecycle/lib/codes');
 const esign = require('../lifecycle/esign'); // registers BUILTIN; exposes getProvider
+// Feature 14: letter locale comes from the TENANT country's capability matrix
+// (the single source of truth), not an inline `entity.countryCode==='NZ'?…:…`.
+const { tenantCountry, countryCapabilities, assertCountry } = require('../tenant/countryContext');
 const { resolveMergeData, renderMerge } = require('./mergeFields');
 const { renderLetter } = require('./renderLetter');
 const { renderLetterFallback } = require('./letterPdfFallback');
@@ -470,8 +473,25 @@ async function issueLetter(client, args = {}) {
     if (lh) ctx.letterhead = lh;
   }
 
-  const locale = ctx.template.locale
-    || (ctx.entity && ctx.entity.countryCode === 'NZ' ? 'en-NZ' : 'en-IN');
+  // Feature 14 — the letter locale follows the TENANT country's capabilities (the
+  // single source of truth), so an IN tenant never renders an en-NZ letter. When
+  // the tenant country IS set the entity's countryCode is asserted to match it
+  // (tripwire). The locale is presentation-only, so a pre-setup tenant (hrCountry
+  // not yet set) falls back to the entity country / en-IN rather than blocking
+  // issuance (fail-SOFT here — letters are not a country security boundary).
+  let tCountry = null;
+  try {
+    tCountry = await tenantCountry(businessId);
+    if (ctx.entity && ctx.entity.countryCode) await assertCountry(businessId, ctx.entity.countryCode);
+  } catch (e) {
+    if (e && (e.code === 'HR_NOT_SET_UP' || e.code === 'HR_COUNTRY_AMBIGUOUS')) {
+      tCountry = (ctx.entity && ctx.entity.countryCode) || 'IN';
+    } else {
+      throw e; // a real COUNTRY_MISMATCH (off-country entity under a set-up tenant) still fails closed
+    }
+  }
+  const caps = countryCapabilities(tCountry);
+  const locale = ctx.template.locale || (caps && caps.letterLocale) || 'en-IN';
   const now = overrides.issueDate ? new Date(overrides.issueDate) : new Date();
 
   // ── 2) merge + missingRequired (preview/draft render WITHOUT a ref-no) ────────
