@@ -25,9 +25,13 @@ router.use('/onboarding', require('../lifecycle/routes/onboarding.routes'));
 router.use('/separations', require('../lifecycle/routes/offboarding.routes'));
 router.use('/esign', require('../lifecycle/routes/esign.routes'));
 
-// Letters & communication (Feature 9) — letterhead manager + visual position-picker
-// (slice 9C). RBAC: canManageLetters; tenant-scoped (cross-tenant id ⇒ 404).
+// Letters & Communication (Feature 9). Mount the specific config routers BEFORE
+// the base issuance router so /letters/letterheads (+ /letters/templates above) are
+// not swallowed by the issuance /:id route. RBAC: config (letterheads/templates) →
+// canManageLetters; issuance/register/download → canGenerateLetters (+withEmployeeScope
+// for a named subject → out-of-band 404); revoke → canManageLetters (SoD).
 router.use('/letters/letterheads', require('../letters/routes/letterheads.routes'));
+router.use('/letters', require('../letters/routes/issuance.routes'));
 
 // Talent (recruitment/ATS + performance). RBAC: recruitment -> canManageEmployees;
 // performance -> canViewEmployees (read) / canManageEmployees (write). The offer
