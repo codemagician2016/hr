@@ -34,6 +34,12 @@ const SCOPE_DEFAULTS = Object.freeze({
   // periodKey (the tax year, e.g. "2026-27") so the sequence resets yearly via
   // the (businessId, entityId, scope, periodKey) NumberSequence row.
   LETTER: { prefix: 'LTR-', padding: 4 },
+  // Feature 11 — Reimbursement/Claims + Travel. Claims carry a human reference
+  // EXP-0001 (migrated off the legacy read-max nextClaimNumber loop onto this
+  // atomic allocator); trips mint a travel id TRV-0001. Padding 4 matches the
+  // historical EXP-#### format, so existing EXP-0001..EXP-9999 claims interoperate.
+  EXP: { prefix: 'EXP-', padding: 4 },
+  TRV: { prefix: 'TRV-', padding: 4 },
 });
 
 function format(prefix, value, padding) {

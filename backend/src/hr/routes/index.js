@@ -94,6 +94,10 @@ router.use('/me/attendance', require('./meAttendance.routes'));
 router.use('/me/leave', require('./meLeave.routes'));
 router.use('/me/tax-declaration', require('./meTax.routes'));
 router.use('/me/tasks', require('./meTasks.routes'));
+// FLAG (Feature 11 — shared edit): ESS reimbursement/claims + travel. Customer session,
+// SELF_ONLY (subject resolved from the session). Apply for reimbursement / outdoor duty,
+// submit bills against a trip, live policy verdict, submit → opens the F10 chain.
+router.use('/me/expenses', require('./meExpenses.routes'));
 // Feature 10 ESS — "Delegate while I'm away" (out-of-office approval delegation).
 // Customer session; the delegating user is resolved from the session (self-only).
 router.use('/me/delegations', require('./meDelegations.routes'));

@@ -27,7 +27,9 @@ export const NAV_ITEMS = [
   { key: 'leave', label: 'Leave', href: '/leave', feature: 'leave', permission: 'canApproveLeave', icon: 'leaf' },
   { key: 'attendance', label: 'Attendance', href: '/attendance', feature: 'attendance', permission: 'canManageAttendance', icon: 'clock' },
   { key: 'compensation', label: 'Compensation', href: '/compensation', feature: 'hr', permission: 'canViewCompensation', icon: 'coin' },
-  { key: 'expenses', label: 'Expenses', href: '/expenses', feature: 'hr', permission: 'canViewEmployees', icon: 'receipt' },
+  { key: 'expenses', label: 'Reimbursements', href: '/expenses', feature: 'hr', permission: 'canViewEmployees', icon: 'receipt' },
+  // Feature 11 — travel / outdoor-duty queue (pre-trip approvals). Same view perm.
+  { key: 'travel', label: 'Travel', href: '/travel', feature: 'hr', permission: 'canViewEmployees', icon: 'wallet' },
   { key: 'loans', label: 'Loans', href: '/loans', feature: 'hr', permission: 'canViewEmployees', icon: 'loan' },
   { key: 'documents', label: 'Documents', href: '/documents', feature: 'hr', permission: 'canViewEmployees', icon: 'doc' },
   // Performance & Goals (Feature 8). Visible to Managers (TEAM band — their reports'
@@ -73,7 +75,7 @@ export const NAV_ITEMS = [
   // Settings groups Branding, Roles, Domain and Billing. Show it to anyone who
   // can manage ANY of those — a Finance role (canEditBilling, no canEditBranding)
   // must still reach the Billing tab. Per-tab/per-action gating happens inside.
-  { key: 'settings', label: 'Settings', href: '/settings', anyPermission: ['canEditBranding', 'canEditBilling', 'canEditDomain', 'canManageCompanyProfile'], group: true, icon: 'settings' },
+  { key: 'settings', label: 'Settings', href: '/settings', anyPermission: ['canEditBranding', 'canEditBilling', 'canEditDomain', 'canManageCompanyProfile', 'canManageExpensePolicy'], group: true, icon: 'settings' },
   // FLAG FOR MERGE: two NEW Settings sub-pages, gated on the new
   // canManageCompanyProfile rbac key (seeded true for Owner + HR-Admin). The
   // server is the real boundary; this just hides the links from operators who
@@ -83,6 +85,9 @@ export const NAV_ITEMS = [
   //   - Employee number  : the auto employee-number format (prefix/padding/start).
   { key: 'settings-company-profile', label: 'Company profile', href: '/settings/company-profile', permission: 'canManageCompanyProfile', parent: 'settings', icon: 'building' },
   { key: 'settings-employee-number', label: 'Employee number', href: '/settings/employee-number', permission: 'canManageCompanyProfile', parent: 'settings', icon: 'hash' },
+  // Feature 11 — the Travel & Expense Policy builder (per-diem / hotel matrix /
+  // transport rules / city tiers). Gated on the new canManageExpensePolicy key.
+  { key: 'settings-travel-policy', label: 'Travel & Expense policy', href: '/settings/travel-policy', permission: 'canManageExpensePolicy', parent: 'settings', icon: 'shield' },
 ];
 
 // ── Sidebar grouping ─────────────────────────────────────────────────────────
@@ -100,7 +105,7 @@ export const NAV_GROUPS = [
   { key: 'people-org', label: 'People & Org', icon: 'people', items: ['people', 'org', 'profile-changes', 'profile-policy'] },
   { key: 'talent', label: 'Talent', icon: 'onboarding', items: ['recruitment', 'onboarding', 'separations', 'performance'] },
   { key: 'time', label: 'Time', icon: 'calendar', items: ['leave', 'attendance'] },
-  { key: 'pay', label: 'Pay', icon: 'wallet', items: ['compensation', 'payroll', 'expenses', 'loans', 'reports'] },
+  { key: 'pay', label: 'Pay', icon: 'wallet', items: ['compensation', 'payroll', 'expenses', 'travel', 'loans', 'reports'] },
   // FLAG FOR MERGE: new Feature 10 group — approval chains + RBAC + reporting tree.
   { key: 'approvals-access', label: 'Approvals & Access', icon: 'approvals', items: ['approvals', 'access-roles', 'access-hierarchy'] },
 ];

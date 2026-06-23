@@ -69,6 +69,15 @@ const PERMISSIONS = Object.freeze({
   canManageHiring:   'Create/configure jobs, screening, scorecards, schedule interviews, manage offers',
   canViewHiring:     'View jobs, candidates, applications, merit lists (TEAM/req-scoped)',
   canScoreInterview: 'Submit interview scorecards for assigned panels (interviewer self-service)',
+  // Reimbursement/Claims + Travel (Feature 11) — additive; no migration.
+  // canApproveExpense is the approver key for claims + trips: Finance (ALL band) and
+  // Manager (TEAM band, self-dropped by the F1 SoD list) act on it; it is distinct from
+  // canManageEmployees so the approve/reject/reimburse actions are F1-scoped, not the
+  // old bare operator gate. canManageExpensePolicy gates the Travel & Expense Policy
+  // builder (per-diem / hotel-by-level×tier / transport rules / city-tier editor) and
+  // category CRUD — HR-Admin config, not a per-claim action.
+  canApproveExpense:        'Approve/reject/reimburse expense claims + travel requests (scoped + SoD)',
+  canManageExpensePolicy:   'Build the travel & expense policy (per-diem, hotel matrix, transport, city tiers)',
 });
 
 const PERMISSION_KEYS = Object.freeze(Object.keys(PERMISSIONS));
@@ -102,6 +111,8 @@ const SYSTEM_ROLES = Object.freeze({
     canManageApprovalWorkflows: true, canManageRoles: true, canManageHierarchy: true,
     // Feature 12 — HR-Admin owns the full recruitment/ATS surface.
     canManageHiring: true, canViewHiring: true, canScoreInterview: true,
+    // Feature 11 — HR-Admin owns the travel & expense policy builder + can approve.
+    canManageExpensePolicy: true, canApproveExpense: true,
     // No canEditBilling / canEditDomain / canApprovePayroll — Owner/Finance only
   },
   // Finance — payroll + compensation + statutory + billing.
@@ -112,6 +123,8 @@ const SYSTEM_ROLES = Object.freeze({
     canApproveCompensation: true,
     canManageStatutory: true, canFileReturns: true,
     canEditBilling: true,
+    // Feature 11 — Finance approves + reimburses expense claims (the settle action).
+    canApproveExpense: true,
   },
   // Manager — view directory + approve leave + manage attendance
   // (scoped to direct reports — see §6.3 for the location/team-scoped
@@ -130,6 +143,9 @@ const SYSTEM_ROLES = Object.freeze({
     // Feature 12 — a Manager who is also a hiring manager scores interviews for their
     // panels (scope-bound) and views their requisitions' pipelines/merit lists.
     canViewHiring: true, canScoreInterview: true,
+    // Feature 11 — a Manager approves their TEAM's claims/trips. The F1 TEAM band +
+    // the APPROVAL_ACTIONS self-drop (scopeResolver) enforce "team only, never own".
+    canApproveExpense: true,
   },
   // Recruiter — Feature 12 preset. Owns the recruitment/ATS surface (jobs,
   // screening, scorecards, scheduling, offers) and the read keys, but nothing

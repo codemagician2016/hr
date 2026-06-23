@@ -107,3 +107,51 @@ export function createDelegation(body) {
 export function revokeDelegation(id) {
   return apiSend(`/api/hr/me/delegations/${id}`, 'DELETE');
 }
+
+// ── Feature 11 (ESS) — Reimbursement/Claims + Travel ──────────────────────────
+// Reference data (categories + active policy summary) for the apply forms.
+export function fetchExpenseReference() {
+  return apiGet('/api/hr/me/expenses/reference');
+}
+// Live policy verdict for a draft bill line ("within / over budget" badge).
+export function previewExpensePolicy(body) {
+  return apiPost('/api/hr/me/expenses/policy/preview', body);
+}
+// Claims
+export function fetchMyClaims(query = '') {
+  return apiGet(`/api/hr/me/expenses/claims${query}`);
+}
+export function fetchMyClaim(id) {
+  return apiGet(`/api/hr/me/expenses/claims/${id}`);
+}
+export function createClaim(body) {
+  return apiPost('/api/hr/me/expenses/claims', body);
+}
+export function addClaimLine(id, body) {
+  return apiPost(`/api/hr/me/expenses/claims/${id}/lines`, body);
+}
+export function removeClaimLine(id, lineId) {
+  return apiSend(`/api/hr/me/expenses/claims/${id}/lines/${lineId}`, 'DELETE');
+}
+export function submitClaim(id) {
+  return apiPost(`/api/hr/me/expenses/claims/${id}/submit`);
+}
+export function cancelClaim(id) {
+  return apiPost(`/api/hr/me/expenses/claims/${id}/cancel`);
+}
+// Trips (outdoor duty / travel)
+export function fetchMyTrips(query = '') {
+  return apiGet(`/api/hr/me/expenses/trips${query}`);
+}
+export function fetchMyTrip(id) {
+  return apiGet(`/api/hr/me/expenses/trips/${id}`);
+}
+export function createTrip(body) {
+  return apiPost('/api/hr/me/expenses/trips', body);
+}
+export function submitTrip(id) {
+  return apiPost(`/api/hr/me/expenses/trips/${id}/submit`);
+}
+export function cancelTrip(id) {
+  return apiPost(`/api/hr/me/expenses/trips/${id}/cancel`);
+}

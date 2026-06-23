@@ -17,6 +17,10 @@ const { registerExpenseConsumer } = require('./consumers.expense');
 // field → HR approval). Self-registers on load like leave/expense; wired here too so
 // the explicit boot path stays the single source of truth.
 const { registerProfileChangeConsumer } = require('./consumers.profileChange');
+// FLAG (Feature 11 — shared edit): the TRAVEL consumer (pre-trip approval → flips
+// TravelRequest.status). Self-registers on load like the others; wired here too so
+// the explicit boot path stays the single source of truth.
+const { registerTravelConsumer } = require('./consumers.travel');
 
 let done = false;
 
@@ -25,6 +29,7 @@ function registerConsumers() {
   registerLeaveConsumer();
   registerExpenseConsumer();
   registerProfileChangeConsumer();
+  registerTravelConsumer();
   done = true;
 }
 
