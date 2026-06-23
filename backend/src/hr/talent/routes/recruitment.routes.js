@@ -13,6 +13,7 @@ const { protect, requirePermission } = require('../../../core/middleware/auth.mi
 const { effectivePermissions } = require('../../../core/lib/rbac');
 const { ROLES } = require('../../../core/lib/roles');
 const { attachSelfEmployee } = require('../../middleware/scope.middleware');
+const { attachRecruitmentScope } = require('../recruitment/recruitmentScope');
 const c = require('../controllers/recruitment.controller');
 const s = require('../recruitment/recruitment.scoring.controller');
 
@@ -32,7 +33,15 @@ function requireAny(...keys) {
 }
 
 const canManage = requireAny('canManageHiring', 'canManageEmployees');
-const canView = requireAny('canViewHiring', 'canViewEmployees', 'canManageHiring', 'canManageEmployees');
+// Read gate = the canView permission AND F1 read-scope resolution. The scope
+// middleware attaches req.recruitmentScope (the hiring-manager id-set the caller
+// may read across); the read handlers AND it into every query so a Manager/
+// Recruiter sees ONLY their own requisitions' jobs/candidates/applications/
+// merit/interviews/offers (admin/HR keep the tenant-wide view).
+const canView = [
+  requireAny('canViewHiring', 'canViewEmployees', 'canManageHiring', 'canManageEmployees'),
+  ...attachRecruitmentScope('canViewHiring'),
+];
 
 // ── Jobs ─────────────────────────────────────────────────────────────────────
 router.get('/jobs', canView, c.listJobs);
@@ -98,8 +107,11 @@ router.post('/me/scorecards/:id/submit', canScore, attachSelfEmployee, s.submitM
 router.get('/offers', canView, c.listOffers);
 router.get('/offers/:id', canView, c.getOffer);
 router.post('/offers', canManage, c.createOffer);
-router.post('/offers/:id/send', canManage, c.sendOffer);
-router.post('/offers/:id/accept', canManage, c.acceptOffer);
+// send/accept carry the offer-approval SoD: attachSelfEmployee resolves the
+// actor's own Employee so the controller can reject a scorer/panellist approving
+// their own candidate's offer (maker ≠ checker, §9.4).
+router.post('/offers/:id/send', canManage, attachSelfEmployee, c.sendOffer);
+router.post('/offers/:id/accept', canManage, attachSelfEmployee, c.acceptOffer);
 router.post('/offers/:id/decline', canManage, c.declineOffer);
 router.post('/offers/:id/render-letter', canManage, c.renderOfferLetter);
 router.post('/offers/:id/request-signature', canManage, s.requestOfferSignature);

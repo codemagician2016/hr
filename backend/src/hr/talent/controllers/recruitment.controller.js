@@ -18,6 +18,11 @@ const indiaCompliance = require('../../payroll/compliance/india.js');
 const { computeStatutoryWages } = indiaCompliance._internals;
 // Feature 4: onboarding journey seeding (invoked inside the acceptOffer tx).
 const { seedOnboardingJourney } = require('../../lifecycle/onboarding.service');
+// Feature 12 — F1 recruitment read-scope (requisition-scoped reads, SoD).
+const {
+  jobScopeWhere, scopeAllowsJob, accessibleJobIds, assignedInterviewIds,
+} = require('../recruitment/recruitmentScope');
+const { resolveAccessibleEmployeeIds, scopeAllows } = require('../../lib/scopeResolver');
 
 const DUP_MSG = 'A record with that code already exists';
 
@@ -79,7 +84,8 @@ function slugify(s) {
 async function listJobs(req, res, next) {
   try {
     const { businessId } = req.user;
-    const where = { businessId, deletedAt: null };
+    // F1 scope — a scoped recruiter sees only their own requisitions.
+    const where = { businessId, deletedAt: null, ...jobScopeWhere(req.recruitmentScope) };
     if (req.query.status) where.status = req.query.status;
     const items = await prisma.job.findMany({ where, orderBy: { createdAt: 'desc' } });
     res.json({ items });
@@ -94,6 +100,8 @@ async function getJob(req, res, next) {
       include: { stages: { orderBy: { sortOrder: 'asc' } } },
     });
     if (!item) return res.status(404).json({ message: 'Not found' });
+    // F1 scope — an out-of-requisition job 404s (IDOR-safe), not 403.
+    if (!scopeAllowsJob(req.recruitmentScope, item)) return res.status(404).json({ message: 'Not found' });
     res.json(item);
   } catch (e) { next(e); }
 }
@@ -181,8 +189,8 @@ const STAGE_FIELDS = ['name', 'kind', 'sortOrder'];
 async function listStages(req, res, next) {
   try {
     const { businessId } = req.user;
-    const job = await prisma.job.findFirst({ where: { id: req.params.jobId, businessId, deletedAt: null }, select: { id: true } });
-    if (!job) return res.status(404).json({ message: 'Job not found' });
+    const job = await prisma.job.findFirst({ where: { id: req.params.jobId, businessId, deletedAt: null }, select: { id: true, hiringManagerId: true } });
+    if (!job || !scopeAllowsJob(req.recruitmentScope, job)) return res.status(404).json({ message: 'Job not found' });
     const items = await prisma.jobStage.findMany({
       where: { businessId, jobId: req.params.jobId },
       orderBy: { sortOrder: 'asc' },
@@ -223,6 +231,10 @@ async function listCandidates(req, res, next) {
     const { businessId } = req.user;
     const where = { businessId, deletedAt: null };
     if (req.query.email) where.email = req.query.email;
+    // F1 scope — a scoped recruiter sees only candidates who applied to one of
+    // their requisitions (a candidate with no in-scope application is invisible).
+    const reach = await accessibleJobIds(businessId, req.recruitmentScope);
+    if (!reach.all) where.applications = { some: { jobId: { in: reach.ids } } };
     const items = await prisma.candidate.findMany({ where, orderBy: { createdAt: 'desc' } });
     res.json({ items });
   } catch (e) { next(e); }
@@ -231,9 +243,15 @@ async function listCandidates(req, res, next) {
 async function getCandidate(req, res, next) {
   try {
     const { businessId } = req.user;
+    const reach = await accessibleJobIds(businessId, req.recruitmentScope);
+    const where = { id: req.params.id, businessId, deletedAt: null };
+    // F1 scope — 404 a candidate with no application to an in-scope job.
+    if (!reach.all) where.applications = { some: { jobId: { in: reach.ids } } };
     const item = await prisma.candidate.findFirst({
-      where: { id: req.params.id, businessId, deletedAt: null },
-      include: { applications: true },
+      where,
+      include: reach.all
+        ? { applications: true }
+        : { applications: { where: { jobId: { in: reach.ids } } } },
     });
     if (!item) return res.status(404).json({ message: 'Not found' });
     res.json(item);
@@ -298,6 +316,14 @@ async function listApplications(req, res, next) {
     if (req.query.jobId) where.jobId = req.query.jobId;
     if (req.query.candidateId) where.candidateId = req.query.candidateId;
     if (req.query.status) where.status = req.query.status;
+    // F1 scope — applications under in-scope requisitions only.
+    const reach = await accessibleJobIds(businessId, req.recruitmentScope);
+    if (!reach.all) {
+      // intersect any caller-supplied jobId with the accessible set.
+      where.jobId = where.jobId && reach.ids.includes(where.jobId)
+        ? where.jobId
+        : { in: where.jobId ? [] : reach.ids };
+    }
     const items = await prisma.application.findMany({ where, orderBy: { createdAt: 'desc' } });
     res.json({ items });
   } catch (e) { next(e); }
@@ -308,9 +334,12 @@ async function getApplication(req, res, next) {
     const { businessId } = req.user;
     const item = await prisma.application.findFirst({
       where: { id: req.params.id, businessId },
-      include: { interviews: true, offers: true },
+      include: { interviews: true, offers: true, job: { select: { hiringManagerId: true } } },
     });
     if (!item) return res.status(404).json({ message: 'Not found' });
+    // F1 scope — 404 an application on an out-of-requisition job.
+    if (!scopeAllowsJob(req.recruitmentScope, item.job)) return res.status(404).json({ message: 'Not found' });
+    delete item.job;
     res.json(item);
   } catch (e) { next(e); }
 }
@@ -398,6 +427,19 @@ async function listInterviews(req, res, next) {
     const { businessId } = req.user;
     const where = { businessId };
     if (req.query.applicationId) where.applicationId = req.query.applicationId;
+    // F1 scope — interviews under in-scope requisitions OR ones the caller is
+    // personally panelled onto (assigned-interviewer fallback for a panellist who
+    // owns no requisition). ALL band keeps the tenant-wide view.
+    const scope = req.recruitmentScope;
+    if (scope && scope.kind !== 'ALL') {
+      const reach = await accessibleJobIds(businessId, scope);
+      const myIvIds = await assignedInterviewIds(businessId, req.user.employeeId);
+      const ors = [];
+      if (reach.ids && reach.ids.length) ors.push({ application: { jobId: { in: reach.ids } } });
+      if (myIvIds.length) ors.push({ id: { in: myIvIds } });
+      if (!ors.length) return res.json({ items: [] });
+      where.OR = ors;
+    }
     const items = await prisma.interview.findMany({ where, orderBy: { createdAt: 'desc' } });
     res.json({ items });
   } catch (e) { next(e); }
@@ -516,6 +558,12 @@ async function listOffers(req, res, next) {
     const where = { businessId };
     if (req.query.applicationId) where.applicationId = req.query.applicationId;
     if (req.query.status) where.status = req.query.status;
+    // F1 scope — offers on in-scope requisitions only.
+    const scope = req.recruitmentScope;
+    if (scope && scope.kind !== 'ALL') {
+      const reach = await accessibleJobIds(businessId, scope);
+      where.application = { is: { jobId: { in: reach.ids } } };
+    }
     const items = await prisma.offer.findMany({ where, orderBy: { createdAt: 'desc' } });
     res.json({ items });
   } catch (e) { next(e); }
@@ -524,8 +572,16 @@ async function listOffers(req, res, next) {
 async function getOffer(req, res, next) {
   try {
     const { businessId } = req.user;
-    const item = await prisma.offer.findFirst({ where: { id: req.params.id, businessId } });
+    const item = await prisma.offer.findFirst({
+      where: { id: req.params.id, businessId },
+      include: { application: { select: { job: { select: { hiringManagerId: true } } } } },
+    });
     if (!item) return res.status(404).json({ message: 'Not found' });
+    // F1 scope — 404 an offer on an out-of-requisition job.
+    if (!scopeAllowsJob(req.recruitmentScope, item.application && item.application.job)) {
+      return res.status(404).json({ message: 'Not found' });
+    }
+    delete item.application;
     res.json(item);
   } catch (e) { next(e); }
 }
@@ -567,12 +623,46 @@ async function createOffer(req, res, next) {
   } catch (e) { next(e); }
 }
 
+// ── Offer-approval Separation-of-Duties (§9.4, acceptance criterion 7) ─────────
+// An interviewer who scored — i.e. sat on the panel of, or submitted a scorecard
+// on, ANY interview of this candidate's application — must not be the one who
+// approves/extends (send) or finalises (accept) that candidate's offer. Maker ≠
+// checker. Returns the conflicting employeeId when the actor is a panellist/scorer.
+//
+// SUPER_ADMIN / a caller with no linked Employee (a pure HR-admin who never sat on
+// a panel) is structurally absent from every panel, so they always pass — the
+// guard only ever fires on someone who actually scored the candidate.
+async function offerApproverConflict(businessId, offer, actorEmployeeId) {
+  if (!actorEmployeeId) return null; // no linked Employee → cannot be a panellist
+  const interviews = await prisma.interview.findMany({
+    where: { businessId, applicationId: offer.applicationId },
+    select: { id: true, interviewerIds: true },
+  });
+  if (!interviews.length) return null;
+  // panellist check — the actor appears as a token in any interview's CSV panel.
+  const onPanel = interviews.some((iv) =>
+    String(iv.interviewerIds || '').split(',').map((t) => t.trim()).includes(actorEmployeeId));
+  if (onPanel) return actorEmployeeId;
+  // scorer check — the actor owns a scorecard on any of those interviews (covers a
+  // scorer who scored after being removed from the live panel CSV).
+  const card = await prisma.scorecard.findFirst({
+    where: { businessId, interviewId: { in: interviews.map((i) => i.id) }, interviewerEmployeeId: actorEmployeeId },
+    select: { id: true },
+  });
+  return card ? actorEmployeeId : null;
+}
+
+const SOD_MSG = 'Separation of duties: an interviewer who scored this candidate cannot approve their offer. A different approver is required.';
+
 // POST /offers/:id/send — DRAFT/APPROVED -> SENT, stamping sentAt.
 async function sendOffer(req, res, next) {
   try {
     const { businessId } = req.user;
     const offer = await prisma.offer.findFirst({ where: { id: req.params.id, businessId } });
     if (!offer) return res.status(404).json({ message: 'Not found' });
+    // SoD — the scorer/panellist of the candidate may not extend the offer.
+    const conflict = await offerApproverConflict(businessId, offer, req.user.employeeId);
+    if (conflict) return res.status(403).json({ message: SOD_MSG, code: 'OFFER_SOD' });
     if (!['DRAFT', 'APPROVED', 'PENDING_APPROVAL'].includes(offer.status)) {
       return res.status(409).json({ message: `Cannot send an offer in status ${offer.status}` });
     }
@@ -595,6 +685,10 @@ async function acceptOffer(req, res, next) {
     const { businessId } = req.user;
     const offer = await prisma.offer.findFirst({ where: { id: req.params.id, businessId } });
     if (!offer) return res.status(404).json({ message: 'Not found' });
+    // SoD — the scorer/panellist may not finalise (provision the hire from) the
+    // very offer they scored. Maker ≠ checker (§9.4, acceptance criterion 7).
+    const conflict = await offerApproverConflict(businessId, offer, req.user.employeeId);
+    if (conflict) return res.status(403).json({ message: SOD_MSG, code: 'OFFER_SOD' });
     if (offer.status !== 'SENT') {
       return res.status(409).json({ message: `Cannot accept an offer in status ${offer.status}` });
     }
@@ -699,6 +793,6 @@ module.exports = {
   listInterviews, createInterview, updateInterview,
   // offers
   listOffers, getOffer, createOffer, sendOffer, acceptOffer, declineOffer, renderOfferLetter,
-  // exported for unit-testing the pure 50% pre-flight
-  _internals: { offerWageCheck, toMinor, validateMeritWeights, slugify, parsePanel },
+  // exported for unit-testing the pure 50% pre-flight + offer-approval SoD
+  _internals: { offerWageCheck, toMinor, validateMeritWeights, slugify, parsePanel, offerApproverConflict },
 };
