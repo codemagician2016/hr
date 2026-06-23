@@ -36,17 +36,37 @@ const { effectivePermissions } = require('../../core/lib/rbac');
 
 const DEPTH_CAP = 64;
 
+// Terminal employee statuses — a person in one of these has left the company and
+// must never be a live approver, even if their portal User row is still isActive
+// (User deactivation can lag employee termination). Mirrors the meTasks/leave/ESS
+// lockout invariant (resolveActiveSelf checks emp.isActive).
+const TERMINATED_STATUSES = ['TERMINATED', 'RETIRED'];
+
+// A Prisma Employee `where` fragment for an EMPLOYABLE (live) employee: not
+// soft-deleted, isActive (not the explicit termination flag), and not in a terminal
+// status. Reused by every resolver that turns employees → approver userIds.
+function liveEmployeeWhere(businessId) {
+  return {
+    businessId,
+    deletedAt: null,
+    isActive: true,
+    status: { notIn: TERMINATED_STATUSES },
+  };
+}
+
 // ── resolve the requester's portal user id (for SoD self-exclusion) ─────────────
 function requesterUserId(requesterEmployee) {
   return requesterEmployee && requesterEmployee.userId ? requesterEmployee.userId : null;
 }
 
 // Map a set of Employee ids → their active portal user ids (Employee.userId).
+// Excludes terminated/inactive employees: a separated employee whose User login is
+// still active must NOT remain a valid SPECIFIC_EMPLOYEE / REPORTING_MANAGER approver.
 async function employeeUserIds(businessId, employeeIds) {
   const ids = [...new Set(employeeIds.filter(Boolean))];
   if (ids.length === 0) return [];
   const emps = await prisma.employee.findMany({
-    where: { id: { in: ids }, businessId, deletedAt: null, userId: { not: null } },
+    where: { id: { in: ids }, ...liveEmployeeWhere(businessId), userId: { not: null } },
     select: { userId: true },
   });
   return emps.map((e) => e.userId).filter(Boolean);
@@ -107,31 +127,56 @@ async function departmentHead(requesterEmployee, businessId) {
   return null;
 }
 
+// Set of userIds in the tenant linked to a TERMINATED/inactive employee. Such a user
+// must be dropped from every resolver — a separated employee whose login lingers is
+// not a valid approver (consistent with the leave/ESS terminated-employee lockout).
+async function terminatedEmployeeUserIds(businessId) {
+  const rows = await prisma.employee.findMany({
+    where: {
+      businessId,
+      deletedAt: null,
+      userId: { not: null },
+      OR: [{ isActive: false }, { status: { in: TERMINATED_STATUSES } }],
+    },
+    select: { userId: true },
+  });
+  return new Set(rows.map((r) => r.userId).filter(Boolean));
+}
+
 // All active users in the tenant whose effective permissions grant `permKey`.
 // Reuses the rbac catalog (effectivePermissions) so a custom role that ticks the
-// key is honoured, not just the seeded HR-Admin/Finance presets.
+// key is honoured, not just the seeded HR-Admin/Finance presets. Users linked to a
+// terminated/inactive employee are excluded (User.isActive can lag termination).
 async function usersWithPermission(businessId, permKey) {
-  const users = await prisma.user.findMany({
-    where: { businessId, isActive: true },
-    select: {
-      id: true, role: true,
-      businessRole: { select: { id: true, name: true, permissions: true, isSystem: true, defaultScope: true } },
-    },
-  });
+  const [users, terminated] = await Promise.all([
+    prisma.user.findMany({
+      where: { businessId, isActive: true },
+      select: {
+        id: true, role: true,
+        businessRole: { select: { id: true, name: true, permissions: true, isSystem: true, defaultScope: true } },
+      },
+    }),
+    terminatedEmployeeUserIds(businessId),
+  ]);
   return users.filter((u) => {
+    if (terminated.has(u.id)) return false;
     const perms = effectivePermissions(u);
     return !!(perms && perms[permKey]);
   }).map((u) => u.id);
 }
 
-// Users assigned a specific BusinessRole (SPECIFIC_ROLE).
+// Users assigned a specific BusinessRole (SPECIFIC_ROLE), excluding any linked to a
+// terminated/inactive employee.
 async function usersInRole(businessId, roleId) {
   if (!roleId) return [];
-  const users = await prisma.user.findMany({
-    where: { businessId, isActive: true, businessRoleId: roleId },
-    select: { id: true },
-  });
-  return users.map((u) => u.id);
+  const [users, terminated] = await Promise.all([
+    prisma.user.findMany({
+      where: { businessId, isActive: true, businessRoleId: roleId },
+      select: { id: true },
+    }),
+    terminatedEmployeeUserIds(businessId),
+  ]);
+  return users.filter((u) => !terminated.has(u.id)).map((u) => u.id);
 }
 
 // ── raw resolution: step → candidate userIds (before delegation + SoD) ──────────
@@ -189,15 +234,27 @@ async function expandDelegations(businessId, userIds, module, now) {
   return { userIds: [...out], delegationMap };
 }
 
-// Drop inactive/terminated/soft-deleted users (active-only invariant).
+// Drop inactive/terminated/soft-deleted users (active-only invariant). Also drops a
+// user whose LINKED Employee is terminated/inactive even when User.isActive still
+// lags — the single chokepoint that catches delegation targets + every resolver path.
 async function activeOnly(businessId, userIds) {
   if (userIds.length === 0) return [];
+  const unique = [...new Set(userIds)];
   const rows = await prisma.user.findMany({
-    where: { id: { in: [...new Set(userIds)] }, businessId, isActive: true },
+    where: {
+      id: { in: unique },
+      businessId,
+      isActive: true,
+      // No linked employee, OR a linked employee that is live (not terminated/inactive).
+      OR: [
+        { hrEmployee: { is: null } },
+        { hrEmployee: { isActive: true, status: { notIn: TERMINATED_STATUSES }, deletedAt: null } },
+      ],
+    },
     select: { id: true },
   });
   const live = new Set(rows.map((r) => r.id));
-  return [...new Set(userIds)].filter((id) => live.has(id));
+  return unique.filter((id) => live.has(id));
 }
 
 /**

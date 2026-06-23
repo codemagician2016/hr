@@ -15,6 +15,43 @@ const prisma = require('../../core/lib/prisma');
 const engine = require('../approvals/engine');
 const { previewChain } = require('../approvals/engine');
 const { validateCondition } = require('../approvals/conditions');
+const { effectivePermissions, effectiveCompVisibility } = require('../../core/lib/rbac');
+const { resolveAccessibleEmployeeIds, scopeAllows } = require('../lib/scopeResolver');
+const { maskCompensation } = require('../compensation/maskCompensation');
+
+// Modules whose payloadJson snapshots salary / disbursement amounts — these get
+// comp-masked per the viewer's effectiveCompVisibility before serialization.
+const COMP_MODULES = new Set(['COMPENSATION', 'PAYRUN']);
+
+// Money-bearing keys that may live at the payload root of a COMPENSATION/PAYRUN
+// snapshot. A non-ABSOLUTE viewer never sees the absolute numbers.
+const COMP_AMOUNT_KEYS = [
+  'ctcAnnual', 'grossMonthly', 'netMonthly', 'grossPay', 'netPay', 'amount',
+  'amountMonthly', 'amountAnnual', 'totalEarnings', 'totalDeductions', 'lines',
+];
+
+// Mask a COMPENSATION/PAYRUN payload for a viewer who lacks ABSOLUTE comp visibility.
+//
+// IMPORTANT: a SELF_ONLY level legitimately carries FULL absolute money — but only
+// when the viewer is looking at their OWN compensation. Here the viewer is an
+// APPROVER reading someone ELSE's request (requesterEmployeeId), so SELF_ONLY must be
+// FORCED DOWN to RANGE_ONLY (no absolute money) unless the viewer IS the requester.
+// ABSOLUTE viewers get the payload verbatim.
+function maskCompPayload(payload, viewer, requesterEmployeeId) {
+  const base = effectiveCompVisibility(viewer);
+  if (base === 'ABSOLUTE') return payload;
+  const isSelf = !!(viewer && viewer.employeeId && requesterEmployeeId && viewer.employeeId === requesterEmployeeId);
+  // Non-self approver: never SELF_ONLY (would leak absolute money). Floor at RANGE_ONLY,
+  // and keep NONE as NONE. Self viewer keeps their own (SELF_ONLY) breakup.
+  let level = base;
+  if (!isSelf && base === 'SELF_ONLY') level = 'RANGE_ONLY';
+  const masked = maskCompensation(payload || {}, viewer, { level });
+  const out = { ...(payload || {}) };
+  for (const k of COMP_AMOUNT_KEYS) delete out[k];
+  // Re-attach only the masking envelope's view (range/band/coarse delta; absolute only
+  // when self/ABSOLUTE, which the early-return above already handled).
+  return { ...out, _comp: masked };
+}
 
 const MODULES = new Set([
   'LEAVE', 'EXPENSE', 'TRAVEL', 'LOAN', 'COMPENSATION', 'OFFER', 'PROFILE_CHANGE',
@@ -271,15 +308,49 @@ async function inbox(req, res, next) {
   } catch (e) { next(e); }
 }
 
+// The set of userIds who are (or were) approvers on a request: the active approver
+// set + every historical actor (incl. the delegators they acted for). This is the
+// "active or historical approver" gate from §7.2.
+function approverUniverse(r) {
+  const ids = new Set();
+  const active = r.payloadJson && r.payloadJson._active;
+  if (active && Array.isArray(active.approverUserIds)) active.approverUserIds.forEach((u) => ids.add(u));
+  for (const a of r.actions || []) {
+    if (a.approverUserId) ids.add(a.approverUserId);
+    if (a.delegatedFromUserId) ids.add(a.delegatedFromUserId);
+  }
+  return ids;
+}
+
 async function getRequest(req, res, next) {
   try {
     const { businessId } = req.user;
+    const me = callerUserId(req);
     const r = await prisma.approvalRequest.findFirst({
       where: { id: req.params.id, businessId },
       include: { actions: { orderBy: { actedAt: 'asc' } } },
     });
     if (!r) return res.status(404).json({ message: 'Not found' });
-    const { _chain, _active, _ctx, ...payload } = r.payloadJson || {};
+
+    // ── §7.2 access gate (this was MISSING — any operator could read any request).
+    // A caller may read the request iff they are: (a) an approval-workflows admin,
+    // (b) in the active/historical approver set, OR (c) pass the F1 data-scope check
+    // on the requester's employee. Otherwise 404 (never confirm existence / leak comp).
+    const perms = effectivePermissions(req.user) || {};
+    const isAdmin = req.user.role === 'SUPER_ADMIN' || perms.canManageApprovalWorkflows === true;
+    let allowed = isAdmin;
+    if (!allowed && me && approverUniverse(r).has(me)) allowed = true;
+    if (!allowed && r.requesterEmployeeId) {
+      const scope = await resolveAccessibleEmployeeIds(req.user, 'approvals.read');
+      if (scopeAllows(scope, r.requesterEmployeeId)) allowed = true;
+    }
+    if (!allowed) return res.status(404).json({ message: 'Not found' });
+
+    const { _chain, _active, _ctx, ...rawPayload } = r.payloadJson || {};
+    // Comp masking: a COMPENSATION/PAYRUN snapshot carries salary/disbursement amounts.
+    // A viewer without ABSOLUTE comp-visibility never sees the absolute numbers, even
+    // when they ARE an approver (approving ≠ seeing exact pay).
+    const payload = COMP_MODULES.has(r.module) ? maskCompPayload(rawPayload, req.user, r.requesterEmployeeId) : rawPayload;
     res.json({
       id: r.id, module: r.module, entityType: r.entityType, entityId: r.entityId,
       status: r.status, currentStepOrder: r.currentStepOrder, slaDueAt: r.slaDueAt,

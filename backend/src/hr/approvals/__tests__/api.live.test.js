@@ -81,7 +81,10 @@ async function main() {
     const mgr = await mkUserEmp(businessId, 'Mgr');
     const ic = await mkUserEmp(businessId, 'Ic', mgr.emp.id);
     const fin = await mkUserEmp(businessId, 'Fin');
-    const adminUser = { id: mgr.user.id, businessId, businessRoleId: null }; // acts as the operator for config calls
+    // A privileged operator for config + role CRUD. role:BUSINESS_ADMIN ⇒ Owner-equivalent
+    // effective perms (the real caller has cleared the canManageRoles route gate), so the
+    // §7.4 privilege-escalation cap (subset/Owner-only-key check) treats it as full-control.
+    const adminUser = { id: mgr.user.id, businessId, businessRoleId: null, role: 'BUSINESS_ADMIN' };
 
     // ── (1) create a definition via API ────────────────────────────────────────
     log('(1) POST /workflows → create draft:');

@@ -15,9 +15,14 @@
 const express = require('express');
 const router = express.Router();
 const { protect, requirePermission } = require('../../core/middleware/auth.middleware');
+const { attachSelfEmployee } = require('../middleware/scope.middleware');
 const c = require('../controllers/approvals.controller');
 
 router.use(protect);
+// F1 hierarchy anchor (req.user.employeeId) — GET /:id falls back to a data-scope
+// check on the requester's employee when the caller is neither an approver nor an
+// approval-workflows admin.
+router.use(attachSelfEmployee);
 
 const WF = requirePermission('canManageApprovalWorkflows');
 
