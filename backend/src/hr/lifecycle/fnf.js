@@ -68,13 +68,23 @@ function computeGratuityLine(ctx) {
     serviceMonths: int(ctx.serviceMonths),
     actCovered: true,
   });
-  // On a death/disablement waiver, pay the formula amount even when <5 years.
+  // On a death/disablement waiver, pay the formula amount even when <5 years. The
+  // ₹20,00,000 cap is the TAX-EXEMPT cap, never a cap on the PAYOUT — mirror the
+  // india.js normal path: amountMinor = grossMinor (uncapped), exemptMinor capped.
   if (!g.eligible && waived) {
     const completedYears = int(ctx.serviceYears) + (int(ctx.serviceMonths) >= 6 ? 1 : 0);
     const grossRaw = (int(ctx.basicDaMonthlyMinor) * 15 * completedYears) / 26;
     const grossMinor = Math.floor(grossRaw + 0.5);
-    const capMinor = 2000000 * 100; // ₹20,00,000 in paise
-    return { amountMinor: Math.min(grossMinor, capMinor), eligible: true, waived: true, completedYears };
+    const capMinor = 2000000 * 100; // ₹20,00,000 in paise (tax-exempt cap only)
+    const exemptMinor = Math.min(grossMinor, capMinor);
+    return {
+      amountMinor: grossMinor,
+      exemptMinor,
+      taxableMinor: grossMinor - exemptMinor,
+      eligible: true,
+      waived: true,
+      completedYears,
+    };
   }
   return {
     amountMinor: g.grossMinor,
@@ -92,9 +102,11 @@ function computeGratuityLine(ctx) {
 function computeLeaveEncashment(ctx) {
   const days = Number(ctx.encashableLeaveDays) || 0;
   if (days <= 0) return { days: 0, amountMinor: 0, perDayMinor: perDay26(ctx.basicDaMonthlyMinor) };
+  // Round ONCE: value the full encashment off the unrounded monthly Basic+DA ÷ 26
+  // (days may be fractional, Decimal(8,4)); perDayMinor is kept for display only and
+  // is NOT the amount basis (rounding per-day THEN multiplying double-rounds).
+  const amountMinor = Math.floor((int(ctx.basicDaMonthlyMinor) * days) / 26 + 0.5);
   const perDayMinor = perDay26(ctx.basicDaMonthlyMinor);
-  // days may be fractional (Decimal(8,4)); keep the product exact then round.
-  const amountMinor = Math.floor(perDayMinor * days + 0.5);
   return { days, amountMinor, perDayMinor };
 }
 
@@ -134,9 +146,21 @@ function computeNotice(ctx) {
 // 8% of gross-since-anniversary (pre-entitlement / termination 8%, s28) PLUS the
 // untaken annual-leave entitlement valued at the GREATER OF OWP and AWE (§9.5).
 // Reuses compliance/holidaysAct.js. IN → 0 (gratuity path instead).
+//
+// M6 fix: the controller MUST supply the real earnings (grossSinceAnniversaryMinor
+// from actual payroll history + OWP/AWE from the 52-week history). If they cannot be
+// resolved we MUST NOT fabricate an 8%-of-zero / proxy number: the caller passes
+// `nz.earningsResolved === false` and we return a clearly-flagged `requiresInput`
+// state so the controller blocks compute (422 'nz-earnings-required') rather than
+// persisting a wrong payout. Pre-existing callers that pass real figures are unchanged.
 function computeNzHolidayPayout(ctx) {
-  if (ctx.country !== 'NZ') return { amountMinor: 0, eightPctMinor: 0, untakenMinor: 0 };
+  if (ctx.country !== 'NZ') return { amountMinor: 0, eightPctMinor: 0, untakenMinor: 0, requiresInput: false };
   const nz = ctx.nz || {};
+
+  // Earnings not resolvable from payroll history and not supplied → flag, don't guess.
+  if (nz.earningsResolved === false) {
+    return { amountMinor: 0, eightPctMinor: 0, untakenMinor: 0, requiresInput: true };
+  }
 
   // (a) 8% pre-entitlement on gross earnings since the last anniversary.
   const preEntitle = holidaysAct.valueLeave('ANNUAL_HOLIDAY_PRE_ENTITLE', {
@@ -158,7 +182,7 @@ function computeNzHolidayPayout(ctx) {
     });
     untakenMinor = int(vested.amountMinor);
   }
-  return { amountMinor: eightPctMinor + untakenMinor, eightPctMinor, untakenMinor };
+  return { amountMinor: eightPctMinor + untakenMinor, eightPctMinor, untakenMinor, requiresInput: false };
 }
 
 // ── 5. Recoveries (loan foreclosure + asset recovery) ────────────────────────
@@ -285,6 +309,9 @@ function computeFnf(separationCase, ctx = {}) {
     // Negative net = the employee owes the company (recoveries > earnings). The
     // FnF still produces a PayRun(type=FNF) (§7 QA14); HR surfaces the balance.
     recoverableBalance: netMinor < 0,
+    // M6: when the NZ payout needs real earnings the controller couldn't resolve,
+    // the result is INCOMPLETE — the controller must block compute (422), not persist.
+    nzRequiresInput: country === 'NZ' && nzHoliday.requiresInput === true,
   };
 }
 

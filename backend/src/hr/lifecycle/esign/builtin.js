@@ -99,10 +99,28 @@ async function storeArtifact({ dataUrl, businessId, scope }) {
   return dataUrl;
 }
 
+// The server secret the audit certificate is HMAC-sealed with. A dedicated
+// ESIGN_CERT_SECRET is preferred; it falls back to JWT_SECRET, then to a build-time
+// constant (dev/test only) so the cert is ALWAYS sealed and the HMAC is ALWAYS real.
+function getCertSecret() {
+  return process.env.ESIGN_CERT_SECRET || process.env.JWT_SECRET || 'drifthr-esign-cert-dev-secret';
+}
+
+// HMAC-SHA256 of the certificate body (hex). This is the tamper seal: a verifier
+// re-derives the HMAC over the same canonical body with the server secret and
+// compares it to the embedded value — any edit to the body changes the HMAC.
+function certHmac(body) {
+  return crypto.createHmac('sha256', getCertSecret()).update(body, 'utf8').digest('hex');
+}
+
 // Build the audit certificate as an HTML document (data URL). Captures intent +
-// attribution + integrity for every signer. This is the artifact a later PDF pass
-// would flatten; here it stands alone and is itself hashed for integrity.
+// attribution + integrity for every signer, and is HMAC-SEALED with a server secret
+// so tamper is cryptographically detectable (D13) — not merely "claimed". The HMAC
+// is computed over the canonical body (everything before the seal) and embedded in
+// the document; buildAuditCertificate also RETURNS the hmac so the caller can store
+// it for later verification.
 function buildAuditCertificate({ envelope, signers, docHash }) {
+  const completedIso = new Date().toISOString();
   const rows = signers.map((s) => `
     <tr>
       <td>${escapeHtml(s.name)} &lt;${escapeHtml(s.email)}&gt;</td>
@@ -112,21 +130,27 @@ function buildAuditCertificate({ envelope, signers, docHash }) {
       <td>${escapeHtml(s.ipAddress || '—')}</td>
       <td><code>${escapeHtml(s.signatureHash || '—')}</code></td>
     </tr>`).join('');
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Signature audit certificate</title></head>
-<body>
-<h1>Signature audit certificate</h1>
+  // Canonical body: deterministic from the envelope/signer facts (no nonce) so the
+  // HMAC over it is reproducible by a verifier holding the same secret.
+  const body = `<h1>Signature audit certificate</h1>
 <p><strong>Envelope:</strong> ${escapeHtml(envelope.id)}</p>
 <p><strong>Subject:</strong> ${escapeHtml(envelope.subject)}</p>
 <p><strong>Document SHA-256:</strong> <code>${escapeHtml(docHash)}</code></p>
-<p><strong>Completed (UTC):</strong> ${new Date().toISOString()}</p>
+<p><strong>Completed (UTC):</strong> ${completedIso}</p>
 <p><strong>Legal basis:</strong> IN IT Act 2000 §10A; NZ Contract &amp; Commercial Law Act 2017 Part 4.</p>
 <table border="1" cellpadding="6" cellspacing="0">
   <thead><tr><th>Signer</th><th>Role</th><th>Signed at (UTC)</th><th>Consent</th><th>IP</th><th>Signature hash</th></tr></thead>
   <tbody>${rows}</tbody>
-</table>
+</table>`;
+  const hmac = certHmac(body);
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Signature audit certificate</title></head>
+<body>
+${body}
+<p><strong>Integrity seal (HMAC-SHA256):</strong> <code id="cert-hmac">${hmac}</code></p>
+<p><em>This certificate is HMAC-sealed with a server secret; recompute the HMAC over the body above to verify it has not been altered.</em></p>
 </body></html>`;
   const b64 = Buffer.from(html, 'utf8').toString('base64');
-  return `data:text/html;base64,${b64}`;
+  return { dataUrl: `data:text/html;base64,${b64}`, hmac, body };
 }
 
 function escapeHtml(v) {
@@ -154,9 +178,21 @@ async function createEnvelope(input, prisma) {
     throw new Error('createEnvelope requires a documentTemplateId or employeeDocumentId');
   }
 
-  const tokenExpiresAt = expiresAt
-    ? new Date(expiresAt)
-    : new Date(Date.now() + DEFAULT_TTL_DAYS * 86400000);
+  // D16: reject a past expiresAt at creation — an envelope that is born expired can
+  // never be signed (and would be a confusing no-op). A malformed date is rejected
+  // too. Absent → the default TTL.
+  let tokenExpiresAt;
+  if (expiresAt) {
+    tokenExpiresAt = new Date(expiresAt);
+    if (Number.isNaN(tokenExpiresAt.getTime())) {
+      throw new EsignError('createEnvelope: expiresAt is not a valid date', 422);
+    }
+    if (tokenExpiresAt.getTime() <= Date.now()) {
+      throw new EsignError('createEnvelope: expiresAt must be in the future', 422);
+    }
+  } else {
+    tokenExpiresAt = new Date(Date.now() + DEFAULT_TTL_DAYS * 86400000);
+  }
 
   const run = async (tx) => {
     const envelope = await tx.signatureEnvelope.create({
@@ -244,6 +280,16 @@ async function sign(input, prisma) {
     if (['VOIDED', 'DECLINED', 'EXPIRED'].includes(envelope.status)) {
       throw new EsignError(`This envelope is ${envelope.status.toLowerCase()} and cannot be signed`, 409);
     }
+    // D14: enforce the ENVELOPE expiry at sign (the signer-token expiry is checked
+    // above; this is the separate envelope-level deadline). A past expiry → 410
+    // Gone. No signature is recorded (we throw before any signer write). The EXPIRED
+    // status flip is done OUTSIDE this tx (the throw rolls the tx back), so we tag
+    // the error and the wrapper persists the terminal status separately.
+    if (envelope.expiresAt && new Date(envelope.expiresAt).getTime() < Date.now()) {
+      const err = new EsignError('This envelope has expired and can no longer be signed', 410);
+      err.expireEnvelopeId = envelope.status !== 'EXPIRED' ? envelope.id : null;
+      throw err;
+    }
 
     // Idempotency: a second sign on an already-SIGNED signer is inert (no-op).
     if (candidate.status === 'SIGNED') {
@@ -287,7 +333,15 @@ async function sign(input, prisma) {
       },
     });
 
-    // Re-read the full signer set to decide completion.
+    // D15: completion under concurrency. Take a ROW LOCK on the envelope so two
+    // concurrent signs serialise on it — the second blocks until the first commits,
+    // then re-reads the now-committed signer set. Without the lock, under READ
+    // COMMITTED each tx could read a stale "not all signed" set and leave the
+    // envelope permanently PARTIALLY_SIGNED. The lock makes the completion decision
+    // a function of the COMMITTED state, not an interleaving snapshot.
+    await tx.$queryRaw`SELECT id FROM "SignatureEnvelope" WHERE id = ${envelope.id} FOR UPDATE`;
+
+    // Re-read the full signer set (now serialised behind the lock) to decide completion.
     const allSigners = await tx.signatureSigner.findMany({
       where: { envelopeId: envelope.id }, orderBy: { signerOrder: 'asc' },
     });
@@ -299,8 +353,9 @@ async function sign(input, prisma) {
     });
 
     if (allSigned) {
-      // Generate the audit certificate (intent + attribution + integrity).
-      const certDataUrl = buildAuditCertificate({ envelope: finalEnvelope, signers: allSigners, docHash });
+      // Generate the audit certificate (intent + attribution + integrity), HMAC-sealed.
+      const cert = buildAuditCertificate({ envelope: finalEnvelope, signers: allSigners, docHash });
+      const certDataUrl = cert.dataUrl;
       const certificateUrl = await storeArtifact({
         dataUrl: certDataUrl, businessId: envelope.businessId, scope: 'esign-cert',
       });
@@ -341,8 +396,22 @@ async function sign(input, prisma) {
     return { signer, envelope: finalEnvelope, completed: allSigned };
   };
 
+  // D14: when the sign rejects because the ENVELOPE expired, flip it to EXPIRED in a
+  // SEPARATE write (the failing tx rolled back). The 410 still propagates to the caller.
+  const expireOutsideTx = async (err) => {
+    if (err && err.expireEnvelopeId && prisma && !prisma.__isTx) {
+      try {
+        await prisma.signatureEnvelope.update({
+          where: { id: err.expireEnvelopeId },
+          data: { status: 'EXPIRED', version: { increment: 1 } },
+        });
+      } catch { /* best-effort terminal flip */ }
+    }
+    throw err;
+  };
+
   if (prisma && typeof prisma.$transaction === 'function' && !prisma.__isTx) {
-    return prisma.$transaction((tx) => run(tx));
+    return prisma.$transaction((tx) => run(tx)).catch(expireOutsideTx);
   }
   return run(prisma);
 }
@@ -384,4 +453,6 @@ module.exports = {
   mintSignerToken,
   resolveDocHash,
   buildAuditCertificate,
+  certHmac,
+  getCertSecret,
 };

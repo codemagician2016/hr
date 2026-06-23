@@ -325,6 +325,118 @@ async function main() {
     ], mgrScopeReq);
     const mgrDocIds = (mgrList.body.items || []).map((d) => d.id);
     assert(!mgrDocIds.includes(hrOnlyDoc.id), 'manager view excludes HR_ONLY docs (in-scope report)');
+
+    const s3 = require('../../../core/lib/s3');
+
+    // ════════════════════════════════════════════════════════════════════════
+    // D12 — PDF upload succeeds on BOTH the inline-fallback AND the S3 branch
+    // ════════════════════════════════════════════════════════════════════════
+    log('\nD12) PDF upload works on both the inline + S3 branches:');
+    // (a) Inline-fallback branch (S3 not configured in test) — already exercised by
+    //     QA22 above, re-assert explicitly that a PDF lands.
+    const pdfUp = await callController(documents.createDocument, {
+      user: hrActor, params: { employeeId: report.id },
+      body: { category: 'CONTRACT', name: 'PDF inline', fileBase64: pdfDataUrl('inline-pdf'), visibility: 'HR_ONLY' },
+    });
+    assert(pdfUp.statusCode === 201 && pdfUp.body.mimeType === 'application/pdf', 'D12 PDF upload (inline branch) → 201 application/pdf');
+    // (b) S3 branch: the allow-list now accepts application/pdf, so parseDataUrl no
+    //     longer throws on a PDF (the old image-only list 500'd). Prove it directly.
+    let parsedPdf = null; let parseErr = null;
+    try { parsedPdf = s3.parseDataUrl(pdfDataUrl('s3-pdf')); } catch (e) { parseErr = e; }
+    assert(!parseErr && parsedPdf && parsedPdf.mime === 'application/pdf' && parsedPdf.ext === 'pdf', 'D12 s3.parseDataUrl accepts application/pdf (S3 branch no longer 500s)');
+    // A non-allow-listed type still throws (defence intact).
+    let badParse = null;
+    try { s3.parseDataUrl('data:application/x-msdownload;base64,QQ=='); } catch (e) { badParse = e; }
+    assert(!!badParse, 'D12 s3.parseDataUrl still rejects a non-allow-listed type');
+
+    // ════════════════════════════════════════════════════════════════════════
+    // D14 — envelope expiry enforced at sign (even with a still-valid token)
+    // ════════════════════════════════════════════════════════════════════════
+    log('\nD14) expired ENVELOPE rejected at sign (token still valid):');
+    const envExpDoc = await prisma.employeeDocument.create({
+      data: { businessId, employeeId: report.id, category: 'POLICY_ACK', name: 'EnvExpiry', fileUrl: pdfDataUrl('envexp'), fileHash: sha256Hex('envexp'), visibility: 'EMPLOYEE_VISIBLE' },
+    });
+    const envExp = await builtin.createEnvelope({
+      businessId, subject: 'Envelope expiry', employeeDocumentId: envExpDoc.id,
+      signers: [{ role: 'EMPLOYEE', name: 'Rep Ort', email: `${PREFIX}-rpt@x.com` }],
+    }, prisma);
+    const envExpToken = envExp.signers[0].rawToken;
+    // Push the ENVELOPE expiry into the past but keep the SIGNER token valid → the
+    // envelope-level deadline (D14) must still reject, distinct from QA19 (token expiry).
+    await prisma.signatureEnvelope.update({ where: { id: envExp.envelope.id }, data: { expiresAt: new Date(Date.now() - 86400000) } });
+    let envExpErr = null;
+    try { await builtin.sign({ token: envExpToken, signatureImageDataUrl: 'data:image/png;base64,iVBORw0KGgo=', consent: true }, prisma); }
+    catch (e) { envExpErr = e; }
+    assert(envExpErr && envExpErr.status === 410, 'D14 expired envelope → 410');
+    const envExpSigner = await prisma.signatureSigner.findUnique({ where: { id: envExp.signers[0].id } });
+    assert(envExpSigner.status !== 'SIGNED' && !envExpSigner.signatureHash, 'D14 no signature recorded on an expired envelope');
+    const envExpAfter = await prisma.signatureEnvelope.findUnique({ where: { id: envExp.envelope.id } });
+    assert(envExpAfter.status === 'EXPIRED', 'D14 envelope flipped to EXPIRED (terminal)');
+
+    // ════════════════════════════════════════════════════════════════════════
+    // D16 — createEnvelope rejects a PAST expiresAt
+    // ════════════════════════════════════════════════════════════════════════
+    log('\nD16) createEnvelope rejects a past expiresAt:');
+    let pastErr = null;
+    try {
+      await builtin.createEnvelope({
+        businessId, subject: 'Past expiry', employeeDocumentId: envExpDoc.id,
+        signers: [{ role: 'EMPLOYEE', name: 'Rep Ort', email: `${PREFIX}-rpt@x.com` }],
+        expiresAt: new Date(Date.now() - 3600_000).toISOString(),
+      }, prisma);
+    } catch (e) { pastErr = e; }
+    assert(pastErr && pastErr.status === 422, 'D16 past expiresAt at creation → 422 (rejected)');
+
+    // ════════════════════════════════════════════════════════════════════════
+    // D13 — audit certificate is HMAC-SEALED with a server secret (tamper-evident)
+    // ════════════════════════════════════════════════════════════════════════
+    log('\nD13) audit certificate is HMAC-sealed (real tamper-evidence):');
+    const cert = builtin.buildAuditCertificate({
+      envelope: { id: 'env-x', subject: 'Cert test' },
+      signers: [{ name: 'A', email: 'a@x.com', role: 'EMPLOYEE', signedAt: new Date(), consentAt: new Date(), ipAddress: '9.9.9.9', signatureHash: 'abc' }],
+      docHash: 'deadbeef',
+    });
+    assert(cert && typeof cert.hmac === 'string' && cert.hmac.length === 64, 'D13 buildAuditCertificate returns a 64-hex HMAC seal');
+    // Recompute the HMAC over the SAME body → matches (verifier path).
+    assert(builtin.certHmac(cert.body) === cert.hmac, 'D13 HMAC recomputes over the body (verifiable)');
+    // Tamper the body → the recomputed HMAC no longer matches the seal.
+    assert(builtin.certHmac(cert.body + ' (tampered)') !== cert.hmac, 'D13 tampered body → HMAC mismatch (tamper detected)');
+    // A different secret yields a different HMAC (the seal depends on the secret).
+    const realSecret = process.env.ESIGN_CERT_SECRET; process.env.ESIGN_CERT_SECRET = 'a-different-secret';
+    assert(builtin.certHmac(cert.body) !== cert.hmac, 'D13 HMAC depends on the server secret');
+    if (realSecret === undefined) delete process.env.ESIGN_CERT_SECRET; else process.env.ESIGN_CERT_SECRET = realSecret;
+    // The HMAC is embedded in the rendered certificate so it travels with the artifact.
+    const certHtml = Buffer.from(cert.dataUrl.split(',')[1], 'base64').toString('utf8');
+    assert(certHtml.includes(cert.hmac), 'D13 HMAC seal embedded in the rendered certificate');
+
+    // ════════════════════════════════════════════════════════════════════════
+    // D15 — concurrent final signs cannot leave the envelope stuck PARTIALLY_SIGNED
+    // ════════════════════════════════════════════════════════════════════════
+    log('\nD15) concurrent dual-sign completes (no stuck PARTIALLY_SIGNED):');
+    const concDoc = await prisma.employeeDocument.create({
+      data: { businessId, employeeId: report.id, category: 'CONTRACT', name: 'Concurrent', fileUrl: pdfDataUrl('conc'), fileHash: sha256Hex('conc'), visibility: 'EMPLOYEE_VISIBLE' },
+    });
+    // Non-sequential dual-signer so BOTH tokens are immediately live.
+    const conc = await builtin.createEnvelope({
+      businessId, subject: 'Concurrent contract', employeeDocumentId: concDoc.id, sequential: false,
+      signers: [
+        { role: 'EMPLOYEE', name: 'Rep Ort', email: `${PREFIX}-rpt@x.com`, signerOrder: 1 },
+        { role: 'EMPLOYER', name: 'Mgr One', email: `${PREFIX}-mgr@x.com`, signerOrder: 2 },
+      ],
+    }, prisma);
+    const ctok1 = conc.signers.find((s) => s.signerOrder === 1).rawToken;
+    const ctok2 = conc.signers.find((s) => s.signerOrder === 2).rawToken;
+    // Fire both signs concurrently — the FOR UPDATE row-lock serialises completion so
+    // exactly one observes "all signed" and the envelope ends COMPLETED, never stuck.
+    const sig = 'data:image/png;base64,iVBORw0KGgo=';
+    const [r1, r2] = await Promise.all([
+      builtin.sign({ token: ctok1, signatureImageDataUrl: sig, consent: true }, prisma),
+      builtin.sign({ token: ctok2, signatureImageDataUrl: sig, consent: true }, prisma),
+    ]);
+    assert(r1 && r2, 'D15 both concurrent signs resolved');
+    const concEnv = await prisma.signatureEnvelope.findUnique({ where: { id: conc.envelope.id } });
+    assert(concEnv.status === 'COMPLETED', 'D15 envelope COMPLETED after concurrent signs (not stuck PARTIALLY_SIGNED)');
+    assert(!!concEnv.completedAt && !!concEnv.certificateUrl, 'D15 completion artifacts (completedAt + certificateUrl) recorded');
   } finally {
     await cleanup();
     await prisma.$disconnect();

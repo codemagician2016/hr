@@ -186,6 +186,96 @@ function partA() {
     const assetLine = r.lines.deductions.find((d) => d.code === 'FNF_ASSET_RECOVERY');
     eq(assetLine ? assetLine.amountMinor : 0, r.snapshot.assetRecoveryAmountMinor, 'QA15 asset line == snapshot.assetRecoveryAmount');
   }
+
+  // ── M1+M2 (QA15-reconcile): payRunInput reconciles gross−ded=net AND carries
+  //    EVERY component incl. unpaid salary + employer pay-in-lieu + statutory ──
+  log('M1+M2) PayRun-from-snapshot reconciles + carries all components:');
+  {
+    // Employer-initiated (redundancy) so notice is a pay-in-lieu EARNING, plus
+    // unpaid salary + statutory deduction — the three the old re-derivation dropped.
+    const r = computeFnf({ type: 'REDUNDANCY' }, {
+      country: 'IN', basicDaMonthlyMinor: R(40000), grossMonthlyMinor: R(80000),
+      serviceYears: 7, serviceMonths: 6, encashableLeaveDays: 12,
+      noticeShortfallDays: 10,                 // employer-initiated → pay-in-lieu earning
+      unpaidSalaryMinor: R(15000),             // days-worked-to-LWD
+      statutoryDeductionsMinor: R(3000),       // TDS on the FnF
+      loanOutstandingMinor: R(20000), assetRecoveryMinor: R(5000),
+    });
+    const pri = r.payRunInput;
+    const earnSum = pri.earnings.reduce((a, e) => a + e.amountMinor, 0);
+    const dedSum = pri.deductions.reduce((a, d) => a + d.amountMinor, 0);
+    // Reconciliation: gross − deductions === net, ALWAYS.
+    eq(pri.grossMinor, earnSum, 'M1 payRunInput.gross == Σ earning lines');
+    eq(pri.totalDeductionsMinor, dedSum, 'M1 payRunInput.deductions == Σ deduction lines');
+    eq(pri.grossMinor - pri.totalDeductionsMinor, pri.netMinor, 'M1 gross − deductions === net (reconciles)');
+    eq(pri.netMinor, r.snapshot.netSettlementMinor, 'M2 payRunInput.net == snapshot.netSettlement');
+    // The three components the OLD re-derivation silently dropped are present.
+    assert(pri.earnings.some((e) => e.code === 'FNF_UNPAID_SALARY' && e.amountMinor === R(15000)), 'M2 unpaid salary earning present');
+    assert(pri.earnings.some((e) => e.code === 'FNF_NOTICE_PAY_IN_LIEU' && e.amountMinor > 0), 'M2 employer pay-in-lieu earning present');
+    assert(pri.deductions.some((d) => d.code === 'FNF_STATUTORY' && d.amountMinor === R(3000)), 'M2 statutory deduction present');
+    // And gratuity/encashment/loan/asset are all still there too.
+    assert(pri.earnings.some((e) => e.code === 'FNF_GRATUITY'), 'M2 gratuity earning present');
+    assert(pri.earnings.some((e) => e.code === 'FNF_LEAVE_ENCASH'), 'M2 encashment earning present');
+    assert(pri.deductions.some((d) => d.code === 'FNF_LOAN_FORECLOSURE'), 'M2 loan deduction present');
+    assert(pri.deductions.some((d) => d.code === 'FNF_ASSET_RECOVERY'), 'M2 asset deduction present');
+  }
+
+  // ── M3: gratuity ₹20L cap must NOT cap the PAYOUT on a death/disablement waiver ──
+  log('M3) death-waiver high-wage pays FULL 15/26 amount (not ₹20L):');
+  {
+    // DEATH with <5y service (the 5y-gate WAIVER branch — the one that used to cap
+    // the payout) AND a wage high enough that the formula amount EXCEEDS ₹20,00,000.
+    // The payout must be the full formula amount; only the EXEMPT portion is capped.
+    const death = computeFnf({ type: 'DEATH' }, {
+      country: 'IN', basicDaMonthlyMinor: R(2500000), serviceYears: 3, serviceMonths: 0,
+    });
+    const full = Math.floor(R(2500000) * 15 * 3 / 26 + 0.5); // ₹43,26,923 > ₹20L
+    assert(full > 200000000, 'M3 fixture exceeds the ₹20L cap (sanity)');
+    assert(death.breakdown.gratuity.waived === true, 'M3 <5y death takes the WAIVER branch');
+    eq(death.snapshot.gratuityAmountMinor, full, 'M3 DEATH waiver pays the FULL 15/26 amount (uncapped payout, NOT ₹20L)');
+    eq(death.breakdown.gratuity.exemptMinor, 200000000, 'M3 exempt portion capped at ₹20,00,000');
+    eq(death.breakdown.gratuity.taxableMinor, full - 200000000, 'M3 taxable = gross − exempt cap');
+    // Belt-and-braces: the eligible (≥5y) high-wage death also pays full (india.js path).
+    const eligibleDeath = computeFnf({ type: 'DEATH' }, {
+      country: 'IN', basicDaMonthlyMinor: R(500000), serviceYears: 8, serviceMonths: 0,
+    });
+    const fullEligible = Math.floor(R(500000) * 15 * 8 / 26 + 0.5);
+    eq(eligibleDeath.snapshot.gratuityAmountMinor, fullEligible, 'M3 ≥5y death also pays full uncapped (india.js normal path)');
+  }
+
+  // ── M5: leave encashment rounds ONCE (no per-day double-round) ──
+  log('M5) leave encashment single-round:');
+  {
+    // Basic+DA ₹50,000 → per-day = floor(5000000/26 + 0.5) = 192308 (₹1,923.08).
+    // OLD double-round: 192308 × 7 = 1346156. SINGLE-round: floor(5000000×7/26+0.5)
+    // = floor(1346153.84+0.5) = 1346154. The two differ → proves single-round.
+    const r = computeFnf({ type: 'RESIGNATION' }, {
+      country: 'IN', basicDaMonthlyMinor: R(50000), encashableLeaveDays: 7,
+    });
+    const singleRound = Math.floor(R(50000) * 7 / 26 + 0.5);
+    const perDay = Math.floor(R(50000) / 26 + 0.5);
+    const doubleRound = perDay * 7;
+    assert(singleRound !== doubleRound, 'M5 fixture distinguishes single vs double round (sanity)');
+    eq(r.snapshot.leaveEncashmentAmountMinor, singleRound, 'M5 encashment uses ONE rounding (× days off unrounded ÷26)');
+  }
+
+  // ── M6: NZ payout flags requiresInput when earnings are not resolvable ──
+  log('M6) NZ payout requiresInput when earnings unresolved (no fabricated 0/proxy):');
+  {
+    const r = computeFnf({ type: 'RESIGNATION' }, {
+      country: 'NZ', currencyCode: 'NZD',
+      nz: { earningsResolved: false },
+    });
+    assert(r.nzRequiresInput === true, 'M6 nzRequiresInput set when earningsResolved:false');
+    eq(r.snapshot.nzHolidayPayoutAmountMinor, 0, 'M6 no fabricated payout when earnings unresolved');
+    // When earnings ARE supplied, it computes normally and does NOT flag.
+    const ok = computeFnf({ type: 'RESIGNATION' }, {
+      country: 'NZ', currencyCode: 'NZD',
+      nz: { earningsResolved: true, grossSinceAnniversaryMinor: D(40000) },
+    });
+    assert(ok.nzRequiresInput === false, 'M6 not flagged when earnings supplied');
+    eq(ok.breakdown.nzHoliday.eightPctMinor, D(3200), 'M6 8% of $40,000 = $3,200 when resolved');
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -242,6 +332,7 @@ async function partB() {
       if (payRunIds.length) await prisma.payRun.deleteMany({ where: { id: { in: payRunIds } } });
       const asg = await prisma.assetAssignment.findMany({ where: { businessId, employeeId: { in: empIds } }, select: { id: true } });
       if (asg.length) await prisma.assetAssignment.deleteMany({ where: { id: { in: asg.map((a) => a.id) } } });
+      await prisma.compensationRevision.deleteMany({ where: { businessId, employeeId: { in: empIds } } });
       await prisma.employmentRecord.deleteMany({ where: { businessId, employeeId: { in: empIds } } });
     }
     await prisma.asset.deleteMany({ where: { businessId, code: { startsWith: PREFIX } } });
@@ -405,6 +496,137 @@ async function partB() {
     eq(letter.statusCode, 201, 'letters → 201 (case SETTLED)');
     assert(letter.body.document && typeof letter.body.document.fileHash === 'string' && letter.body.document.fileHash.length === 64, 'letters → verifiable SHA-256 fileHash');
     eq(letter.body.document.visibility, 'EMPLOYEE_VISIBLE', 'letters → EMPLOYEE_VISIBLE doc');
+
+    // ── M1+M2 (live): the minted PayRun reconciles + is fed from the snapshot ──
+    log('M1+M2-live) PayRun(FNF) totals == snapshot payRunInput; gross−ded=net:');
+    {
+      const sepRow = await prisma.separationCase.findUnique({ where: { id: sepId } });
+      assert(sepRow.fnfSnapshotJson && sepRow.fnfSnapshotJson.payRunInput, 'M1 fnfSnapshotJson.payRunInput persisted on the case');
+      const pri = sepRow.fnfSnapshotJson.payRunInput;
+      const payRun = await prisma.payRun.findUnique({ where: { id: sepRow.fnfPayRunId } });
+      const toMinor = (d) => Math.round(Number(d) * 100);
+      eq(toMinor(payRun.totalGross), Math.round(pri.grossMinor), 'M1 PayRun.totalGross == snapshot gross');
+      eq(toMinor(payRun.totalDeductions), Math.round(pri.totalDeductionsMinor), 'M1 PayRun.totalDeductions == snapshot deductions');
+      eq(toMinor(payRun.totalNet), Math.round(pri.netMinor), 'M1 PayRun.totalNet == snapshot net');
+      eq(toMinor(payRun.totalGross) - toMinor(payRun.totalDeductions), toMinor(payRun.totalNet), 'M2 PayRun gross − deductions === net (reconciles)');
+      // The snapshot's lines sum to those very totals.
+      const eSum = pri.earnings.reduce((a, e) => a + e.amountMinor, 0);
+      const dSum = pri.deductions.reduce((a, d) => a + d.amountMinor, 0);
+      eq(eSum, Math.round(pri.grossMinor), 'M2 Σ snapshot earning lines == gross');
+      eq(dSum, Math.round(pri.totalDeductionsMinor), 'M2 Σ snapshot deduction lines == deductions');
+    }
+
+    // ── M4 (live): a SHORT-NOTICE resignation yields a NOTICE_RECOVERY deduction ──
+    log('M4-live) short-notice resignation → NOTICE_RECOVERY fires from dates:');
+    {
+      const shortEmp = await prisma.employee.create({
+        data: { businessId, code: `${PREFIX}-SHORT`, firstName: 'Short', lastName: 'Notice', status: 'ACTIVE', hireDate: new Date('2019-01-01') },
+      });
+      await prisma.employmentRecord.create({
+        data: { businessId, employeeId: shortEmp.id, entityId, employmentType: 'FULL_TIME', workerCategory: 'STAFF', noticeDays: 30, effectiveFrom: new Date('2019-01-01'), changeReason: 'HIRE', isCurrent: true },
+      });
+      // Gross monthly pay so the notice per-day (and thus the recovery amount) is non-zero.
+      await prisma.compensationRevision.create({
+        data: { businessId, employeeId: shortEmp.id, entityId, currencyCode: entity.payCurrency, basis: 'GROSS', revisionReason: 'HIRE', grossMonthly: '60000.00', effectiveFrom: new Date('2019-01-01'), isCurrent: true },
+      });
+      // Resignation TODAY with an LWD only 5 days out → 25-day shortfall.
+      const lwd = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10);
+      const si = await callController(offboarding.initiateSeparation, {
+        user: opUser, scope: opUser.scope, params: {},
+        body: { employeeId: shortEmp.id, type: 'RESIGNATION', resignationDate: new Date().toISOString().slice(0, 10), lwd },
+      });
+      eq(si.statusCode, 201, 'M4 short-notice initiate → 201');
+      const shortSep = await prisma.separationCase.findUnique({ where: { id: si.body.separation.id } });
+      assert(shortSep.noticeShortfallDays >= 20, `M4 noticeShortfallDays persisted from dates (got ${shortSep.noticeShortfallDays})`);
+      // Clear all lanes (no assets) then compute → the snapshot carries a recovery.
+      for (const lane of ['it', 'finance', 'admin', 'knowledge_transfer', 'assets']) {
+        await callController(offboarding.updateClearance, { user: opUser, scope: opUser.scope, params: { id: shortSep.id }, body: { lane, status: 'CLEARED' } });
+      }
+      const sc = await callController(offboarding.computeFnf, { user: opUser, scope: opUser.scope, params: { id: shortSep.id }, body: {} });
+      eq(sc.statusCode, 200, 'M4 compute-fnf → 200');
+      const recovered = await prisma.separationCase.findUnique({ where: { id: shortSep.id } });
+      assert(Number(recovered.noticeRecoveryAmount) > 0, 'M4 employee-initiated short notice → NOTICE_RECOVERY deduction > 0');
+      assert(recovered.fnfSnapshotJson.payRunInput.deductions.some((d) => d.code === 'FNF_NOTICE_RECOVERY'), 'M4 NOTICE_RECOVERY line in the snapshot');
+    }
+
+    // ── S7 (live): SoD FAILS CLOSED on a null initiator + on self-approve ──
+    log('S7-live) SoD fails-closed: null initiator → 403; self-approve → 403:');
+    {
+      // Build a fresh FNF_COMPUTED case, then NULL its initiator to simulate a
+      // legacy/un-attributable case — approve must FAIL CLOSED (not fail-open).
+      const sEmp = await prisma.employee.create({
+        data: { businessId, code: `${PREFIX}-SOD`, firstName: 'Sod', lastName: 'Case', status: 'ACTIVE', hireDate: new Date('2017-01-01') },
+      });
+      await prisma.employmentRecord.create({
+        data: { businessId, employeeId: sEmp.id, entityId, employmentType: 'FULL_TIME', workerCategory: 'STAFF', noticeDays: 30, effectiveFrom: new Date('2017-01-01'), changeReason: 'HIRE', isCurrent: true },
+      });
+      const si = await callController(offboarding.initiateSeparation, {
+        user: opUser, scope: opUser.scope, params: {},
+        body: { employeeId: sEmp.id, type: 'RESIGNATION', lwd: '2026-12-31' },
+      });
+      const sodSepId = si.body.separation.id;
+      for (const lane of ['it', 'finance', 'admin', 'knowledge_transfer', 'assets']) {
+        await callController(offboarding.updateClearance, { user: opUser, scope: opUser.scope, params: { id: sodSepId }, body: { lane, status: 'CLEARED' } });
+      }
+      await callController(offboarding.computeFnf, { user: opUser, scope: opUser.scope, params: { id: sodSepId }, body: {} });
+      // NULL the initiator → fail-closed.
+      await prisma.separationCase.update({ where: { id: sodSepId }, data: { initiatedByUserId: null } });
+      const nullInit = await callController(offboarding.approveFnf, { user: op2User, scope: op2User.scope, params: { id: sodSepId }, body: {} });
+      eq(nullInit.statusCode, 403, 'S7 null initiator → 403 (fail-closed)');
+      assert(nullInit.body.reason === 'sod-initiator-unknown', 'S7 fail-closed reason set');
+      // Restore initiator = opUser, then opUser (the initiator) self-approves → 403.
+      await prisma.separationCase.update({ where: { id: sodSepId }, data: { initiatedByUserId: opUser.id } });
+      const selfApprove = await callController(offboarding.approveFnf, { user: opUser, scope: opUser.scope, params: { id: sodSepId }, body: {} });
+      eq(selfApprove.statusCode, 403, 'S7 initiator self-approve → 403');
+      assert(selfApprove.body.reason === 'sod-initiator-equals-approver', 'S7 self-approve reason set');
+    }
+
+    // ── S8 (live): a TERMINATED employee's ESS state-changes are blocked ──
+    log('S8-live) terminated employee ESS resign/acknowledge blocked:');
+    {
+      const meSep = require('../controllers/meSeparation.controller');
+      // emp (from QA23) was TERMINATED by settle above; its ESS resolves to that row.
+      const termEmp = await prisma.employee.findUnique({ where: { id: emp.id } });
+      assert(termEmp.status === 'TERMINATED' || termEmp.isActive === false, 'S8 sanity: emp is terminated/inactive');
+      // Give it a workEmail so resolveSelfEmployee finds it from the customer session.
+      await prisma.employee.update({ where: { id: emp.id }, data: { workEmail: `${PREFIX}-term@x.com` } });
+      const custReq = { customer: { businessId, email: `${PREFIX}-term@x.com`, id: 'cust-term' }, body: { intendedLastDay: '2027-01-01' } };
+      const resignRes = await callController(meSep.resign, custReq);
+      eq(resignRes.statusCode, 403, 'S8 terminated employee resign → 403');
+      assert(resignRes.body.reason === 'separated', 'S8 resign blocked reason=separated');
+    }
+
+    // ── S9 (live): a plain override CANNOT mint a relieving letter pre-FnF-approval ──
+    log('S9-live) override refuses pre-FNF-approval; SETTLED letters still work:');
+    {
+      const lEmp = await prisma.employee.create({
+        data: { businessId, code: `${PREFIX}-LET`, firstName: 'Letter', lastName: 'Gate', status: 'ACTIVE', hireDate: new Date('2021-01-01') },
+      });
+      await prisma.employmentRecord.create({
+        data: { businessId, employeeId: lEmp.id, entityId, employmentType: 'FULL_TIME', workerCategory: 'STAFF', noticeDays: 30, effectiveFrom: new Date('2021-01-01'), changeReason: 'HIRE', isCurrent: true },
+      });
+      const si = await callController(offboarding.initiateSeparation, {
+        user: opUser, scope: opUser.scope, params: {}, body: { employeeId: lEmp.id, type: 'RESIGNATION', lwd: '2026-12-31' },
+      });
+      const lSepId = si.body.separation.id;
+      // Case is INITIATED (pre-FnF). A plain override must be refused (not-settled), and
+      // even an elevated override is refused pre-FNF-approval.
+      const elevatedUser = { ...opUser, businessRole: { defaultScope: 'ALL', permissions: { canGenerateLetters: true, canManageOrg: true } } };
+      const forced = await callController(offboarding.generateLetters, {
+        user: elevatedUser, scope: opUser.scope, params: { id: lSepId }, body: { type: 'relieving', override: true },
+      });
+      eq(forced.statusCode, 422, 'S9 elevated override pre-FnF-approval → 422 (refused)');
+      assert(forced.body.reason === 'override-pre-fnf-approval', 'S9 override-pre-fnf-approval reason set');
+      // A NON-elevated user (no canManageOrg) on a non-settled case → 403 on override.
+      const plainUser = { ...opUser, businessRole: { defaultScope: 'ALL', permissions: { canGenerateLetters: true } } };
+      // Push the case to FNF_APPROVED so the only gate left is the elevated-permission one.
+      await prisma.separationCase.update({ where: { id: lSepId }, data: { status: 'FNF_APPROVED' } });
+      const plainForce = await callController(offboarding.generateLetters, {
+        user: plainUser, scope: opUser.scope, params: { id: lSepId }, body: { type: 'relieving', override: true },
+      });
+      eq(plainForce.statusCode, 403, 'S9 non-elevated override → 403 (needs canManageOrg)');
+      assert(plainForce.body.reason === 'override-needs-elevated-permission', 'S9 elevated-permission reason set');
+    }
 
     // ── cancel guard: a NEW case can be cancelled (returns employee to ACTIVE) ──
     log('cancel) pre-SETTLE withdraw → employee ACTIVE:');

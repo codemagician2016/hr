@@ -57,6 +57,27 @@ function toDateOnly(x) {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }
 
+// Whole calendar days between two date-only values (b − a), never negative.
+function daysBetween(a, b) {
+  const da = toDateOnly(a);
+  const db = toDateOnly(b);
+  if (!da || !db) return 0;
+  return Math.max(0, Math.round((db.getTime() - da.getTime()) / 86400000));
+}
+
+// M4: notice shortfall = max(0, requiredNoticeDays − daysActuallyServed), where
+// served = (lastWorkingDay − noticeStart). noticeStart is the resignationDate (or
+// the initiate date). Returns 0 when either date or noticePeriodDays is missing
+// (we never invent a shortfall). This is the value that drives the NOTICE_RECOVERY
+// deduction (employee-initiated) or the pay-in-lieu earning (employer-initiated).
+function deriveNoticeShortfallDays({ noticePeriodDays, noticeStart, lastWorkingDay }) {
+  const required = Number(noticePeriodDays);
+  if (!Number.isFinite(required) || required <= 0) return 0;
+  if (!noticeStart || !lastWorkingDay) return 0;
+  const served = daysBetween(noticeStart, lastWorkingDay);
+  return Math.max(0, Math.round(required) - served);
+}
+
 // ── separation types ─────────────────────────────────────────────────────────
 const SEPARATION_TYPES = new Set([
   'RESIGNATION', 'TERMINATION_FOR_CAUSE', 'RETRENCHMENT', 'REDUNDANCY', 'END_OF_CONTRACT',
@@ -173,6 +194,38 @@ async function assetReturnState(businessId, employeeId, db = prisma) {
   return { openCount: open.length, unresolvedCount: unresolved.length, unresolved };
 }
 
+// M6: resolve the NZ holiday-payout earnings from the employee's ACTUAL payroll
+// history (PayRunLine.grossEarnings on PAID/non-draft runs), never a fabricated
+// proxy. Returns the gross earned since the holiday anniversary + the trailing
+// 52-week gross (for AWE) + the count of weeks covered. `resolved` is false when
+// no payroll history exists at all — the caller then blocks compute (422) rather
+// than valuing 8% of zero or an OWP guessed off the current monthly gross.
+async function resolveNzEarningsHistory(businessId, employeeId, lwd, db = prisma) {
+  const lwdDate = lwd ? new Date(lwd) : new Date();
+  const anchor = new Date(Date.UTC(lwdDate.getUTCFullYear() - 1, lwdDate.getUTCMonth(), lwdDate.getUTCDate()));
+  const lines = await db.payRunLine.findMany({
+    where: {
+      businessId,
+      employeeId,
+      status: { not: 'EXCLUDED' },
+      payRun: { is: { periodEnd: { gte: anchor, lte: lwdDate }, status: { notIn: ['DRAFT', 'CANCELLED'] } } },
+    },
+    select: { grossEarnings: true, payRun: { select: { periodEnd: true } } },
+  });
+  if (!lines.length) {
+    return { resolved: false, grossSinceAnniversaryMinor: 0, grossEarnings52Minor: 0, weeksCovered: 0 };
+  }
+  let grossSinceAnniversaryMinor = 0;
+  for (const l of lines) grossSinceAnniversaryMinor += Math.round(Number(l.grossEarnings || 0) * 100);
+  // For AWE the §9 base is the trailing 52 weeks; the same window approximates it.
+  return {
+    resolved: true,
+    grossSinceAnniversaryMinor,
+    grossEarnings52Minor: grossSinceAnniversaryMinor,
+    weeksCovered: 52,
+  };
+}
+
 // Encashable leave balance (days) for an employee — Σ LeaveBalance.closing over
 // encashable LeaveTypes (current period). The pure fnf core values it.
 async function resolveEncashableLeaveDays(businessId, employeeId, db = prisma) {
@@ -262,6 +315,12 @@ async function initiateSeparation(req, res, next) {
     }
 
     const noticeDays = record && record.noticeDays != null ? record.noticeDays : null;
+    // M4: persist the notice shortfall at initiate (required notice vs notice served
+    // from the notice start to the LWD). 0 when dates/notice are unknown.
+    const noticeStart = toDateOnly(resignationDate || noticeDate) || toDateOnly(new Date());
+    const noticeShortfallDays = deriveNoticeShortfallDays({
+      noticePeriodDays: noticeDays, noticeStart, lastWorkingDay: toDateOnly(lwd),
+    });
     const out = await prisma.$transaction(async (tx) => {
       const code = await allocateCode(tx, { businessId, entityId: entity.id, scope: 'SEP' });
       const sep = await tx.separationCase.create({
@@ -273,12 +332,15 @@ async function initiateSeparation(req, res, next) {
           type,
           reason: reason || null,
           initiatedAt: toDateOnly(new Date()),
-          resignationDate: toDateOnly(resignationDate || noticeDate) || toDateOnly(new Date()),
+          resignationDate: noticeStart,
           noticePeriodDays: noticeDays,
+          noticeShortfallDays,
           lastWorkingDay: toDateOnly(lwd),
           relievingDate: toDateOnly(relievingDate),
           currencyCode: entity.payCurrency,
           status: 'INITIATED',
+          // S7: persist the initiator (HR actor) in the SAME tx — the SoD anchor.
+          initiatedByUserId: req.user.id,
           clearanceJson: {},
         },
       });
@@ -468,32 +530,65 @@ async function computeFnfEndpoint(req, res, next) {
       serviceMonths = totalMonths % 12;
     }
 
-    // Notice shortfall comes off the SeparationCase (set at acceptResignation).
-    const noticeShortfallDays = sep.noticeShortfallDays || 0;
+    // M4: notice shortfall. Prefer the value persisted on the case (initiate), but
+    // ALWAYS re-derive from the dates here so it's never read from a column nobody
+    // wrote — the larger of the two wins (a stored 0 from a pre-fix row is healed).
+    const derivedShortfall = deriveNoticeShortfallDays({
+      noticePeriodDays: sep.noticePeriodDays,
+      noticeStart: sep.resignationDate || sep.initiatedAt,
+      lastWorkingDay: sep.lastWorkingDay,
+    });
+    const noticeShortfallDays = Math.max(Number(sep.noticeShortfallDays) || 0, derivedShortfall);
+
+    // M6: NZ holiday inputs from ACTUAL payroll history (never a fabricated proxy).
+    // If the caller passes an explicit nz block we honour it; otherwise we resolve
+    // from PayRunLine history and, when none exists, flag earningsResolved:false so
+    // computeFnf returns nzRequiresInput and we block below with a 422.
+    let nzCtx;
+    if (country === 'NZ') {
+      if (req.body && req.body.nz) {
+        nzCtx = { ...req.body.nz, earningsResolved: true };
+      } else {
+        const hist = await resolveNzEarningsHistory(businessId, sep.employeeId, sep.lastWorkingDay);
+        nzCtx = {
+          earningsResolved: hist.resolved,
+          grossSinceAnniversaryMinor: hist.grossSinceAnniversaryMinor,
+          untakenAnnualLeaveWeeks: encashableLeaveDays / 5,
+          owp: { specifiedWeeklyMinor: Math.round(hist.grossEarnings52Minor / 52) },
+          awe: { grossEarnings52Minor: hist.grossEarnings52Minor },
+          workingDaysPerWeek: 5,
+        };
+      }
+    }
 
     const ctx = {
       country,
       currencyCode: entity ? entity.payCurrency : sep.currencyCode,
       separationType: sep.type,
+      disablement: req.body && req.body.disablement === true,
       basicDaMonthlyMinor: pay.basicDaMonthlyMinor,
       grossMonthlyMinor: pay.grossMonthlyMinor,
       serviceYears,
       serviceMonths,
       encashableLeaveDays,
       noticeShortfallDays,
+      unpaidSalaryMinor: req.body && req.body.unpaidSalaryMinor != null ? req.body.unpaidSalaryMinor : 0,
+      statutoryDeductionsMinor: req.body && req.body.statutoryDeductionsMinor != null ? req.body.statutoryDeductionsMinor : 0,
       loanOutstandingMinor,
       assetRecoveryMinor,
-      // NZ holiday inputs (best-effort; the controller passes what it can resolve).
-      nz: country === 'NZ' ? {
-        grossSinceAnniversaryMinor: req.body && req.body.nz ? req.body.nz.grossSinceAnniversaryMinor : 0,
-        untakenAnnualLeaveWeeks: req.body && req.body.nz ? req.body.nz.untakenAnnualLeaveWeeks : encashableLeaveDays / 5,
-        owp: req.body && req.body.nz ? req.body.nz.owp : { specifiedWeeklyMinor: Math.round(pay.grossMonthlyMinor * 12 / 52) },
-        awe: req.body && req.body.nz ? req.body.nz.awe : { grossEarnings52Minor: pay.grossMonthlyMinor * 12 },
-        workingDaysPerWeek: 5,
-      } : undefined,
+      nz: nzCtx,
     };
 
     const fnf = computeFnf(sep, ctx);
+
+    // M6: block (don't persist) when the NZ payout needs real earnings we couldn't
+    // resolve — a clearly-flagged 422 rather than a wrong number on the case.
+    if (fnf.nzRequiresInput) {
+      return res.status(422).json({
+        message: 'Cannot compute FnF: NZ holiday-pay earnings could not be resolved from payroll history; supply the nz earnings block',
+        reason: 'nz-earnings-required',
+      });
+    }
 
     const updated = await prisma.separationCase.update({
       where: { id: sep.id },
@@ -506,6 +601,23 @@ async function computeFnfEndpoint(req, res, next) {
         loanForeclosureAmount: minorToDecimal(fnf.snapshot.loanForeclosureAmountMinor),
         assetRecoveryAmount: minorToDecimal(fnf.snapshot.assetRecoveryAmountMinor),
         netSettlement: minorToDecimal(fnf.snapshot.netSettlementMinor),
+        // M1+M2: persist the FULL computeFnf result — payRunInput (every earning/
+        // deduction line + grossMinor/totalDeductionsMinor/netMinor) + breakdown.
+        // approveFnf mints the PayRun(type=FNF) DIRECTLY from this so the run always
+        // reconciles (totalGross − totalDeductions === totalNet) and no component is
+        // dropped (unpaid salary, notice pay-in-lieu, statutory all carried through).
+        fnfSnapshotJson: {
+          country: fnf.country,
+          currencyCode: fnf.currencyCode,
+          lines: fnf.lines,
+          snapshot: fnf.snapshot,
+          breakdown: fnf.breakdown,
+          payRunInput: fnf.payRunInput,
+          recoverableBalance: fnf.recoverableBalance,
+          noticeShortfallDays,
+          computedAt: new Date().toISOString(),
+        },
+        noticeShortfallDays,
         status: 'FNF_COMPUTED',
         version: { increment: 1 },
       },
@@ -535,16 +647,28 @@ async function approveFnf(req, res, next) {
     if (sep.status !== 'FNF_COMPUTED') {
       return res.status(409).json({ message: `FnF must be computed before approval (status: ${sep.status})`, reason: 'precondition' });
     }
-    // ── SoD: the approver must NOT be the initiator (separation of duties). The
-    //    initiator is the actor on the separation.initiate audit row; we also rely
-    //    on canApprovePayroll being stripped of self via APPROVAL_ACTIONS. ──
-    const initAudit = await prisma.auditLog.findFirst({
-      where: { businessId: req.user.businessId, entityType: 'SeparationCase', entityId: sep.id, action: 'separation.initiate' },
-      orderBy: { createdAt: 'asc' },
-    }).catch(() => null);
-    const initiatorUserId = initAudit ? initAudit.actorId : null;
-    if (initiatorUserId && initiatorUserId === req.user.id) {
+    // ── SoD (S7): the approver must NOT be the initiator (separation of duties).
+    //    The initiator is persisted on the case (initiatedByUserId) in the SAME tx
+    //    as initiate / ESS-resign — NOT read from an audit row that the ESS path
+    //    never wrote. We FAIL CLOSED: a null/unknown initiator is a 403 (an
+    //    un-attributable case cannot be self-approved), and so is initiator ==
+    //    approver. (canApprovePayroll + APPROVAL_ACTIONS self-strip still apply.)
+    const initiatorUserId = sep.initiatedByUserId || null;
+    if (!initiatorUserId) {
+      return res.status(403).json({ message: 'Separation of duties: the initiator of this case is unknown; it cannot be approved (fail-closed)', reason: 'sod-initiator-unknown' });
+    }
+    if (initiatorUserId === req.user.id) {
       return res.status(403).json({ message: 'Separation of duties: the initiator of a separation cannot approve its FnF', reason: 'sod-initiator-equals-approver' });
+    }
+
+    // M1+M2: mint the PayRun from the persisted full snapshot's payRunInput, so the
+    // run reconciles exactly and carries every component. A pre-snapshot row (none
+    // exist post-migration, but be safe) is rejected — never re-derive from the 6
+    // Decimal columns (that dropped pay-in-lieu / unpaid salary / statutory).
+    const snap = sep.fnfSnapshotJson || null;
+    const payRunInput = snap && snap.payRunInput ? snap.payRunInput : null;
+    if (!payRunInput || !Array.isArray(payRunInput.earnings) || !Array.isArray(payRunInput.deductions)) {
+      return res.status(409).json({ message: 'FnF snapshot is missing or incomplete; re-run compute-fnf before approval', reason: 'snapshot-missing' });
     }
 
     const businessId = req.user.businessId;
@@ -562,11 +686,12 @@ async function approveFnf(req, res, next) {
       const lwd = sep.lastWorkingDay ? new Date(sep.lastWorkingDay) : new Date();
       const periodStart = new Date(Date.UTC(lwd.getUTCFullYear(), lwd.getUTCMonth(), 1));
       const code = await allocateCode(tx, { businessId, entityId: sep.entityId, scope: 'FNF', prefix: 'FNF-', padding: 6 });
-      const net = sep.netSettlement != null ? Number(sep.netSettlement) : 0;
-      const grossLines = ['gratuityAmount', 'leaveEncashmentAmount', 'nzHolidayPayoutAmount']
-        .reduce((acc, k) => acc + (sep[k] != null ? Number(sep[k]) : 0), 0);
-      const dedLines = ['noticeRecoveryAmount', 'loanForeclosureAmount', 'assetRecoveryAmount']
-        .reduce((acc, k) => acc + (sep[k] != null ? Number(sep[k]) : 0), 0);
+      // Totals come STRAIGHT from the snapshot's payRunInput (Σ earning/deduction
+      // lines). gross − deductions === net by construction (the pure core summed
+      // the very same lines), so the persisted run always reconciles.
+      const grossMinor = Math.round(Number(payRunInput.grossMinor) || 0);
+      const totalDeductionsMinor = Math.round(Number(payRunInput.totalDeductionsMinor) || 0);
+      const netMinor = Math.round(Number(payRunInput.netMinor) || 0);
       const payRun = await tx.payRun.create({
         data: {
           businessId,
@@ -582,25 +707,28 @@ async function approveFnf(req, res, next) {
           status: 'DRAFT',
           currencyCode: sep.currencyCode,
           headcount: 1,
-          totalGross: minorToDecimal(Math.round(grossLines * 100)),
-          totalDeductions: minorToDecimal(Math.round(dedLines * 100)),
-          totalNet: minorToDecimal(Math.round(net * 100)),
+          totalGross: minorToDecimal(grossMinor),
+          totalDeductions: minorToDecimal(totalDeductionsMinor),
+          totalNet: minorToDecimal(netMinor),
           approvedAt: new Date(),
           approvedBy: req.user.id,
-          notes: `Full-and-final settlement for ${sep.code}`,
+          notes: `Full-and-final settlement for ${sep.code} — ${payRunInput.earnings.length} earning / ${payRunInput.deductions.length} deduction line(s)`,
         },
       });
       const updated = await tx.separationCase.update({
         where: { id: sep.id },
         data: { status: 'FNF_APPROVED', fnfPayRunId: payRun.id, version: { increment: 1 } },
       });
-      return { payRun, sep: updated };
+      return { payRun, sep: updated, grossMinor, totalDeductionsMinor, netMinor };
     });
 
     await writeAudit({
       businessId, actorId: req.user.id, action: 'separation.approve-fnf',
       entityType: 'SeparationCase', entityId: sep.id,
-      meta: { code: sep.code, payRunId: out.payRun.id, initiatorUserId },
+      meta: {
+        code: sep.code, payRunId: out.payRun.id, initiatorUserId,
+        grossMinor: out.grossMinor, totalDeductionsMinor: out.totalDeductionsMinor, netMinor: out.netMinor,
+      },
     });
     res.json({ separation: out.sep, payRun: { id: out.payRun.id, code: out.payRun.code, type: out.payRun.type } });
   } catch (e) {
@@ -641,7 +769,11 @@ async function settleSeparation(req, res, next) {
       where: { businessId, managerEmployeeId: sep.employeeId, deletedAt: null },
       select: { id: true },
     });
-    const employee = await prisma.employee.findFirst({ where: { id: sep.employeeId, businessId } });
+    const employee = await prisma.employee.findFirst({
+      where: { id: sep.employeeId, businessId },
+      // workEmail/personalEmail needed to deactivate the leaver's ESS Customer (S8).
+      include: { user: { select: { id: true, email: true } } },
+    });
     const reassignTo = (req.body && req.body.reassignManagerId) || (employee ? employee.managerEmployeeId : null) || null;
     if (reports.length && !reassignTo) {
       return res.status(422).json({
@@ -661,9 +793,27 @@ async function settleSeparation(req, res, next) {
         businessId, employeeId: sep.employeeId, actorId: req.user.id,
         terminationDate: sep.lastWorkingDay || new Date(), status,
       });
-      // 3. Revoke RBAC access: detach BusinessRole + deactivate the portal User.
+      // 3. Revoke RBAC access INSIDE the settle tx (S10/S11 — no separate unguarded
+      //    step): detach BusinessRole + deactivate the operator User AND deactivate
+      //    the leaver's ESS Customer session(s) (S8). authenticateCustomer rejects an
+      //    isActive=false customer, and resolveSelfEmployee (auth) rejects a
+      //    TERMINATED/RETIRED employee, so the leaver's session stops resolving for
+      //    state-changing calls the instant settle commits.
       if (employee && employee.userId) {
         await tx.user.update({ where: { id: employee.userId }, data: { isActive: false, businessRoleId: null } });
+      }
+      // Deactivate every Customer (portal/ESS account) tied to the leaver's emails or
+      // linked User — match the resolveSelfEmployee linkage so no live session remains.
+      const leaverEmails = [
+        employee && employee.workEmail,
+        employee && employee.personalEmail,
+        employee && employee.user && employee.user.email,
+      ].filter(Boolean);
+      if (leaverEmails.length) {
+        await tx.customer.updateMany({
+          where: { businessId, isActive: true, email: { in: leaverEmails } },
+          data: { isActive: false },
+        });
       }
       // 4. Complete the REVOKE_ACCESS task + advance the journey to COMPLETED.
       const journey = await tx.lifecycleJourney.findFirst({ where: { businessId, separationId: sep.id, deletedAt: null } });
@@ -707,12 +857,28 @@ async function generateLetters(req, res, next) {
     if (!LETTER_KINDS[kind]) {
       return res.status(422).json({ message: `Unknown letter type: ${kind}`, types: Object.keys(LETTER_KINDS) });
     }
+    // S9: relieving/experience letters REQUIRE status SETTLED. The override path is
+    // strictly bounded: it can only relax SETTLED → FNF_APPROVED (the dues are
+    // already approved) and NEVER earlier — a plain override can no longer mint a
+    // relieving letter pre-FnF-approval. It also requires an ELEVATED permission
+    // (canManageOrg, an admin-grade key the base canGenerateLetters role need not
+    // hold) AND is audited. A non-SETTLED, non-FNF_APPROVED case is always refused.
+    const overrideRequested = req.body && req.body.override === true;
+    let overrideUsed = false;
     if (sep.status !== 'SETTLED') {
-      // Relieving/experience letters are gated on SETTLED (override is audited).
-      const override = req.body && req.body.override === true;
-      if (!override) {
-        return res.status(422).json({ message: 'Letters are available only after the separation is SETTLED (pass override:true to force, audited)', reason: 'not-settled' });
+      if (!overrideRequested) {
+        return res.status(422).json({ message: 'Letters are available only after the separation is SETTLED (an elevated override can force from FNF_APPROVED only, audited)', reason: 'not-settled' });
       }
+      // Override never bypasses the FnF: pre-FNF-approval states are hard-refused.
+      if (sep.status !== 'FNF_APPROVED') {
+        return res.status(422).json({ message: `A letter cannot be forced before the FnF is approved (status: ${sep.status})`, reason: 'override-pre-fnf-approval' });
+      }
+      // Override requires an elevated permission beyond the base canGenerateLetters.
+      const perms = effectivePermissions(req.user) || {};
+      if (perms.canManageOrg !== true) {
+        return res.status(403).json({ message: 'Forcing a letter before SETTLED requires an elevated permission (canManageOrg)', reason: 'override-needs-elevated-permission', missingPermission: 'canManageOrg' });
+      }
+      overrideUsed = true;
     }
     const businessId = req.user.businessId;
     const employee = await prisma.employee.findFirst({ where: { id: sep.employeeId, businessId } });
@@ -759,7 +925,7 @@ async function generateLetters(req, res, next) {
     await writeAudit({
       businessId, actorId: req.user.id, action: 'separation.letter',
       entityType: 'EmployeeDocument', entityId: doc.id,
-      meta: { code: sep.code, kind, fileHash, override: req.body && req.body.override === true && sep.status !== 'SETTLED' },
+      meta: { code: sep.code, kind, fileHash, override: overrideUsed, forcedFromStatus: overrideUsed ? sep.status : null },
     });
     res.status(201).json({ document: { id: doc.id, name: doc.name, category: doc.category, fileHash: doc.fileHash, visibility: doc.visibility } });
   } catch (e) { next(e); }
@@ -806,6 +972,7 @@ module.exports = {
   _internals: {
     seedOffboardingJourney, resolveLastDrawnPay, resolveEncashableLeaveDays,
     resolveLoanOutstanding, resolveAssetRecovery, assetReturnState,
+    resolveNzEarningsHistory, deriveNoticeShortfallDays, daysBetween,
     CLEARANCE_LANES, BLOCKING_LANES, minorToDecimal,
   },
 };

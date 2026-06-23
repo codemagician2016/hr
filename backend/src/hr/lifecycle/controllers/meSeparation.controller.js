@@ -22,9 +22,21 @@
  */
 
 const prisma = require('../../../core/lib/prisma');
+const { writeAudit } = require('../../../core/lib/audit');
 const { allocateCode } = require('../lib/codes');
 const { seedJourneyTasks } = require('../journeyEngine');
 const { getDefaultOffboardingTemplate } = require('../templates/seed');
+
+// S8: a leaver whose directory status is TERMINATED/RETIRED (or whose account is
+// deactivated) keeps NO write surface — STATE-CHANGING ESS calls are rejected
+// (read-only of the final FnF statement / letters stays open via the read handlers).
+// `isActive` is false post-settle; status flips to TERMINATED/RETIRED in the same tx.
+const SEPARATED_STATUSES = new Set(['TERMINATED', 'RETIRED']);
+function isSeparatedEmployee(employee) {
+  if (!employee) return false;
+  if (employee.isActive === false) return true;
+  return SEPARATED_STATUSES.has(employee.status);
+}
 
 function toDateOnly(x) {
   if (!x) return null;
@@ -37,14 +49,15 @@ function toDateOnly(x) {
 // documents.controller resolveSelfEmployeeId. Returns the row or null.
 async function resolveSelfEmployee(businessId, customer) {
   if (!customer || !customer.email) return null;
+  const select = { id: true, code: true, firstName: true, lastName: true, managerEmployeeId: true, status: true, isActive: true, hireDate: true, userId: true, workEmail: true, personalEmail: true };
   const byEmail = await prisma.employee.findFirst({
     where: { businessId, deletedAt: null, OR: [{ workEmail: customer.email }, { personalEmail: customer.email }] },
-    select: { id: true, code: true, firstName: true, lastName: true, managerEmployeeId: true, status: true, hireDate: true, userId: true },
+    select,
   });
   if (byEmail) return byEmail;
   const byUser = await prisma.employee.findFirst({
     where: { businessId, deletedAt: null, user: { is: { email: customer.email } } },
-    select: { id: true, code: true, firstName: true, lastName: true, managerEmployeeId: true, status: true, hireDate: true, userId: true },
+    select,
   });
   return byUser || null;
 }
@@ -65,6 +78,10 @@ async function resign(req, res, next) {
     const { businessId } = req.customer;
     const employee = await resolveSelfEmployee(businessId, req.customer);
     if (!employee) return res.status(404).json({ message: 'No employee record is linked to your account' });
+    // S8: a terminated/retired/deactivated leaver cannot open a new separation.
+    if (isSeparatedEmployee(employee)) {
+      return res.status(403).json({ message: 'Your account is no longer active; this action is unavailable', reason: 'separated' });
+    }
 
     // Exactly ONE active case per employee (second submit rejected, §6 / §7 QA23).
     const active = await prisma.separationCase.findFirst({
@@ -77,6 +94,18 @@ async function resign(req, res, next) {
 
     const { intendedLastDay, reason } = req.body || {};
     const noticeDays = record && record.noticeDays != null ? record.noticeDays : null;
+    // M4: notice shortfall = required notice − notice served (resignation → LWD).
+    const resignDate = toDateOnly(new Date());
+    const lwdDate = toDateOnly(intendedLastDay);
+    let noticeShortfallDays = 0;
+    if (noticeDays != null && lwdDate) {
+      const served = Math.max(0, Math.round((lwdDate.getTime() - resignDate.getTime()) / 86400000));
+      noticeShortfallDays = Math.max(0, Math.round(Number(noticeDays)) - served);
+    }
+    // S7: the SoD initiator anchor for an ESS self-resign. Never null (so approve-fnf
+    // never fails-open) and never an operator's id (so it can't collide with an HR
+    // approver): prefer the linked operator User id, else a self:<employeeId> marker.
+    const initiatedByUserId = employee.userId || `self:${employee.id}`;
 
     const out = await prisma.$transaction(async (tx) => {
       const code = await allocateCode(tx, { businessId, entityId: entity.id, scope: 'SEP' });
@@ -89,11 +118,13 @@ async function resign(req, res, next) {
           type: 'RESIGNATION',
           reason: reason || null,
           initiatedAt: toDateOnly(new Date()),
-          resignationDate: toDateOnly(new Date()),
+          resignationDate: resignDate,
           noticePeriodDays: noticeDays,
-          lastWorkingDay: toDateOnly(intendedLastDay),
+          noticeShortfallDays,
+          lastWorkingDay: lwdDate,
           currencyCode: entity.payCurrency,
           status: 'INITIATED',
+          initiatedByUserId,
           clearanceJson: {},
         },
       });
@@ -124,6 +155,14 @@ async function resign(req, res, next) {
       });
       await tx.employee.update({ where: { id: employee.id }, data: { status: 'NOTICE_PERIOD', version: { increment: 1 } } });
       return { sep, journey };
+    });
+
+    // S7/S11: audit the ESS self-resign (the HR initiate path already audits; the
+    // self path previously did not, leaving the SoD-relevant action un-logged).
+    await writeAudit({
+      businessId, actorId: initiatedByUserId, action: 'separation.resign',
+      entityType: 'SeparationCase', entityId: out.sep.id,
+      meta: { code: out.sep.code, employeeId: employee.id, self: true, noticeShortfallDays },
     });
 
     // Short-notice amber warning (intended last day inside the notice period).
@@ -207,6 +246,10 @@ async function acknowledgeAsset(req, res, next) {
     const { businessId } = req.customer;
     const employee = await resolveSelfEmployee(businessId, req.customer);
     if (!employee) return res.status(404).json({ message: 'Assignment not found' });
+    // S8: a separated leaver has no write surface (asset acknowledgment mutates state).
+    if (isSeparatedEmployee(employee)) {
+      return res.status(403).json({ message: 'Your account is no longer active; this action is unavailable', reason: 'separated' });
+    }
     const assignment = await prisma.assetAssignment.findFirst({
       where: { id: req.params.id, businessId, employeeId: employee.id },
     });

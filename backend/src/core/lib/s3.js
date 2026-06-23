@@ -52,17 +52,22 @@ function isConfigured() {
 }
 
 // Decode a data URL like "data:image/jpeg;base64,XXXX" into { buffer, mime, ext }.
-// Throws on invalid input. Only images are accepted (defence against arbitrary
-// uploads — an authenticated caller still shouldn't be able to push non-images
-// into the tenant's bucket).
-const ALLOWED_EXT = { 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
+// Throws on invalid input. Only images + PDF are accepted (defence against
+// arbitrary uploads — an authenticated caller still shouldn't be able to push an
+// arbitrary content type into the tenant's bucket). PDF is on the allow-list so the
+// documents controller's PDF path works on the S3 branch exactly as on the inline
+// fallback (D12); the per-payload size cap stays enforced by the caller.
+const ALLOWED_EXT = {
+  'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif',
+  'application/pdf': 'pdf',
+};
 function parseDataUrl(dataUrl) {
   if (typeof dataUrl !== 'string') throw new Error('dataUrl must be a string');
   const m = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
-  if (!m) throw new Error('Only base64 image data URLs are supported');
+  if (!m) throw new Error('Only base64 data URLs are supported');
   const mime = m[1].toLowerCase();
   const ext  = ALLOWED_EXT[mime];
-  if (!ext) throw new Error(`Unsupported image type: ${mime}`);
+  if (!ext) throw new Error(`Unsupported upload type: ${mime}`);
   const buffer = Buffer.from(m[2], 'base64');
   return { buffer, mime, ext };
 }

@@ -8128,10 +8128,12 @@ model SeparationCase {
   loanForeclosureAmount Decimal? @db.Decimal(15, 2)
   assetRecoveryAmount   Decimal? @db.Decimal(15, 2)
   netSettlement         Decimal? @db.Decimal(15, 2)
+  fnfSnapshotJson       Json?                            // full computeFnf result (payRunInput + breakdown); PayRun(FNF) is minted from this so gross−ded=net always reconciles
   currencyCode  String   @db.Char(3)
   fnfPayRunId   String?                                 // FNF PayRun (type=FNF) that paid it
   clearanceJson Json?                                   // {assets,it,finance,knowledge_transfer}
   status        SeparationStatus @default(INITIATED)
+  initiatedByUserId String?                             // SoD anchor: who initiated (HR actor or ESS self); approve-fnf fails closed when null/equals approver
   approvalRequestId String?
   exitInterviewJson Json?
   createdAt     DateTime @default(now())
