@@ -16,5 +16,9 @@ const c = require('../controllers/compensation.controller');
 router.use(requireCustomer);
 
 router.get('/', c.getMyCompensationEss);
+// Branded CTC/Compensation Statement PDF of the employee's CURRENT compensation.
+// SELF-ONLY: the employee is resolved server-side from the customer session
+// (no `:id`), full own figures (SELF_ONLY), terminated/inactive → 404.
+router.get('/pdf', c.getMyCompensationPdfEss);
 
 module.exports = router;

@@ -8,12 +8,74 @@
 // breakup matches actual payslips. A 404 (no current revision / not deployed)
 // degrades to a friendly "contact HR" empty state — never fabricated numbers.
 
+import { useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { ErrorBanner, Empty, Spinner, Centered } from '@hr/ui';
 import { useApi } from '@/lib/useApi';
 import { money, formatDate } from '@/lib/format';
 
 const PATH = '/api/hr/me/compensation';
+const PDF_PATH = '/api/hr/me/compensation/pdf';
+
+// Premium "Download CTC (PDF)" control — a same-origin blob fetch (the customer
+// session cookie rides along) with a loading state, so the page never shows a
+// dead button. The server streams an application/pdf of the employee's CURRENT
+// compensation (SELF_ONLY, full own figures).
+function DownloadCtcButton() {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  async function onDownload() {
+    setBusy(true); setErr('');
+    try {
+      const res = await fetch(PDF_PATH, { credentials: 'include', headers: { Accept: 'application/pdf' } });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `Download failed (${res.status})`);
+      }
+      const blob = await res.blob();
+      const cd = res.headers.get('Content-Disposition') || '';
+      const m = /filename="?([^"]+)"?/.exec(cd);
+      const name = m ? m[1] : 'compensation-statement.pdf';
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setErr(e.message || 'Could not download your compensation statement.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <button
+        type="button"
+        onClick={onDownload}
+        disabled={busy}
+        className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition disabled:opacity-60"
+        style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}
+      >
+        {busy ? (
+          <>
+            <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            Preparing…
+          </>
+        ) : (
+          <>
+            <svg width="15" height="15" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <path d="M10 3v9m0 0 3-3m-3 3-3-3M4 15v1.5A1.5 1.5 0 0 0 5.5 18h9a1.5 1.5 0 0 0 1.5-1.5V15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Download CTC (PDF)
+          </>
+        )}
+      </button>
+      {err && <span className="text-xs" style={{ color: 'var(--theme-danger, #b91c1c)' }}>{err}</span>}
+    </div>
+  );
+}
 
 function Row({ label, value, strong, accent }) {
   return (
@@ -95,7 +157,10 @@ function CompensationInner() {
 
   return (
     <div className="max-w-3xl space-y-4">
-      <h1 className="text-2xl font-semibold" style={{ color: 'var(--theme-text)' }}>Compensation</h1>
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold" style={{ color: 'var(--theme-text)' }}>Compensation</h1>
+        <DownloadCtcButton />
+      </div>
       <header className="rounded-2xl border bg-white p-5 shadow-sm" style={{ borderColor: 'var(--theme-border)' }}>
         <div className="flex items-baseline justify-between">
           <div>

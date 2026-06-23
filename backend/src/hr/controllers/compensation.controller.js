@@ -16,6 +16,7 @@ const money = require('../payroll/money');
 const india = require('../payroll/compliance/india');
 const { deriveBreakup, materializeRevisionLines, DeriveError } = require('../compensation/deriveBreakup');
 const { maskCompensation } = require('../compensation/maskCompensation');
+const { renderCtcPdf } = require('../compensation/ctcPdf');
 const { effectiveCompVisibility, effectivePermissions } = require('../../core/lib/rbac');
 
 // Coerce a Decimal|number|string → integer minor units (paise/cents). Reuses
@@ -852,6 +853,79 @@ async function meCompensation(req, res, next) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PDF identity loader — the employee + business identity blocks the branded CTC
+// PDF header needs (name/code/department/designation + company name). Tenant-
+// scoped, read-only. Mirrors payroll's resolvePayslipPdfIdentity so the document
+// reads consistently. Defensive: returns minimal blocks when relations are absent.
+// ─────────────────────────────────────────────────────────────────────────────
+async function resolveCtcPdfIdentity({ businessId, employeeId }) {
+  const employee = await prisma.employee.findFirst({
+    where: { id: employeeId, businessId, deletedAt: null },
+    select: {
+      id: true, code: true, firstName: true, middleName: true, lastName: true,
+      preferredName: true, currentEmploymentRecordId: true,
+    },
+  });
+
+  let department = null;
+  let designation = null;
+  if (employee) {
+    const cer = await prisma.employmentRecord.findFirst({
+      where: employee.currentEmploymentRecordId
+        ? { id: employee.currentEmploymentRecordId, businessId }
+        : { employeeId: employee.id, businessId },
+      orderBy: { effectiveFrom: 'desc' },
+      select: {
+        department: { select: { name: true } },
+        designation: { select: { title: true } }, // Designation uses `title`, not `name`
+      },
+    });
+    department = cer && cer.department ? cer.department.name : null;
+    designation = cer && cer.designation ? cer.designation.title : null;
+  }
+
+  const business = await prisma.business.findUnique({
+    where: { id: businessId },
+    select: { id: true, name: true },
+  });
+
+  const identity = employee
+    ? {
+        id: employee.id,
+        code: employee.code,
+        firstName: employee.firstName,
+        middleName: employee.middleName,
+        lastName: employee.lastName,
+        preferredName: employee.preferredName,
+        department,
+        designation,
+      }
+    : null;
+
+  return { employee: identity, business: business || { id: businessId } };
+}
+
+// Shape a masked CompensationRevision envelope (the SAME shaper output the JSON
+// read returns) into the `revision` arg renderCtcPdf consumes. By passing the
+// MASKED envelope — never the raw row — the PDF is structurally incapable of
+// drawing a figure the viewer is not entitled to: a RANGE_ONLY envelope carries
+// no absolute money and no line amounts, so the renderer falls back to its
+// banded statement. (renderCtcPdf accepts the masked shape directly: absolute{},
+// lines[], range{}, currencyCode, effectiveFrom, revisionReason.)
+function ctcRevisionFromMasked(masked, rev) {
+  return {
+    effectiveFrom: masked.effectiveFrom != null ? masked.effectiveFrom : (rev && rev.effectiveFrom),
+    currencyCode: masked.currencyCode || (rev && rev.currencyCode) || null,
+    revisionReason: (rev && rev.revisionReason) || null,
+    absolute: masked.absolute || null,
+    lines: masked.lines || [],
+    range: masked.range || null,
+    delta: masked.delta || null,
+    visibility: masked.visibility,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ESS (customer session) — GET /api/hr/me/compensation. Resolves the employee
 // from req.customer (email/user link, reused payroll resolver), returns the
 // SELF_ONLY breakup + history + letters. No `:id` path → cross-employee leakage
@@ -891,4 +965,128 @@ async function getMyCompensationEss(req, res, next) {
   } catch (e) { next(e); }
 }
 
-module.exports = { components, structures, revisions, preview, meCompensation, getMyCompensationEss, validateWages50 };
+// ─────────────────────────────────────────────────────────────────────────────
+// ESS (customer session) — GET /api/hr/me/compensation/pdf. Streams the signed-in
+// employee's CURRENT compensation as a branded `application/pdf`. SELF-ONLY: the
+// employee is resolved SERVER-SIDE from the customer session (NO `:id` path), so
+// cross-employee leakage is structurally impossible. The figures are unmasked
+// SELF_ONLY (you can always see your OWN full pay) — the SAME posture the JSON
+// /me/compensation read uses. Terminated/inactive → 404 (ESS lockout).
+// ─────────────────────────────────────────────────────────────────────────────
+async function getMyCompensationPdfEss(req, res, next) {
+  try {
+    const { businessId } = req.customer;
+    const payrollService = require('../payroll/service');
+    const employeeId = await payrollService.resolveSelfEmployee(businessId, req.customer);
+    if (!employeeId) return res.status(404).json({ message: 'No employee record for this account' });
+    const emp = await prisma.employee.findFirst({ where: { id: employeeId, businessId, deletedAt: null } });
+    if (!emp || emp.isActive === false) return res.status(404).json({ message: 'No active employee record' });
+
+    const rows = await prisma.compensationRevision.findMany({
+      where: { businessId, employeeId, status: { in: ['EFFECTIVE'] } },
+      orderBy: { effectiveFrom: 'desc' },
+      include: { lines: { orderBy: { sortOrder: 'asc' }, include: { component: true } } },
+    });
+    const current = rows.find((r) => r.isCurrent) || rows[0] || null;
+    if (!current) return res.status(404).json({ message: 'No current compensation on record' });
+
+    // Self-view → SELF_ONLY: a synthetic viewer whose employeeId === target. The
+    // PDF renders only what this masked envelope carries (full own figures here).
+    const viewer = { employeeId, role: 'USER', businessRole: null };
+    const grade = await resolveEmployeeGrade(businessId, employeeId);
+    const masked = maskCompensation(revisionPayload(current, employeeId, null), viewer, { grade, level: 'SELF_ONLY' });
+
+    const { employee, business } = await resolveCtcPdfIdentity({ businessId, employeeId });
+    const revision = ctcRevisionFromMasked(masked, current);
+    const pdf = await renderCtcPdf({ employee, business, revision, currency: revision.currencyCode });
+
+    auditRead({ businessId, actorId: req.customer.id, employeeId, visibility: 'SELF_ONLY', fields: 'ess/me/compensation/pdf' });
+
+    const fileName = `compensation-${(employee && employee.code) || 'statement'}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.setHeader('Content-Length', pdf.length);
+    res.status(200).send(pdf);
+  } catch (e) { next(e); }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// hr-admin (operator session) — GET /api/hr/compensation/revisions/:id/pdf.
+// Streams a CompensationRevision as a branded `application/pdf`, gated by
+// canViewCompensation (route RBAC) + the F5 masking posture.
+//
+// MASKING IS PRESERVED (the load-bearing security property): we resolve the row,
+// then run it through the SAME maskCompensation() shaper the JSON read uses. A
+// RANGE_ONLY (or NONE) viewer's masked envelope carries NO absolute money and NO
+// per-line amounts. We refuse to mint a leaky absolute statement: under NONE → 403
+// (zero salary in the body); under RANGE_ONLY → the PDF renders a BANDED statement
+// (compa-ratio / range penetration / grade min-mid-max) — never absolute pay. Only
+// an ABSOLUTE viewer gets the full component waterfall. There is NO code path that
+// hands renderCtcPdf an absolute figure the viewer is not entitled to.
+//
+// Scope: withEmployeeScope on the route yields a 404 for an out-of-subtree
+// employee (IDOR-safe) before we ever load the row's lines.
+// ─────────────────────────────────────────────────────────────────────────────
+async function getRevisionPdf(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const { id } = req.params;
+    const rev = await prisma.compensationRevision.findFirst({
+      where: { id, businessId },
+      include: { lines: { orderBy: { sortOrder: 'asc' }, include: { component: true } } },
+    });
+    if (!rev) return res.status(404).json({ message: 'Revision not found' });
+
+    const employeeId = rev.employeeId;
+
+    // IDOR-safe scope gate: the route param is a REVISION id (not an employeeId),
+    // so withEmployeeScope cannot guard it upfront. Enforce the same scope band
+    // here — an out-of-subtree (TEAM/SELF) viewer gets a 404 (never the document,
+    // never salary in the body), exactly like the JSON revisions list.
+    const { resolveAccessibleEmployeeIds, scopeAllows } = require('../lib/scopeResolver');
+    const scope = await resolveAccessibleEmployeeIds(req.user, 'compensation');
+    if (!scopeAllows(scope, employeeId)) {
+      return res.status(404).json({ message: 'Not found' });
+    }
+
+    const grade = await resolveEmployeeGrade(businessId, employeeId);
+    const priorRev = await prisma.compensationRevision.findFirst({
+      where: { businessId, employeeId, status: 'EFFECTIVE', id: { not: rev.id }, effectiveFrom: { lt: rev.effectiveFrom } },
+      orderBy: { effectiveFrom: 'desc' },
+      select: { ctcAnnual: true },
+    });
+    const priorCtc = priorRev ? toNum(priorRev.ctcAnnual) : null;
+
+    // SAME shaper as the JSON read — the viewer's effective compVisibility × scope
+    // decides what survives. This is the ONLY source the PDF draws from.
+    const viewer = { ...req.user, employeeId: req.user.employeeId };
+    const masked = maskCompensation(revisionPayload(rev, employeeId, priorCtc), viewer, { grade, target: { employeeId } });
+
+    // NONE → a clean refusal that carries ZERO salary data (mirrors the masking
+    // anti-leak rule: a 403 body never contains pay figures).
+    if (masked.visibility === 'NONE') {
+      return res.status(403).json({
+        error: 'COMP_NOT_VISIBLE',
+        message: 'You do not have permission to view this employee’s compensation.',
+      });
+    }
+
+    const { employee, business } = await resolveCtcPdfIdentity({ businessId, employeeId });
+    const revision = ctcRevisionFromMasked(masked, rev);
+    const pdf = await renderCtcPdf({ employee, business, revision, currency: revision.currencyCode });
+
+    auditRead({ businessId, actorId: req.user.id, employeeId, visibility: masked.visibility, fields: 'compensation/revisions/:id/pdf' });
+
+    const banded = masked.visibility === 'RANGE_ONLY';
+    const fileName = `compensation-${(employee && employee.code) || 'statement'}${banded ? '-banded' : ''}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+    res.setHeader('Content-Length', pdf.length);
+    res.status(200).send(pdf);
+  } catch (e) { next(e); }
+}
+
+module.exports = {
+  components, structures, revisions, preview, meCompensation,
+  getMyCompensationEss, getMyCompensationPdfEss, getRevisionPdf, validateWages50,
+};
