@@ -214,11 +214,23 @@ async function assign(req, res, next) {
 
 // Return an asset: stamp returnedAt + the return condition (the schema field is
 // `conditionIn`, NOT `condition` — writing the latter makes Prisma throw), close
-// the assignment, and flip the Asset back to AVAILABLE. When the item comes back
-// lost/damaged the caller may pass a `recoveryAmount` (and the assignment is
-// marked DAMAGED/LOST instead of RETURNED) — this is the recovery seam that the
-// FnF `assetRecoveryAmount` deduction reads (Feature 4 §4.3). Idempotency guard:
-// an already-returned assignment yields 409 rather than silently re-closing.
+// the assignment, and update the Asset register. The assignment status, the asset
+// status and the recovery seam are kept CONSISTENT with the physical outcome:
+//
+//   outcome            AssetAssignment.status   Asset.status   recovery
+//   ────────────────   ──────────────────────   ────────────   ────────
+//   lost (lost=true)   LOST                     LOST           yes (if amount)
+//   damaged            DAMAGED                  IN_REPAIR      yes (if amount)
+//   retired (EOL)      RETURNED / PENDING_REC   RETIRED        optional
+//   clean return       RETURNED                 AVAILABLE      no
+//
+// A non-zero recoveryAmount on an otherwise-clean return parks the assignment at
+// PENDING_RECOVERY (the FnF `assetRecoveryAmount` deduction, Feature 4 §4.3, reads
+// it). Idempotency guard: an already-returned assignment yields 409.
+//
+// Enum values are validated against the real schema (AssetAssignmentStatus /
+// AssetStatus / AssetCondition) so a bad input is a 422, never a Prisma 500.
+const ASSET_CONDITIONS = new Set(['NEW', 'GOOD', 'FAIR', 'DAMAGED', 'RETIRED']);
 async function returnAsset(req, res, next) {
   try {
     const { businessId } = req.user;
@@ -232,20 +244,40 @@ async function returnAsset(req, res, next) {
 
     const returnedAt = req.body.returnedAt ? new Date(req.body.returnedAt) : new Date();
     const conditionIn = req.body.conditionIn !== undefined ? req.body.conditionIn : undefined;
-    // Lost/damaged returns carry a recovery amount and a non-RETURNED status that
-    // feeds the separation FnF asset-recovery line.
-    const lostOrDamaged = conditionIn === 'DAMAGED' || conditionIn === 'RETIRED' || req.body.lost === true;
-    const data = {
-      returnedAt,
-      status: req.body.lost === true ? 'LOST' : (conditionIn === 'DAMAGED' ? 'DAMAGED' : 'RETURNED'),
-    };
+    if (conditionIn !== undefined && !ASSET_CONDITIONS.has(conditionIn)) {
+      return res.status(422).json({ message: `Invalid return condition: ${conditionIn}` });
+    }
+    const lost = req.body.lost === true;
+    const hasRecovery = req.body.recoveryAmount !== undefined
+      && req.body.recoveryAmount !== null
+      && Number(req.body.recoveryAmount) > 0;
+
+    // Resolve the consistent (assignment status, asset status) pair from the
+    // physical outcome — lost/damaged take precedence, then retired, then a clean
+    // return (which parks at PENDING_RECOVERY only when money is owed).
+    let assignmentStatus;
+    let assetStatus;
+    if (lost) {
+      assignmentStatus = 'LOST';
+      assetStatus = 'LOST';
+    } else if (conditionIn === 'DAMAGED') {
+      assignmentStatus = 'DAMAGED';
+      assetStatus = 'IN_REPAIR';
+    } else if (conditionIn === 'RETIRED') {
+      // End-of-life: the asset is retired; the assignment closes as RETURNED
+      // (or PENDING_RECOVERY when a recovery amount is owed for it).
+      assignmentStatus = hasRecovery ? 'PENDING_RECOVERY' : 'RETURNED';
+      assetStatus = 'RETIRED';
+    } else {
+      // Clean return — but if a recovery amount is owed, park for FnF recovery.
+      assignmentStatus = hasRecovery ? 'PENDING_RECOVERY' : 'RETURNED';
+      assetStatus = 'AVAILABLE';
+    }
+
+    const data = { returnedAt, status: assignmentStatus };
     if (conditionIn !== undefined) data.conditionIn = conditionIn;
     if (req.body.notes !== undefined) data.notes = req.body.notes;
     if (req.body.recoveryAmount !== undefined) data.recoveryAmount = req.body.recoveryAmount;
-
-    // Asset register reflects the physical outcome: a lost item never returns to
-    // the available pool.
-    const assetStatus = req.body.lost === true ? 'LOST' : 'AVAILABLE';
 
     const [assignment] = await prisma.$transaction([
       prisma.assetAssignment.update({ where: { id: existing.id }, data, include: ASSIGNMENT_INCLUDE }),
@@ -253,7 +285,9 @@ async function returnAsset(req, res, next) {
         where: { id: existing.assetId },
         data: {
           status: assetStatus,
-          ...(lostOrDamaged && conditionIn ? { condition: conditionIn } : {}),
+          // Mirror the return condition onto the asset register when a concrete
+          // condition was recorded (DAMAGED/RETIRED/FAIR/GOOD/NEW).
+          ...(conditionIn ? { condition: conditionIn } : {}),
         },
       }),
     ]);

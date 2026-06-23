@@ -154,6 +154,32 @@ function partA() {
     );
     assert(done.status === 'COMPLETED', 'all stages cleared at terminal stage → COMPLETED');
     assert(done.sideEffects.some((s) => s.type === 'JOURNEY_COMPLETED'), 'emits JOURNEY_COMPLETED');
+
+    // ── L-fix: a NON-BLOCKING mandatory task still PENDING must NOT keep the
+    //    journey from COMPLETED; it surfaces in `outstanding` instead. ──
+    const withNonBlockingPending = [
+      ..._internals.ONBOARDING_STAGES.map((s) => ({ stageKey: s, status: 'DONE', isBlocking: true, isMandatory: true })),
+      { stageKey: 'WEEK_ONE', taskKey: 'ORDER_WELCOME_KIT', status: 'PENDING', isBlocking: false, isMandatory: true },
+    ];
+    const doneAnyway = advanceJourney(
+      { id: 'j5b', direction: 'ONBOARDING', currentStage: 'PROBATION', status: 'IN_PROGRESS' },
+      withNonBlockingPending,
+    );
+    assert(doneAnyway.status === 'COMPLETED', 'non-blocking mandatory PENDING task does NOT block COMPLETED');
+    assert(Array.isArray(doneAnyway.outstanding)
+      && doneAnyway.outstanding.some((t) => t.taskKey === 'ORDER_WELCOME_KIT'),
+      'the still-open non-blocking task surfaces in `outstanding`');
+
+    // A BLOCKING mandatory task still PENDING at the terminal stage → NOT completed.
+    const blockingPending = [
+      ..._internals.ONBOARDING_STAGES.slice(0, -1).map((s) => ({ stageKey: s, status: 'DONE', isBlocking: true, isMandatory: true })),
+      { stageKey: 'PROBATION', taskKey: 'PROBATION_REVIEW', status: 'PENDING', isBlocking: true, isMandatory: true },
+    ];
+    const notDone = advanceJourney(
+      { id: 'j5c', direction: 'ONBOARDING', currentStage: 'PROBATION', status: 'IN_PROGRESS' },
+      blockingPending,
+    );
+    assert(notDone.status !== 'COMPLETED', 'a blocking mandatory PENDING task at the terminal stage keeps it open');
   }
 
   // ── A6: blueprint sanity (IN vs NZ statutory task differs) ──
@@ -325,6 +351,14 @@ async function partB() {
         data: { businessId, journeyId: j.id, stageKey: 'DAY_ONE', taskKey: 'CUSTOM', title: 'mgr in', ownerRole: 'MANAGER',
           assigneeEmployeeId: manager.id, isBlocking: false, isMandatory: false, status: 'PENDING' },
       });
+      // A task on the IN-SCOPE hire's journey but owned by a DIFFERENT function
+      // (HR, assigned to a user, no assigneeEmployeeId). Under the old ASSIGNEE
+      // scoping this was hidden from the manager; SUBJECT scoping must surface it
+      // because its subject (inHire) is in the manager's sub-tree (M).
+      const inHrTask = await prisma.lifecycleTask.create({
+        data: { businessId, journeyId: j.id, stageKey: 'DAY_ONE', taskKey: 'ASSIGN_ASSET', title: 'IT setup (HR-owned)', ownerRole: 'HR',
+          assigneeUserId: 'hr-user', isBlocking: false, isMandatory: false, status: 'PENDING' },
+      });
       // A task whose subject (journey.employeeId) is OUT of the manager's sub-tree.
       const jOut = await prisma.lifecycleJourney.create({
         data: { businessId, code: `${PREFIX}-OFBX`, direction: 'ONBOARDING', currentStage: 'DAY_ONE', status: 'IN_PROGRESS', employeeId: outHire.id },
@@ -333,6 +367,16 @@ async function partB() {
         data: { businessId, journeyId: jOut.id, stageKey: 'DAY_ONE', taskKey: 'CUSTOM', title: 'mgr out', ownerRole: 'MANAGER',
           assigneeEmployeeId: outHire.id, isBlocking: false, isMandatory: false, status: 'PENDING' },
       });
+      // An UNRELATED journey whose SUBJECT is out of scope but whose task is
+      // ASSIGNED to an in-scope employee (the manager's report). Under SUBJECT
+      // scoping this must NOT leak (old ASSIGNEE scoping would have shown it).
+      const jLeak = await prisma.lifecycleJourney.create({
+        data: { businessId, code: `${PREFIX}-LEAK`, direction: 'ONBOARDING', currentStage: 'DAY_ONE', status: 'IN_PROGRESS', employeeId: outHire.id },
+      });
+      const leakTask = await prisma.lifecycleTask.create({
+        data: { businessId, journeyId: jLeak.id, stageKey: 'DAY_ONE', taskKey: 'CUSTOM', title: 'assigned-to-report', ownerRole: 'MANAGER',
+          assigneeEmployeeId: inHire.id, isBlocking: false, isMandatory: false, status: 'PENDING' },
+      });
 
       const mgrUser = { id: 'mgr-user', businessId, role: 'STAFF', employeeId: manager.id, businessRole: { defaultScope: 'TEAM' } };
       const scope = await resolveAccessibleEmployeeIds(mgrUser, 'canViewEmployees');
@@ -340,7 +384,9 @@ async function partB() {
       const res = await callController(onboarding.listTasks, req);
       const ids = new Set((res.body.items || []).map((t) => t.id));
       assert(ids.has(inTask.id), 'manager sees the in-sub-tree task');
+      assert(ids.has(inHrTask.id), 'manager sees an HR-owned task on a sub-tree hire (SUBJECT scoping, not assignee)');
       assert(!ids.has(outTask.id), 'manager does NOT see the out-of-sub-tree task');
+      assert(!ids.has(leakTask.id), 'a task merely ASSIGNED to a report (but subject out-of-scope) does NOT leak (subject scoping)');
 
       // ── B4: complete out-of-scope task → 404 ──
       log('B4) manager completes out-of-scope task → 404:');
@@ -358,6 +404,26 @@ async function partB() {
         assert(rOk.statusCode === 200, 'in-scope owned complete → 200');
         const reload = await prisma.lifecycleTask.findUnique({ where: { id: inTask.id } });
         assert(reload.status === 'DONE' && reload.completedByUserId === 'mgr-user', 'task DONE + stamped completedBy');
+      }
+
+      // ── B5b: manager ADVANCE on an in-sub-tree journey → NOT a false 404 ──
+      // The advance route no longer passes { idParam } (the :id is a JOURNEY id,
+      // never in the employee scope-set). The controller scopes by the journey's
+      // SUBJECT employee (inHire, in the manager's sub-tree) → resolves, no 404.
+      log('B5b) manager advances an in-sub-tree journey → no false 404:');
+      {
+        const rAdv = await callController(onboarding.advanceJourney, {
+          user: mgrUser, scope, params: { id: j.id }, query: {}, body: {},
+        });
+        assert(rAdv.statusCode !== 404, `manager ADVANCE resolves the journey (got ${rAdv.statusCode}, not a false 404)`);
+        assert(rAdv.statusCode === 200 || rAdv.statusCode === 409,
+          'ADVANCE returns 200 (advanced) or 409 (blockers open) — never 404 for an in-scope subject');
+
+        // And an OUT-of-sub-tree journey subject still 404s (IDOR-safe).
+        const rAdv404 = await callController(onboarding.advanceJourney, {
+          user: mgrUser, scope, params: { id: jOut.id }, query: {}, body: {},
+        });
+        assert(rAdv404.statusCode === 404, 'ADVANCE on an out-of-sub-tree journey subject → 404 (IDOR-safe)');
       }
     }
 
@@ -395,6 +461,56 @@ async function partB() {
       assert(returnRes.body.conditionIn === 'DAMAGED', 'return writes conditionIn=DAMAGED (not `condition`)');
       assert(String(returnRes.body.recoveryAmount) === '5000', 'return writes recoveryAmount (FnF asset-recovery seam)');
       assert(returnRes.body.status === 'DAMAGED', 'damaged return → assignment status DAMAGED');
+      // Damaged item should NOT be re-listed as AVAILABLE — the asset goes IN_REPAIR.
+      const damagedAsset = await prisma.asset.findUnique({ where: { id: assetId } });
+      assert(damagedAsset.status === 'IN_REPAIR' && damagedAsset.condition === 'DAMAGED',
+        'damaged return → Asset status IN_REPAIR + condition DAMAGED (consistent, not AVAILABLE)');
+
+      // ── L-fix: RETIRED return with a recovery amount is CONSISTENT (not the old
+      //    RETURNED-status-but-recovery mismatch). Asset → RETIRED; assignment →
+      //    PENDING_RECOVERY (money owed), and the recovery amount is recorded. ──
+      const asset2 = await callController(assets.createAsset, {
+        user: opUser, params: {}, body: { code: `${PREFIX}-LAP2`, name: 'OldBook', category: 'LAPTOP' },
+      });
+      const assign2 = await callController(assets.assign, {
+        user: opUser, params: {}, body: { assetId: asset2.body.id, employeeId: empA.id, conditionOut: 'FAIR' },
+      });
+      const retired = await callController(assets.returnAsset, {
+        user: opUser, params: { id: assign2.body.id }, body: { conditionIn: 'RETIRED', recoveryAmount: '1200.00' },
+      });
+      assert(retired.statusCode === 200, 'RETIRED return → 200');
+      assert(retired.body.status === 'PENDING_RECOVERY',
+        'RETIRED + recovery → assignment PENDING_RECOVERY (consistent, not a RETURNED-with-recovery mismatch)');
+      assert(String(retired.body.recoveryAmount) === '1200', 'RETIRED return records the recovery amount');
+      const retiredAsset = await prisma.asset.findUnique({ where: { id: asset2.body.id } });
+      assert(retiredAsset.status === 'RETIRED' && retiredAsset.condition === 'RETIRED',
+        'RETIRED return → Asset status + condition RETIRED (never silently AVAILABLE)');
+
+      // ── A clean return (no condition, no recovery) → RETURNED + AVAILABLE. ──
+      const asset3 = await callController(assets.createAsset, {
+        user: opUser, params: {}, body: { code: `${PREFIX}-LAP3`, name: 'CleanBook', category: 'LAPTOP' },
+      });
+      const assign3 = await callController(assets.assign, {
+        user: opUser, params: {}, body: { assetId: asset3.body.id, employeeId: empA.id, conditionOut: 'GOOD' },
+      });
+      const clean = await callController(assets.returnAsset, {
+        user: opUser, params: { id: assign3.body.id }, body: { conditionIn: 'GOOD' },
+      });
+      assert(clean.body.status === 'RETURNED', 'clean return → assignment RETURNED');
+      const cleanAsset = await prisma.asset.findUnique({ where: { id: asset3.body.id } });
+      assert(cleanAsset.status === 'AVAILABLE', 'clean return → Asset back to AVAILABLE');
+
+      // ── A bad return condition (outside the enum) → 422, not a Prisma 500. ──
+      const asset4 = await callController(assets.createAsset, {
+        user: opUser, params: {}, body: { code: `${PREFIX}-LAP4`, name: 'BadBook', category: 'LAPTOP' },
+      });
+      const assign4 = await callController(assets.assign, {
+        user: opUser, params: {}, body: { assetId: asset4.body.id, employeeId: empA.id, conditionOut: 'GOOD' },
+      });
+      const badCond = await callController(assets.returnAsset, {
+        user: opUser, params: { id: assign4.body.id }, body: { conditionIn: 'NONSENSE' },
+      });
+      assert(badCond.statusCode === 422, 'invalid return condition → 422 (validated, not a 500)');
     }
   } finally {
     await cleanup();

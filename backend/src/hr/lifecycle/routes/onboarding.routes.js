@@ -36,10 +36,14 @@ router.get('/journeys/:id',
   withEmployeeScope('canViewEmployees'),
   c.getJourney);
 
-// Re-run the engine + persist (HR pipeline action). Out-of-scope :id → 404.
+// Re-run the engine + persist (HR pipeline action). NOTE: we do NOT pass
+// { idParam:'id' } — the path :id is a JOURNEY id, not an Employee id, so it
+// would never be in the employee scope-set and every manager would falsely 404.
+// The controller's loadScopedJourney resolves the journey's SUBJECT employee and
+// 404s out-of-scope (mirrors provision / confirm-probation).
 router.post('/journeys/:id/advance',
   requirePermission('canViewEmployees'),
-  withEmployeeScope('canViewEmployees', { idParam: 'id' }),
+  withEmployeeScope('canViewEmployees'),
   c.advanceJourney);
 
 // ── Tasks ────────────────────────────────────────────────────────────────────

@@ -16,10 +16,10 @@
  */
 
 const prisma = require('../../../core/lib/prisma');
-const { scopeWhere, scopeAllows } = require('../../lib/scopeResolver');
+const { scopeAllows } = require('../../lib/scopeResolver');
 const { advanceJourney } = require('../journeyEngine');
 const {
-  provisionEmployee, confirmProbation, resolveOfferApproverUserId, ProvisionError,
+  provisionEmployee, confirmProbation, resolveSodSubjectUserIds, ProvisionError,
 } = require('../provision');
 
 // Statuses that count as "blocking still open" for the advance guard.
@@ -91,9 +91,16 @@ async function getJourney(req, res, next) {
   } catch (e) { next(e); }
 }
 
-// GET /tasks?owner=me|all — task list scoped to the actor's assignable tasks.
-//   owner=me  -> tasks assigned to the actor's own Employee (manager's own tasks)
-//   owner=all -> all in-scope tasks (assignee employee in the sub-tree)
+// GET /tasks?owner=me|all — task list, scoped per owner mode:
+//   owner=me  -> ASSIGNEE-based: tasks assigned to the actor themselves (the
+//                manager's own personal task list — by Employee or User id).
+//   owner=all -> SUBJECT-based: tasks whose JOURNEY SUBJECT (the new hire) is in
+//                the actor's reporting sub-tree, so a manager sees ALL tasks for
+//                their sub-tree's hires (incl. HR/IT-owned ones), not only those
+//                that happen to be assigned to an in-scope employee. HR (ALL band)
+//                sees the whole tenant. (M: the old code scoped owner=all by
+//                ASSIGNEE, which hid sub-tree hires' tasks owned by other functions
+//                and leaked unrelated tasks merely assigned to a sub-tree employee.)
 async function listTasks(req, res, next) {
   try {
     const { businessId } = req.user;
@@ -117,8 +124,13 @@ async function listTasks(req, res, next) {
       ];
       if (!where.OR.length) return res.json({ items: [], total: 0, page: 1, pageSize: take });
     } else {
-      // owner=all → scope by assignee employee (ANDed with the tenant wall).
-      Object.assign(where, scopeWhere(req.scope, 'assigneeEmployeeId'));
+      // owner=all → scope by the JOURNEY SUBJECT employee (the new hire). The
+      // tenant wall is already on `where.businessId`; we AND the subject filter
+      // onto the related journey so only the actor's sub-tree's hires are listed.
+      const subjectScope = journeyScopeWhere(req.scope);
+      // journeyScopeWhere returns {} for ALL, { id:{in:[]} } for NONE, or
+      // { employeeId:{in:[...]} } for IDS. Apply it to the related journey.
+      where.journey = { ...where.journey, ...subjectScope };
     }
 
     const [items, total] = await Promise.all([
@@ -234,18 +246,13 @@ async function skipTask(req, res, next) {
 
 // POST /journeys/:id/advance — re-run the engine + persist. Blocked (409) if the
 // current stage still has open blocking tasks (the engine reports no progress).
+// Scope is enforced by loadScopedJourney (the journey's SUBJECT employee), so the
+// route does NOT pass { idParam } — a journeyId is never in the employee scope-set
+// (that bug 404'd every manager).
 async function advanceJourneyEndpoint(req, res, next) {
   try {
-    const { businessId } = req.user;
-    const journey = await prisma.lifecycleJourney.findFirst({
-      where: { id: req.params.id, businessId, deletedAt: null },
-    });
-    if (!journey) return res.status(404).json({ message: 'Journey not found' });
-    if (req.scope && req.scope.kind !== 'ALL') {
-      if (!journey.employeeId || !scopeAllows(req.scope, journey.employeeId)) {
-        return res.status(404).json({ message: 'Journey not found' });
-      }
-    }
+    const journey = await loadScopedJourney(req, res);
+    if (!journey) return undefined;
 
     const tasks = await prisma.lifecycleTask.findMany({ where: { journeyId: journey.id } });
     // Guard: the current stage's blocking+mandatory tasks must be cleared to move.
@@ -296,18 +303,21 @@ async function provisionJourney(req, res, next) {
     const journey = await loadScopedJourney(req, res);
     if (!journey) return undefined;
 
-    // ── SoD (spec §7/§8): provisioner ≠ offer approver. Only enforced when the
-    //    offer carries a recorded approver; an unapproved offer allows anyone
-    //    with the permission to provision. ──
+    // ── SoD (spec §7/§8, M1): the provisioner must NOT be a user with a stake in
+    //    the offer. resolveSodSubjectUserIds derives this from signals that EXIST
+    //    in production — the offer's APPROVED approver (when there's an approval
+    //    gate) AND the requisition's hiring manager (Job.hiringManagerId → portal
+    //    User), so the guard's precondition is actually reachable in prod (the
+    //    old approvalRequestId-only path was never set and so was dead). ──
     if (journey.offerId) {
       const offer = await prisma.offer.findFirst({
         where: { id: journey.offerId, businessId: req.user.businessId },
       });
       if (offer) {
-        const approverUserId = await resolveOfferApproverUserId(prisma, offer);
-        if (approverUserId && approverUserId === req.user.id) {
+        const sodSubjects = await resolveSodSubjectUserIds(prisma, offer);
+        if (sodSubjects.has(req.user.id)) {
           return res.status(403).json({
-            message: 'Separation of duties: the offer approver cannot provision this hire',
+            message: 'Separation of duties: a user with a stake in this offer (its approver or the requisition recruiter) cannot provision the hire',
             reason: 'sod-provision-vs-approve',
           });
         }

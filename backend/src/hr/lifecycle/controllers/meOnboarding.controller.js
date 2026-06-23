@@ -34,6 +34,68 @@ function hashToken(raw) {
   return crypto.createHash('sha256').update(String(raw)).digest('hex');
 }
 
+// Default pre-join link lifetime (days) — the mint path ALWAYS sets an expiry
+// (validation treats a NULL expiry as invalid, so a token without one is dead).
+const PRE_JOIN_TOKEN_TTL_DAYS = 7;
+
+/**
+ * mintPreJoinToken({ joinDate } = {}) -> { rawToken, tokenHash, expiresAt }
+ *
+ * Mint a pre-join magic-link token. The caller persists { tokenHash, expiresAt }
+ * onto the journey (preJoinTokenHash / preJoinTokenExpiresAt) and emails the
+ * rawToken in the link (never stored). The expiry is ALWAYS set — joinDate + 7d
+ * when a join date is known, else now + 7d — so a minted token is never
+ * non-expiring (H). Exported so the offer-accept seed path reuses it.
+ */
+function mintPreJoinToken({ joinDate } = {}) {
+  const rawToken = crypto.randomBytes(32).toString('base64url');
+  const base = joinDate ? new Date(joinDate) : new Date();
+  const anchor = Number.isNaN(base.getTime()) ? new Date() : base;
+  const expiresAt = new Date(anchor.getTime() + PRE_JOIN_TOKEN_TTL_DAYS * 86400000);
+  return { rawToken, tokenHash: hashToken(rawToken), expiresAt };
+}
+
+// ── document upload guards (size cap + MIME allow-list + category enum) ───────
+// Hard ceiling on the DECODED payload (DoS guard): reject before decoding/storing.
+const MAX_DOC_BYTES = 10 * 1024 * 1024; // 10 MB
+// Onboarding docs are PDFs or scanned ID images only.
+const ALLOWED_DOC_MIME = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/jpg']);
+// The DocumentCategory enum values (mirror prisma/schema.prisma — writing a value
+// outside this set makes Prisma 500; we reject with a 422 instead).
+const DOCUMENT_CATEGORIES = new Set([
+  'ID_PROOF', 'ADDRESS_PROOF', 'PAN', 'AADHAAR', 'PASSPORT', 'VISA', 'WORK_PERMIT',
+  'EDUCATION', 'EXPERIENCE', 'OFFER_LETTER', 'CONTRACT', 'PAYSLIP_COPY',
+  'TAX_DECLARATION', 'FORM16', 'BANK_PROOF', 'MEDICAL', 'POLICY_ACK', 'OTHER',
+]);
+
+// Parse + validate a base64 data URL against the allow-list + size cap, WITHOUT
+// trusting any client-supplied mimeType/sizeBytes. Returns { ok, mime, bytes } or
+// { ok:false, status, message }. Applies to BOTH the S3 path and the data-URL
+// fallback path (so the fallback can't bypass the allow-list, M).
+function validateDocDataUrl(dataUrl) {
+  if (typeof dataUrl !== 'string') {
+    return { ok: false, status: 400, message: 'A file (fileBase64 data URL) is required' };
+  }
+  const m = /^data:([^;,]+)(;base64)?,(.*)$/i.exec(dataUrl);
+  if (!m || !m[2]) {
+    return { ok: false, status: 422, message: 'Only base64 data URLs are supported' };
+  }
+  const mime = m[1].toLowerCase();
+  if (!ALLOWED_DOC_MIME.has(mime)) {
+    return { ok: false, status: 422, message: `Unsupported document type: ${mime}. Allowed: PDF, PNG, JPG.` };
+  }
+  // Decoded size from the base64 length WITHOUT allocating the buffer: every 4
+  // base64 chars decode to 3 bytes, minus padding. This lets us reject an
+  // oversize payload BEFORE decoding/storing it (DoS guard, H).
+  const b64 = m[3] || '';
+  const padding = b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0;
+  const decodedBytes = Math.floor((b64.length * 3) / 4) - padding;
+  if (decodedBytes > MAX_DOC_BYTES) {
+    return { ok: false, status: 413, message: `File exceeds the ${MAX_DOC_BYTES / (1024 * 1024)} MB upload limit` };
+  }
+  return { ok: true, mime, bytes: decodedBytes };
+}
+
 // ── self-employee bridge (mirror of payroll service resolveSelfEmployee) ──────
 // A customer's portal identity links to an Employee via matching workEmail /
 // personalEmail, or via the linked User. Tenant-scoped. Returns the employee row
@@ -98,10 +160,16 @@ async function resolveSubjectJourney(req) {
       where: { direction: 'ONBOARDING', deletedAt: null, preJoinTokenHash: tokenHash },
     });
     if (!journey) return { error: { status: 401, message: 'Invalid or expired onboarding link' } };
-    if (journey.preJoinTokenExpiresAt && new Date(journey.preJoinTokenExpiresAt).getTime() < Date.now()) {
+    // Expiry is MANDATORY: a NULL expiry is treated as INVALID (never a
+    // non-expiring token), and a past expiry is rejected — both 401.
+    if (!journey.preJoinTokenExpiresAt
+      || new Date(journey.preJoinTokenExpiresAt).getTime() < Date.now()) {
       return { error: { status: 401, message: 'This onboarding link has expired' } };
     }
-    return { journey, employeeId: journey.employeeId || null, viaToken: true };
+    // Tenant binding (L): the businessId is derived from THIS journey (resolved by
+    // the token hash) — never from any client hint — and every downstream read/
+    // write is businessId-scoped, so a cross-tenant journey is unreachable.
+    return { journey, businessId: journey.businessId, employeeId: journey.employeeId || null, viaToken: true };
   }
 
   // Session path — requires an authenticated customer (ESS).
@@ -119,7 +187,7 @@ async function resolveSubjectJourney(req) {
       orderBy: { createdAt: 'desc' },
     });
     if (!journey) return { error: { status: 404, message: 'No onboarding in progress' } };
-    return { journey, employeeId: self.id, viaToken: false };
+    return { journey, businessId, employeeId: self.id, viaToken: false };
   }
 
   // Pre-provision new hire who DOES have a portal session: match the journey via
@@ -136,7 +204,7 @@ async function resolveSubjectJourney(req) {
     orderBy: { createdAt: 'desc' },
   });
   if (!journey) return { error: { status: 404, message: 'No onboarding in progress' } };
-  return { journey, employeeId: null, viaToken: false };
+  return { journey, businessId, employeeId: null, viaToken: false };
 }
 
 // ── completeness vector ──────────────────────────────────────────────────────
@@ -335,14 +403,29 @@ async function postDocuments(req, res, next) {
     if (resolved.error) return res.status(resolved.error.status).json({ message: resolved.error.message });
     const { journey } = resolved;
     const body = req.body || {};
-    const { category, name, mimeType, sizeBytes, fileHash } = body;
+    const { category, name, fileHash } = body;
     const dataUrl = body.fileBase64 || body.dataUrl;
     if (!dataUrl) return res.status(400).json({ message: 'A file (fileBase64 data URL) is required' });
     if (!category) return res.status(400).json({ message: 'A document category is required' });
+    // Category must be a real DocumentCategory enum value (L) — else Prisma 500s.
+    if (!DOCUMENT_CATEGORIES.has(category)) {
+      return res.status(422).json({ message: `Invalid document category: ${category}` });
+    }
 
-    // Store the bytes (≤10 MB cap enforced by the data-URL path). When S3 is not
-    // configured (dev), fall back to embedding the data URL as the fileUrl so the
-    // row is still written with real schema fields (regression guard, §7 QA 22).
+    // Validate the payload (MIME allow-list + ≤10 MB cap) BEFORE decoding/storing.
+    // This runs on BOTH the S3 path AND the data-URL fallback so the fallback
+    // cannot bypass the allow-list (M) and an oversize upload is rejected up-front
+    // (H, 413/422). We trust the VALIDATED mime/size, not the client-claimed ones.
+    const docCheck = validateDocDataUrl(dataUrl);
+    if (!docCheck.ok) {
+      return res.status(docCheck.status).json({ message: docCheck.message });
+    }
+    const mimeType = docCheck.mime;
+    const sizeBytes = docCheck.bytes;
+
+    // Store the bytes. When S3 is not configured (dev), fall back to embedding the
+    // data URL as the fileUrl so the row is still written with real schema fields
+    // (regression guard, §7 QA 22) — the same allow-list + cap already applied.
     let fileUrl;
     if (s3.isConfigured()) {
       const up = await s3.uploadDataUrl({ dataUrl, businessId: journey.businessId, scope: 'onboarding-doc' });
@@ -365,8 +448,8 @@ async function postDocuments(req, res, next) {
             name: name || 'Onboarding document',
             fileUrl,
             fileHash: fileHash || null,
-            mimeType: mimeType || null,
-            sizeBytes: sizeBytes != null ? Number(sizeBytes) : null,
+            mimeType,
+            sizeBytes,
             visibility: 'HR_ONLY',
             isEmployeeUploaded: true,
           },
@@ -386,7 +469,7 @@ async function postDocuments(req, res, next) {
         const ss = journey.selfServiceJson && typeof journey.selfServiceJson === 'object'
           ? { ...journey.selfServiceJson } : {};
         const docs = Array.isArray(ss.documents) ? ss.documents.slice() : [];
-        docs.push({ category, name: name || 'Onboarding document', fileUrl, fileHash: fileHash || null, mimeType: mimeType || null, sizeBytes: sizeBytes != null ? Number(sizeBytes) : null, stagedAt: new Date().toISOString() });
+        docs.push({ category, name: name || 'Onboarding document', fileUrl, fileHash: fileHash || null, mimeType, sizeBytes, stagedAt: new Date().toISOString() });
         ss.documents = docs;
         await tx.lifecycleJourney.update({ where: { id: journey.id }, data: { selfServiceJson: ss, version: { increment: 1 } } });
         await markCollectTask(tx, journey.id, 'UPLOAD_DOCS', req.customer ? req.customer.id : null);
@@ -428,10 +511,20 @@ async function submitOnboarding(req, res, next) {
       const fresh = await tx.lifecycleJourney.findUnique({ where: { id: journey.id } });
       const freshTasks = await tx.lifecycleTask.findMany({ where: { journeyId: journey.id } });
       const advance = advanceJourney(fresh, freshTasks);
-      if (advance.currentStage !== fresh.currentStage || advance.status !== fresh.status) {
+      // INVALIDATE the pre-join magic-link token on submit (H): null out the hash
+      // and stamp the expiry into the past so a replayed token can no longer
+      // resolve this journey (a consumed link 401s on reuse). The submit is the
+      // self-service finish line — the candidate now proceeds via their session.
+      const advanceChanged = advance.currentStage !== fresh.currentStage || advance.status !== fresh.status;
+      const hadToken = fresh.preJoinTokenHash != null;
+      if (advanceChanged || hadToken) {
         await tx.lifecycleJourney.update({
           where: { id: journey.id },
-          data: { currentStage: advance.currentStage, status: advance.status, version: { increment: 1 } },
+          data: {
+            ...(advanceChanged ? { currentStage: advance.currentStage, status: advance.status } : {}),
+            ...(hadToken ? { preJoinTokenHash: null, preJoinTokenExpiresAt: new Date(0) } : {}),
+            version: { increment: 1 },
+          },
         });
       }
       const tasksAfter = await loadTasks(tx, journey.id);
@@ -453,6 +546,13 @@ module.exports = {
   postEmergency,
   postDocuments,
   submitOnboarding,
+  // the offer-accept seed path mints a pre-join token via this (always w/ expiry)
+  hashToken,
+  mintPreJoinToken,
   // exported for unit tests
-  _internals: { hashToken, resolveSubjectJourney, completenessVector, selfOnboardingGate, resolveCountryCode },
+  _internals: {
+    hashToken, mintPreJoinToken, resolveSubjectJourney, completenessVector,
+    selfOnboardingGate, resolveCountryCode, validateDocDataUrl,
+    DOCUMENT_CATEGORIES, ALLOWED_DOC_MIME, MAX_DOC_BYTES, PRE_JOIN_TOKEN_TTL_DAYS,
+  },
 };

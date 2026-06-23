@@ -317,6 +317,91 @@ async function partB() {
       await prisma.lifecycleJourney.update({ where: { id: preJourney.id }, data: { preJoinTokenExpiresAt: new Date(Date.now() - 1000) } });
       const expTok = await callController(mec.getMyOnboarding, { query: { token: rawToken }, params: {}, body: {}, get: () => null });
       assert(expTok.statusCode === 401, 'expired token → 401');
+
+      // NULL expiry must be treated as INVALID (a token without an expiry is dead,
+      // never non-expiring).
+      await prisma.lifecycleJourney.update({ where: { id: preJourney.id }, data: { preJoinTokenExpiresAt: null } });
+      const nullExpTok = await callController(mec.getMyOnboarding, { query: { token: rawToken }, params: {}, body: {}, get: () => null });
+      assert(nullExpTok.statusCode === 401, 'NULL-expiry token → 401 (never non-expiring)');
+    }
+
+    // ── B6: token REPLAY is dead after submit (the token is invalidated) ──
+    log('B6) pre-join token is invalidated after submit (replay → 401):');
+    {
+      const rawToken = 'replay-token-abc';
+      const tokenHash = mec._internals.hashToken(rawToken);
+      // A token-anchored journey with NO blocking SELF_ONBOARDING tasks so submit
+      // passes the gate immediately and advances the stage.
+      const replayJourney = await prisma.lifecycleJourney.create({
+        data: {
+          businessId, entityId, code: `${PREFIX}-J-REPLAY`, direction: 'ONBOARDING',
+          currentStage: 'SELF_ONBOARDING', status: 'IN_PROGRESS', joinDate: new Date('2026-08-01'),
+          preJoinTokenHash: tokenHash, preJoinTokenExpiresAt: new Date(Date.now() + 86400000),
+          tasks: {
+            create: [
+              { businessId, stageKey: 'DOCS_ESIGN', taskKey: 'ESIGN_CONTRACT', title: 'E-sign', ownerRole: 'NEW_HIRE', isBlocking: true, isMandatory: true, status: 'PENDING' },
+            ],
+          },
+        },
+      });
+      // The token resolves while valid.
+      const before = await callController(mec.getMyOnboarding, { query: { token: rawToken }, params: {}, body: {}, get: () => null });
+      assert(before.statusCode === 200, 'token resolves the journey before submit');
+
+      const submitRes = await callController(mec.submitOnboarding, { query: { token: rawToken }, params: {}, body: {}, get: () => null });
+      assert(submitRes.statusCode === 200, 'submit via token → 200');
+
+      // The hash is nulled + expiry stamped in the past → replay 401s.
+      const reloaded = await prisma.lifecycleJourney.findUnique({ where: { id: replayJourney.id } });
+      assert(reloaded.preJoinTokenHash === null, 'preJoinTokenHash nulled after submit');
+      const replay = await callController(mec.getMyOnboarding, { query: { token: rawToken }, params: {}, body: {}, get: () => null });
+      assert(replay.statusCode === 401, 'replayed (consumed) token → 401');
+    }
+
+    // ── B7: document upload guards — over-cap 413, MIME reject in fallback, bad enum 422 ──
+    log('B7) upload guards (size cap, MIME allow-list in fallback, category enum):');
+    {
+      const upEmp = await prisma.employee.create({
+        data: { businessId, code: `${PREFIX}-UPEMP`, firstName: 'Up', lastName: 'Load', status: 'PRE_HIRE', workEmail: `${PREFIX}-up@example.com` },
+      });
+      await seedJourney(upEmp.id, `${PREFIX}-J-UP`);
+      const upCustomer = { id: 'cust-up', email: `${PREFIX}-up@example.com`, businessId };
+
+      // (a) An oversize PNG (>10 MB decoded) → 413 BEFORE decoding/storing.
+      const bigB64 = 'A'.repeat(15 * 1024 * 1024); // ~11.25 MB decoded
+      const bigUrl = `data:image/png;base64,${bigB64}`;
+      const tooBig = await callController(mec.postDocuments, {
+        customer: upCustomer, query: {}, params: {},
+        body: { category: 'AADHAAR', name: 'big.png', fileBase64: bigUrl },
+      });
+      assert(tooBig.statusCode === 413, 'over-cap upload → 413 (rejected before decode/store)');
+
+      // (b) A disallowed MIME (SVG) must be rejected even on the S3-unconfigured
+      //     fallback path (the fallback no longer bypasses the allow-list).
+      const svgUrl = 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=';
+      const badMime = await callController(mec.postDocuments, {
+        customer: upCustomer, query: {}, params: {},
+        body: { category: 'AADHAAR', name: 'x.svg', fileBase64: svgUrl },
+      });
+      assert(badMime.statusCode === 422, 'disallowed MIME (svg) → 422 even on the data-URL fallback');
+
+      // (c) A category outside the DocumentCategory enum → 422 (not a Prisma 500).
+      const pngUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+      const badCat = await callController(mec.postDocuments, {
+        customer: upCustomer, query: {}, params: {},
+        body: { category: 'NONSENSE', name: 'id.png', fileBase64: pngUrl },
+      });
+      assert(badCat.statusCode === 422, 'invalid DocumentCategory → 422 (validated, not a 500)');
+
+      // (d) A valid PDF passes the allow-list (PDF is allowed for documents).
+      const pdfUrl = 'data:application/pdf;base64,JVBERi0xLjQK';
+      const okPdf = await callController(mec.postDocuments, {
+        customer: upCustomer, query: {}, params: {},
+        body: { category: 'CONTRACT', name: 'c.pdf', fileBase64: pdfUrl },
+      });
+      assert(okPdf.statusCode === 201, 'a valid PDF upload → 201 (PDF on the allow-list)');
+      const docRow = await prisma.employeeDocument.findFirst({ where: { businessId, employeeId: upEmp.id } });
+      assert(docRow && docRow.mimeType === 'application/pdf', 'stored mimeType is the VALIDATED value (application/pdf)');
     }
   } finally {
     await cleanup();

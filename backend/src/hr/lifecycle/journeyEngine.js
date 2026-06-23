@@ -168,9 +168,22 @@ function anyBlockingBad(tasks) {
     (t) => t && t.isBlocking !== false && t.isMandatory !== false && BLOCKING_BAD.has(t.status),
   );
 }
-function allDone(tasks) {
-  // Every task (blocking or not) is in a terminal-good state.
-  return (tasks || []).every((t) => TERMINAL_GOOD.has(t.status));
+// COMPLETED is gated on BLOCKING (blocking+mandatory) tasks only — a non-blocking
+// task (even a mandatory one) must NOT keep the journey from completing; it
+// surfaces as "outstanding" instead (see outstandingTasks). This matches the
+// stage-gating rule (a stage advances on its blocking tasks), so the terminal
+// stage's completion is consistent with how every prior stage advanced.
+function allBlockingDone(tasks) {
+  return (tasks || []).every(
+    (t) => !(t && t.isBlocking !== false && t.isMandatory !== false) || TERMINAL_GOOD.has(t.status),
+  );
+}
+// Non-terminal tasks that remain after COMPLETED — surfaced so HR can chase them
+// (e.g. a non-blocking mandatory "order welcome kit" that's still PENDING).
+function outstandingTasks(tasks) {
+  return (tasks || [])
+    .filter((t) => t && !TERMINAL_GOOD.has(t.status))
+    .map((t) => ({ taskKey: t.taskKey || t.title || null, stageKey: t.stageKey, status: t.status, isBlocking: t.isBlocking !== false, isMandatory: t.isMandatory !== false }));
 }
 
 /**
@@ -225,12 +238,14 @@ function advanceJourney(journey, tasks) {
     sideEffects.push({ type: 'STAGE_ENTERED', from, to: stage, journeyId: j.id });
   }
 
-  // Status resolution.
-  const everyTaskGood = allDone(list);
+  // Status resolution. COMPLETED requires every BLOCKING task done (NOT every
+  // task) — a lingering non-blocking task doesn't hold the journey open; it is
+  // reported as `outstanding` so HR can still chase it.
+  const blockingAllDone = allBlockingDone(list);
   const lastStage = order[order.length - 1];
   let status;
-  if (stage === lastStage && stageSatisfied(list, stage) && everyTaskGood) {
-    // Reached + cleared the terminal stage with nothing outstanding → done.
+  if (stage === lastStage && stageSatisfied(list, stage) && blockingAllDone) {
+    // Reached + cleared the terminal stage with all BLOCKING work done → done.
     status = 'COMPLETED';
     sideEffects.push({ type: 'JOURNEY_COMPLETED', journeyId: j.id });
   } else {
@@ -240,7 +255,10 @@ function advanceJourney(journey, tasks) {
     status = anyTouched ? 'IN_PROGRESS' : 'NOT_STARTED';
   }
 
-  return { currentStage: stage, status, sideEffects };
+  // Always surface the still-open tasks (esp. relevant once COMPLETED, where a
+  // non-blocking mandatory task may remain) so the caller/UI can flag them.
+  const outstanding = outstandingTasks(list);
+  return { currentStage: stage, status, sideEffects, outstanding };
 }
 
 module.exports = {
@@ -253,7 +271,8 @@ module.exports = {
     stageBlockers,
     stageSatisfied,
     anyBlockingBad,
-    allDone,
+    allBlockingDone,
+    outstandingTasks,
     stageOrder,
     TERMINAL_GOOD,
     BLOCKING_BAD,

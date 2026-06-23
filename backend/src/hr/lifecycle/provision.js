@@ -84,7 +84,7 @@ async function findProvisionTask(client, journeyId) {
  * The Offer carries no approver column; the approver (if the offer went through
  * an approval gate) is the User who APPROVED its ApprovalRequest. Returns the
  * approving user's id, or null when the offer was never formally approved (then
- * the SoD guard is a no-op — anyone with the permission may provision).
+ * the SoD guard falls back to the requisition recruiter — see resolveSodSubject).
  */
 async function resolveOfferApproverUserId(client, offer) {
   if (!offer || !offer.approvalRequestId) return null;
@@ -98,6 +98,94 @@ async function resolveOfferApproverUserId(client, offer) {
     select: { approverUserId: true },
   });
   return action ? action.approverUserId : null;
+}
+
+/**
+ * resolveSodSubjectUserIds(client, offer) -> Set<userId>
+ *
+ * The set of users the provisioner must NOT be (separation of duties). The Offer
+ * model carries NO createdByUserId/sentByUserId column (grep confirms only
+ * approvalRequestId), so the only signal that EXISTS in production is the
+ * requisition's recruiter/hiring manager on the linked Job (Job.hiringManagerId,
+ * an Employee id → its portal User). We block when the provisioner is:
+ *   (a) the offer's APPROVED approver (approval-gate path, if any), OR
+ *   (b) the requisition's hiring manager (the person who owns the hire) —
+ *       a signal that is set in prod (seedOnboardingJourney already resolves it).
+ * Returning a Set (not a single id) so the M1 guard never ships a precondition
+ * that is never true. Empty set = no SoD subject resolvable (guard is a no-op).
+ */
+async function resolveSodSubjectUserIds(client, offer) {
+  const out = new Set();
+  if (!offer) return out;
+  // (a) Approval-gate path (when the offer went through an ApprovalRequest).
+  const approverUserId = await resolveOfferApproverUserId(client, offer);
+  if (approverUserId) out.add(approverUserId);
+  // (b) Requisition recruiter / hiring manager (Job.hiringManagerId is an
+  //     Employee id; map it to the portal User so we can compare against
+  //     req.user.id). This field is populated in production.
+  if (offer.applicationId) {
+    const application = await client.application.findFirst({
+      where: { id: offer.applicationId, businessId: offer.businessId },
+      include: { job: { select: { hiringManagerId: true } } },
+    });
+    const hiringManagerId = application && application.job ? application.job.hiringManagerId : null;
+    if (hiringManagerId) {
+      const mgr = await client.employee.findFirst({
+        where: { id: hiringManagerId, businessId: offer.businessId },
+        select: { userId: true },
+      });
+      if (mgr && mgr.userId) out.add(mgr.userId);
+    }
+  }
+  return out;
+}
+
+// ── component kinds that count toward the India Code-on-Wages "Basic+DA" floor ──
+const BASIC_DA_KINDS = new Set(['BASIC', 'DEARNESS_ALLOWANCE']);
+
+/**
+ * resolveBasicDaMonthly(client, { offer, businessId, compSplit }) ->
+ *   { basicMonthly, daMonthly } | null
+ *
+ * The AUTHORITATIVE Basic+DA monthly amounts for the 50% wage guard (H1). NEVER
+ * defaults Basic to Gross (that fallback makes the guard a no-op). Resolution
+ * order, most-authoritative first:
+ *   1. The offer's proposed SalaryStructure (offer.structureId) component lines,
+ *      summing amountMonthly for components whose kind ∈ {BASIC, DEARNESS_ALLOWANCE}.
+ *   2. The staged compensation split (selfServiceJson.comp.basicMonthly/daMonthly),
+ *      when HR captured an explicit split for the hire.
+ * Returns null when no split is resolvable — the caller FAILS an INR provision
+ * (reason 'wage-rule') rather than silently passing Basic==Gross.
+ */
+async function resolveBasicDaMonthly(client, { offer, businessId, compSplit }) {
+  // 1) Authoritative: the proposed structure's component lines.
+  if (offer && offer.structureId) {
+    const lines = await client.salaryComponentLine.findMany({
+      where: { businessId, structureId: offer.structureId },
+      include: { component: { select: { kind: true } } },
+    });
+    if (lines.length) {
+      let basic = 0;
+      let da = 0;
+      let sawBasicDa = false;
+      for (const ln of lines) {
+        const kind = ln.component && ln.component.kind;
+        if (!BASIC_DA_KINDS.has(kind)) continue;
+        const amt = ln.amountMonthly != null ? Number(ln.amountMonthly) : null;
+        if (amt == null || Number.isNaN(amt)) continue;
+        sawBasicDa = true;
+        if (kind === 'BASIC') basic += amt;
+        else da += amt;
+      }
+      if (sawBasicDa) return { basicMonthly: String(basic), daMonthly: da ? String(da) : null };
+    }
+  }
+  // 2) Explicit staged split captured by HR on the journey.
+  const split = compSplit || {};
+  if (split.basicMonthly != null) {
+    return { basicMonthly: String(split.basicMonthly), daMonthly: split.daMonthly != null ? String(split.daMonthly) : null };
+  }
+  return null;
 }
 
 /**
@@ -215,6 +303,69 @@ async function provisionEmployee({ journeyId, actorId } = {}, prismaOrTx) {
     const lastName = personal.lastName || (application && application.candidate && application.candidate.lastName) || offer.lastName || 'Hire';
     const email = (personal.workEmail || personal.email || (application && application.candidate && application.candidate.email) || '').trim().toLowerCase() || null;
 
+    // ── PRE-WRITE PRECONDITION: India 50% wage rule (H1). ──
+    // Run the Code-on-Wages 50% guard BEFORE creating any row so a breach (or an
+    // unresolvable Basic/DA split for an INR hire) is a clean PRE_WRITE failure
+    // (reason 'wage-rule') that never half-provisions / never flips the journey to
+    // BLOCKED. Basic+DA comes from the AUTHORITATIVE source (offer structure lines,
+    // else the staged comp split) — NEVER defaulted to gross.
+    const grossMonthly = offer.grossMonthly != null ? String(offer.grossMonthly) : null;
+    const compSplit = self.comp || {};
+    const isIndiaHire = countryCode === 'IN' || String(currencyCode || '').toUpperCase() === 'INR';
+    if (grossMonthly != null && isIndiaHire) {
+      const basicDa = await resolveBasicDaMonthly(tx, { offer, businessId, compSplit });
+      if (!basicDa) {
+        throw new ProvisionError(
+          'Cannot validate the India 50% wage rule: no Basic/DA split is resolvable from the offer structure or the staged compensation split.',
+          { status: 422, reason: 'wage-rule' },
+        );
+      }
+      const wage = offerWageCheck({
+        countryCode,
+        currencyCode,
+        grossMonthly,
+        basicMonthly: basicDa.basicMonthly,
+        daMonthly: basicDa.daMonthly,
+        joiningDate: joinDate,
+      });
+      if (!wage.ok) {
+        throw new ProvisionError(
+          (wage.error && wage.error.message) || 'Offer violates the India 50% wage rule',
+          { status: 422, reason: 'wage-rule' },
+        );
+      }
+    }
+
+    // ── PRE-WRITE PRECONDITION: portal email uniqueness (H2). ──
+    // User.email is GLOBALLY @unique. Resolve a pre-existing User up-front so a
+    // collision is a clean decision, not a P2002 rollback that BLOCKS the journey:
+    //   - same tenant + not yet linked to an Employee → REUSE it (link below);
+    //   - same tenant + already linked to a DIFFERENT Employee → email-in-use 409;
+    //   - a DIFFERENT tenant → email-in-use 409 (PRE_WRITE, journey NOT blocked).
+    let reusableUser = null;
+    if (email) {
+      const existingUser = await tx.user.findUnique({ where: { email } });
+      if (existingUser) {
+        if (existingUser.businessId !== businessId) {
+          throw new ProvisionError(
+            'A portal account with this email already exists for another tenant.',
+            { status: 409, reason: 'email-in-use' },
+          );
+        }
+        const linkedEmp = await tx.employee.findFirst({
+          where: { businessId, userId: existingUser.id, deletedAt: null },
+          select: { id: true },
+        });
+        if (linkedEmp) {
+          throw new ProvisionError(
+            'A portal account with this email is already linked to another employee.',
+            { status: 409, reason: 'email-in-use' },
+          );
+        }
+        reusableUser = existingUser; // same tenant, unlinked → reuse it.
+      }
+    }
+
     // ── STEP 1: allocate EMP code + create the Employee (PRE_HIRE → real row). ──
     const code = await allocateCode(tx, { businessId, entityId, scope: 'EMPLOYEE', prefix: 'EMP-', padding: 6 });
     let employee = await tx.employee.create({
@@ -254,19 +405,50 @@ async function provisionEmployee({ journeyId, actorId } = {}, prismaOrTx) {
       const tempPassword = crypto.randomBytes(18).toString('base64url');
       const passwordHash = bcrypt.hashSync(tempPassword, 10);
       const name = `${firstName} ${lastName}`.trim();
-      const user = await tx.user.create({
-        data: {
-          email, password: passwordHash, name,
-          role: 'USER', businessId,
-          emailVerified: false, isActive: true,
-        },
-      });
-      userId = user.id;
-      await tx.customer.upsert({
+      // REUSE a pre-existing same-tenant, unlinked User (resolved pre-write, H2)
+      // rather than creating one that would P2002 on the global email @unique and
+      // BLOCK the journey. We reset it to the temp invite (the new hire claims it).
+      if (reusableUser) {
+        await tx.user.update({
+          where: { id: reusableUser.id },
+          data: { password: passwordHash, name, role: 'USER', businessId, isActive: true },
+        });
+        userId = reusableUser.id;
+      } else {
+        const user = await tx.user.create({
+          data: {
+            email, password: passwordHash, name,
+            role: 'USER', businessId,
+            emailVerified: false, isActive: true,
+          },
+        });
+        userId = user.id;
+      }
+      // Customer ESS identity (M2): do NOT blindly upsert/clobber a shared
+      // multi-product Customer row. Look it up first; only UPDATE when it is
+      // unambiguously THIS employee's ESS identity (same tenant, not anonymised,
+      // not already an unrelated principal's login). NEVER auto-clear
+      // anonymisedAt during provisioning (re-activation must be explicit).
+      const existingCustomer = await tx.customer.findUnique({
         where: { businessId_email: { businessId, email } },
-        update: { password: passwordHash, name, isActive: true, anonymisedAt: null },
-        create: { businessId, email, password: passwordHash, name, emailVerified: false, isActive: true },
+        select: { id: true, anonymisedAt: true },
       });
+      if (!existingCustomer) {
+        await tx.customer.create({
+          data: { businessId, email, password: passwordHash, name, emailVerified: false, isActive: true },
+        });
+      } else if (existingCustomer.anonymisedAt) {
+        // A GDPR-anonymised row — leave it untouched (do NOT un-anonymise here).
+        // The new hire gets a portal User login; HR re-activates the Customer
+        // explicitly if needed. We intentionally write nothing.
+      } else {
+        // A live same-tenant ESS identity for this email → refresh the invite
+        // credentials only. anonymisedAt is never set/cleared here.
+        await tx.customer.update({
+          where: { id: existingCustomer.id },
+          data: { password: passwordHash, name, isActive: true },
+        });
+      }
       // Link the portal identity. The Employee.userId @unique is the concurrency
       // backstop: a racing second provision that reused this email aborts here.
       employee = await tx.employee.update({ where: { id: employee.id }, data: { userId } });
@@ -354,28 +536,9 @@ async function provisionEmployee({ journeyId, actorId } = {}, prismaOrTx) {
       });
     }
 
-    // ── STEP 8: CompensationRevision (HIRE) — reuse offerWageCheck (India 50%). ──
-    const grossMonthly = offer.grossMonthly != null ? String(offer.grossMonthly) : null;
-    // The India Code-on-Wages 50% guard. Basic+DA comes from the offer's staged
-    // structure split (selfServiceJson.comp) when present; the check is a no-op
-    // for non-India currencies. A breach aborts the whole provision (422).
-    const compSplit = self.comp || {};
-    if (grossMonthly != null) {
-      const wage = offerWageCheck({
-        countryCode,
-        currencyCode,
-        grossMonthly,
-        basicMonthly: compSplit.basicMonthly != null ? compSplit.basicMonthly : grossMonthly,
-        daMonthly: compSplit.daMonthly,
-        joiningDate: joinDate,
-      });
-      if (!wage.ok) {
-        throw new ProvisionError(
-          (wage.error && wage.error.message) || 'Offer violates the India 50% wage rule',
-          { status: 422, reason: 'wage-rule' },
-        );
-      }
-    }
+    // ── STEP 8: CompensationRevision (HIRE). The India 50% wage rule was already
+    //    validated PRE-WRITE (see the precondition block above), so by here a
+    //    breach has already aborted the provision without writing any row. ──
     const comp = await tx.compensationRevision.create({
       data: {
         businessId, employeeId: employee.id, entityId,
@@ -455,7 +618,15 @@ async function provisionEmployee({ journeyId, actorId } = {}, prismaOrTx) {
     }
     await tx.lifecycleJourney.update({
       where: { id: journey.id },
-      data: { employeeId: employee.id, version: { increment: 1 } },
+      data: {
+        employeeId: employee.id,
+        // INVALIDATE the pre-join magic-link token on provisioning: once the hire
+        // is a real Employee with a portal login, the pre-join link must no longer
+        // resolve the journey (a replayed token 401s). Null the hash + past expiry.
+        preJoinTokenHash: null,
+        preJoinTokenExpiresAt: new Date(0),
+        version: { increment: 1 },
+      },
     });
 
     // ── STEP 13b: re-run the pure engine to move PROVISIONING → DAY_ONE. ──
@@ -492,11 +663,18 @@ async function provisionEmployee({ journeyId, actorId } = {}, prismaOrTx) {
     // provision, so we surface them verbatim and leave the task/journey untouched.
     if (err instanceof ProvisionError && PRE_WRITE_REASONS.has(err.reason)) throw err;
 
-    // Anything else (wage-rule breach at the comp step, a DB error, etc.) threw
-    // AFTER provisioning began: the tx has already rolled back (no partial
-    // Employee/User/EmploymentRecord/LeaveBalance), and we record the failure in
-    // a SEPARATE write so the FAILED task + BLOCKED journey persist (QA §7.1).
-    await markProvisionFailed(prisma, journeyId, err).catch(() => {});
+    // Anything else (a DB error mid-write, etc.) threw AFTER provisioning began:
+    // the tx has already rolled back (no partial Employee/User/EmploymentRecord/
+    // LeaveBalance), and we record the failure in a SEPARATE write so the FAILED
+    // task + BLOCKED journey persist (QA §7.1). M3: AWAIT it (it is intentionally
+    // its own tx) and log if the bookkeeping itself throws, but always surface the
+    // ORIGINAL, actionable error to the controller.
+    try {
+      await markProvisionFailed(prisma, journeyId, err);
+    } catch (markErr) {
+      // The BLOCKED-marking itself failed — never swallow it silently.
+      console.error('[provision] markProvisionFailed failed for journey', journeyId, markErr && markErr.message ? markErr.message : markErr);
+    }
     if (err instanceof ProvisionError) throw err;
     throw new ProvisionError(err && err.message ? err.message : 'Provisioning failed', {
       status: 500, reason: 'provision-failed',
@@ -506,8 +684,12 @@ async function provisionEmployee({ journeyId, actorId } = {}, prismaOrTx) {
 
 // ProvisionError reasons raised by the pre-write guards (idempotency /
 // precondition checks that run before any row is created). These must NOT flip
-// the task to FAILED or the journey to BLOCKED — nothing was attempted.
-const PRE_WRITE_REASONS = new Set(['bad-request', 'not-found', 'precondition', 'already-provisioned']);
+// the task to FAILED or the journey to BLOCKED — nothing was attempted. This
+// includes 'wage-rule' (H1 — validated PRE-WRITE) and 'email-in-use' (H2 — the
+// portal-email collision resolved PRE-WRITE), so neither flips a journey BLOCKED.
+const PRE_WRITE_REASONS = new Set([
+  'bad-request', 'not-found', 'precondition', 'already-provisioned', 'wage-rule', 'email-in-use',
+]);
 
 /**
  * markProvisionFailed(prisma, journeyId, err) — POST-ROLLBACK bookkeeping.
@@ -672,8 +854,9 @@ module.exports = {
   confirmProbation,
   dueProbations,
   resolveOfferApproverUserId,
+  resolveSodSubjectUserIds,
   markProvisionFailed,
   ProvisionError,
   // exported for unit tests
-  _internals: { toDateOnly, periodCodeFor, resolveDefaultEmployeeRole },
+  _internals: { toDateOnly, periodCodeFor, resolveDefaultEmployeeRole, resolveBasicDaMonthly },
 };

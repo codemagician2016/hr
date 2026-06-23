@@ -76,6 +76,13 @@ async function seedOnboardingJourney(offer, tx, opts = {}) {
   // Mint the human code inside the same tx (NumberSequence increment, §3.3).
   const code = await allocateCode(tx, { businessId, entityId, scope: 'ONBOARD' });
 
+  // Mint the pre-join magic-link token (no portal account yet → the candidate
+  // self-onboards via this expiring link). The mint helper ALWAYS sets an expiry
+  // (joinDate + 7d), so a token is never non-expiring; the raw token is returned
+  // for the invite email (caller/notifier) and only the hash is persisted.
+  const { mintPreJoinToken } = require('./controllers/meOnboarding.controller');
+  const preJoin = mintPreJoinToken({ joinDate });
+
   // Owner resolution: NEW_HIRE/EMPLOYEE have no Employee yet (provisioned later),
   // so their tasks stay unassigned until provisioning; MANAGER resolves now.
   const ctx = {
@@ -100,6 +107,8 @@ async function seedOnboardingJourney(offer, tx, opts = {}) {
       joinDate,
       currentStage: 'PRE_JOIN',
       status: 'NOT_STARTED',
+      preJoinTokenHash: preJoin.tokenHash,
+      preJoinTokenExpiresAt: preJoin.expiresAt,
       tasks: {
         create: taskPayloads.map((t) => ({
           businessId: t.businessId,
@@ -120,7 +129,10 @@ async function seedOnboardingJourney(offer, tx, opts = {}) {
     include: { tasks: true },
   });
 
-  return { journey, created: true };
+  // Return the raw pre-join token so the caller (notifier) can email the link.
+  // It is NOT persisted anywhere (only the hash is); callers that don't need it
+  // can ignore it.
+  return { journey, created: true, preJoinRawToken: preJoin.rawToken };
 }
 
 module.exports = { seedOnboardingJourney, advanceJourney };
