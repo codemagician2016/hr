@@ -63,6 +63,28 @@ async function applyRegisterScope(where, req) {
   return where;
 }
 
+// Resolve issuer user ids → a { id: { name, email } } map in one batched query.
+// `issuedBy` is a bare userId string on IssuedLetter (no Prisma relation), so the
+// register would otherwise render a raw UUID; we join the User here for a human
+// "Issued by" label, keeping the id available as a secondary audit field.
+async function resolveIssuers(ids) {
+  const distinct = [...new Set((ids || []).filter(Boolean).map(String))];
+  if (!distinct.length) return {};
+  const users = await prisma.user.findMany({
+    where: { id: { in: distinct } },
+    select: { id: true, name: true, email: true },
+  });
+  const map = {};
+  for (const u of users) map[u.id] = { name: u.name, email: u.email };
+  return map;
+}
+
+// Best human label for an issuer: name → email → the raw id (so it's never blank).
+function issuerName(issuerMap, issuedBy) {
+  const u = issuedBy ? issuerMap[String(issuedBy)] : null;
+  return (u && (u.name || u.email)) || issuedBy || '';
+}
+
 // Stream a PDF buffer as a download/inline response (payslip-serving pattern).
 function streamPdf(res, { buffer, fileName, inline }) {
   res.setHeader('Content-Type', 'application/pdf');
@@ -109,6 +131,13 @@ async function preview(req, res, next) {
       overrides,
       mode: 'preview',
     });
+    // Surface the masked comp keys to the wizard so the "salary figures hidden"
+    // notice can show on the LIVE preview (before issuing). The body is a PDF
+    // stream, so we pass the (non-sensitive — just field names) list via a header.
+    if (Array.isArray(out.masked) && out.masked.length) {
+      res.setHeader('X-Letter-Masked', out.masked.join(','));
+      res.setHeader('Access-Control-Expose-Headers', 'X-Letter-Masked');
+    }
     return streamPdf(res, { buffer: out.pdf, fileName: 'preview', inline: true });
   } catch (err) {
     if (sendServiceError(res, err)) return undefined;
@@ -241,7 +270,8 @@ async function register(req, res, next) {
       const rows = await prisma.issuedLetter.findMany({
         where, select, orderBy: { createdAt: 'desc' }, take: 5000,
       });
-      const out = toCsv(rows);
+      const issuers = await resolveIssuers(rows.map((r) => r.issuedBy));
+      const out = toCsv(rows, issuers);
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', 'attachment; filename="letters-register.csv"');
       return res.status(200).send(out);
@@ -254,14 +284,15 @@ async function register(req, res, next) {
         skip: (page - 1) * pageSize, take: pageSize,
       }),
     ]);
+    const issuers = await resolveIssuers(items.map((r) => r.issuedBy));
     return res.json({
-      items: items.map(publicRow),
+      items: items.map((r) => publicRow(r, issuers)),
       page, pageSize, total, totalPages: Math.ceil(total / pageSize),
     });
   } catch (err) { return next(err); }
 }
 
-function publicRow(r) {
+function publicRow(r, issuerMap = {}) {
   const emp = r.employee;
   return {
     id: r.id,
@@ -270,7 +301,8 @@ function publicRow(r) {
     status: r.status,
     subject: r.subject,
     entityId: r.entityId,
-    issuedBy: r.issuedBy,
+    issuedBy: r.issuedBy, // raw userId — secondary audit field
+    issuedByName: issuerName(issuerMap, r.issuedBy),
     issuedAt: r.issuedAt,
     createdAt: r.createdAt,
     supersedesLetterId: r.supersedesLetterId,
@@ -284,8 +316,8 @@ function publicRow(r) {
   };
 }
 
-function toCsv(rows) {
-  const header = ['referenceNo', 'category', 'status', 'employee', 'employeeCode', 'issuedBy', 'issuedAt'];
+function toCsv(rows, issuerMap = {}) {
+  const header = ['referenceNo', 'category', 'status', 'employee', 'employeeCode', 'issuedByName', 'issuedById', 'issuedAt'];
   const esc = (v) => {
     const s = v == null ? '' : String(v);
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -295,7 +327,8 @@ function toCsv(rows) {
     const emp = r.employee ? [r.employee.firstName, r.employee.lastName].filter(Boolean).join(' ').trim() : '';
     lines.push([
       esc(r.referenceNo), esc(r.category), esc(r.status), esc(emp),
-      esc(r.employee ? r.employee.code : ''), esc(r.issuedBy),
+      esc(r.employee ? r.employee.code : ''),
+      esc(issuerName(issuerMap, r.issuedBy)), esc(r.issuedBy),
       esc(r.issuedAt ? new Date(r.issuedAt).toISOString() : ''),
     ].join(','));
   }
@@ -320,7 +353,11 @@ async function getOne(req, res, next) {
     // mergeDataJson/renderedBody were minted with the ISSUER's perms and may carry
     // absolute salary. A non-ABSOLUTE viewer gets comp.* masked + renderedBody
     // omitted (the masked-at-render PDF stays available via /download).
-    return res.json(redactLetterForViewer(letter, req.user));
+    const redacted = redactLetterForViewer(letter, req.user);
+    // Human "Issued by" label (the raw id stays as a secondary audit field). Spread
+    // into a NEW object so we never mutate the redacted row / live snapshot.
+    const issuers = await resolveIssuers([letter.issuedBy]);
+    return res.json({ ...redacted, issuedByName: issuerName(issuers, letter.issuedBy) });
   } catch (err) { return next(err); }
 }
 
@@ -370,5 +407,5 @@ module.exports = {
   getOne,
   download,
   employeeLetters,
-  _internals: { toCsv, publicRow, letterBytes },
+  _internals: { toCsv, publicRow, letterBytes, resolveIssuers, issuerName },
 };

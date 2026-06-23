@@ -41,7 +41,7 @@ function categoryLabel(value) {
 function UploadPanel({ onCreated }) {
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
-  const [file, setFile] = useState(null); // { fileBase64, fileName, ... } — chosen, not yet uploaded
+  const [file, setFile] = useState(null); // DocumentDropzone payload { name, mimeType, sizeBytes, fileHash, fileBase64 } — chosen, not yet uploaded
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [warning, setWarning] = useState('');
@@ -103,7 +103,7 @@ function UploadPanel({ onCreated }) {
       />
       {file && (
         <p className="mt-2 text-xs text-emerald-700">
-          Selected: {file.fileName || 'letterhead.pdf'} — ready to upload.
+          Selected: {file.name || 'letterhead.pdf'} — ready to upload.
         </p>
       )}
       <div className="mt-4">

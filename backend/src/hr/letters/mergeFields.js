@@ -155,6 +155,22 @@ function toDate(v) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+/**
+ * Whole/partial years of service between a joining date and an end date, rounded
+ * to one decimal (e.g. 4.3). Returns null when either bound is unparseable or the
+ * span is negative — the field then resolves to '' (and, if marked required for an
+ * EXPERIENCE letter, surfaces in missingRequired so the wizard blocks the issue
+ * rather than rendering "a tenure of  year(s)").
+ */
+function computeTenureYears(doj, end) {
+  const a = toDate(doj);
+  const b = toDate(end);
+  if (!a || !b) return null;
+  const years = (b.getTime() - a.getTime()) / (365.25 * 24 * 60 * 60 * 1000);
+  if (!Number.isFinite(years) || years < 0) return null;
+  return Math.round(years * 10) / 10;
+}
+
 // ── source flatteners ─────────────────────────────────────────────────────────
 function rel(v) {
   // a relation field may be a string or { name|title|label|code }
@@ -180,6 +196,18 @@ function buildRawSources({ employee, business, comp, entity, now, refNo, authori
 
   const issueDate = now instanceof Date ? now : (now ? toDate(now) : new Date());
 
+  // Tenure / last-working-day for service letters (EXPERIENCE / Statement of
+  // Service). For an ACTIVE employee there's no termination date, so the service
+  // period runs joining → issue date — defaulting lastWorkingDay to the issue
+  // date keeps "...from {{doj}} to {{lwd}}..." reading as proper English instead
+  // of a trailing blank. tenureYears is computed (one decimal) from the joining
+  // date to that end date when the caller didn't supply an explicit figure.
+  const dojRaw = e.dateOfJoining || e.joinedAt || e.doj || null;
+  const lwdRaw = e.lastWorkingDay || e.lwd || (dojRaw ? issueDate : null);
+  const tenureYears = (e.tenureYears != null && e.tenureYears !== '')
+    ? e.tenureYears
+    : computeTenureYears(dojRaw, lwdRaw);
+
   return {
     // employee
     'employee.name': nm,
@@ -188,9 +216,9 @@ function buildRawSources({ employee, business, comp, entity, now, refNo, authori
     'employee.code': str(e.code),
     'employee.designation': rel(e.designation) || rel(e.jobTitle),
     'employee.department': rel(e.department),
-    'employee.dateOfJoining': e.dateOfJoining || e.joinedAt || e.doj || null,
-    'employee.lastWorkingDay': e.lastWorkingDay || e.lwd || null,
-    'employee.tenureYears': e.tenureYears,
+    'employee.dateOfJoining': dojRaw,
+    'employee.lastWorkingDay': lwdRaw,
+    'employee.tenureYears': tenureYears,
     'employee.employmentType': str(e.employmentType),
     'employee.workLocation': rel(e.workLocation) || rel(e.location),
     'employee.email': str(e.email || e.workEmail),
@@ -372,5 +400,5 @@ module.exports = {
   mergeFieldCatalog,
   CATALOG,
   MASK,
-  _internals: { formatDate, formatMoney, formatNumber, maskAccount, buildRawSources, TOKEN_RE },
+  _internals: { formatDate, formatMoney, formatNumber, maskAccount, buildRawSources, computeTenureYears, TOKEN_RE },
 };
