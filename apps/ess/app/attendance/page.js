@@ -1,16 +1,14 @@
 'use client';
 
-// Attendance (ESS) — clock, timesheets, corrections, schedule (Feature 2, Phase 4).
+// Attendance (ESS) — monthly "Attendance Details" table is the PRIMARY view, with
+// the clock in/out control and corrections/timesheets/schedule folded into tabs
+// (Feature 2). Everything reads the customer-session /api/hr/me/attendance/*
+// surface, which resolves the employee SERVER-SIDE from the session — the page
+// NEVER sends an employeeId (audit #53/#55).
 //
-// SELF-SERVICE SURFACE (audit #53/#55): every call goes to the customer-session
-// /api/hr/me/attendance/* endpoints, which resolve the employee SERVER-SIDE from
-// the session. The page NEVER sends an employeeId — a client-derived id was the
-// wrong subject (it resolved to the customer id) and the operator /api/hr/* API
-// 401s for a customer session. Writes (punch / timesheet submit / correction)
-// land on the right employee because the backend derives it.
-//
-//   Punch        : POST /api/hr/me/attendance/punch       { type }
+//   Punch        : POST /api/hr/me/attendance/punch        { type }
 //   Punches      : GET  /api/hr/me/attendance/punches?from=&to=
+//   Day rollup   : GET  /api/hr/me/attendance/days?from=&to=   (one row per civil day)
 //   Timesheets   : GET  /api/hr/me/attendance/timesheets
 //                  GET  /api/hr/me/attendance/timesheets/:id   (per-day entries)
 //                  POST /api/hr/me/attendance/timesheets/:id/submit
@@ -18,18 +16,23 @@
 //                  POST /api/hr/me/attendance/regularizations
 //                  { date, requestedInAt, requestedOutAt, kind, reason }
 //   Schedule     : GET  /api/hr/me/attendance/schedule  → { shift, assignment }
-//   Holidays     : GET  /api/hr/me/attendance/holidays?year=  (country server-resolved)
+//   Holidays     : GET  /api/hr/me/attendance/holidays?year=
 //
-// Headline figures here are client-side indicative; the authoritative payable
-// comes from the frozen period summary.
+// The "Attendance Details" table joins the day rollup (authoritative status, shift,
+// workedMinutes) with the raw punches (the IN→OUT pairs stacked per cell). For days
+// with no rollup row we derive WEEKOFF (shift weekly-off) / HOLIDAY (calendar) /
+// ABSENT (past working day) so the month reads as a complete calendar.
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useCallback } from 'react';
+import Link from 'next/link';
 import AppShell from '@/components/AppShell';
 import { ErrorBanner, Empty, Spinner, Centered } from '@hr/ui';
 import { useApi } from '@/lib/useApi';
 import { apiPost } from '@/lib/api';
 import { useProfile } from '@/lib/useProfile';
 import { formatTime, formatDate } from '@/lib/format';
+
+// ── time helpers ─────────────────────────────────────────────────────────────
 
 function startOfToday() {
   const d = new Date();
@@ -46,7 +49,30 @@ function endOfToday() {
   return d;
 }
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+// Local civil-day key (YYYY-MM-DD) for an instant — buckets punches by the user's
+// local day so they line up with the rollup rows.
+function localDayKey(value) {
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+// Civil-day key for a date-only API value (YYYY-MM-DD…), taken from the string so
+// a UTC-midnight Date never slips to the previous local day.
+function isoDayKey(value) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value || ''));
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : localDayKey(value);
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function monthLabel(year, month) {
+  return `${MONTHS[month].toUpperCase()}-${year}`;
+}
+function dmy(year, month, day) {
+  return `${String(day).padStart(2, '0')}-${String(month + 1).padStart(2, '0')}-${year}`;
 }
 
 const PUNCH_LABELS = {
@@ -61,30 +87,86 @@ const CORRECTION_KINDS = [
   ['WFH', 'Work from home'],
   ['ON_DUTY', 'On duty'],
   ['LATE_WAIVER', 'Late waiver'],
+  ['EARLY_OUT_WAIVER', 'Early-out waiver'],
 ];
 
 const SECTIONS = [
+  { key: 'details', label: 'Attendance details' },
   { key: 'clock', label: 'Clock' },
-  { key: 'timesheet', label: 'My timesheet' },
-  { key: 'corrections', label: 'Corrections' },
+  { key: 'timesheet', label: 'Timesheets' },
+  { key: 'corrections', label: 'My corrections' },
   { key: 'schedule', label: 'Schedule' },
 ];
 
-// Sum worked ms across IN→OUT pairs (ignores breaks for a simple headline).
-function workedMs(punches) {
+// ── attendance status → display badge ────────────────────────────────────────
+// Maps the AttendanceStatus enum (+ a few derived pseudo-statuses) to a clear
+// label + semantic hues (green/red/amber/violet/slate/blue) for legibility. The
+// page chrome stays theme-driven; status colors are intentionally semantic.
+const STATUS_META = {
+  PRESENT: { label: 'PRESENT', fg: '#047857', bg: '#ECFDF5', bd: '#A7F3D0' },
+  WORK_FROM_HOME: { label: 'WFH', fg: '#047857', bg: '#ECFDF5', bd: '#A7F3D0' },
+  ON_DUTY: { label: 'ON DUTY', fg: '#047857', bg: '#ECFDF5', bd: '#A7F3D0' },
+  HOLIDAY_WORKED: { label: 'HOLIDAY WORKED', fg: '#047857', bg: '#ECFDF5', bd: '#A7F3D0' },
+  HALF_DAY: { label: 'HALF DAY', fg: '#B45309', bg: '#FFFBEB', bd: '#FDE68A' },
+  MISSING_PUNCH: { label: 'MISSING PUNCH', fg: '#B45309', bg: '#FFFBEB', bd: '#FDE68A' },
+  ON_LEAVE: { label: 'LEAVE', fg: '#6D28D9', bg: '#F5F3FF', bd: '#DDD6FE' },
+  ABSENT: { label: 'ABSENT', fg: '#B91C1C', bg: '#FEF2F2', bd: '#FECACA' },
+  WEEKLY_OFF: { label: 'WEEKOFF', fg: '#475569', bg: '#F8FAFC', bd: '#E2E8F0' },
+  HOLIDAY: { label: 'HOLIDAY', fg: '#1D4ED8', bg: '#EFF6FF', bd: '#BFDBFE' },
+};
+function statusMeta(status) {
+  return STATUS_META[String(status || '').toUpperCase()] || { label: status || '—', fg: '#475569', bg: '#F8FAFC', bd: '#E2E8F0' };
+}
+function AttnBadge({ status }) {
+  if (!status) return <span style={{ color: 'var(--theme-muted)' }}>—</span>;
+  const m = statusMeta(status);
+  return (
+    <span
+      className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold tracking-wide"
+      style={{ color: m.fg, background: m.bg, border: `1px solid ${m.bd}` }}
+    >
+      {m.label}
+    </span>
+  );
+}
+
+// ── pair builders ────────────────────────────────────────────────────────────
+// Walk a day's punches (ascending) and emit IN→OUT pairs. BREAK_* punches do not
+// open/close a worked pair; the pairs are what the table stacks in In/Out cells.
+function pairsForDay(punches) {
   const sorted = [...punches].sort((a, b) => new Date(a.punchAt) - new Date(b.punchAt));
-  let total = 0;
+  const pairs = [];
   let openIn = null;
   for (const p of sorted) {
-    if (p.punchType === 'IN') openIn = new Date(p.punchAt);
-    else if (p.punchType === 'OUT' && openIn) {
-      total += new Date(p.punchAt) - openIn;
+    if (p.punchType === 'IN') {
+      if (openIn) pairs.push({ in: openIn, out: null }); // unmatched IN before a new IN
+      openIn = p.punchAt;
+    } else if (p.punchType === 'OUT') {
+      pairs.push({ in: openIn, out: p.punchAt });
       openIn = null;
     }
   }
+  if (openIn) pairs.push({ in: openIn, out: null }); // still clocked in / missing OUT
+  return pairs;
+}
+// Worked ms across IN→OUT pairs (ignores breaks) — the fallback when the rollup
+// carries no workedMinutes.
+function workedMsFromPairs(pairs) {
+  let total = 0;
+  for (const p of pairs) {
+    if (p.in && p.out) total += new Date(p.out) - new Date(p.in);
+  }
   return total;
 }
-
+// HH:MM:SS for the Actual Time column.
+function fmtHMS(ms) {
+  if (!ms || ms < 0) return '00:00:00';
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
 function fmtHours(ms) {
   const mins = Math.round(ms / 60000);
   const h = Math.floor(mins / 60);
@@ -105,14 +187,556 @@ function StatusPill({ status }) {
   );
 }
 
-// ─── Clock (existing behaviour, kept) ────────────────────────────────────────
+// ─── Attendance Details (PRIMARY view) ───────────────────────────────────────
+
+const WEEKDAY_ISO = ['0', '1', '2', '3', '4', '5', '6']; // 0=Sun
+
+function RegRequestModal({ open, onClose, day, canAct, onSubmitted }) {
+  const [inAt, setInAt] = useState('');
+  const [outAt, setOutAt] = useState('');
+  const [kind, setKind] = useState('MISSED_PUNCH');
+  const [reason, setReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const [done, setDone] = useState(false);
+
+  function toInstant(d, t) {
+    if (!d || !t) return undefined;
+    const dt = new Date(`${d}T${t}`);
+    return Number.isNaN(dt.getTime()) ? undefined : dt.toISOString();
+  }
+
+  async function submit(e) {
+    e.preventDefault();
+    setError(null);
+    if (!reason.trim()) { setError('Please give a reason for this request.'); return; }
+    setSubmitting(true);
+    try {
+      await apiPost('/api/hr/me/attendance/regularizations', {
+        date: day.key,
+        requestedInAt: toInstant(day.key, inAt),
+        requestedOutAt: toInstant(day.key, outAt),
+        kind,
+        reason: reason.trim(),
+      });
+      setDone(true);
+      onSubmitted && onSubmitted();
+    } catch (err) {
+      setError(err.message || 'Could not submit your request.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function close() {
+    setInAt(''); setOutAt(''); setKind('MISSED_PUNCH'); setReason('');
+    setError(null); setDone(false); setSubmitting(false);
+    onClose();
+  }
+
+  if (!open) return null;
+  const inputCls = 'w-full rounded-lg border px-3 py-2 text-sm outline-none';
+  const inputStyle = { borderColor: 'var(--theme-border)' };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="reg-modal-title"
+    >
+      <div className="absolute inset-0 bg-black/40" onClick={close} aria-hidden="true" />
+      <div
+        className="relative z-10 w-full max-w-md rounded-2xl bg-white p-5 shadow-xl"
+        style={{ border: '1px solid var(--theme-border)' }}
+      >
+        <div className="mb-3 flex items-start justify-between">
+          <div>
+            <h3 id="reg-modal-title" className="text-base font-semibold" style={{ color: 'var(--theme-text)' }}>
+              Regularization request
+            </h3>
+            <p className="text-xs" style={{ color: 'var(--theme-muted)' }}>{formatDate(day.key)}</p>
+          </div>
+          <button
+            type="button"
+            onClick={close}
+            aria-label="Close"
+            className="rounded-lg px-2 py-1 text-sm"
+            style={{ color: 'var(--theme-muted)' }}
+          >
+            ✕
+          </button>
+        </div>
+
+        {done ? (
+          <div className="space-y-4">
+            <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+              Request sent to your manager for approval.
+            </p>
+            <button
+              type="button"
+              onClick={close}
+              className="w-full rounded-lg py-2.5 text-sm font-semibold"
+              style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}
+            >
+              Done
+            </button>
+          </div>
+        ) : (
+          <form onSubmit={submit} className="space-y-3">
+            {error && <ErrorBanner message={error} />}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="reg-in" className="mb-1 block text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Corrected in-time</label>
+                <input id="reg-in" type="time" value={inAt} onChange={(e) => setInAt(e.target.value)} className={inputCls} style={inputStyle} />
+              </div>
+              <div>
+                <label htmlFor="reg-out" className="mb-1 block text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Corrected out-time</label>
+                <input id="reg-out" type="time" value={outAt} onChange={(e) => setOutAt(e.target.value)} className={inputCls} style={inputStyle} />
+              </div>
+            </div>
+            <div>
+              <label htmlFor="reg-kind" className="mb-1 block text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Reason type</label>
+              <select id="reg-kind" value={kind} onChange={(e) => setKind(e.target.value)} className={`${inputCls} bg-white`} style={inputStyle}>
+                {CORRECTION_KINDS.map(([v, l]) => (<option key={v} value={v}>{l}</option>))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="reg-reason" className="mb-1 block text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Reason</label>
+              <textarea
+                id="reg-reason"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                rows={3}
+                required
+                className={inputCls}
+                style={inputStyle}
+                placeholder="Why is this correction needed?"
+              />
+            </div>
+            <div className="flex gap-3 pt-1">
+              <button
+                type="button"
+                onClick={close}
+                className="flex-1 rounded-lg border py-2.5 text-sm font-semibold"
+                style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-text)' }}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={submitting || !canAct}
+                className="flex-1 rounded-lg py-2.5 text-sm font-semibold transition disabled:opacity-50"
+                style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}
+              >
+                {submitting ? 'Sending…' : 'Send request'}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TableSkeleton({ rows = 8 }) {
+  return (
+    <div className="animate-pulse">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="flex items-center gap-4 border-b px-4 py-4" style={{ borderColor: 'var(--theme-border)' }}>
+          <div className="h-3 w-20 rounded bg-gray-200" />
+          <div className="h-3 w-10 rounded bg-gray-200" />
+          <div className="h-3 w-16 rounded bg-gray-200" />
+          <div className="h-3 w-16 rounded bg-gray-200" />
+          <div className="h-3 w-16 rounded bg-gray-200" />
+          <div className="ml-auto h-5 w-16 rounded-full bg-gray-200" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AttendanceDetailsSection({ canAct }) {
+  const [cursor, setCursor] = useState(() => {
+    const d = new Date();
+    return { year: d.getFullYear(), month: d.getMonth() }; // month 0-11
+  });
+
+  const range = useMemo(() => {
+    const first = new Date(cursor.year, cursor.month, 1, 0, 0, 0, 0);
+    const last = new Date(cursor.year, cursor.month + 1, 0, 23, 59, 59, 999);
+    return { from: first.toISOString(), to: last.toISOString(), first, last };
+  }, [cursor]);
+
+  // Authoritative per-day rollup (status, shift, workedMinutes) for the month.
+  const daysApi = useApi(
+    `/api/hr/me/attendance/days?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`,
+    { select: (b) => (Array.isArray(b) ? b : b?.items || []), deps: [cursor.year, cursor.month] }
+  );
+  // Raw punches for the IN/OUT pairs.
+  const punchesApi = useApi(
+    `/api/hr/me/attendance/punches?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}&pageSize=200`,
+    { select: (b) => (Array.isArray(b) ? b : b?.items || b?.punches || []), deps: [cursor.year, cursor.month] }
+  );
+  // Current shift (for the weekly-off derivation + the Shift column default).
+  const scheduleApi = useApi('/api/hr/me/attendance/schedule', {
+    select: (b) => (b && b.shift ? { shift: b.shift } : null),
+  });
+  // Holidays for the year (to label HOLIDAY days that have no rollup row).
+  const holidaysApi = useApi(`/api/hr/me/attendance/holidays?year=${cursor.year}`, {
+    select: (b) => (Array.isArray(b) ? b : b?.items || b?.holidays || []),
+    deps: [cursor.year],
+  });
+
+  const [regDay, setRegDay] = useState(null); // open the modal for this day
+
+  const loading = daysApi.loading || punchesApi.loading;
+  const error = (daysApi.error && daysApi.error.status !== 404 && daysApi.error)
+    || (punchesApi.error && punchesApi.error.status !== 404 && punchesApi.error)
+    || null;
+
+  // Index punches by local civil day.
+  const punchesByDay = useMemo(() => {
+    const map = {};
+    for (const p of punchesApi.data || []) {
+      const k = localDayKey(p.punchAt);
+      if (!k) continue;
+      (map[k] = map[k] || []).push(p);
+    }
+    return map;
+  }, [punchesApi.data]);
+
+  // Index rollup rows by civil day.
+  const rollupByDay = useMemo(() => {
+    const map = {};
+    for (const r of daysApi.data || []) map[isoDayKey(r.date)] = r;
+    return map;
+  }, [daysApi.data]);
+
+  // Holidays by civil day.
+  const holidayByDay = useMemo(() => {
+    const map = {};
+    for (const h of holidaysApi.data || []) map[isoDayKey(h.observedDate || h.date)] = h;
+    return map;
+  }, [holidaysApi.data]);
+
+  // Weekly-off ISO weekdays from the current shift (CSV "0,6" → Set).
+  const weeklyOff = useMemo(() => {
+    const raw = scheduleApi.data?.shift?.weeklyOffDays;
+    const arr = Array.isArray(raw) ? raw : String(raw == null ? '' : raw).split(',').map((x) => x.trim()).filter((x) => x !== '');
+    return new Set(arr.map(String));
+  }, [scheduleApi.data]);
+
+  const shiftDefaultLabel = scheduleApi.data?.shift
+    ? (scheduleApi.data.shift.isNightShift ? 'Night' : 'Day')
+    : '—';
+
+  const todayKey = todayISO();
+
+  // Build one row per civil day in the month.
+  const rows = useMemo(() => {
+    const daysInMonth = new Date(cursor.year, cursor.month + 1, 0).getDate();
+    const out = [];
+    for (let d = 1; d <= daysInMonth; d += 1) {
+      const dateObj = new Date(cursor.year, cursor.month, d);
+      const key = `${cursor.year}-${String(cursor.month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const isFuture = key > todayKey;
+      const rollup = rollupByDay[key] || null;
+      const dayPunches = punchesByDay[key] || [];
+      const pairs = pairsForDay(dayPunches);
+      const holiday = holidayByDay[key] || null;
+      const isWeeklyOff = weeklyOff.has(WEEKDAY_ISO[dateObj.getDay()]);
+
+      // Status precedence: rollup (authoritative) → holiday → weekly-off → (past
+      // working day with no record = ABSENT) → blank for future days.
+      let status = rollup?.status || null;
+      if (!status) {
+        if (holiday) status = 'HOLIDAY';
+        else if (isWeeklyOff) status = 'WEEKLY_OFF';
+        else if (!isFuture) status = pairs.length ? 'PRESENT' : 'ABSENT';
+      }
+
+      // Actual time: prefer the rollup's workedMinutes, else sum the pairs.
+      const workedMs = rollup && rollup.workedMinutes != null
+        ? rollup.workedMinutes * 60000
+        : workedMsFromPairs(pairs);
+
+      // Shift label: rollup's pattern → current-schedule default → off/holiday.
+      let shiftLabel = rollup?.shift?.name || null;
+      if (!shiftLabel) {
+        if (status === 'HOLIDAY') shiftLabel = 'Holiday';
+        else if (status === 'WEEKLY_OFF') shiftLabel = 'Weekoff';
+        else shiftLabel = shiftDefaultLabel;
+      }
+
+      out.push({
+        key,
+        dmy: dmy(cursor.year, cursor.month, d),
+        isFuture,
+        status,
+        statusKey: String(status || '').toUpperCase(),
+        shiftLabel,
+        pairs,
+        workedMs,
+        locked: !!rollup?.isLocked,
+      });
+    }
+    return out;
+  }, [cursor, rollupByDay, punchesByDay, holidayByDay, weeklyOff, shiftDefaultLabel, todayKey]);
+
+  const hasAnyData = rows.some((r) => r.pairs.length || (r.status && r.status !== 'WEEKLY_OFF' && r.status !== 'HOLIDAY'));
+
+  function gotoMonth(delta) {
+    setCursor((c) => {
+      const m = c.month + delta;
+      const year = c.year + Math.floor(m / 12);
+      const month = ((m % 12) + 12) % 12;
+      return { year, month };
+    });
+  }
+  function gotoThisMonth() {
+    const d = new Date();
+    setCursor({ year: d.getFullYear(), month: d.getMonth() });
+  }
+  const isThisMonth = (() => {
+    const d = new Date();
+    return d.getFullYear() === cursor.year && d.getMonth() === cursor.month;
+  })();
+
+  const reload = useCallback(() => {
+    daysApi.reload();
+    punchesApi.reload();
+  }, [daysApi, punchesApi]);
+
+  // Which rows surface a Leave-request deep-link: ABSENT past working days, where
+  // applying for leave actually makes sense.
+  function showLeaveBtn(r) {
+    if (r.isFuture || r.locked) return false;
+    return r.statusKey === 'ABSENT';
+  }
+  // Reg request: any past/today non-locked, non-weekoff/holiday/leave working day.
+  function showRegBtn(r) {
+    if (r.isFuture || r.locked || !canAct) return false;
+    return !['WEEKLY_OFF', 'HOLIDAY', 'ON_LEAVE'].includes(r.statusKey);
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Header: title + month navigator */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold" style={{ color: 'var(--theme-text)' }}>Attendance Details</h2>
+          <p className="text-xs" style={{ color: 'var(--theme-muted)' }}>
+            Your daily attendance for the selected month.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {!isThisMonth && (
+            <button
+              type="button"
+              onClick={gotoThisMonth}
+              className="rounded-lg border px-3 py-1.5 text-xs font-medium transition"
+              style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-muted)' }}
+            >
+              This month
+            </button>
+          )}
+          <div
+            className="flex items-center gap-1 rounded-xl border bg-white p-1 shadow-sm"
+            style={{ borderColor: 'var(--theme-border)' }}
+          >
+            <button
+              type="button"
+              onClick={() => gotoMonth(-1)}
+              aria-label="Previous month"
+              className="rounded-lg px-2.5 py-1.5 text-sm font-semibold transition hover:opacity-80"
+              style={{ color: 'var(--theme-primary)' }}
+            >
+              ◀
+            </button>
+            <span
+              className="min-w-[7.5rem] text-center text-sm font-semibold tabular-nums"
+              style={{ color: 'var(--theme-text)' }}
+              aria-live="polite"
+            >
+              {monthLabel(cursor.year, cursor.month)}
+            </span>
+            <button
+              type="button"
+              onClick={() => gotoMonth(1)}
+              aria-label="Next month"
+              className="rounded-lg px-2.5 py-1.5 text-sm font-semibold transition hover:opacity-80"
+              style={{ color: 'var(--theme-primary)' }}
+            >
+              ▶
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {error && <ErrorBanner message={error.message || 'Could not load your attendance.'} />}
+
+      {/* The table card */}
+      <div className="overflow-hidden rounded-2xl border bg-white shadow-sm" style={{ borderColor: 'var(--theme-border)' }}>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[820px] border-collapse text-sm">
+            <thead>
+              <tr style={{ background: 'var(--theme-primary-soft, #f8fafc)' }}>
+                {['Date', 'Shift', 'In-Time', 'Out-Time', 'Actual Time', 'Attn. Status', 'Requests'].map((h, i) => (
+                  <th
+                    key={h}
+                    className={`whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wide ${i >= 2 && i <= 4 ? 'text-center' : 'text-left'} ${i === 6 ? 'text-right' : ''}`}
+                    style={{ color: 'var(--theme-muted)', borderBottom: '1px solid var(--theme-border)' }}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={7} className="p-0">
+                    <TableSkeleton />
+                  </td>
+                </tr>
+              ) : !hasAnyData ? (
+                <tr>
+                  <td colSpan={7}>
+                    <div className="px-4 py-14 text-center">
+                      <p className="text-sm font-medium" style={{ color: 'var(--theme-text)' }}>
+                        No attendance recorded for this month
+                      </p>
+                      <p className="mt-1 text-xs" style={{ color: 'var(--theme-muted)' }}>
+                        Punches and approved leave for {monthLabel(cursor.year, cursor.month)} will appear here.
+                      </p>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                rows.map((r, idx) => {
+                  const isToday = r.key === todayKey;
+                  const bg = isToday
+                    ? 'var(--theme-primary-soft, #eef2ff)'
+                    : idx % 2 === 1
+                      ? 'color-mix(in srgb, var(--theme-text) 2.5%, transparent)'
+                      : 'transparent';
+                  const dim = r.isFuture ? 0.45 : 1;
+                  return (
+                    <tr
+                      key={r.key}
+                      style={{ background: bg, borderBottom: '1px solid var(--theme-border)', opacity: dim }}
+                    >
+                      {/* Date */}
+                      <td className="whitespace-nowrap px-4 py-3 align-top">
+                        <span className="font-medium tabular-nums" style={{ color: 'var(--theme-text)' }}>{r.dmy}</span>
+                        {isToday && (
+                          <span className="ml-2 rounded-full px-1.5 py-0.5 text-[10px] font-semibold" style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}>
+                            Today
+                          </span>
+                        )}
+                      </td>
+                      {/* Shift */}
+                      <td className="whitespace-nowrap px-4 py-3 align-top" style={{ color: 'var(--theme-muted)' }}>
+                        {r.shiftLabel}
+                      </td>
+                      {/* In-Time (stacked) */}
+                      <td className="px-4 py-3 text-center align-top">
+                        {r.pairs.length ? (
+                          <div className="flex flex-col items-center gap-0.5 tabular-nums" style={{ color: 'var(--theme-text)' }}>
+                            {r.pairs.map((p, i) => (
+                              <span key={i}>{p.in ? formatTime(p.in) : '—'}</span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span style={{ color: 'var(--theme-muted)' }}>—</span>
+                        )}
+                      </td>
+                      {/* Out-Time (stacked) */}
+                      <td className="px-4 py-3 text-center align-top">
+                        {r.pairs.length ? (
+                          <div className="flex flex-col items-center gap-0.5 tabular-nums" style={{ color: 'var(--theme-text)' }}>
+                            {r.pairs.map((p, i) => (
+                              <span key={i}>{p.out ? formatTime(p.out) : '—'}</span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span style={{ color: 'var(--theme-muted)' }}>—</span>
+                        )}
+                      </td>
+                      {/* Actual Time */}
+                      <td className="whitespace-nowrap px-4 py-3 text-center align-top tabular-nums" style={{ color: 'var(--theme-text)' }}>
+                        {r.workedMs > 0 ? fmtHMS(r.workedMs) : <span style={{ color: 'var(--theme-muted)' }}>—</span>}
+                      </td>
+                      {/* Status */}
+                      <td className="whitespace-nowrap px-4 py-3 align-top">
+                        <AttnBadge status={r.status} />
+                      </td>
+                      {/* Requests */}
+                      <td className="whitespace-nowrap px-4 py-3 text-right align-top">
+                        <div className="inline-flex items-center gap-2">
+                          {showLeaveBtn(r) && (
+                            <Link
+                              href={`/leave?date=${r.key}`}
+                              className="rounded-lg border px-2.5 py-1 text-xs font-medium transition hover:opacity-80"
+                              style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-primary)' }}
+                            >
+                              Leave
+                            </Link>
+                          )}
+                          {showRegBtn(r) && (
+                            <button
+                              type="button"
+                              onClick={() => setRegDay(r)}
+                              className="rounded-lg px-2.5 py-1 text-xs font-semibold transition hover:opacity-90"
+                              style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}
+                            >
+                              Regularize
+                            </button>
+                          )}
+                          {r.locked && (
+                            <span className="text-[11px]" style={{ color: 'var(--theme-muted)' }} title="Period locked">Locked</span>
+                          )}
+                          {!showLeaveBtn(r) && !showRegBtn(r) && !r.locked && (
+                            <span style={{ color: 'var(--theme-muted)' }}>—</span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div className="flex flex-wrap items-center gap-2 text-[11px]" style={{ color: 'var(--theme-muted)' }}>
+        {['PRESENT', 'ABSENT', 'ON_LEAVE', 'WEEKLY_OFF', 'HOLIDAY'].map((s) => (
+          <AttnBadge key={s} status={s} />
+        ))}
+      </div>
+
+      <RegRequestModal
+        open={!!regDay}
+        day={regDay || { key: todayISO() }}
+        canAct={canAct}
+        onClose={() => setRegDay(null)}
+        onSubmitted={reload}
+      />
+    </div>
+  );
+}
+
+// ─── Clock (kept) ────────────────────────────────────────────────────────────
 
 function ClockSection({ canAct }) {
   const from = useMemo(() => startOfPeriod().toISOString(), []);
   const to = useMemo(() => endOfToday().toISOString(), []);
 
   const { data: punches, loading, error, reload } = useApi(
-    `/api/hr/me/attendance/punches?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    `/api/hr/me/attendance/punches?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&pageSize=200`,
     { select: (b) => (Array.isArray(b) ? b : b?.items || b?.punches || []) }
   );
 
@@ -127,9 +751,9 @@ function ClockSection({ canAct }) {
   const lastType = today[0]?.punchType;
   const isClockedIn = lastType === 'IN' || lastType === 'BREAK_END';
 
-  const periodWorked = useMemo(() => fmtHours(workedMs(all)), [all]);
-  const todayWorked = useMemo(() => fmtHours(workedMs(today)), [today]);
-  const daysPresent = useMemo(() => new Set(all.map((p) => formatDate(p.punchAt))).size, [all]);
+  const periodWorked = useMemo(() => fmtHours(workedMsFromPairs(pairsForDay(all))), [all]);
+  const todayWorked = useMemo(() => fmtHours(workedMsFromPairs(pairsForDay(today))), [today]);
+  const daysPresent = useMemo(() => new Set(all.map((p) => localDayKey(p.punchAt))).size, [all]);
 
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState(null);
@@ -242,7 +866,7 @@ function ClockSection({ canAct }) {
   );
 }
 
-// ─── My timesheet ────────────────────────────────────────────────────────────
+// ─── My timesheet (kept) ──────────────────────────────────────────────────────
 
 function TimesheetDetail({ timesheet, onSubmitted }) {
   const { data, loading, error } = useApi(
@@ -258,7 +882,7 @@ function TimesheetDetail({ timesheet, onSubmitted }) {
   }, [data]);
 
   const status = data?.status || timesheet.status;
-  const canSubmit = String(status || '').toUpperCase() === 'DRAFT';
+  const canSubmit = ['DRAFT', 'REJECTED'].includes(String(status || '').toUpperCase());
 
   async function submit() {
     setBusy(true);
@@ -368,7 +992,7 @@ function TimesheetSection() {
   );
 }
 
-// ─── Request correction ──────────────────────────────────────────────────────
+// ─── My corrections (history + free-form request, kept) ───────────────────────
 
 function CorrectionsSection({ canAct }) {
   const { data: requests, loading, error, reload } = useApi(
@@ -429,6 +1053,9 @@ function CorrectionsSection({ canAct }) {
     <div className="space-y-6">
       <section className="rounded-2xl border bg-white p-5 shadow-sm" style={{ borderColor: 'var(--theme-border)' }}>
         <h2 className="mb-3 text-sm font-semibold" style={{ color: 'var(--theme-text)' }}>Request a correction</h2>
+        <p className="mb-3 text-xs" style={{ color: 'var(--theme-muted)' }}>
+          Tip: you can also file a regularization for a specific day from the <strong>Attendance details</strong> table.
+        </p>
         {formError && <ErrorBanner message={formError} />}
         {success && (
           <p className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
@@ -515,7 +1142,7 @@ function CorrectionsSection({ canAct }) {
   );
 }
 
-// ─── My schedule + holidays ──────────────────────────────────────────────────
+// ─── My schedule + holidays (kept) ────────────────────────────────────────────
 
 const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -635,11 +1262,11 @@ function ScheduleSection() {
 
 function AttendanceInner() {
   // The employee is resolved SERVER-SIDE by every /api/hr/me/attendance/* call;
-  // we only read the profile to gate the "couldn't resolve your record" banner
+  // we read the profile only to gate the "couldn't resolve your record" banner
   // and to disable write actions when there is genuinely no employee record.
   const { employeeId, loading: profileLoading } = useProfile();
   const canAct = !!employeeId;
-  const [section, setSection] = useState('clock');
+  const [section, setSection] = useState('details');
 
   return (
     <div className="space-y-5">
@@ -673,6 +1300,7 @@ function AttendanceInner() {
         <ErrorBanner message="We couldn't resolve your employee record. Please contact HR." />
       )}
 
+      {section === 'details' && <AttendanceDetailsSection canAct={canAct} />}
       {section === 'clock' && <ClockSection canAct={canAct} />}
       {section === 'timesheet' && <TimesheetSection />}
       {section === 'corrections' && <CorrectionsSection canAct={canAct} />}
