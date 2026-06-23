@@ -25,6 +25,15 @@ router.use(attachSelfEmployee); // Feature 1: hierarchy anchor (consistent stack
 // protect + attachSelfEmployee above, so ?root=me can root at req.user.employeeId.
 router.get('/tree', requirePermission('canViewEmployees'), org.tree);
 
+// Feature 19 — scalable org chart: lazy per-node API (children-of-node, ancestors,
+// search-to-locate, scope-clamped roots). All canViewEmployees; the controller
+// resolves the F1 band and re-validates every :id with scopeAllows (out-of-scope →
+// 404). Declared BEFORE the generic mountResource('/:id') so 'tree' isn't taken as an id.
+router.get('/tree/roots', requirePermission('canViewEmployees'), org.treeRoots);
+router.get('/tree/search', requirePermission('canViewEmployees'), org.treeSearch);
+router.get('/tree/nodes/:id/children', requirePermission('canViewEmployees'), org.treeChildren);
+router.get('/tree/nodes/:id/ancestors', requirePermission('canViewEmployees'), org.treeAncestors);
+
 // Optional extra create-guards per resource (Feature 14 country/currency lock).
 function mountResource(path, ctrl, createGuards = []) {
   router.get(`/${path}`, requirePermission('canViewEmployees'), ctrl.list);

@@ -1,263 +1,160 @@
 'use client';
 
-// Org chart (Feature 1, Phase D).
+// Org chart (Feature 19 — scalable redesign).
 //
-// Renders GET /api/hr/org/tree — the manager→reports hierarchy — as a
-// collapsible, dependency-free tree (CSS/flex; no chart libraries). Each node is
-// a card showing name, designation, department, and #reports. Branches
-// expand/collapse; a search box focuses (auto-expands + highlights) matching
-// nodes. The tree is server-built and already scope-filtered: a Manager sees
-// their own sub-tree, an Owner/HR-Admin sees the whole forest.
+// Renders the reporting hierarchy via the LAZY per-node API so it stays fast at
+// 1000+ / 10+ levels: first paint fetches only the roots (/org/tree/roots);
+// expanding a node lazily loads that node's direct reports (/nodes/:id/children,
+// paginated); search hits the server (/org/tree/search) and returns each match's
+// ancestor path so the tree expands EXACTLY the branches to reveal it; the
+// breadcrumb-to-top comes from /nodes/:id/ancestors. An admin can re-root the
+// viewport at any in-scope node (?root=<id>); a manager is scope-clamped to their
+// own sub-tree server-side. The whole thing is virtualized by the shared OrgTree
+// component (DOM ≪ tenant size). Re-parenting (org editing) lives in the F10
+// org editor — linked, never duplicated here.
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Spinner, ErrorBanner, Empty } from '@hr/ui';
-import { get } from '@/lib/api';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { PageHeader } from '@/lib/ui';
+import { InfoTip } from '@/lib/widgets';
+import OrgTree from '@/components/OrgTree';
+import { get } from '@/lib/api';
 
-function countNodes(nodes) {
-  let n = 0;
-  for (const node of nodes) n += 1 + countNodes(node.children || []);
-  return n;
-}
+function OrgChartInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const rootId = searchParams.get('root') || null; // ?root=<id> re-roots the viewport
 
-// Collect ids of nodes that match the query, plus the ids of every ancestor so
-// the path to a match stays expanded.
-function matchPaths(nodes, q, ancestors, outMatches, outExpand) {
-  for (const node of nodes) {
-    const hit =
-      q &&
-      [node.name, node.code, node.designation, node.departmentName]
-        .filter(Boolean)
-        .some((s) => s.toLowerCase().includes(q));
-    if (hit) {
-      outMatches.add(node.id);
-      for (const a of ancestors) outExpand.add(a);
-    }
-    matchPaths(node.children || [], q, [...ancestors, node.id], outMatches, outExpand);
-  }
-}
-
-function Node({ node, depth, expanded, toggle, matches, hasQuery }) {
-  const kids = node.children || [];
-  const hasKids = kids.length > 0;
-  const isOpen = expanded.has(node.id);
-  const isMatch = matches.has(node.id);
-
-  return (
-    <li className="relative">
-      <div
-        className={`inline-flex items-start gap-3 rounded-xl border bg-white px-4 py-3 mb-2 transition-shadow hover:shadow-sm ${
-          isMatch ? 'border-[color:var(--theme-primary)] ring-1 ring-[color:var(--theme-primary)]' : 'border-gray-200'
-        } ${hasQuery && !isMatch ? 'opacity-60' : ''}`}
-      >
-        {hasKids ? (
-          <button
-            type="button"
-            onClick={() => toggle(node.id)}
-            aria-label={isOpen ? 'Collapse' : 'Expand'}
-            aria-expanded={isOpen}
-            className="mt-0.5 h-5 w-5 shrink-0 rounded border border-gray-300 text-xs leading-none text-gray-600 hover:bg-gray-50"
-          >
-            {isOpen ? '−' : '+'}
-          </button>
-        ) : (
-          <span className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
-        )}
-        <span
-          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white text-sm font-semibold"
-          style={{ backgroundColor: 'var(--theme-primary)' }}
-        >
-          {(node.name || node.code || '?').slice(0, 1).toUpperCase()}
-        </span>
-        <span className="min-w-0">
-          <span className="block text-sm font-semibold text-gray-900">{node.name}</span>
-          <span className="block text-xs text-gray-500">
-            {[node.designation, node.departmentName].filter(Boolean).join(' · ') || node.code}
-          </span>
-          {node.reportsCount > 0 && (
-            <span className="mt-1 inline-flex items-center rounded-full bg-gray-100 text-gray-600 px-2 py-0.5 text-[11px]">
-              {node.reportsCount} {node.reportsCount === 1 ? 'report' : 'reports'}
-            </span>
-          )}
-        </span>
-      </div>
-
-      {hasKids && isOpen && (
-        <ul className="pl-7 border-l border-gray-200 ml-2.5">
-          {kids.map((child) => (
-            <Node
-              key={child.id}
-              node={child}
-              depth={depth + 1}
-              expanded={expanded}
-              toggle={toggle}
-              matches={matches}
-              hasQuery={hasQuery}
-            />
-          ))}
-        </ul>
-      )}
-    </li>
-  );
-}
-
-export default function OrgChartPage() {
-  const [tree, setTree] = useState(null);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [expanded, setExpanded] = useState(() => new Set());
   const [query, setQuery] = useState('');
+  const [searchResults, setSearchResults] = useState(null);
+  const [searching, setSearching] = useState(false);
+  const [breadcrumb, setBreadcrumb] = useState([]);
 
+  // Scoped API clients injected into the shared tree. Stable identities so the tree
+  // only reloads roots when the re-root target (rootId) actually changes.
+  const loadRoots = useCallback(
+    (cursor) => get('/api/hr/org/tree/roots', { root: rootId || undefined, cursor: cursor || undefined, limit: 50 }),
+    [rootId],
+  );
+  const loadChildren = useCallback(
+    (id, cursor) => get(`/api/hr/org/tree/nodes/${id}/children`, { cursor: cursor || undefined, limit: 50 }),
+    [],
+  );
+  const loadAncestors = useCallback(
+    (id) => get(`/api/hr/org/tree/nodes/${id}/ancestors`),
+    [],
+  );
+
+  // Re-root → push ?root=<id>; the page reloads roots at that node + draws the
+  // breadcrumb path-to-top.
+  const focusNode = useCallback((node) => {
+    const sp = new URLSearchParams(Array.from(searchParams.entries()));
+    sp.set('root', node.id);
+    router.push(`/org/chart?${sp.toString()}`);
+  }, [router, searchParams]);
+
+  const clearRoot = useCallback(() => {
+    const sp = new URLSearchParams(Array.from(searchParams.entries()));
+    sp.delete('root');
+    router.push(sp.toString() ? `/org/chart?${sp.toString()}` : '/org/chart');
+  }, [router, searchParams]);
+
+  // Breadcrumb: when re-rooted, fetch the focused node's path-to-top.
   useEffect(() => {
     let alive = true;
-    setLoading(true);
-    get('/api/hr/org/tree')
-      .then((res) => {
-        if (!alive) return;
-        const items = Array.isArray(res?.items) ? res.items : [];
-        setTree(items);
-        // Default: expand the root level so the chart isn't a wall of collapsed cards.
-        setExpanded(new Set(items.map((n) => n.id)));
-      })
-      .catch((err) => {
-        if (alive) setError(err.data?.message || err.message || 'Failed to load org chart.');
-      })
-      .finally(() => {
-        if (alive) setLoading(false);
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
+    if (!rootId) { setBreadcrumb([]); return undefined; }
+    loadAncestors(rootId)
+      .then((res) => { if (alive) setBreadcrumb(res.path || []); })
+      .catch(() => { if (alive) setBreadcrumb([]); });
+    return () => { alive = false; };
+  }, [rootId, loadAncestors]);
 
-  const q = query.trim().toLowerCase();
-  const { matches } = useMemo(() => {
-    const m = new Set();
-    const exp = new Set();
-    if (q && tree) matchPaths(tree, q, [], m, exp);
-    return { matches: m, expandForQuery: exp };
-  }, [q, tree]);
-
-  // When searching, auto-expand the path to every match.
+  // Server search (debounced). Picking a result expands its path inside the tree.
+  const debounceRef = useRef(null);
   useEffect(() => {
-    if (!q || !tree) return;
-    const m = new Set();
-    const exp = new Set();
-    matchPaths(tree, q, [], m, exp);
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      for (const id of exp) next.add(id);
-      for (const id of m) next.add(id); // expand the matched node itself too
-      return next;
-    });
-  }, [q, tree]);
+    const q = query.trim();
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!q) { setSearchResults(null); setSearching(false); return undefined; }
+    setSearching(true);
+    debounceRef.current = setTimeout(() => {
+      get('/api/hr/org/tree/search', { q, limit: 20 })
+        .then((res) => setSearchResults(res.results || []))
+        .catch(() => setSearchResults([]))
+        .finally(() => setSearching(false));
+    }, 250);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [query]);
 
-  const toggle = useCallback((id) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-
-  function expandAll() {
-    if (!tree) return;
-    const all = new Set();
-    const walk = (nodes) => nodes.forEach((n) => { all.add(n.id); walk(n.children || []); });
-    walk(tree);
-    setExpanded(all);
-  }
-  function collapseAll() {
-    setExpanded(new Set());
-  }
-
-  const total = tree ? countNodes(tree) : 0;
+  // Breadcrumb click → re-root upward at that ancestor.
+  const onBreadcrumb = useCallback((node) => focusNode(node), [focusNode]);
 
   return (
     <div>
       <PageHeader
         title="Org chart"
-        subtitle={total ? `${total} ${total === 1 ? 'person' : 'people'} in the reporting tree` : 'Reporting hierarchy'}
+        subtitle="The reporting hierarchy — opens at the top and loads each branch only when you expand it, so it stays fast at thousands of people."
         actions={
-          <Link
-            href="/org"
-            className="px-3 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 inline-flex items-center"
-          >
-            Org structure
-          </Link>
+          <div className="flex items-center gap-2">
+            {rootId && (
+              <button type="button" onClick={clearRoot} className="px-3 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50">
+                Back to full org
+              </button>
+            )}
+            <Link href="/approvals/org" className="px-3 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 inline-flex items-center">
+              Edit reporting lines
+            </Link>
+            <Link href="/org" className="px-3 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 inline-flex items-center">
+              Org structure
+            </Link>
+          </div>
         }
       />
 
-      {loading && <Spinner />}
-      {error && <ErrorBanner message={error} />}
-
-      {!loading && !error && tree && tree.length === 0 && (
-        // Spec §6.1: a Manager rooted at self with no reports gets a friendly,
-        // non-error empty state — not a failure.
-        <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-10 text-center">
-          <p className="text-sm font-medium text-gray-900">You don&apos;t manage anyone yet.</p>
-          <p className="text-sm text-gray-500 mt-1">
-            Ask HR to set your team&apos;s reporting lines, or assign managers from the People screen.
-          </p>
+      <div className="mb-5 flex flex-wrap items-center gap-3">
+        <label htmlFor="org-search" className="sr-only">Search the org chart by name, code, designation, or department</label>
+        <div className="relative">
+          <input
+            id="org-search"
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search a person to jump to them…"
+            className="w-80 rounded-lg border border-gray-300 px-4 py-2.5 text-sm"
+          />
+          {searching && <span className="absolute right-3 top-3 text-xs text-gray-400">…</span>}
         </div>
-      )}
+        <span className="inline-flex items-center text-xs text-gray-500">
+          Lazy &amp; virtualized
+          <InfoTip text="The chart never downloads the whole company. It loads the top, then each branch only when you open it, and searches on the server — so it stays fast even with thousands of employees across many levels." />
+        </span>
+        {searchResults && (
+          <span className="text-sm text-gray-500">
+            {searchResults.length} {searchResults.length === 1 ? 'match' : 'matches'}
+          </span>
+        )}
+      </div>
 
-      {!loading && !error && tree && tree.length > 0 && (
-        <>
-          <div className="flex flex-wrap items-center gap-3 mb-5">
-            <label htmlFor="org-search" className="sr-only">
-              Search the org chart by name, code, designation, or department
-            </label>
-            <input
-              id="org-search"
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search name, designation, department…"
-              className="px-4 py-2.5 border border-gray-300 rounded-lg text-sm w-80"
-            />
-            <button
-              type="button"
-              onClick={expandAll}
-              className="px-3 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50"
-            >
-              Expand all
-            </button>
-            <button
-              type="button"
-              onClick={collapseAll}
-              className="px-3 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50"
-            >
-              Collapse all
-            </button>
-            {q && (
-              <span className="text-sm text-gray-500">
-                {matches.size} {matches.size === 1 ? 'match' : 'matches'}
-              </span>
-            )}
-          </div>
-
-          {q && matches.size === 0 ? (
-            <Empty text="No one matches your search." />
-          ) : (
-            <ul className="text-sm">
-              {tree.map((node) => (
-                <Node
-                  key={node.id}
-                  node={node}
-                  depth={0}
-                  expanded={expanded}
-                  toggle={toggle}
-                  matches={matches}
-                  hasQuery={!!q}
-                />
-              ))}
-            </ul>
-          )}
-        </>
-      )}
+      <OrgTree
+        key={rootId || 'root'}
+        loadRoots={loadRoots}
+        loadChildren={loadChildren}
+        loadAncestors={loadAncestors}
+        searchResults={searchResults}
+        onFocus={focusNode}
+        breadcrumb={breadcrumb}
+        onBreadcrumb={onBreadcrumb}
+        showStatus
+        emptyText="You don't manage anyone yet — ask HR to set your team's reporting lines, or assign managers from the People screen."
+      />
     </div>
+  );
+}
+
+export default function OrgChartPage() {
+  return (
+    <Suspense fallback={<p className="text-sm text-gray-500">Loading the org chart…</p>}>
+      <OrgChartInner />
+    </Suspense>
   );
 }

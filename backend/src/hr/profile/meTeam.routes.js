@@ -26,6 +26,17 @@ router.post('/leave/:id/decide', c.leaveDecide);
 router.get('/reimbursements/pending', c.reimbursementsPending);
 router.post('/reimbursements/:id/decide', c.reimbursementDecide);
 router.get('/approvals', c.approvalsInbox);
-router.get('/org', c.org);
+router.get('/org', c.org); // legacy whole-tree (kept for small tenants / fallback)
+
+// Feature 19 — employee-centric lazy org chart. Self-rooted landing (self + path to
+// top), drill-down (own sub-tree), go-to-top (card-only roots), search-to-locate.
+// All on the customer session; scope = resolveCustomerScope + the §3.3 policy. No
+// :id ever names the SUBJECT — only a tree node to expand, gated to the actor's own
+// sub-tree (or a policy-allowed ancestor) else 404. No compensation on any node.
+router.get('/org/self', c.orgSelf);
+router.get('/org/top', c.orgTop);
+router.get('/org/search', c.orgSearch);
+router.get('/org/nodes/:id/children', c.orgChildren);
+router.get('/org/nodes/:id/ancestors', c.orgAncestors);
 
 module.exports = router;

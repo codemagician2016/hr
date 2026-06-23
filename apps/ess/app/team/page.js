@@ -7,13 +7,14 @@
 // rooted at the manager). All data is scoped SERVER-SIDE to the manager's reporting
 // sub-tree (/api/hr/me/team/*); a non-manager simply sees empty tabs.
 
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { Spinner, Centered, ErrorBanner, Empty } from '@hr/ui';
 import { useApi } from '@/lib/useApi';
-import { apiPost } from '@/lib/api';
+import { apiGet, apiPost } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 import OrgTree from '@/components/OrgTree';
+import InfoTip from '@/components/InfoTip';
 
 const TABS = [
   { key: 'roster', label: 'Roster' },
@@ -159,11 +160,96 @@ function DirectoryTab() {
   );
 }
 
+// My Org (Feature 19) — employee-centric lazy chart. Lands self-rooted: one
+// /org/self call gives the breadcrumb path-to-top + the viewer's node; expanding
+// drills DOWN through the sub-tree (lazy + paginated + virtualized). "Go to top of
+// org" lists the tenant roots as cards (branches outside your own sub-tree are
+// card-only under the default policy). Search locates a person in your tree.
 function OrgTab() {
-  const { data, loading, error } = useApi('/api/hr/me/team/org?root=me');
-  if (loading) return <Centered><Spinner /></Centered>;
-  if (error) return <ErrorBanner message={error.message} />;
-  return <OrgTree nodes={data?.items || []} />;
+  const [mode, setMode] = useState('self'); // 'self' | 'top'
+  const [breadcrumb, setBreadcrumb] = useState([]);
+  const [bootError, setBootError] = useState('');
+  const [booting, setBooting] = useState(true);
+  const [query, setQuery] = useState('');
+  const [searchResults, setSearchResults] = useState(null);
+
+  // loadRoots depends on the mode: self → the viewer's node (from /org/self);
+  // top → the tenant roots (card-only outside own sub-tree).
+  const loadRoots = useCallback(async (cursor) => {
+    if (mode === 'top') {
+      const res = await apiGet(`/api/hr/me/team/org/top?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
+      return { nodes: res.nodes || [], nextCursor: res.nextCursor || null };
+    }
+    const res = await apiGet('/api/hr/me/team/org/self');
+    setBreadcrumb(res.ancestors || []);
+    return { nodes: res.self ? [res.self] : [], nextCursor: null };
+  }, [mode]);
+
+  const loadChildren = useCallback(
+    (id, cursor) => apiGet(`/api/hr/me/team/org/nodes/${id}/children?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`),
+    [],
+  );
+  const loadAncestors = useCallback((id) => apiGet(`/api/hr/me/team/org/nodes/${id}/ancestors`), []);
+
+  // Boot probe — confirm the employee has an org context (a non-linked customer
+  // gets a friendly empty state, not an error).
+  useEffect(() => {
+    let alive = true;
+    setBooting(true);
+    apiGet('/api/hr/me/team/org/self')
+      .then((res) => { if (alive) { setBreadcrumb(res.ancestors || []); if (!res.self) setBootError(''); } })
+      .catch((e) => { if (alive) setBootError(e?.message || 'Could not load your org view.'); })
+      .finally(() => { if (alive) setBooting(false); });
+    return () => { alive = false; };
+  }, []);
+
+  // Server search (debounced) within the employee's allowed tree.
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) { setSearchResults(null); return undefined; }
+    const t = setTimeout(() => {
+      apiGet(`/api/hr/me/team/org/search?q=${encodeURIComponent(q)}&limit=20`)
+        .then((res) => setSearchResults(res.results || []))
+        .catch(() => setSearchResults([]));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  if (booting) return <Centered><Spinner /></Centered>;
+  if (bootError) return <ErrorBanner message={bootError} />;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="inline-flex rounded-lg border" style={{ borderColor: 'var(--theme-border)' }}>
+          <button type="button" onClick={() => setMode('self')} aria-pressed={mode === 'self'}
+                  className="px-3 py-1.5 text-sm font-medium" style={mode === 'self' ? { background: 'var(--theme-primary)', color: '#fff' } : { color: 'var(--theme-muted)' }}>
+            Me &amp; my team
+          </button>
+          <button type="button" onClick={() => setMode('top')} aria-pressed={mode === 'top'}
+                  className="px-3 py-1.5 text-sm font-medium" style={mode === 'top' ? { background: 'var(--theme-primary)', color: '#fff' } : { color: 'var(--theme-muted)' }}>
+            Top of org
+          </button>
+        </div>
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find someone in your team…"
+               className="w-full rounded-lg border px-3 py-2 text-sm sm:max-w-xs" style={{ borderColor: 'var(--theme-border)' }} />
+        <span className="inline-flex items-center text-xs" style={{ color: 'var(--theme-muted)' }}>
+          Path to the top
+          <InfoTip text="You see yourself and everyone who reports to you, expandable down to the leaves — plus your path up to the top of the org. Branches outside your own team are shown as cards you can read but not drill into." />
+        </span>
+      </div>
+
+      <OrgTree
+        key={mode}
+        loadRoots={loadRoots}
+        loadChildren={loadChildren}
+        loadAncestors={loadAncestors}
+        searchResults={searchResults}
+        breadcrumb={mode === 'self' ? breadcrumb : []}
+        emptyText="No reporting relationships to show yet."
+      />
+    </div>
+  );
 }
 
 function TeamInner() {
