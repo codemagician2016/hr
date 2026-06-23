@@ -88,15 +88,49 @@ function prettyStatus(s) {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-// Normalise the /summary payload into [{ status, count }] regardless of whether
-// the server returns an array, a { items } envelope, or a { counts: {} } map.
+// Turn the period-close blockers object — { pendingRegularizations, unsubmittedTimesheets }
+// — into a normalized list the blocker renderer understands. Only non-zero counts
+// surface as actionable rows, each with a `kind` so blockerLink can deep-link the tab (#15).
+function blockersFromCounts(counts) {
+  if (!counts || typeof counts !== 'object') return [];
+  const out = [];
+  const reg = Number(counts.pendingRegularizations || 0);
+  const ts = Number(counts.unsubmittedTimesheets || 0);
+  if (reg > 0) {
+    out.push({
+      kind: 'regularization',
+      count: reg,
+      label: `${reg} pending regularization${reg === 1 ? '' : 's'} awaiting a decision`,
+    });
+  }
+  if (ts > 0) {
+    out.push({
+      kind: 'timesheet',
+      count: ts,
+      label: `${ts} unsubmitted timesheet${ts === 1 ? '' : 's'} in this range`,
+    });
+  }
+  return out;
+}
+
+// Normalise the /summary payload into [{ status, count, lopDays }]. The server
+// returns { groupBy:'status', total, buckets:[{ key, count, lopDays, overtimeMinutes }] }
+// — map b.key → status (#14). We stay tolerant of a few legacy shapes (array,
+// { items }, { counts:{} } map) so a payload change never blanks the dashboard.
 function normaliseCounts(res) {
   if (!res) return [];
-  if (Array.isArray(res)) return res.map((r) => ({ status: r.status, count: Number(r.count ?? r.total ?? 0) }));
-  if (Array.isArray(res.items)) return res.items.map((r) => ({ status: r.status, count: Number(r.count ?? r.total ?? 0) }));
+  if (Array.isArray(res.buckets)) {
+    return res.buckets.map((b) => ({
+      status: b.key ?? b.status,
+      count: Number(b.count ?? b.total ?? 0),
+      lopDays: b.lopDays != null ? Number(b.lopDays) : 0,
+    }));
+  }
+  if (Array.isArray(res)) return res.map((r) => ({ status: r.status, count: Number(r.count ?? r.total ?? 0), lopDays: Number(r.lopDays ?? 0) }));
+  if (Array.isArray(res.items)) return res.items.map((r) => ({ status: r.status, count: Number(r.count ?? r.total ?? 0), lopDays: Number(r.lopDays ?? 0) }));
   const map = res.counts || res.byStatus || res.summary;
   if (map && typeof map === 'object') {
-    return Object.entries(map).map(([status, count]) => ({ status, count: Number(count) || 0 }));
+    return Object.entries(map).map(([status, count]) => ({ status, count: Number(count) || 0, lopDays: 0 }));
   }
   return [];
 }
@@ -125,10 +159,13 @@ function DashboardTab() {
   }, []);
 
   const counts = useMemo(() => normaliseCounts(data), [data]);
+  // LOP is reported per-bucket on the /summary payload; total it across statuses
+  // (the server never sends a top-level data.lopDays — #14).
   const lopDays = useMemo(() => {
-    const v = data?.lopDays ?? data?.totals?.lopDays;
-    return v == null ? null : Number(v);
-  }, [data]);
+    if (!counts.length) return null;
+    const sum = counts.reduce((s, c) => s + (Number(c.lopDays) || 0), 0);
+    return Math.round(sum * 100) / 100;
+  }, [counts]);
 
   const total = counts.reduce((s, c) => s + c.count, 0);
   const present = counts.filter((c) => PRESENTISH.has(String(c.status).toUpperCase())).reduce((s, c) => s + c.count, 0);
@@ -875,7 +912,11 @@ function ImportHolidaysModal({ year, countries = [], onClose, onDone }) {
     }
   }
 
-  const importedCount = result?.imported ?? result?.count ?? (Array.isArray(result?.items) ? result.items.length : null);
+  // The import returns { total, created, updated } (#20). Headline the new rows
+  // (created), falling back to total/updated; surface the updated count too so a
+  // re-run reads clearly ("0 new, N already present") rather than a blank.
+  const createdCount = result?.created ?? result?.total ?? result?.imported ?? null;
+  const updatedCount = result?.updated ?? null;
 
   return (
     <Modal title="Import statutory holiday set" onClose={onClose}>
@@ -887,7 +928,8 @@ function ImportHolidaysModal({ year, countries = [], onClose, onDone }) {
       {result ? (
         <div className="space-y-3">
           <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
-            Imported {importedCount != null ? importedCount : 'the'} statutory holiday{importedCount === 1 ? '' : 's'} for {countryCode} {importYear}.
+            Imported {createdCount != null ? createdCount : 'the'} statutory holiday{createdCount === 1 ? '' : 's'} for {countryCode} {importYear}
+            {updatedCount != null && updatedCount > 0 ? ` (${updatedCount} already present, left unchanged)` : ''}.
           </p>
           <p className="text-xs text-gray-500">
             Re-running is safe — existing holidays are de-duplicated, not doubled.
@@ -1203,30 +1245,37 @@ function PeriodCloseTab() {
   const [entityId, setEntityId] = useState('');
   const [phase, setPhase] = useState('idle'); // idle | checking | blocked | ready | locking | done
   const [blockers, setBlockers] = useState([]);
+  const [wouldLock, setWouldLock] = useState(null); // rows that would be frozen
   const [error, setError] = useState('');
 
-  // Preview: call /period/close; a 409 means blockers exist (don't lock); a 2xx
-  // here would mean nothing blocks — but to keep preview side-effect-free we only
-  // *confirm* after the operator explicitly clicks Lock. So preview surfaces the
-  // 409 blocker list; if no blockers, we move to a "ready to lock" state.
+  // Preview: the dry-run (confirm:false) returns 200 with the real blocker counts
+  // — { blockers:{pendingRegularizations,unsubmittedTimesheets}, wouldLock, canClose }
+  // — it never throws a 409 (#15). Read canClose to branch: false → blocked (build
+  // the blocker list from the counts), true → ready to lock. We still defend the
+  // 409 path in case an older backend short-circuits to it.
   async function preview() {
     setPhase('checking');
     setError('');
     setBlockers([]);
+    setWouldLock(null);
     try {
-      // Ask the backend to dry-run if supported; otherwise the first call is the
-      // real close. We pass confirm:false so the server treats this as a check.
       const res = await post('/api/hr/attendance/period/close', { from, to, entityId: entityId || undefined, confirm: false });
-      // No 409 → nothing blocks. If the server already locked (confirm ignored),
-      // treat as done; otherwise mark ready for an explicit lock.
-      if (res?.locked || res?.closed) setPhase('done');
-      else setPhase('ready');
-    } catch (e) {
-      if (e.status === 409) {
-        const list = e.data?.blockers || e.data?.issues || e.data?.errors || [];
-        setBlockers(Array.isArray(list) ? list : []);
+      setWouldLock(res?.wouldLock ?? null);
+      if (res?.canClose === false) {
+        setBlockers(blockersFromCounts(res?.blockers));
         setPhase('blocked');
-        if (!Array.isArray(list) || list.length === 0) setError(e.data?.message || 'The period cannot be closed yet.');
+      } else {
+        // canClose === true (or an older 200 with no counts) → ready for an explicit lock.
+        setPhase('ready');
+      }
+    } catch (e) {
+      // Legacy fallback: a 409 with the same blockers object (or a list).
+      if (e.status === 409) {
+        const raw = e.data?.blockers || e.data?.issues || e.data?.errors;
+        const list = Array.isArray(raw) ? raw : blockersFromCounts(raw);
+        setBlockers(list);
+        setPhase('blocked');
+        if (list.length === 0) setError(e.data?.message || 'The period cannot be closed yet.');
       } else {
         setError(e.data?.message || e.message || 'Failed to check the period.');
         setPhase('idle');
@@ -1241,9 +1290,10 @@ function PeriodCloseTab() {
       await post('/api/hr/attendance/period/close', { from, to, entityId: entityId || undefined, confirm: true });
       setPhase('done');
     } catch (e) {
+      // A real lock that races a new blocker returns 409 with the blockers object.
       if (e.status === 409) {
-        const list = e.data?.blockers || e.data?.issues || e.data?.errors || [];
-        setBlockers(Array.isArray(list) ? list : []);
+        const raw = e.data?.blockers || e.data?.issues || e.data?.errors;
+        setBlockers(Array.isArray(raw) ? raw : blockersFromCounts(raw));
         setPhase('blocked');
       } else {
         setError(e.data?.message || e.message || 'Failed to lock the period.');
@@ -1315,12 +1365,21 @@ function PeriodCloseTab() {
               })}
             </ul>
           )}
+          <p className="mt-3 text-xs text-amber-700">
+            Once these are cleared, re-run <span className="font-medium">Check for blockers</span> to lock the period.
+          </p>
         </div>
       )}
 
       {phase === 'ready' && (
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-800">
-          No blockers found for {formatAdminDate(from)} – {formatAdminDate(to)}. Click <span className="font-medium">Lock period</span> to freeze it. This cannot be undone.
+          No blockers found for {formatAdminDate(from)} – {formatAdminDate(to)}.{' '}
+          {wouldLock != null && (
+            <>
+              Locking will freeze <span className="font-medium tabular-nums">{wouldLock}</span> attendance row{wouldLock === 1 ? '' : 's'}.{' '}
+            </>
+          )}
+          Click <span className="font-medium">Lock period</span> to freeze it. This cannot be undone.
         </div>
       )}
 
@@ -1398,7 +1457,9 @@ export default function AttendancePage() {
             {
               key: 'decidedBy',
               header: 'Decided by',
-              render: (r) => (r.decidedBy ? employeeLabel({ employee: r.decidedBy }) : r.decidedByName || '—'),
+              // decidedBy is an operator user-id; the controller resolves the
+              // person's name into decidedByName (#19). Never render the raw id.
+              render: (r) => (r.decidedByName ? <span className="text-gray-700">{r.decidedByName}</span> : <span className="text-gray-400">—</span>),
             },
           ]}
         />

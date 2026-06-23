@@ -450,7 +450,14 @@ async function listPunches(req, res, next) {
     }
 
     const [items, total] = await Promise.all([
-      prisma.attendancePunch.findMany({ where, orderBy: { punchAt: 'desc' }, skip, take }),
+      // Resolve the employee so the admin punch log renders a name, not a UUID (#17).
+      prisma.attendancePunch.findMany({
+        where,
+        orderBy: { punchAt: 'desc' },
+        skip,
+        take,
+        include: { employee: { select: { id: true, firstName: true, lastName: true, code: true } } },
+      }),
       prisma.attendancePunch.count({ where }),
     ]);
     res.json({ items, total, page, pageSize: take });
@@ -644,7 +651,14 @@ async function listTimesheets(req, res, next) {
     if (status) where.status = status;
 
     const [items, total] = await Promise.all([
-      prisma.timesheet.findMany({ where, orderBy: { periodStart: 'desc' }, skip, take }),
+      // Resolve the employee so the approval queue renders a name, not a UUID (#17).
+      prisma.timesheet.findMany({
+        where,
+        orderBy: { periodStart: 'desc' },
+        skip,
+        take,
+        include: { employee: { select: { id: true, firstName: true, lastName: true, code: true } } },
+      }),
       prisma.timesheet.count({ where }),
     ]);
     res.json({ items, total, page, pageSize: take });
@@ -825,11 +839,31 @@ async function listRegularizations(req, res, next) {
       where.employeeId = employeeId;
     }
     if (status) where.status = status;
-    const items = await prisma.attendanceRegularizationRequest.findMany({
+    const rows = await prisma.attendanceRegularizationRequest.findMany({
       where,
       orderBy: { date: 'desc' },
       take: 200,
+      // Resolve the employee so the list renders a name, not a UUID (#17).
+      include: { employee: { select: { id: true, firstName: true, lastName: true, code: true } } },
     });
+
+    // `decidedBy` is a User id (no Prisma relation on this model), so resolve the
+    // decider's display name in one batched lookup and surface it as decidedByName
+    // — the admin "Decided by" column shows a person, not a raw user id (#19).
+    const deciderIds = [...new Set(rows.map((r) => r.decidedBy).filter(Boolean))];
+    const deciderById = new Map();
+    if (deciderIds.length) {
+      const users = await prisma.user.findMany({
+        where: { id: { in: deciderIds } },
+        select: { id: true, name: true, email: true },
+      });
+      for (const u of users) deciderById.set(u.id, u.name || u.email || null);
+    }
+    const items = rows.map((r) => ({
+      ...r,
+      decidedByName: r.decidedBy ? (deciderById.get(r.decidedBy) || null) : null,
+    }));
+
     res.json({ items });
   } catch (e) { next(e); }
 }
