@@ -38,6 +38,7 @@ const { getDefaultOffboardingTemplate } = require('../templates/seed');
 const { seedJourneyTasks } = require('../journeyEngine');
 const { computeFnf } = require('../fnf');
 const { settleEmployeeTermination } = require('../../controllers/employee.controller');
+const { fyPeriodCode } = require('../../leave/periodCode');
 
 // Decimal helper: integer minor units → Decimal string (2dp money columns).
 function minorToDecimal(minor) {
@@ -226,28 +227,63 @@ async function resolveNzEarningsHistory(businessId, employeeId, lwd, db = prisma
   };
 }
 
+// The leave PERIOD a separation's FnF prices/encashes against — the financial
+// year containing the last working day, using the entity's tax-year start (the
+// SAME scheme provision/accrualRunner mint LeaveBalance rows under). Both the FnF
+// valuation and the settle write-back use this so they price and pay the same
+// period's row (finding #4).
+function resolveFnfLeavePeriod(sep, entity) {
+  const lwd = (sep && sep.lastWorkingDay) ? new Date(sep.lastWorkingDay) : new Date();
+  const startMonth = (entity && entity.taxYearStartMonth) || 4;
+  return fyPeriodCode(lwd, startMonth);
+}
+
 // Encashable leave balance (days) for an employee — Σ LeaveBalance.closing over
-// encashable LeaveTypes (current period). The pure fnf core values it.
-async function resolveEncashableLeaveDays(businessId, employeeId, db = prisma) {
+// encashable LeaveTypes FOR THE CURRENT PERIOD only (finding #4). Summing across
+// ALL periods would encash stale/duplicated prior-period rows and (when a source
+// period was not zeroed by carry-forward) double-count carried units → over-pay.
+// `periodCode` scopes the query; when omitted (defensive) we fall back to the
+// single most-recent row per type so the valuation never silently doubles.
+async function resolveEncashableLeaveDays(businessId, employeeId, db = prisma, { periodCode = null } = {}) {
+  if (periodCode) {
+    const balances = await db.leaveBalance.findMany({
+      where: { businessId, employeeId, periodCode, leaveType: { is: { isEncashable: true } } },
+      select: { closing: true },
+    });
+    let days = 0;
+    for (const b of balances) days += Number(b.closing || 0);
+    return days;
+  }
+  // Fallback: one row per encashable leaveType (the newest) — never sum periods.
   const balances = await db.leaveBalance.findMany({
     where: { businessId, employeeId, leaveType: { is: { isEncashable: true } } },
-    select: { closing: true },
+    select: { closing: true, leaveTypeId: true, updatedAt: true },
     orderBy: { updatedAt: 'desc' },
   });
+  const seen = new Set();
   let days = 0;
-  for (const b of balances) days += Number(b.closing || 0);
+  for (const b of balances) {
+    if (seen.has(b.leaveTypeId)) continue;
+    seen.add(b.leaveTypeId);
+    days += Number(b.closing || 0);
+  }
   return days;
 }
 
 // FnF encashment write-back (§4.11 — closes the audited gap). For each encashable
-// LeaveBalance with a positive closing, post an append-only ENCASHMENT
-// LeaveTransaction (quantity = −closing, stamped with the FnF payRunId) and move
-// the units into the `encashed` bucket (NEVER `taken`) so closing → 0 and the
-// §4.2 ledger identity still holds after the payout. MUST run inside the settle
-// $transaction. Returns { encashedDays, lines:[{ leaveBalanceId, units }] }.
-async function writeBackLeaveEncashment(tx, { businessId, employeeId, payRunId }) {
+// LeaveBalance with a positive closing IN THE FnF PERIOD, post an append-only
+// ENCASHMENT LeaveTransaction (quantity = −closing, stamped with the FnF payRunId)
+// and move the units into the `encashed` bucket (NEVER `taken`) so closing → 0 and
+// the §4.2 ledger identity still holds after the payout. MUST run inside the settle
+// $transaction. `periodCode` scopes the write-back to the SAME period the FnF
+// valuation (resolveEncashableLeaveDays) priced, so we never encash/pay a stale or
+// duplicated prior-period row (finding #4). Returns { encashedDays, lines:[…] }.
+async function writeBackLeaveEncashment(tx, { businessId, employeeId, payRunId, periodCode = null }) {
   const balances = await tx.leaveBalance.findMany({
-    where: { businessId, employeeId, leaveType: { is: { isEncashable: true } } },
+    where: {
+      businessId, employeeId, leaveType: { is: { isEncashable: true } },
+      ...(periodCode ? { periodCode } : {}),
+    },
     include: { leaveType: { select: { unit: true } } },
   });
   const lines = [];
@@ -549,7 +585,9 @@ async function computeFnfEndpoint(req, res, next) {
     const { entity, record } = await resolveEmployeeEntity(businessId, sep.employeeId);
     const country = entity && entity.countryCode === 'NZ' ? 'NZ' : 'IN';
     const pay = await resolveLastDrawnPay(businessId, sep.employeeId);
-    const encashableLeaveDays = await resolveEncashableLeaveDays(businessId, sep.employeeId);
+    // Period-scope the encashable valuation to the FY containing the LWD (finding #4).
+    const fnfLeavePeriod = resolveFnfLeavePeriod(sep, entity);
+    const encashableLeaveDays = await resolveEncashableLeaveDays(businessId, sep.employeeId, prisma, { periodCode: fnfLeavePeriod });
     const loanOutstandingMinor = await resolveLoanOutstanding(businessId, sep.employeeId);
     const assetRecoveryMinor = await resolveAssetRecovery(businessId, sep.employeeId);
 
@@ -837,6 +875,12 @@ async function settleSeparation(req, res, next) {
       });
     }
 
+    // Resolve the FnF leave period (FY containing LWD) so the encashment write-back
+    // scopes to the SAME period the FnF valuation priced (finding #4) — never sums
+    // across stale/duplicated prior-period rows.
+    const { entity: settleEntity } = await resolveEmployeeEntity(businessId, sep.employeeId);
+    const fnfLeavePeriod = resolveFnfLeavePeriod(sep, settleEntity);
+
     const status = sep.type === 'RETIREMENT' ? 'RETIRED' : 'TERMINATED';
     const out = await prisma.$transaction(async (tx) => {
       // 1. Reassign the leaver's reports.
@@ -890,7 +934,7 @@ async function settleSeparation(req, res, next) {
       //    was left stale (no ENCASHMENT txn, no `.encashed` move). Post it now so
       //    the balance closes to 0 via `encashed` (never `taken`) and the ledger
       //    reconciles against the payout. Idempotent: a re-settle finds closing=0.
-      const encash = await writeBackLeaveEncashment(tx, { businessId, employeeId: sep.employeeId, payRunId: sep.fnfPayRunId });
+      const encash = await writeBackLeaveEncashment(tx, { businessId, employeeId: sep.employeeId, payRunId: sep.fnfPayRunId, periodCode: fnfLeavePeriod });
       const updated = await tx.separationCase.update({ where: { id: sep.id }, data: { status: 'SETTLED', version: { increment: 1 } } });
       return { sep: updated, settled: settleRes.changed, reassignedReports: reports.length, encashedDays: encash.encashedDays, encashLines: encash.lines };
     });
@@ -1032,6 +1076,7 @@ module.exports = {
   // exported for tests
   _internals: {
     seedOffboardingJourney, resolveLastDrawnPay, resolveEncashableLeaveDays,
+    writeBackLeaveEncashment, resolveFnfLeavePeriod,
     resolveLoanOutstanding, resolveAssetRecovery, assetReturnState,
     resolveNzEarningsHistory, deriveNoticeShortfallDays, daysBetween,
     CLEARANCE_LANES, BLOCKING_LANES, minorToDecimal,

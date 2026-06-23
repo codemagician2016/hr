@@ -7779,6 +7779,11 @@ model LeaveBalance {
   // NZ annual leave money valuation (weeks → $ via 8% / AWE)
   nzAccruedGrossEarnings Decimal? @db.Decimal(15, 2)
   lastAccrualAt   DateTime?
+  // Year-end carry-forward idempotency marker (Feature 6 §4.4). Stamped on the
+  // SOURCE balance when runCarryForward rolls it into the next period; the in-tx
+  // re-guard skips a balance whose carriedForwardAt is already set, so a re-run /
+  // double-click / double-fired cron can never double-lapse + double-carry.
+  carriedForwardAt DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   version         Int      @default(0)

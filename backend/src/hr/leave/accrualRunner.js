@@ -129,19 +129,27 @@ async function runNightlyAccrual({ businessId = null, asOf = new Date(), dryRun 
 
 // ── year-end carry-forward / lapse ────────────────────────────────────────────
 /**
- * runCarryForward(opts) — roll one period into the next.
- *   For each balance in `periodCode` (optionally one leaveType):
+ * runCarryForward(opts) — roll one period into the next, IDEMPOTENTLY.
+ *   For each not-yet-rolled balance in `periodCode` (optionally one leaveType):
  *     { carried, lapsed } = yearEndRoll(policy, closing)
  *     post LAPSE (−lapsed) on the closing period (when > 0)
  *     mint/extend next-period OPENING_BALANCE (+carried), carried folded into opening
+ *     STAMP carriedForwardAt on the source balance (the idempotency marker)
  * dryRun writes nothing; returns the line-by-line preview either way.
+ *
+ * Idempotency (finding #1): the source balance carries a `carriedForwardAt`
+ * marker. We exclude already-stamped rows from the candidate set, AND re-guard
+ * inside the tx (re-read carriedForwardAt + version) before posting — so a re-run,
+ * an operator double-click, or a double-fired cron is a no-op for any balance
+ * already rolled. Mirrors runNightlyAccrual's in-tx re-read + version-lock.
  */
 async function runCarryForward({ businessId, periodCode, leaveTypeId = null, dryRun = true, actorId = null } = {}) {
   if (!businessId || !periodCode) throw new Error('runCarryForward requires businessId and periodCode');
   const nextCode = nextPeriodCode(periodCode);
   const asOf = new Date();
 
-  const where = { businessId, periodCode };
+  // Only roll balances that have NOT already been carried forward (idempotent set).
+  const where = { businessId, periodCode, carriedForwardAt: null };
   if (leaveTypeId) where.leaveTypeId = leaveTypeId;
   const balances = await prisma.leaveBalance.findMany({
     where,
@@ -158,7 +166,7 @@ async function runCarryForward({ businessId, periodCode, leaveTypeId = null, dry
   });
 
   const lines = [];
-  let carriedTotal = 0; let lapsedTotal = 0;
+  let carriedTotal = 0; let lapsedTotal = 0; let rolled = 0; let skipped = 0;
 
   for (const bal of balances) {
     const emp = bal.employee;
@@ -177,47 +185,70 @@ async function runCarryForward({ businessId, periodCode, leaveTypeId = null, dry
 
     if (dryRun) continue;
 
-    await prisma.$transaction(async (tx) => {
-      if (lapsed > 0) {
-        await tx.leaveTransaction.create({
-          data: {
-            businessId, employeeId: emp.id, leaveTypeId: bal.leaveTypeId, leaveBalanceId: bal.id,
-            txnType: 'LAPSE', unit: bal.unit, quantity: -lapsed,
-            status: 'APPROVED', appliedAt: asOf, decidedAt: asOf, decidedBy: actorId,
-            reason: `Year-end lapse ${periodCode}`,
-          },
-        });
-        await tx.leaveBalance.update({
+    try {
+      await prisma.$transaction(async (tx) => {
+        // In-tx re-guard (mirrors runNightlyAccrual): only roll if STILL un-rolled.
+        // A concurrent/duplicate run that already stamped this balance short-circuits.
+        const fresh = await tx.leaveBalance.findUnique({
           where: { id: bal.id },
-          data: { lapsed: { increment: lapsed }, closing: { decrement: lapsed }, version: { increment: 1 } },
+          select: { carriedForwardAt: true, version: true, closing: true },
         });
-      }
-      if (carried > 0) {
-        // mint (or extend) the next-period balance with the carried units in `opening`.
-        const next = await tx.leaveBalance.upsert({
-          where: { businessId_employeeId_leaveTypeId_periodCode: { businessId, employeeId: emp.id, leaveTypeId: bal.leaveTypeId, periodCode: nextCode } },
-          update: {},
-          create: { businessId, employeeId: emp.id, leaveTypeId: bal.leaveTypeId, periodCode: nextCode, unit: bal.unit },
-        });
-        await tx.leaveTransaction.create({
+        if (!fresh || fresh.carriedForwardAt) { skipped += 1; return; } // already rolled this period
+        if (lapsed > 0) {
+          await tx.leaveTransaction.create({
+            data: {
+              businessId, employeeId: emp.id, leaveTypeId: bal.leaveTypeId, leaveBalanceId: bal.id,
+              txnType: 'LAPSE', unit: bal.unit, quantity: -lapsed,
+              status: 'APPROVED', appliedAt: asOf, decidedAt: asOf, decidedBy: actorId,
+              reason: `Year-end lapse ${periodCode}`,
+            },
+          });
+        }
+        if (carried > 0) {
+          // mint (or extend) the next-period balance with the carried units in `opening`.
+          const next = await tx.leaveBalance.upsert({
+            where: { businessId_employeeId_leaveTypeId_periodCode: { businessId, employeeId: emp.id, leaveTypeId: bal.leaveTypeId, periodCode: nextCode } },
+            update: {},
+            create: { businessId, employeeId: emp.id, leaveTypeId: bal.leaveTypeId, periodCode: nextCode, unit: bal.unit },
+          });
+          await tx.leaveTransaction.create({
+            data: {
+              businessId, employeeId: emp.id, leaveTypeId: bal.leaveTypeId, leaveBalanceId: next.id,
+              txnType: 'OPENING_BALANCE', unit: bal.unit, quantity: carried,
+              status: 'APPROVED', appliedAt: asOf, decidedAt: asOf, decidedBy: actorId,
+              reason: `Carry-forward from ${periodCode}`,
+            },
+          });
+          await tx.leaveBalance.update({
+            where: { id: next.id },
+            data: { opening: { increment: carried }, closing: { increment: carried }, version: { increment: 1 } },
+          });
+        }
+        // Stamp the source balance + (when lapsing) move closing→lapsed UNDER the
+        // version lock. A racing run that ticked it first fails the version match
+        // (P2025) and its whole tx rolls back — no double-lapse/double-carry. The
+        // stamp is always set so a re-run is a true no-op even when carried===lapsed===0.
+        await tx.leaveBalance.update({
+          where: { id: bal.id, version: fresh.version },
           data: {
-            businessId, employeeId: emp.id, leaveTypeId: bal.leaveTypeId, leaveBalanceId: next.id,
-            txnType: 'OPENING_BALANCE', unit: bal.unit, quantity: carried,
-            status: 'APPROVED', appliedAt: asOf, decidedAt: asOf, decidedBy: actorId,
-            reason: `Carry-forward from ${periodCode}`,
+            ...(lapsed > 0 ? { lapsed: { increment: lapsed }, closing: { decrement: lapsed } } : {}),
+            carriedForwardAt: asOf,
+            version: { increment: 1 },
           },
         });
-        await tx.leaveBalance.update({
-          where: { id: next.id },
-          data: { opening: { increment: carried }, closing: { increment: carried }, version: { increment: 1 } },
-        });
-      }
-    });
+        rolled += 1;
+      });
+    } catch (e) {
+      // P2025 = a concurrent run rolled this balance first; safe to ignore (idempotent).
+      if (e && e.code === 'P2025') { skipped += 1; continue; }
+      throw e;
+    }
   }
 
   return {
     businessId, periodCode, nextPeriodCode: nextCode, dryRun,
-    lineCount: lines.length, carriedTotal: Math.round(carriedTotal * 1e4) / 1e4,
+    lineCount: lines.length, rolled, skipped,
+    carriedTotal: Math.round(carriedTotal * 1e4) / 1e4,
     lapsedTotal: Math.round(lapsedTotal * 1e4) / 1e4, lines,
   };
 }

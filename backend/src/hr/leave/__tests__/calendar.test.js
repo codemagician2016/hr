@@ -78,6 +78,28 @@ near('9 endHalf on last day = 2.5', 2.5,
 near('10 both boundary halves = 2.0', 2.0,
   C.computeLeaveUnits({ startDate: '2026-06-01', endDate: '2026-06-03', startHalf: 'FIRST_HALF', endHalf: 'SECOND_HALF' }, { weeklyOffDays: SAT_SUN, leaveType: { countryCode: 'IN' } }).units);
 
+// ── finding #6: half-day lands on the first/last WORKING day, not the raw endpoint ──
+// Sun 06-07 (leading weekoff) .. Tue 06-09 with startHalf. The first WORKING day is
+// Mon 06-08, so the half must apply there: Mon 0.5 + Tue 1 = 1.5 (NOT 2.0).
+near('13 startHalf on leading-weekoff request charges 1.5', 1.5,
+  C.computeLeaveUnits({ startDate: '2026-06-07', endDate: '2026-06-09', startHalf: 'FIRST_HALF' }, { weeklyOffDays: SAT_SUN, leaveType: { countryCode: 'IN' } }).units);
+// the half lands on Mon 06-08 (the first working day), reported as HALF
+check('13b half is on the first WORKING day', { date: '2026-06-08', kind: 'HALF', fraction: 0.5 },
+  (() => { const r = C.computeLeaveUnits({ startDate: '2026-06-07', endDate: '2026-06-09', startHalf: 'FIRST_HALF' }, { weeklyOffDays: SAT_SUN, leaveType: { countryCode: 'IN' } }); const d = r.dayBreakdown.find((x) => x.fraction === 0.5); return { date: d.date, kind: d.kind, fraction: d.fraction }; })());
+// Fri 06-05 .. Sun 06-07 (trailing weekoff) with endHalf. Last WORKING day is Fri 06-05,
+// so the half applies there: Fri 0.5 = 0.5 (NOT silently ignored → 1.0).
+near('14 endHalf on trailing-weekoff request charges 0.5', 0.5,
+  C.computeLeaveUnits({ startDate: '2026-06-05', endDate: '2026-06-07', endHalf: 'SECOND_HALF' }, { weeklyOffDays: SAT_SUN, leaveType: { countryCode: 'IN' } }).units);
+// trailing holiday: Mon 06-01 .. Wed 06-03, Wed is a holiday (trailing, skipped). endHalf
+// must land on the last working day Tue 06-02: Mon 1 + Tue 0.5 = 1.5.
+near('15 endHalf with trailing holiday lands on last working day = 1.5', 1.5,
+  C.computeLeaveUnits({ startDate: '2026-06-01', endDate: '2026-06-03', endHalf: 'SECOND_HALF' }, { weeklyOffDays: SAT_SUN, holidays: [holiday('2026-06-03')], leaveType: { countryCode: 'IN' } }).units);
+// multi-day both-halves with leading + trailing non-working days: Sun 06-07 (weekoff) ..
+// Sat 06-13 (weekoff), startHalf+endHalf. Working Mon..Fri (06-08..06-12); half on Mon
+// + half on Fri + 3 full = 0.5 + 3 + 0.5 = 4.0 (not under-charged).
+near('16 both halves on leading/trailing non-working = 4.0', 4.0,
+  C.computeLeaveUnits({ startDate: '2026-06-07', endDate: '2026-06-13', startHalf: 'FIRST_HALF', endHalf: 'SECOND_HALF' }, { weeklyOffDays: SAT_SUN, leaveType: { countryCode: 'IN' } }).units);
+
 // ── invalid range ─────────────────────────────────────────────────────────────
 check('11 end before start = null units', null,
   C.computeLeaveUnits({ startDate: '2026-06-05', endDate: '2026-06-01' }, { weeklyOffDays: SAT_SUN, leaveType: {} }).units);

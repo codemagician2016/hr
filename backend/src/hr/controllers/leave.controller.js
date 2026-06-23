@@ -302,6 +302,77 @@ async function loadPendingApplication(req, res, businessId, { enforceScope = fal
   return txn;
 }
 
+// Separation of duties (finding #3): an approver may never act on their OWN
+// leave. The canApproveLeave scope already excludes self, but we fail-closed here
+// too so a mis-scoped route can't slip a self-decision through. Returns true when
+// the decision is blocked (and has sent the 404 — IDOR-safe, don't reveal it).
+function blockSelfDecision(req, res, txn) {
+  const actorEmp = req.user && req.user.employeeId;
+  if (actorEmp && actorEmp === txn.employeeId) {
+    res.status(404).json({ message: 'Leave request not found' });
+    return true;
+  }
+  return false;
+}
+
+/**
+ * decideTerminal(tx, { txn, toStatus, fromStatuses, decidedBy, reason, balanceMove })
+ * — the shared guarded terminal transition used by approve/reject/cancel/withdraw.
+ *
+ * (1) CONDITIONALLY flips the APPLICATION status with `updateMany where status ∈
+ *     fromStatuses` — a 0-rowcount means a racing decision already moved it, so we
+ *     throw DECISION_RACE (→ 409) and the whole tx rolls back. This closes the
+ *     double-decision / double-release window (findings #3, #5): the status flip
+ *     and the balance move can only happen together, exactly once.
+ * (2) Moves the balance under the version OPTIMISTIC-LOCK (`where { id, version }`
+ *     + `version: increment`), mirroring the apply path. A P2025 (the balance
+ *     moved under us) bubbles up → 409 CONCURRENT_UPDATE. pendingApproval is
+ *     floored so a stale hold can't drive it negative.
+ *
+ * `balanceMove(currentBalance)` returns the Prisma `data` for the locked update,
+ * or null to skip the balance write (e.g. a request with no leaveBalanceId).
+ */
+async function decideTerminal(tx, { txn, toStatus, fromStatuses, decidedBy, reason, balanceMove }) {
+  const flip = await tx.leaveTransaction.updateMany({
+    where: { id: txn.id, status: { in: fromStatuses } },
+    data: { status: toStatus, decidedAt: new Date(), decidedBy, ...(reason !== undefined ? { reason } : {}) },
+  });
+  if (flip.count === 0) {
+    const err = new Error('Leave request already decided concurrently');
+    err.code = 'DECISION_RACE';
+    throw err;
+  }
+  if (txn.leaveBalanceId && typeof balanceMove === 'function') {
+    const bal = await tx.leaveBalance.findUnique({
+      where: { id: txn.leaveBalanceId },
+      select: { id: true, version: true, pendingApproval: true, taken: true, closing: true },
+    });
+    if (bal) {
+      const data = balanceMove(bal);
+      if (data) {
+        // version optimistic-lock — P2025 (concurrent move) bubbles to the 409 handler.
+        await tx.leaveBalance.update({
+          where: { id: bal.id, version: bal.version },
+          data: { ...data, version: { increment: 1 } },
+        });
+      }
+    }
+  }
+  return tx.leaveTransaction.findUnique({ where: { id: txn.id } });
+}
+
+// pendingApproval can never go below zero — floor the release so a duplicated
+// decision (or a stale hold) cannot over-state `available` (finding #3).
+function flooredRelease(current, qty) {
+  const floored = Math.min(qty, Math.max(0, Number(current || 0)));
+  return floored;
+}
+
+// Map the guarded-transition races to a 409 the client can retry.
+function isDecisionRace(e) {
+  return e && (e.code === 'DECISION_RACE' || e.code === 'P2025');
+}
+
 // POST /requests/:id/approve — PENDING -> APPROVED. Moves the soft-hold into
 // `taken` and decrements `closing`. The ledger row is NOT rewritten beyond its
 // terminal status + decision metadata (append-only invariant preserved).
@@ -310,6 +381,8 @@ async function approveRequest(req, res, next) {
     const { businessId } = req.user;
     const txn = await loadPendingApplication(req, res, businessId, { enforceScope: true });
     if (!txn) return;
+    // SoD: an approver may never approve their own leave (finding #3).
+    if (blockSelfDecision(req, res, txn)) return;
 
     // Feature 1 (approval routing): the canonical approver for this application is
     // the applicant's manager (escalating up the chain to an HR-Admin fallback).
@@ -327,28 +400,27 @@ async function approveRequest(req, res, next) {
     const heldQty = Math.abs(Number(txn.quantity));
     const decidedBy = req.user.id || req.user.userId || null;
 
-    const updated = await prisma.$transaction(async (tx) => {
-      const row = await tx.leaveTransaction.update({
-        where: { id: txn.id },
-        data: { status: 'APPROVED', decidedAt: new Date(), decidedBy },
-      });
-      if (txn.leaveBalanceId) {
-        // Release the hold and post the consumption; closing is the persisted
-        // derived figure (opening+accrued-taken-encashed-lapsed+/-adjusted).
-        await tx.leaveBalance.update({
-          where: { id: txn.leaveBalanceId },
-          data: {
-            pendingApproval: { decrement: heldQty },
-            taken: { increment: heldQty },
-            closing: { decrement: heldQty },
-          },
-        });
-      }
-      return row;
-    });
+    const updated = await prisma.$transaction(async (tx) => decideTerminal(tx, {
+      txn, toStatus: 'APPROVED', fromStatuses: ['PENDING'], decidedBy,
+      // Release the hold and post the consumption under the version lock. closing
+      // is the persisted derived figure (opening+accrued-taken-encashed-lapsed+/-adjusted).
+      balanceMove: (bal) => {
+        const release = flooredRelease(bal.pendingApproval, heldQty);
+        return {
+          pendingApproval: { decrement: release },
+          taken: { increment: heldQty },
+          closing: { decrement: heldQty },
+        };
+      },
+    }));
 
     res.json(updated);
-  } catch (e) { next(e); }
+  } catch (e) {
+    if (isDecisionRace(e)) {
+      return res.status(409).json({ message: 'Request changed concurrently; please retry', reason: 'CONCURRENT_UPDATE' });
+    }
+    next(e);
+  }
 }
 
 // POST /requests/:id/reject — PENDING -> REJECTED. Releases the soft-hold; no
@@ -358,26 +430,26 @@ async function rejectRequest(req, res, next) {
     const { businessId } = req.user;
     const txn = await loadPendingApplication(req, res, businessId, { enforceScope: true });
     if (!txn) return;
+    // SoD: an approver may never reject their own leave (finding #3).
+    if (blockSelfDecision(req, res, txn)) return;
 
     const heldQty = Math.abs(Number(txn.quantity));
     const decidedBy = req.user.id || req.user.userId || null;
 
-    const updated = await prisma.$transaction(async (tx) => {
-      const row = await tx.leaveTransaction.update({
-        where: { id: txn.id },
-        data: { status: 'REJECTED', decidedAt: new Date(), decidedBy, reason: req.body.reason || txn.reason },
-      });
-      if (txn.leaveBalanceId) {
-        await tx.leaveBalance.update({
-          where: { id: txn.leaveBalanceId },
-          data: { pendingApproval: { decrement: heldQty } },
-        });
-      }
-      return row;
-    });
+    const updated = await prisma.$transaction(async (tx) => decideTerminal(tx, {
+      txn, toStatus: 'REJECTED', fromStatuses: ['PENDING'], decidedBy,
+      reason: req.body.reason || txn.reason,
+      // Release the hold (floored); no units are consumed.
+      balanceMove: (bal) => ({ pendingApproval: { decrement: flooredRelease(bal.pendingApproval, heldQty) } }),
+    }));
 
     res.json(updated);
-  } catch (e) { next(e); }
+  } catch (e) {
+    if (isDecisionRace(e)) {
+      return res.status(409).json({ message: 'Request changed concurrently; please retry', reason: 'CONCURRENT_UPDATE' });
+    }
+    next(e);
+  }
 }
 
 // POST /requests/:id/cancel — PENDING -> CANCELLED (withdrawal before decision).
@@ -391,22 +463,19 @@ async function cancelRequest(req, res, next) {
     const heldQty = Math.abs(Number(txn.quantity));
     const decidedBy = req.user.id || req.user.userId || null;
 
-    const updated = await prisma.$transaction(async (tx) => {
-      const row = await tx.leaveTransaction.update({
-        where: { id: txn.id },
-        data: { status: 'CANCELLED', decidedAt: new Date(), decidedBy },
-      });
-      if (txn.leaveBalanceId) {
-        await tx.leaveBalance.update({
-          where: { id: txn.leaveBalanceId },
-          data: { pendingApproval: { decrement: heldQty } },
-        });
-      }
-      return row;
-    });
+    const updated = await prisma.$transaction(async (tx) => decideTerminal(tx, {
+      txn, toStatus: 'CANCELLED', fromStatuses: ['PENDING'], decidedBy,
+      // Release the soft-hold (floored, version-locked).
+      balanceMove: (bal) => ({ pendingApproval: { decrement: flooredRelease(bal.pendingApproval, heldQty) } }),
+    }));
 
     res.json(updated);
-  } catch (e) { next(e); }
+  } catch (e) {
+    if (isDecisionRace(e)) {
+      return res.status(409).json({ message: 'Request changed concurrently; please retry', reason: 'CONCURRENT_UPDATE' });
+    }
+    next(e);
+  }
 }
 
 // ── Balance read ────────────────────────────────────────────────────────────
@@ -550,7 +619,11 @@ async function withdrawRequest(req, res, next) {
       return res.status(404).json({ message: 'Leave request not found' });
     }
     if (txn.status !== 'APPROVED' && txn.status !== 'AVAILED') {
-      return res.status(409).json({ message: `Only an approved request can be withdrawn (status: ${txn.status})` });
+      // already WITHDRAWN (a re-withdraw) reports a stable reason so the client can
+      // distinguish "already done" from "never withdrawable" (both 409). The in-tx
+      // conditional flip (finding #5) covers the concurrent race with the same reason.
+      const reason = txn.status === 'WITHDRAWN' ? 'ALREADY_WITHDRAWN' : 'NOT_WITHDRAWABLE';
+      return res.status(409).json({ message: `Only an approved request can be withdrawn (status: ${txn.status})`, reason });
     }
     if (txn.payRunId) {
       return res.status(422).json({
@@ -562,16 +635,24 @@ async function withdrawRequest(req, res, next) {
     const decidedBy = req.user.id || req.user.userId || null;
 
     const updated = await prisma.$transaction(async (tx) => {
-      const row = await tx.leaveTransaction.update({
-        where: { id: txn.id },
+      // CONDITIONAL status flip (finding #5): only transition a row that is still
+      // {APPROVED,AVAILED}. Two concurrent withdraws both pass the pre-tx status
+      // check, but only ONE updateMany matches — the loser sees count===0 and we
+      // throw DECISION_RACE so the credit (and CANCELLATION row) never run twice.
+      const flip = await tx.leaveTransaction.updateMany({
+        where: { id: txn.id, status: { in: ['APPROVED', 'AVAILED'] } },
         data: { status: 'WITHDRAWN', decidedAt: new Date(), decidedBy },
       });
+      if (flip.count === 0) {
+        const err = new Error('Leave request already withdrawn'); err.code = 'DECISION_RACE'; throw err;
+      }
       // Append-only audit marker for the reversal. The WITHDRAWN status flip already
       // removes the application's −units from the closing identity (the ledger
       // reducer scores a non-{APPROVED,AVAILED} APPLICATION as 0), so this row is
       // a zero-quantity CANCELLATION trail — posting +units here would DOUBLE-count
       // the credit and break the §4.2 reconciliation. The balance credit below
-      // mirrors exactly the status flip.
+      // mirrors exactly the status flip, and ONLY runs because the flip transitioned
+      // the row (so a re-withdraw cannot double-credit).
       await tx.leaveTransaction.create({
         data: {
           businessId, employeeId: txn.employeeId, leaveTypeId: txn.leaveTypeId,
@@ -583,15 +664,24 @@ async function withdrawRequest(req, res, next) {
         },
       });
       if (txn.leaveBalanceId) {
-        await tx.leaveBalance.update({
-          where: { id: txn.leaveBalanceId },
-          data: { taken: { decrement: units }, closing: { increment: units }, version: { increment: 1 } },
-        });
+        // version optimistic-lock — a concurrent move bubbles P2025 → 409 retry.
+        const bal = await tx.leaveBalance.findUnique({ where: { id: txn.leaveBalanceId }, select: { id: true, version: true } });
+        if (bal) {
+          await tx.leaveBalance.update({
+            where: { id: bal.id, version: bal.version },
+            data: { taken: { decrement: units }, closing: { increment: units }, version: { increment: 1 } },
+          });
+        }
       }
-      return row;
+      return tx.leaveTransaction.findUnique({ where: { id: txn.id } });
     });
     res.json(updated);
-  } catch (e) { next(e); }
+  } catch (e) {
+    if (isDecisionRace(e)) {
+      return res.status(409).json({ message: 'This leave was already withdrawn (or changed concurrently)', reason: 'ALREADY_WITHDRAWN' });
+    }
+    next(e);
+  }
 }
 
 // POST /balances/adjust — audited manual adjustment → ADJUSTMENT ledger row +
