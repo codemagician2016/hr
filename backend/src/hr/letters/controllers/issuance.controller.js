@@ -14,8 +14,9 @@
  */
 
 const prisma = require('../../../core/lib/prisma');
-const { scopeAllows } = require('../../lib/scopeResolver');
+const { scopeAllows, resolveAccessibleEmployeeIds } = require('../../lib/scopeResolver');
 const { effectivePermissions } = require('../../../core/lib/rbac');
+const { redactLetterForViewer } = require('../redactLetter');
 const s3 = require('../../../core/lib/s3');
 const service = require('../letters.service');
 
@@ -40,6 +41,26 @@ function subjectInScope(req, employeeId) {
   if (!employeeId) return true; // company-wide letter (no subject)
   if (!req.scope || req.scope.kind === 'ALL') return true;
   return scopeAllows(req.scope, employeeId);
+}
+
+// Constrain a register `where` to the actor's data-scope band. ALL ⇒ no filter
+// (fast path). A narrower band (TEAM/SELF/NONE) ⇒ only letters for in-scope
+// employees PLUS company-wide letters (employeeId == null) — mirrors the
+// subjectInScope posture used by getOne/download so a scoped issuer can't read
+// the whole tenant register (IDOR). NONE/empty scope ⇒ company-wide letters only.
+//
+// req.scope is normally populated by withEmployeeScope on the route; if it isn't
+// (defense-in-depth / a mount path that skipped the middleware), we resolve the
+// band here so the register can NEVER silently fall open to the whole tenant.
+async function applyRegisterScope(where, req) {
+  let scope = req.scope;
+  if (!scope) scope = await resolveAccessibleEmployeeIds(req.user, 'canGenerateLetters');
+  if (!scope || scope.kind === 'ALL') return where;
+  const ids = scope.kind === 'IDS' && scope.ids ? [...scope.ids] : [];
+  where.AND = (where.AND || []).concat([{
+    OR: [{ employeeId: { in: ids } }, { employeeId: null }],
+  }]);
+  return where;
 }
 
 // Stream a PDF buffer as a download/inline response (payslip-serving pattern).
@@ -201,6 +222,10 @@ async function register(req, res, next) {
       ];
     }
 
+    // F1 scope: a non-ALL (TEAM/SELF/…) issuer sees only in-scope employees'
+    // letters + company-wide letters — never the whole tenant register.
+    await applyRegisterScope(where, req);
+
     const page = Math.max(1, parseInt(q.page, 10) || 1);
     const pageSize = Math.min(200, Math.max(1, parseInt(q.pageSize, 10) || 25));
     const csv = q.format === 'csv' || q.csv === 'true';
@@ -291,7 +316,11 @@ async function getOne(req, res, next) {
     });
     if (!letter) return res.status(404).json({ message: 'Letter not found' });
     if (!subjectInScope(req, letter.employeeId)) return res.status(404).json({ message: 'Letter not found' });
-    return res.json(letter);
+    // Re-mask the persisted comp snapshot at the read boundary: the row's
+    // mergeDataJson/renderedBody were minted with the ISSUER's perms and may carry
+    // absolute salary. A non-ABSOLUTE viewer gets comp.* masked + renderedBody
+    // omitted (the masked-at-render PDF stays available via /download).
+    return res.json(redactLetterForViewer(letter, req.user));
   } catch (err) { return next(err); }
 }
 

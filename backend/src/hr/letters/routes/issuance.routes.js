@@ -37,8 +37,11 @@ router.post('/issue',
   c.issue);
 
 // ── register / read (maker key) ───────────────────────────────────────────────
+// withEmployeeScope populates req.scope so a non-ALL (TEAM/SELF) issuer's register
+// is constrained to in-scope employees + company-wide letters (F1 IDOR guard).
 router.get('/register',
   requirePermission('canGenerateLetters'),
+  withEmployeeScope('canGenerateLetters'),
   c.register);
 
 // Per-employee history — scoped on the :employeeId path param (out-of-band ⇒ 404).
