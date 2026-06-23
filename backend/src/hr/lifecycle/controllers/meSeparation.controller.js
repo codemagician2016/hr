@@ -218,11 +218,20 @@ async function getMyFnf(req, res, next) {
       orderBy: { createdAt: 'desc' },
     });
     if (!sep) return res.status(404).json({ message: 'No FnF statement available yet' });
-    // The snapshot lines == the persisted SeparationCase money fields, 1:1.
+    // Full component breakdown from the frozen FnF snapshot — reconciles exactly
+    // to netSettlement (includes unpaid salary / notice pay-in-lieu / statutory
+    // that the 6 legacy columns omit). The legacy column view is kept for
+    // back-compat alongside the authoritative earnings/deductions lines.
+    const snap = sep.fnfSnapshotJson && sep.fnfSnapshotJson.payRunInput;
     res.json({
       code: sep.code,
       currencyCode: sep.currencyCode,
       status: sep.status,
+      earnings: snap && snap.earnings ? snap.earnings.map((e) => ({ code: e.code, label: e.label, amountMinor: e.amountMinor })) : [],
+      deductions: snap && snap.deductions ? snap.deductions.map((d) => ({ code: d.code, label: d.label, amountMinor: d.amountMinor })) : [],
+      grossMinor: snap ? snap.grossMinor : null,
+      totalDeductionsMinor: snap ? snap.totalDeductionsMinor : null,
+      netMinor: snap ? snap.netMinor : null,
       lines: {
         gratuityAmount: sep.gratuityAmount,
         leaveEncashmentDays: sep.leaveEncashmentDays,

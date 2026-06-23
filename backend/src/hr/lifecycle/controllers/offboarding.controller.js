@@ -715,6 +715,27 @@ async function approveFnf(req, res, next) {
           notes: `Full-and-final settlement for ${sep.code} — ${payRunInput.earnings.length} earning / ${payRunInput.deductions.length} deduction line(s)`,
         },
       });
+      // Write the per-line detail (PayRunLine + components) so the FnF payslip
+      // reconciles line-by-line, not just at the run header — mirrors the regular
+      // payroll line/component shape; the breakdown also lives in fnfSnapshotJson.
+      const fnfEmp = await tx.employee.findUnique({ where: { id: sep.employeeId }, select: { currentCompensationId: true } });
+      if (fnfEmp && fnfEmp.currentCompensationId) {
+        const fnfLine = await tx.payRunLine.create({
+          data: {
+            businessId, payRunId: payRun.id, employeeId: sep.employeeId,
+            compensationId: fnfEmp.currentCompensationId, payableDays: 0,
+            grossEarnings: minorToDecimal(grossMinor),
+            totalDeductions: minorToDecimal(totalDeductionsMinor),
+            netPay: minorToDecimal(netMinor),
+            currencyCode: sep.currencyCode, status: 'COMPUTED',
+          },
+        });
+        let sort = 0;
+        const comps = [];
+        for (const e of payRunInput.earnings || []) comps.push({ businessId, payRunLineId: fnfLine.id, componentId: e.code, componentCode: e.code, componentName: e.label || e.code, category: 'EARNING', amount: minorToDecimal(e.amountMinor), sortOrder: sort++ });
+        for (const d of payRunInput.deductions || []) comps.push({ businessId, payRunLineId: fnfLine.id, componentId: d.code, componentCode: d.code, componentName: d.label || d.code, category: 'DEDUCTION', amount: minorToDecimal(d.amountMinor), isStatutory: !!d.statutory, sortOrder: sort++ });
+        if (comps.length) await tx.payRunLineComponent.createMany({ data: comps });
+      }
       const updated = await tx.separationCase.update({
         where: { id: sep.id },
         data: { status: 'FNF_APPROVED', fnfPayRunId: payRun.id, version: { increment: 1 } },
