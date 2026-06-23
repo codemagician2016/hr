@@ -184,7 +184,7 @@ async function loadContext(db, { businessId, templateId, employeeId, perms }) {
       employmentRecord = await db.employmentRecord.findFirst({
         where: { id: employee.currentEmploymentRecordId, businessId },
         include: {
-          designation: { select: { name: true } },
+          designation: { select: { title: true } }, // Designation uses `title`, not `name`
           department: { select: { name: true } },
           location: { select: { name: true } },
           entity: true,
@@ -368,7 +368,7 @@ function mergeEmployeeFrom(employee, employmentRecord, entity) {
     firstName: employee.firstName,
     lastName: employee.lastName,
     code: employee.code,
-    designation: er.designation ? er.designation.name : null,
+    designation: er.designation ? er.designation.title : null,
     department: er.department ? er.department.name : null,
     workLocation: er.location ? er.location.name : null,
     employmentType: er.employmentType || null,
