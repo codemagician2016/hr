@@ -1211,6 +1211,8 @@ module.exports = {
   getMyPayslips,
   getMyPayslip,
   generateFile,
+  // ESS self-resolution (reused by the compensation ESS route).
+  resolveSelfEmployee,
   // internals exposed for tests
   _internal: { taxYearFor, buildFilingAggregate, statutoryRollups, buildPayslipSnapshot, resolveCurrentCompensation, resolveBalancingTarget },
 };

@@ -38,6 +38,11 @@ const { allocateCode } = require('./lib/codes');
 // NOT re-implemented — so provisioning enforces the same wage floor as the offer.
 const { _internals: recruitmentInternals } = require('../talent/controllers/recruitment.controller');
 const { offerWageCheck } = recruitmentInternals;
+// Feature 5 — materialize the offer/structure into resolved SalaryComponentLine
+// rows so the HIRE revision carries REAL lines (the engine then computes a real
+// gross; FnF reads a real Basic+DA). Without this the HIRE revision had zero
+// lines → every provisioned hire computed zero gross. Pure; no DB.
+const { materializeRevisionLines } = require('../compensation/deriveBreakup');
 
 // A structured error the controller maps to an HTTP status. `reason` is a stable
 // machine code; `status` the HTTP code; `employeeId` the already-linked id (409).
@@ -68,6 +73,25 @@ function periodCodeFor(date, startMonth = 4) {
   const m = d.getUTCMonth() + 1;
   const startY = m >= startMonth ? y : y - 1;
   return `${startY}-${String((startY + 1) % 100).padStart(2, '0')}`;
+}
+
+// Feature 5 — Decimal|number|string → integer minor units (paise/cents) for the
+// CTC materializer. Reuses payroll money (string math, no float drift).
+const provMoney = require('../payroll/money');
+function mtoMinor(value, scale = 2) {
+  if (value == null || value === '') return 0;
+  let s;
+  if (typeof value === 'object' && typeof value.toFixed === 'function') s = value.toFixed(scale);
+  else if (typeof value === 'number') s = value.toFixed(scale);
+  else s = String(value);
+  return provMoney.toMinor(s, scale);
+}
+// YYYY-MM-DD from a Date | string (for the wage-rule effective-dating).
+function isoDateOnly(x) {
+  if (!x) return new Date().toISOString().slice(0, 10);
+  const d = x instanceof Date ? x : new Date(x);
+  if (Number.isNaN(d.getTime())) return new Date().toISOString().slice(0, 10);
+  return d.toISOString().slice(0, 10);
 }
 
 // The PROVISION_EMPLOYEE checklist task for a journey (the one we mark DONE/FAILED).
@@ -539,17 +563,66 @@ async function provisionEmployee({ journeyId, actorId } = {}, prismaOrTx) {
     // ── STEP 8: CompensationRevision (HIRE). The India 50% wage rule was already
     //    validated PRE-WRITE (see the precondition block above), so by here a
     //    breach has already aborted the provision without writing any row. ──
+    //
+    // Feature 5 BUG FIX: materialize the offer's SalaryStructure into RESOLVED
+    // SalaryComponentLine rows on the revision. Previously the revision carried
+    // NO lines → resolveCurrentCompensation found none → componentsForEngine=[]
+    // → EVERY provisioned hire computed zero gross, and offboarding read Basic+DA=0
+    // → gratuity/encashment=0. We derive the breakup from the structure + the
+    // offer target (CTC for IN, gross for NZ) and nest the lines in the SAME tx.
+    const basis = countryCode === 'IN' ? 'CTC' : 'GROSS';
+    let revisionLineCreates = null;
+    if (offer.structureId) {
+      const structure = await tx.salaryStructure.findFirst({
+        where: { id: offer.structureId, businessId },
+        include: { lines: { orderBy: { sortOrder: 'asc' }, include: { component: true } } },
+      });
+      if (structure && Array.isArray(structure.lines) && structure.lines.length) {
+        // Target: prefer CTC (IN), else monthly gross (NZ). minor units.
+        const target = {};
+        if (basis === 'CTC' && offer.ctcAnnual != null) {
+          target.ctcAnnualMinor = mtoMinor(offer.ctcAnnual);
+        } else if (grossMonthly != null) {
+          target.grossMonthlyMinor = mtoMinor(grossMonthly);
+        }
+        try {
+          const { lines: matLines } = materializeRevisionLines(
+            { lines: structure.lines, basis },
+            {
+              target,
+              basis,
+              countryCode,
+              asOf: isoDateOnly(joinDate),
+              esiApplicable: false,
+            },
+          );
+          if (matLines.length) {
+            revisionLineCreates = matLines.map((l) => ({ ...l, businessId }));
+          }
+        } catch (err) {
+          // A structurally-infeasible structure is a hard provisioning failure
+          // (we will not silently write a zero-line revision again).
+          throw new ProvisionError(
+            `Cannot materialize the offer salary structure: ${err.message}`,
+            { status: 422, reason: 'comp-structure' },
+          );
+        }
+      }
+    }
+
     const comp = await tx.compensationRevision.create({
       data: {
         businessId, employeeId: employee.id, entityId,
         structureId: offer.structureId || null,
         currencyCode,
-        basis: countryCode === 'IN' ? 'CTC' : 'GROSS',
+        basis,
         ctcAnnual: offer.ctcAnnual != null ? String(offer.ctcAnnual) : null,
         grossMonthly,
         effectiveFrom: joinDate,
         isCurrent: true,
         revisionReason: 'HIRE',
+        status: 'EFFECTIVE',
+        ...(revisionLineCreates ? { lines: { create: revisionLineCreates } } : {}),
       },
     });
     employee = await tx.employee.update({

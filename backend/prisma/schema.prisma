@@ -445,6 +445,9 @@ model Business {
   salaryStructures         SalaryStructure[]
   salaryComponentLines     SalaryComponentLine[]
   compensationRevisions    CompensationRevision[]
+  // Feature 5 — increment cycles
+  incrementCycles          IncrementCycle[]
+  incrementProposals       IncrementProposal[]
   // Payroll
   payCalendars             PayCalendar[]
   payRuns                  PayRun[]
@@ -3639,6 +3642,11 @@ model BusinessRole {
   // HR hierarchical data scope (Feature 1). Resolves WHO this role acts on:
   // Manager=TEAM (their reporting sub-tree), Owner/HR-Admin/Finance=ALL.
   defaultScope ScopeBand @default(ALL)
+  // Feature 5 — salary-masking level intersected with canViewCompensation + scope.
+  // ABSOLUTE=full money, RANGE_ONLY=band/compa-ratio only (no absolute),
+  // SELF_ONLY=own pay only, NONE=no team comp. Manager-with-grant→RANGE_ONLY,
+  // HR/Finance/Owner→ABSOLUTE, Employee→SELF_ONLY.
+  compVisibility CompVisibility @default(NONE)
   isSystem    Boolean  @default(false) // pre-seeded "Owner / Manager / Front Desk"
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -6465,6 +6473,7 @@ model Grade {
   bandId       String?
   band         Band?    @relation(fields: [bandId], references: [id], onDelete: SetNull)
   minSalary    Decimal? @db.Decimal(15, 2)
+  midSalary    Decimal? @db.Decimal(15, 2) // Feature 5 — compa-ratio midpoint (else derive (min+max)/2)
   maxSalary    Decimal? @db.Decimal(15, 2)
   currencyCode String?  @db.Char(3)
   designations Designation[]
@@ -6790,6 +6799,14 @@ model SalaryComponent {
   glCode          String?
   sortOrder       Int     @default(0)
   isActive        Boolean @default(true)
+  // Feature 5 — derivation/clamp (all additive, nullable/defaulted):
+  // derivationPass mirrors the engine's topo order (0=FLAT, 1=PERCENT_OF literal
+  // base, 2=PERCENT_OF GROSS/CTC, 3=BALANCING) so deriveBreakup orders without a
+  // graph solve and the structure builder can reject cycles at save time.
+  derivationPass     Int      @default(0)
+  floorValue         Decimal? @db.Decimal(15, 2) // per-component clamp → engine floorMinor
+  capValue           Decimal? @db.Decimal(15, 2) // per-component clamp → engine capMinor
+  minWageFloorApplies Boolean @default(false)    // counts toward the min-wage Basic floor
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   deletedAt       DateTime?
@@ -6942,6 +6959,16 @@ model CompensationRevision {
   revisionReason CompRevisionReason
   approvalRequestId String?
   notes          String?
+  // Feature 5 — maker-checker status machine + SoD + increment-letter (additive).
+  // Default EFFECTIVE keeps the existing direct-write path (provisioning HIRE,
+  // programmatic) valid; the UI maker-checker path uses PROPOSED→APPROVED→EFFECTIVE.
+  status         CompRevisionStatus @default(EFFECTIVE)
+  proposedById   String?  // SoD maker
+  approvedById   String?  // SoD checker — must differ from proposedById
+  approvedAt     DateTime?
+  letterEnvelopeId String? // F4 SignatureEnvelope for the increment letter
+  cycleId        String?  // links a revision committed via a bulk IncrementCycle
+  sourcePeriodCode String? // ARREAR provenance when the revision is back-dated
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   version        Int      @default(0)
@@ -6951,6 +6978,7 @@ model CompensationRevision {
   @@unique([employeeId, effectiveFrom])
   @@index([businessId, employeeId, isCurrent])
   @@index([businessId, entityId, effectiveFrom])
+  @@index([businessId, status])
 }
 
 enum CompRevisionReason {
@@ -6960,6 +6988,86 @@ enum CompRevisionReason {
   CORRECTION
   RESTRUCTURE
   STATUTORY_ADJUSTMENT
+}
+
+// Feature 5 — maker-checker lifecycle for a CompensationRevision.
+enum CompRevisionStatus {
+  DRAFT
+  PROPOSED
+  APPROVED
+  EFFECTIVE
+  REJECTED
+  WITHDRAWN
+}
+
+// Feature 5 — salary-masking level on a BusinessRole.
+enum CompVisibility {
+  ABSOLUTE
+  RANGE_ONLY
+  SELF_ONLY
+  NONE
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Feature 5 — Increment cycles (bulk maker-checker comp revisions).
+// ─────────────────────────────────────────────────────────────────────────────
+
+model IncrementCycle {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name          String
+  type          IncrementCycleType
+  effectiveDate DateTime @db.Date
+  budgetMinor   BigInt?  // optional pool, integer minor units
+  status        IncrementCycleStatus @default(OPEN)
+  createdById   String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  proposals     IncrementProposal[]
+
+  @@index([businessId, status])
+}
+
+model IncrementProposal {
+  id               String   @id @default(uuid())
+  businessId       String
+  business         Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  cycleId          String
+  cycle            IncrementCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  employeeId       String
+  proposedById     String
+  currentCtcMinor  BigInt?
+  proposedCtcMinor BigInt?
+  pctHike          Decimal? @db.Decimal(8, 4)
+  justification    String?
+  status           ProposalStatus @default(DRAFT)
+  revisionId       String?  // set on commit
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([cycleId, employeeId])
+  @@index([businessId, cycleId])
+}
+
+enum IncrementCycleType {
+  MERIT
+  PROMOTION
+  MARKET
+  COLA
+}
+
+enum IncrementCycleStatus {
+  OPEN
+  LOCKED
+  CLOSED
+}
+
+enum ProposalStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

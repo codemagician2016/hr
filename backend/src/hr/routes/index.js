@@ -39,6 +39,9 @@ router.use('/me/payslips', require('../payroll/mePayslips.routes'));
 router.use('/me/onboarding', require('../lifecycle/routes/meOnboarding.routes'));
 router.use('/me/separation', require('../lifecycle/routes/meSeparation.routes'));
 router.use('/me/documents', require('./meDocuments.routes'));
+// ESS compensation (CTC breakup waterfall + history + letters). Customer session;
+// SELF_ONLY; no `:id` path → cross-employee leakage is structurally impossible.
+router.use('/me/compensation', require('./meCompensation.routes'));
 
 // Reports / analytics — read-only payroll register, statutory summary,
 // headcount & attrition, leave liability. RBAC: canViewPayrollReports.

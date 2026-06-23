@@ -16,6 +16,7 @@ import { money, formatPeriod, formatDate, employeeIdOf } from '@/lib/format';
 
 const TILES = [
   { href: '/payslips', title: 'Payslips', sub: 'View & download', icon: 'M6 2h9l5 5v15H6zM15 2v5h5' },
+  { href: '/compensation', title: 'Compensation', sub: 'CTC breakup', icon: 'M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6' },
   { href: '/attendance', title: 'Attendance', sub: 'Clock in / out', icon: 'M12 8v4l3 2M12 3a9 9 0 100 18 9 9 0 000-18z' },
   { href: '/leave', title: 'Leave', sub: 'Apply & balances', icon: 'M7 3v4M17 3v4M3 9h18M5 5h14v16H5z' },
   { href: '/tax', title: 'Tax', sub: 'Declaration', icon: 'M9 7h6M9 11h6M9 15h4M6 3h12v18H6z' },

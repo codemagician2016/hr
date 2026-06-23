@@ -14,6 +14,9 @@ const PERMISSIONS = Object.freeze({
   canManageEmployees:   'Create/edit/terminate employees',
   canViewCompensation:  'View salary/CTC of others',
   canManageCompensation:'Edit pay structures + revisions',
+  // Feature 5 — maker-checker SoD for comp revisions/cycles.
+  canProposeCompensation:'Draft increment proposals for own team (maker)',
+  canApproveCompensation:'Approve comp revisions/cycles (checker, distinct from maker)',
   // Time & leave
   canApproveLeave:      'Approve/decline leave requests',
   canManageAttendance:  'Edit attendance + regularisations',
@@ -47,6 +50,9 @@ const SYSTEM_ROLES = Object.freeze({
   'HR-Admin': {
     canViewEmployees: true, canManageEmployees: true,
     canViewCompensation: true, canManageCompensation: true,
+    // Feature 5 — HR-Admin is the comp MAKER (propose), NOT the approver, so SoD
+    // holds (approval routes to Finance/Owner). canApproveCompensation off.
+    canProposeCompensation: true,
     canApproveLeave: true, canManageAttendance: true,
     canRunPayroll: true, canViewPayrollReports: true,
     canManageStatutory: true, canFileReturns: true,
@@ -59,6 +65,8 @@ const SYSTEM_ROLES = Object.freeze({
   Finance: {
     canRunPayroll: true, canApprovePayroll: true, canViewPayrollReports: true,
     canViewCompensation: true,
+    // Feature 5 — Finance is a comp CHECKER (approve), view-only on structures.
+    canApproveCompensation: true,
     canManageStatutory: true, canFileReturns: true,
     canEditBilling: true,
   },
@@ -69,8 +77,42 @@ const SYSTEM_ROLES = Object.freeze({
     canViewEmployees: true,
     canApproveLeave: true,
     canManageAttendance: true,
+    // Feature 5 — Manager proposes increments for their team (maker). They do
+    // NOT get canViewCompensation by default → compVisibility floors to RANGE_ONLY.
+    canProposeCompensation: true,
   },
 });
+
+// ── Feature 5: salary-masking visibility level per system role ──
+// Intersected with canViewCompensation + the F1 scope band by maskCompensation.
+// Manager (no canViewCompensation grant) → RANGE_ONLY (band/compa-ratio, no
+// absolute money); HR/Finance/Owner → ABSOLUTE; Employee/ESS → SELF_ONLY.
+const SYSTEM_ROLE_COMP_VISIBILITY = Object.freeze({
+  Owner: 'ABSOLUTE',
+  'HR-Admin': 'ABSOLUTE',
+  Finance: 'ABSOLUTE',
+  Manager: 'RANGE_ONLY',
+});
+
+// Resolve a viewer's effective comp-visibility level. Priority:
+//   1. canViewCompensation grant → ABSOLUTE (full money) regardless of role band.
+//   2. explicit BusinessRole.compVisibility (when not NONE).
+//   3. system-role default.
+//   4. SELF_ONLY for an ESS/USER session, else NONE.
+function effectiveCompVisibility(user) {
+  if (!user) return 'NONE';
+  if (user.role === ROLES.SUPER_ADMIN) return 'ABSOLUTE';
+  const perms = effectivePermissions(user);
+  if (perms && perms.canViewCompensation) return 'ABSOLUTE';
+  const explicit = user.businessRole && user.businessRole.compVisibility;
+  if (explicit && explicit !== 'NONE') return explicit;
+  const roleName = user.businessRole && user.businessRole.name;
+  if (roleName && SYSTEM_ROLE_COMP_VISIBILITY[roleName]) return SYSTEM_ROLE_COMP_VISIBILITY[roleName];
+  // A manager who can PROPOSE (maker) but lacks a view grant still sees ranges.
+  if (perms && perms.canProposeCompensation) return 'RANGE_ONLY';
+  if (user.role === ROLES.USER) return 'SELF_ONLY';
+  return 'NONE';
+}
 
 // ── Feature 1: hierarchical data-scope bands ──
 // Default scope per system role. Manager = TEAM (their reporting sub-tree) — the
@@ -143,10 +185,12 @@ module.exports = {
   PERMISSION_KEYS,
   SYSTEM_ROLES,
   SYSTEM_ROLE_SCOPES,
+  SYSTEM_ROLE_COMP_VISIBILITY,
   LEGACY_ROLE_SCOPE,
   LEGACY_ROLE_PERMS,
   validatePermissions,
   hasPermission,
   effectivePermissions,
   effectiveScope,
+  effectiveCompVisibility,
 };
