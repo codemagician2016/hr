@@ -20,6 +20,7 @@ router.use(requireCustomer);
 
 router.get('/types', c.listTypes);
 router.get('/balances', c.listBalances);
+router.get('/history', c.listHistory);
 router.get('/requests', c.listRequests);
 router.post('/requests', c.applyForLeave);
 router.post('/requests/:id/cancel', c.cancelRequest);

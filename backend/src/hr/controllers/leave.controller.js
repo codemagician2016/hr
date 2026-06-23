@@ -16,6 +16,7 @@ const { resolveApprover } = require('../lib/approvalRouting');
 const { computeLeaveUnits, consecutiveCalendarDays } = require('../leave/calendar');
 const { validateRequest } = require('../leave/validators');
 const ledger = require('../leave/ledger');
+const { buildHistory, groupReconciliation } = require('../leave/history');
 const { loadApplyContext } = require('../leave/leaveContext');
 const { runCarryForward } = require('../leave/accrualRunner');
 
@@ -527,6 +528,99 @@ async function listEmployeeBalances(req, res, next) {
   } catch (e) { next(e); }
 }
 
+// ── Employee leave history (operator, scope-guarded) ─────────────────────────
+// GET /employees/:employeeId/history?leaveTypeId=&periodCode= — the full
+// chronological leave history for ONE employee (every request decision AND every
+// ledger movement — accrued/taken/encashed/lapsed/adjusted), shaped into a
+// plain-English, signed-delta feed with a running balance.
+//
+// Feature 1: the route mounts withEmployeeScope('canViewEmployees'); we 404 when
+// the target employee is OUTSIDE the actor's reporting sub-tree (IDOR-safe — don't
+// reveal existence), mirroring getRequest/requestHistory.
+async function employeeHistory(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const { employeeId } = req.params;
+
+    const employee = await prisma.employee.findFirst({
+      where: { id: employeeId, businessId, deletedAt: null },
+      select: { id: true },
+    });
+    // out-of-tenant OR out-of-scope → 404 (don't reveal existence).
+    if (!employee || !scopeAllows(req.scope, employeeId)) {
+      return res.status(404).json({ message: 'Employee not found' });
+    }
+
+    const where = { businessId, employeeId };
+    if (req.query.leaveTypeId) where.leaveTypeId = req.query.leaveTypeId;
+    if (req.query.periodCode) {
+      const lots = await prisma.leaveBalance.findMany({
+        where: { businessId, employeeId, periodCode: req.query.periodCode },
+        select: { id: true },
+      });
+      where.leaveBalanceId = { in: lots.map((l) => l.id) };
+    }
+
+    const rows = await prisma.leaveTransaction.findMany({
+      where,
+      orderBy: { createdAt: 'asc' },
+      take: 1000,
+      include: { leaveType: { select: { id: true, code: true, name: true, color: true, unit: true } } },
+    });
+    const items = buildHistory(rows).reverse(); // newest-first for display
+    res.json({ items });
+  } catch (e) { next(e); }
+}
+
+// ── Employee leave reconciliation (operator, scope-guarded) ──────────────────
+// GET /employees/:employeeId/reconciliation?periodCode=&leaveTypeId= — a
+// reconciliation STATEMENT per (leaveType) for the chosen period that visibly
+// BALANCES: opening + accrued − taken − encashed − lapsed + adjusted = closing.
+//
+// The components are recomputed from the LeaveTransaction ledger (the source of
+// truth) and cross-checked against the persisted LeaveBalance.closing; any drift
+// is flagged (`reconciled:false`). Feature 1 scope-guarded like employeeHistory.
+async function employeeReconciliation(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const { employeeId } = req.params;
+    const { periodCode, leaveTypeId } = req.query;
+    if (!periodCode) return res.status(400).json({ message: 'periodCode is required' });
+
+    const employee = await prisma.employee.findFirst({
+      where: { id: employeeId, businessId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!employee || !scopeAllows(req.scope, employeeId)) {
+      return res.status(404).json({ message: 'Employee not found' });
+    }
+
+    // The persisted balance lots for this period (the projection we audit against).
+    const balWhere = { businessId, employeeId, periodCode };
+    if (leaveTypeId) balWhere.leaveTypeId = leaveTypeId;
+    const balances = await prisma.leaveBalance.findMany({
+      where: balWhere,
+      include: { leaveType: { select: { id: true, code: true, name: true, color: true, unit: true } } },
+    });
+
+    // Ledger rows for exactly those lots (period-scoped via leaveBalanceId), so the
+    // reconstruction matches the persisted lot field-by-field.
+    const lotIds = balances.map((b) => b.id);
+    const txns = lotIds.length
+      ? await prisma.leaveTransaction.findMany({
+          where: { businessId, employeeId, leaveBalanceId: { in: lotIds } },
+          include: { leaveType: { select: { id: true, code: true, name: true, color: true, unit: true } } },
+        })
+      : [];
+
+    const leaveTypeById = new Map(
+      balances.filter((b) => b.leaveType).map((b) => [b.leaveTypeId, b.leaveType]),
+    );
+    const groups = groupReconciliation(txns, balances, leaveTypeById);
+    res.json({ periodCode, employeeId, items: groups });
+  } catch (e) { next(e); }
+}
+
 // ── (NEW endpoints, §4.8) ────────────────────────────────────────────────────
 
 // GET /me/requests — ESS self-list of own requests. employeeId from the
@@ -796,6 +890,8 @@ module.exports = {
   cancelRequest,
   withdrawRequest,
   listEmployeeBalances,
+  employeeHistory,
+  employeeReconciliation,
   // Feature 6 §4.8 new endpoints
   listMyRequests,
   leaveCalendar,

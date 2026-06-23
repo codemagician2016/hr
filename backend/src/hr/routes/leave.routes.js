@@ -50,7 +50,11 @@ router.get('/reports/summary', withEmployeeScope('canViewEmployees'), c.reportsS
 router.post('/runs/carry-forward', requirePermission('canManageOrg'), validateBody(carryForwardRunSchema), c.carryForwardRun);
 router.post('/balances/adjust', requirePermission('canManageOrg'), validateBody(adjustBalanceSchema), c.adjustBalance);
 
-// ── (e) Employee leave balances ─────────────────────────────────────────────
+// ── (e) Employee leave balances + history + reconciliation ──────────────────
+// History + reconciliation are scope-filtered server-side (canViewEmployees
+// sub-tree); the controller 404s when the target employee is out of scope.
 router.get('/employees/:employeeId/balances', c.listEmployeeBalances);
+router.get('/employees/:employeeId/history', withEmployeeScope('canViewEmployees'), c.employeeHistory);
+router.get('/employees/:employeeId/reconciliation', withEmployeeScope('canViewEmployees'), c.employeeReconciliation);
 
 module.exports = router;
