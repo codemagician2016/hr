@@ -7428,6 +7428,9 @@ model LeaveType {
   requiresReason Boolean @default(false)
   affectsLOP  Boolean  @default(false) // unpaid → loss of pay on payroll
   isEncashable Boolean @default(false)
+  // Sandwich-leave behaviour for interior holidays/weekoffs inside a leave block
+  // (Feature 6 §3.2). NULL ⇒ derive from countryCode (NZ ⇒ EXCLUSIVE, IN ⇒ INCLUSIVE).
+  sandwichPolicy SandwichPolicy?
   color       String? // ESS calendar chip
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
@@ -7440,6 +7443,11 @@ model LeaveType {
 
   @@unique([businessId, code])
   @@index([businessId, countryCode, category])
+}
+
+enum SandwichPolicy {
+  INCLUSIVE // interior holidays/weekoffs are debited against the balance (IN EL)
+  EXCLUSIVE // interior public holidays are paid as holidays, never debited (NZ)
 }
 
 enum LeaveCategory {
@@ -7501,6 +7509,7 @@ model LeavePolicy {
   // Encashment
   encashOnExit  Boolean @default(false)
   encashFormula String?
+  maxEncashCap  Decimal? @db.Decimal(8, 4) // cap encashable units (Feature 6 §3.2); NULL = unbounded
   workflowDefinitionId String?
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())

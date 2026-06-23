@@ -64,7 +64,7 @@ function RequestsTab() {
     { key: 'leaveType', header: 'Type', render: (r) => r.leaveType?.name || r.leaveTypeName || r.leaveTypeId || '—' },
     { key: 'from', header: 'From', render: (r) => formatAdminDate(r.startDate || r.fromDate) },
     { key: 'to', header: 'To', render: (r) => formatAdminDate(r.endDate || r.toDate) },
-    { key: 'qty', header: 'Days', render: (r) => r.quantity ?? r.days ?? r.numDays ?? '—' },
+    { key: 'qty', header: 'Days', render: (r) => (r.quantity != null ? Math.abs(Number(r.quantity)) : '—') },
     { key: 'status', header: 'Status', render: (r) => <StatusBadge status={r.status} /> },
     {
       key: 'actions',
@@ -183,15 +183,40 @@ function ConfigTab({ resource, title, fields }) {
       </div>
       <form onSubmit={onCreate} className="rounded-2xl border border-gray-200 bg-white p-5 space-y-3 h-fit">
         <h2 className="text-sm font-semibold text-gray-900">Add {title.replace(/s$/, '').toLowerCase()}</h2>
-        {fields.map((f) => (
-          <TextInput
-            key={f.key}
-            label={f.label}
-            value={draft[f.key]}
-            onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))}
-            required={f.required}
-          />
-        ))}
+        {fields.map((f) => {
+          const set = (v) => setDraft((d) => ({ ...d, [f.key]: v }));
+          if (f.type === 'select') {
+            return (
+              <label key={f.key} className="block text-sm">
+                <span className="mb-1 block font-medium text-gray-700">{f.label}{f.required ? ' *' : ''}</span>
+                <select
+                  value={draft[f.key]} required={f.required} onChange={(e) => set(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                >
+                  <option value="">{f.placeholder || 'Select…'}</option>
+                  {(f.options || []).map((o) => (
+                    <option key={o.value ?? o} value={o.value ?? o}>{o.label ?? o}</option>
+                  ))}
+                </select>
+              </label>
+            );
+          }
+          if (f.type === 'checkbox') {
+            return (
+              <label key={f.key} className="flex items-center gap-2 text-sm text-gray-700">
+                <input type="checkbox" checked={draft[f.key] === true || draft[f.key] === 'true'}
+                  onChange={(e) => set(e.target.checked)} />
+                {f.label}
+              </label>
+            );
+          }
+          return (
+            <TextInput
+              key={f.key} label={f.label} type={f.type === 'number' ? 'number' : undefined}
+              value={draft[f.key]} onChange={set} required={f.required}
+            />
+          );
+        })}
         <PrimaryButton type="submit" loading={saving}>
           Save
         </PrimaryButton>
@@ -200,33 +225,70 @@ function ConfigTab({ resource, title, fields }) {
   );
 }
 
+const CATEGORY_OPTS = ['ANNUAL', 'CASUAL', 'SICK', 'MATERNITY', 'PATERNITY', 'BEREAVEMENT', 'PUBLIC_HOLIDAY', 'ALTERNATIVE_DAY', 'COMP_OFF', 'UNPAID', 'SABBATICAL', 'MARRIAGE', 'ADOPTION', 'FAMILY_VIOLENCE', 'OTHER'];
+const UNIT_OPTS = ['DAYS', 'HOURS', 'WEEKS'];
+const NZ_BASIS_OPTS = ['', 'RDP', 'ADP', 'AWE_8PCT', 'OWP'];
+const SANDWICH_OPTS = ['', 'INCLUSIVE', 'EXCLUSIVE'];
+const COUNTRY_OPTS = ['', 'IN', 'NZ'];
+const ACCRUAL_METHOD_OPTS = ['UPFRONT_ANNUAL', 'MONTHLY_ACCRUAL', 'ANNIVERSARY_GRANT', 'WORKED_HOURS_RATIO', 'CONTINUOUS_NZ'];
+const ACCRUAL_FREQ_OPTS = ['MONTHLY', 'QUARTERLY', 'ANNUAL', 'PER_PAY_PERIOD'];
+const GENDER_OPTS = ['', 'MALE', 'FEMALE', 'OTHER'];
+
+// Full LeaveType allow-list (matches the controller LEAVE_TYPE_FIELDS + §5.1 spec).
+const TYPE_FIELDS = [
+  { key: 'name', label: 'Name', required: true },
+  { key: 'code', label: 'Code', required: true },
+  { key: 'category', label: 'Category', type: 'select', options: CATEGORY_OPTS, required: true },
+  { key: 'unit', label: 'Unit', type: 'select', options: UNIT_OPTS },
+  { key: 'countryCode', label: 'Country (blank = both)', type: 'select', options: COUNTRY_OPTS },
+  { key: 'nzPayBasis', label: 'NZ pay basis', type: 'select', options: NZ_BASIS_OPTS },
+  { key: 'sandwichPolicy', label: 'Sandwich policy', type: 'select', options: SANDWICH_OPTS },
+  { key: 'color', label: 'Calendar colour (#hex)' },
+  { key: 'isPaid', label: 'Paid', type: 'checkbox' },
+  { key: 'isStatutory', label: 'Statutory', type: 'checkbox' },
+  { key: 'requiresReason', label: 'Requires reason', type: 'checkbox' },
+  { key: 'affectsLOP', label: 'Affects LOP (unpaid)', type: 'checkbox' },
+  { key: 'isEncashable', label: 'Encashable', type: 'checkbox' },
+];
+
+// Full LeavePolicy allow-list (sectioned: entitlement/carry-forward/rules/eligibility/exit).
+function policyFields(typeOptions) {
+  return [
+    { key: 'leaveTypeId', label: 'Leave type', type: 'select', required: true, options: (typeOptions || []).map((t) => ({ value: t.id, label: `${t.name} (${t.code})` })) },
+    { key: 'name', label: 'Policy name', required: true },
+    { key: 'code', label: 'Code', required: true },
+    { key: 'accrualMethod', label: 'Accrual method', type: 'select', options: ACCRUAL_METHOD_OPTS, required: true },
+    { key: 'entitlementPerYear', label: 'Entitlement / year', type: 'number' },
+    { key: 'accrualFrequency', label: 'Accrual frequency', type: 'select', options: ACCRUAL_FREQ_OPTS },
+    { key: 'accrualProrateOnJoin', label: 'Pro-rate on join', type: 'checkbox' },
+    { key: 'carryForwardCap', label: 'Carry-forward cap (blank = unbounded)', type: 'number' },
+    { key: 'carryForwardExpiryMonths', label: 'Carry-forward expiry (months)', type: 'number' },
+    { key: 'maxBalanceCap', label: 'Max balance cap', type: 'number' },
+    { key: 'maxConsecutive', label: 'Max consecutive days', type: 'number' },
+    { key: 'minNoticeDays', label: 'Min notice days', type: 'number' },
+    { key: 'allowNegative', label: 'Allow advance (negative)', type: 'checkbox' },
+    { key: 'negativeCap', label: 'Negative cap', type: 'number' },
+    { key: 'minTenureMonths', label: 'Min tenure (months)', type: 'number' },
+    { key: 'appliesToEmploymentTypes', label: 'Employment types (CSV)' },
+    { key: 'genderRestriction', label: 'Gender restriction', type: 'select', options: GENDER_OPTS },
+    { key: 'encashOnExit', label: 'Encash on exit', type: 'checkbox' },
+    { key: 'maxEncashCap', label: 'Max encash cap', type: 'number' },
+  ];
+}
+
 function LeaveInner() {
   const [tab, setTab] = useState('requests');
+  const [types, setTypes] = useState([]);
+  useEffect(() => {
+    get('/api/hr/leave/types').then((r) => setTypes(asList(r))).catch(() => setTypes([]));
+  }, [tab]);
   return (
     <div>
       <PageHeader title="Leave" subtitle="Requests, leave types and policies" />
       <Tabs tabs={TABS} active={tab} onChange={setTab} />
       {tab === 'requests' && <RequestsTab />}
-      {tab === 'types' && (
-        <ConfigTab
-          resource="types"
-          title="Leave types"
-          fields={[
-            { key: 'name', label: 'Name', required: true },
-            { key: 'code', label: 'Code' },
-          ]}
-        />
-      )}
-      {tab === 'policies' && (
-        <ConfigTab
-          resource="policies"
-          title="Policies"
-          fields={[
-            { key: 'name', label: 'Policy name', required: true },
-            { key: 'code', label: 'Code' },
-          ]}
-        />
-      )}
+      {tab === 'types' && <ConfigTab resource="types" title="Leave types" fields={TYPE_FIELDS} />}
+      {tab === 'policies' && <ConfigTab resource="policies" title="Policies" fields={policyFields(types)} />}
     </div>
   );
 }

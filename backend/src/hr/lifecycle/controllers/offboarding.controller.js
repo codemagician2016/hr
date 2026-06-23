@@ -239,6 +239,40 @@ async function resolveEncashableLeaveDays(businessId, employeeId, db = prisma) {
   return days;
 }
 
+// FnF encashment write-back (§4.11 — closes the audited gap). For each encashable
+// LeaveBalance with a positive closing, post an append-only ENCASHMENT
+// LeaveTransaction (quantity = −closing, stamped with the FnF payRunId) and move
+// the units into the `encashed` bucket (NEVER `taken`) so closing → 0 and the
+// §4.2 ledger identity still holds after the payout. MUST run inside the settle
+// $transaction. Returns { encashedDays, lines:[{ leaveBalanceId, units }] }.
+async function writeBackLeaveEncashment(tx, { businessId, employeeId, payRunId }) {
+  const balances = await tx.leaveBalance.findMany({
+    where: { businessId, employeeId, leaveType: { is: { isEncashable: true } } },
+    include: { leaveType: { select: { unit: true } } },
+  });
+  const lines = [];
+  let encashedDays = 0;
+  for (const bal of balances) {
+    const units = Number(bal.closing || 0);
+    if (units <= 0) continue;
+    await tx.leaveTransaction.create({
+      data: {
+        businessId, employeeId, leaveTypeId: bal.leaveTypeId, leaveBalanceId: bal.id,
+        txnType: 'ENCASHMENT', unit: bal.unit || (bal.leaveType ? bal.leaveType.unit : 'DAYS'),
+        quantity: -units, status: 'APPROVED', appliedAt: new Date(), decidedAt: new Date(),
+        payRunId: payRunId || null, reason: 'Leave encashment on full & final settlement',
+      },
+    });
+    await tx.leaveBalance.update({
+      where: { id: bal.id },
+      data: { encashed: { increment: units }, closing: { decrement: units }, version: { increment: 1 } },
+    });
+    lines.push({ leaveBalanceId: bal.id, leaveTypeId: bal.leaveTypeId, units });
+    encashedDays += units;
+  }
+  return { encashedDays: Math.round(encashedDays * 1e4) / 1e4, lines };
+}
+
 // ── seed the OFFBOARDING journey for a separation case (reuses journeyEngine) ──
 // Snapshots the default offboarding template's task defs into LifecycleTasks,
 // resolves owners (HR/IT/FINANCE/ADMIN → function owners by permission; MANAGER →
@@ -851,16 +885,22 @@ async function settleSeparation(req, res, next) {
       if (sep.fnfPayRunId) {
         await tx.payRun.update({ where: { id: sep.fnfPayRunId }, data: { status: 'PAID', paidAt: new Date() } }).catch(() => {});
       }
+      // 6. Leave-encashment write-back (§4.11): the FnF run already minted the
+      //    FNF_LEAVE_ENCASH / FNF_NZ_HOLIDAY_PAYOUT earnings, but the leave ledger
+      //    was left stale (no ENCASHMENT txn, no `.encashed` move). Post it now so
+      //    the balance closes to 0 via `encashed` (never `taken`) and the ledger
+      //    reconciles against the payout. Idempotent: a re-settle finds closing=0.
+      const encash = await writeBackLeaveEncashment(tx, { businessId, employeeId: sep.employeeId, payRunId: sep.fnfPayRunId });
       const updated = await tx.separationCase.update({ where: { id: sep.id }, data: { status: 'SETTLED', version: { increment: 1 } } });
-      return { sep: updated, settled: settleRes.changed, reassignedReports: reports.length };
+      return { sep: updated, settled: settleRes.changed, reassignedReports: reports.length, encashedDays: encash.encashedDays, encashLines: encash.lines };
     });
 
     await writeAudit({
       businessId, actorId: req.user.id, action: 'separation.settle',
       entityType: 'SeparationCase', entityId: sep.id,
-      meta: { code: sep.code, status, reassignedReports: out.reassignedReports },
+      meta: { code: sep.code, status, reassignedReports: out.reassignedReports, leaveEncashedDays: out.encashedDays },
     });
-    res.json({ separation: out.sep, reassignedReports: out.reassignedReports });
+    res.json({ separation: out.sep, reassignedReports: out.reassignedReports, leaveEncashedDays: out.encashedDays });
   } catch (e) { next(e); }
 }
 
