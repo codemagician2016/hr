@@ -255,8 +255,19 @@ async function listRequests(req, res, next) {
     if (leaveTypeId) where.leaveTypeId = leaveTypeId;
     if (status) where.status = status;
 
+    // Resolve the applicant + leave-type so the admin list renders human names
+    // (and the type label) instead of raw UUIDs (audit #16).
     const [items, total] = await Promise.all([
-      prisma.leaveTransaction.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take }),
+      prisma.leaveTransaction.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take,
+        include: {
+          employee: { select: { id: true, firstName: true, lastName: true, code: true } },
+          leaveType: { select: { id: true, code: true, name: true, color: true, unit: true } },
+        },
+      }),
       prisma.leaveTransaction.count({ where }),
     ]);
     res.json({ items, total, page: pageNum, pageSize: take });
@@ -268,6 +279,10 @@ async function getRequest(req, res, next) {
     const { businessId } = req.user;
     const txn = await prisma.leaveTransaction.findFirst({
       where: { id: req.params.id, businessId, txnType: 'APPLICATION' },
+      include: {
+        employee: { select: { id: true, firstName: true, lastName: true, code: true } },
+        leaveType: { select: { id: true, code: true, name: true, color: true, unit: true } },
+      },
     });
     if (!txn) return res.status(404).json({ message: 'Leave request not found' });
     // Feature 1: out-of-scope applicant → 404 (IDOR-safe; don't reveal existence).

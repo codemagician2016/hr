@@ -1,26 +1,129 @@
 'use client';
 
-// Leave console: three tabs against /api/hr/leave/*.
-//  - Requests: paginated GET /requests with approve/reject (canApproveLeave).
-//  - Types:    GET/POST /types (config; create gated by canManageOrg backend-side).
-//  - Policies: GET/POST /policies.
+// Leave console against /api/hr/leave/*.
+//  - Requests:  paginated GET /requests with approve/reject (canApproveLeave).
+//  - Balances:  employee picker → GET /employees/:id/balances; audited Adjust
+//               (POST /balances/adjust).
+//  - Calendar:  GET /calendar — who is off across the team in a date window.
+//  - Reports:   GET /reports/summary — taken/pending/LOP rolled up by type.
+//  - Carry-fwd: POST /runs/carry-forward — year-end roll (dry-run preview → apply).
+//  - Types:     GET/POST /types   (config; create gated by canManageOrg backend-side).
+//  - Policies:  GET/POST /policies.
 // List envelopes are {items[,total,page,pageSize]}; request decisions POST to
 // /requests/:id/{approve,reject} and we optimistically refetch on success.
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
-import { Spinner, ErrorBanner, PrimaryButton, TextInput, formatAdminDate } from '@hr/ui';
+import {
+  Spinner,
+  ErrorBanner,
+  Empty,
+  PrimaryButton,
+  TextInput,
+  Modal,
+  ModalActions,
+  formatAdminDate,
+} from '@hr/ui';
 import { get, post } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, employeeLabel } from '@/lib/ui';
 import { useTenantCountries } from '@/lib/useTenantCountries';
 
 const TABS = [
   { key: 'requests', label: 'Requests' },
+  { key: 'balances', label: 'Balances' },
+  { key: 'calendar', label: 'Calendar' },
+  { key: 'reports', label: 'Reports' },
+  { key: 'carryforward', label: 'Year-end' },
   { key: 'types', label: 'Leave types' },
   { key: 'policies', label: 'Policies' },
 ];
 
 const STATUSES = ['', 'PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'];
 const PAGE_SIZE = 25;
+
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+// Format a Decimal-ish leave quantity (Prisma returns strings) to a tidy number.
+function qty(v) {
+  if (v == null) return '—';
+  const n = typeof v === 'object' && v.toNumber ? v.toNumber() : Number(v);
+  if (Number.isNaN(n)) return String(v);
+  return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/\.?0+$/, '');
+}
+
+// ─── Shared employee picker (search → GET /employees?q=) ─────────────────────
+
+function EmployeePicker({ value, onChange, label = 'Employee', placeholder = 'Search by name or code…' }) {
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState([]);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!q.trim()) {
+      setResults([]);
+      return undefined;
+    }
+    let alive = true;
+    const t = setTimeout(() => {
+      get('/api/hr/employees', { q: q.trim(), pageSize: 8 })
+        .then((res) => {
+          if (alive) setResults(asList(res).slice(0, 8));
+        })
+        .catch(() => {
+          if (alive) setResults([]);
+        });
+    }, 250);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [q]);
+
+  return (
+    <div className="relative">
+      <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="leave-emp-picker">
+        {label}
+      </label>
+      <input
+        id="leave-emp-picker"
+        type="text"
+        value={value ? employeeLabel(value) : q}
+        onChange={(e) => {
+          onChange(null);
+          setQ(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        placeholder={placeholder}
+        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm"
+        autoComplete="off"
+      />
+      {open && results.length > 0 && !value && (
+        <ul className="absolute z-10 mt-1 w-full max-h-56 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg text-sm">
+          {results.map((emp) => (
+            <li key={emp.id}>
+              <button
+                type="button"
+                onClick={() => {
+                  onChange(emp);
+                  setOpen(false);
+                  setQ('');
+                }}
+                className="block w-full text-left px-3 py-2 hover:bg-gray-50"
+              >
+                <span className="font-medium text-gray-900">{employeeLabel(emp)}</span>
+                {emp.code && <span className="text-gray-400 ml-2">{emp.code}</span>}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ─── Requests ────────────────────────────────────────────────────────────────
 
 function RequestsTab() {
   const [status, setStatus] = useState('PENDING');
@@ -35,7 +138,7 @@ function RequestsTab() {
     setError('');
     get('/api/hr/leave/requests', { status, page, pageSize: PAGE_SIZE })
       .then(setData)
-      .catch((e) => setError(e.message || 'Failed to load leave requests.'))
+      .catch((e) => setError(e.data?.message || e.message || 'Failed to load leave requests.'))
       .finally(() => setLoading(false));
   }, [status, page]);
 
@@ -62,17 +165,20 @@ function RequestsTab() {
 
   const columns = [
     { key: 'employee', header: 'Employee', render: (r) => <span className="font-medium text-gray-900">{employeeLabel(r)}</span> },
-    { key: 'leaveType', header: 'Type', render: (r) => r.leaveType?.name || r.leaveTypeName || r.leaveTypeId || '—' },
+    { key: 'leaveType', header: 'Type', render: (r) => r.leaveType?.name || r.leaveTypeName || '—' },
     { key: 'from', header: 'From', render: (r) => formatAdminDate(r.startDate || r.fromDate) },
     { key: 'to', header: 'To', render: (r) => formatAdminDate(r.endDate || r.toDate) },
-    { key: 'qty', header: 'Days', render: (r) => (r.quantity != null ? Math.abs(Number(r.quantity)) : '—') },
+    { key: 'qty', header: 'Days', render: (r) => (r.quantity != null ? qty(Math.abs(Number(r.quantity))) : '—') },
+    { key: 'reason', header: 'Reason', render: (r) => <span className="text-gray-600">{r.reason || '—'}</span> },
     { key: 'status', header: 'Status', render: (r) => <StatusBadge status={r.status} /> },
     {
       key: 'actions',
       header: '',
+      className: 'text-right',
+      cellClassName: 'text-right',
       render: (r) =>
         String(r.status).toUpperCase() === 'PENDING' ? (
-          <div className="flex gap-2">
+          <div className="inline-flex gap-2">
             <ActionButton tone="positive" disabled={busyId === r.id} onClick={() => decide(r.id, 'approve')}>
               Approve
             </ActionButton>
@@ -134,7 +240,512 @@ function RequestsTab() {
   );
 }
 
-function ConfigTab({ resource, title, fields }) {
+// ─── Balances (employee picker → balances + audited adjust) ──────────────────
+
+function AdjustBalanceModal({ employee, balance, onClose, onSaved }) {
+  const [delta, setDelta] = useState('');
+  const [reason, setReason] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  async function save() {
+    setSaving(true);
+    setError('');
+    try {
+      await post('/api/hr/leave/balances/adjust', {
+        employeeId: employee.id,
+        leaveTypeId: balance.leaveTypeId,
+        periodCode: balance.periodCode,
+        delta: Number(delta),
+        reason,
+      });
+      onSaved();
+    } catch (e) {
+      setError(e.data?.message || e.message || 'Failed to adjust the balance.');
+      setSaving(false);
+    }
+  }
+
+  const d = Number(delta);
+  const valid = Number.isFinite(d) && d !== 0 && reason.trim().length > 0;
+
+  return (
+    <Modal title={`Adjust ${balance.leaveType?.name || 'leave'} balance`} onClose={onClose}>
+      {error && (
+        <div className="mb-3">
+          <ErrorBanner message={error} />
+        </div>
+      )}
+      <p className="text-sm text-gray-500 mb-4">
+        Posts an audited <span className="font-medium">ADJUSTMENT</span> for{' '}
+        <span className="font-medium text-gray-700">{employeeLabel(employee)}</span> in period{' '}
+        <span className="font-medium text-gray-700">{balance.periodCode}</span>. Use a positive delta to credit,
+        negative to debit. Append-only — the original balance is never overwritten.
+      </p>
+      <div className="space-y-4">
+        <TextInput
+          label="Delta (days, +credit / −debit)"
+          type="number"
+          value={delta}
+          onChange={setDelta}
+          hint={`Current closing: ${qty(balance.closing)} ${String(balance.unit || 'days').toLowerCase()}`}
+          required
+        />
+        <TextInput label="Reason" value={reason} onChange={setReason} required hint="Recorded on the ledger row" />
+      </div>
+      <ModalActions>
+        <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50">
+          Cancel
+        </button>
+        <PrimaryButton loading={saving} onClick={save} disabled={!valid}>
+          Post adjustment
+        </PrimaryButton>
+      </ModalActions>
+    </Modal>
+  );
+}
+
+function BalancesTab() {
+  const [employee, setEmployee] = useState(null);
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [adjusting, setAdjusting] = useState(null); // balance row being adjusted
+
+  const load = useCallback(() => {
+    if (!employee?.id) {
+      setRows(null);
+      return;
+    }
+    setLoading(true);
+    setError('');
+    get(`/api/hr/leave/employees/${employee.id}/balances`)
+      .then((r) => setRows(asList(r)))
+      .catch((e) => {
+        setError(e.data?.message || e.message || 'Failed to load balances.');
+        setRows([]);
+      })
+      .finally(() => setLoading(false));
+  }, [employee]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const columns = [
+    {
+      key: 'type',
+      header: 'Leave type',
+      render: (r) => (
+        <span className="inline-flex items-center gap-2 font-medium text-gray-900">
+          {r.leaveType?.color && <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: r.leaveType.color }} aria-hidden="true" />}
+          {r.leaveType?.name || r.leaveTypeId || '—'}
+        </span>
+      ),
+    },
+    { key: 'period', header: 'Period', render: (r) => r.periodCode || '—' },
+    { key: 'opening', header: 'Opening', cellClassName: 'text-right tabular-nums text-gray-700', className: 'text-right', render: (r) => qty(r.opening) },
+    { key: 'accrued', header: 'Accrued', cellClassName: 'text-right tabular-nums text-gray-700', className: 'text-right', render: (r) => qty(r.accrued) },
+    { key: 'taken', header: 'Taken', cellClassName: 'text-right tabular-nums text-gray-700', className: 'text-right', render: (r) => qty(r.taken) },
+    { key: 'pending', header: 'On hold', cellClassName: 'text-right tabular-nums text-amber-700', className: 'text-right', render: (r) => qty(r.pendingApproval) },
+    {
+      key: 'available',
+      header: 'Available',
+      className: 'text-right',
+      cellClassName: 'text-right tabular-nums font-semibold text-gray-900',
+      render: (r) => qty(r.available ?? (Number(r.closing) - Number(r.pendingApproval))),
+    },
+    {
+      key: 'actions',
+      header: '',
+      className: 'text-right',
+      cellClassName: 'text-right',
+      render: (r) => (
+        <ActionButton onClick={() => setAdjusting(r)}>Adjust</ActionButton>
+      ),
+    },
+  ];
+
+  return (
+    <div className="space-y-5">
+      <div className="max-w-md">
+        <EmployeePicker value={employee} onChange={setEmployee} />
+      </div>
+
+      {error && <ErrorBanner message={error} />}
+
+      {!employee ? (
+        <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-10 text-center">
+          <p className="text-sm font-medium text-gray-900">Pick an employee to view their leave balances.</p>
+          <p className="text-sm text-gray-500 mt-1">
+            You can post an audited adjustment (credit or debit) against any period from here.
+          </p>
+        </div>
+      ) : (
+        <DataTable
+          columns={columns}
+          rows={rows}
+          loading={loading}
+          emptyText="No leave balances for this employee yet."
+          rowKey={(r) => r.id}
+        />
+      )}
+
+      {adjusting && (
+        <AdjustBalanceModal
+          employee={employee}
+          balance={adjusting}
+          onClose={() => setAdjusting(null)}
+          onSaved={() => {
+            setAdjusting(null);
+            load();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Calendar (who is off across the team) ───────────────────────────────────
+
+function CalendarTab() {
+  const monthStart = useMemo(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
+  }, []);
+  const monthEnd = useMemo(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().slice(0, 10);
+  }, []);
+  const [from, setFrom] = useState(monthStart);
+  const [to, setTo] = useState(monthEnd);
+  const [includePending, setIncludePending] = useState(true);
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setError('');
+    get('/api/hr/leave/calendar', { from, to, includePending: includePending ? 'true' : 'false' })
+      .then((r) => setRows(asList(r)))
+      .catch((e) => {
+        setError(e.data?.message || e.message || 'Failed to load the leave calendar.');
+        setRows([]);
+      })
+      .finally(() => setLoading(false));
+  }, [from, to, includePending]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const columns = [
+    { key: 'employee', header: 'Employee', render: (r) => <span className="font-medium text-gray-900">{employeeLabel(r)}</span> },
+    {
+      key: 'type',
+      header: 'Type',
+      render: (r) => (
+        <span className="inline-flex items-center gap-2">
+          {r.leaveType?.color && <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: r.leaveType.color }} aria-hidden="true" />}
+          {r.leaveType?.name || '—'}
+        </span>
+      ),
+    },
+    { key: 'from', header: 'From', render: (r) => formatAdminDate(r.startDate) },
+    { key: 'to', header: 'To', render: (r) => formatAdminDate(r.endDate) },
+    { key: 'days', header: 'Days', cellClassName: 'tabular-nums text-gray-700', render: (r) => qty(Math.abs(Number(r.quantity))) },
+    { key: 'status', header: 'Status', render: (r) => <StatusBadge status={r.status} /> },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end gap-3">
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor="cal-from">From</label>
+          <input id="cal-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor="cal-to">To</label>
+          <input id="cal-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+        </div>
+        <label className="flex items-center gap-2 text-sm text-gray-700 pb-2 cursor-pointer">
+          <input type="checkbox" checked={includePending} onChange={(e) => setIncludePending(e.target.checked)} />
+          Include pending
+        </label>
+      </div>
+
+      {error && <ErrorBanner message={error} />}
+
+      <DataTable columns={columns} rows={rows} loading={loading} emptyText="No one is on leave in this window." />
+    </div>
+  );
+}
+
+// ─── Reports (taken / pending / LOP by type) ─────────────────────────────────
+
+function ReportsTab() {
+  const yearStart = `${new Date().getFullYear()}-01-01`;
+  const yearEnd = `${new Date().getFullYear()}-12-31`;
+  const [from, setFrom] = useState(yearStart);
+  const [to, setTo] = useState(yearEnd);
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setError('');
+    get('/api/hr/leave/reports/summary', { from, to, groupBy: 'type' })
+      .then((r) => setRows(asList(r)))
+      .catch((e) => {
+        setError(e.data?.message || e.message || 'Failed to load the report.');
+        setRows([]);
+      })
+      .finally(() => setLoading(false));
+  }, [from, to]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const totals = useMemo(() => {
+    const list = rows || [];
+    return list.reduce(
+      (acc, r) => ({
+        taken: acc.taken + Number(r.taken || 0),
+        pending: acc.pending + Number(r.pending || 0),
+        lop: acc.lop + Number(r.lop || 0),
+      }),
+      { taken: 0, pending: 0, lop: 0 },
+    );
+  }, [rows]);
+
+  const columns = [
+    { key: 'key', header: 'Leave type', render: (r) => <span className="font-medium text-gray-900">{r.key}</span> },
+    { key: 'count', header: 'Requests', cellClassName: 'text-right tabular-nums text-gray-700', className: 'text-right', render: (r) => r.count ?? 0 },
+    { key: 'taken', header: 'Taken', cellClassName: 'text-right tabular-nums text-gray-700', className: 'text-right', render: (r) => qty(r.taken) },
+    { key: 'pending', header: 'Pending', cellClassName: 'text-right tabular-nums text-amber-700', className: 'text-right', render: (r) => qty(r.pending) },
+    { key: 'lop', header: 'LOP', cellClassName: 'text-right tabular-nums text-red-700', className: 'text-right', render: (r) => qty(r.lop) },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end gap-3">
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor="rep-from">From</label>
+          <input id="rep-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor="rep-to">To</label>
+          <input id="rep-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+        </div>
+      </div>
+
+      {error && <ErrorBanner message={error} />}
+
+      {!loading && rows && rows.length > 0 && (
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            ['Taken', totals.taken, 'text-gray-900'],
+            ['Pending', totals.pending, 'text-amber-700'],
+            ['Loss of pay', totals.lop, 'text-red-700'],
+          ].map(([label, value, tone]) => (
+            <div key={label} className="rounded-2xl border border-gray-200 bg-white p-4">
+              <p className="text-xs text-gray-500">{label}</p>
+              <p className={`text-2xl font-semibold tabular-nums ${tone}`}>{qty(value)}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <DataTable columns={columns} rows={rows} loading={loading} emptyText="No leave activity in this window." rowKey={(r) => r.key} />
+    </div>
+  );
+}
+
+// ─── Year-end carry-forward (dry-run preview → apply) ────────────────────────
+
+function CarryForwardTab() {
+  // Default the period to "YYYY-YY" for the year that just ended (the roll source).
+  const defaultPeriod = useMemo(() => {
+    const y = new Date().getFullYear() - 1;
+    return `${y}-${String((y + 1) % 100).padStart(2, '0')}`;
+  }, []);
+  const [periodCode, setPeriodCode] = useState(defaultPeriod);
+  const [result, setResult] = useState(null); // dry-run preview
+  const [applied, setApplied] = useState(null); // applied result
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function run(dryRun) {
+    setBusy(true);
+    setError('');
+    try {
+      const res = await post('/api/hr/leave/runs/carry-forward', { periodCode, dryRun });
+      if (dryRun) {
+        setResult(res);
+        setApplied(null);
+      } else {
+        setApplied(res);
+        setResult(res);
+      }
+    } catch (e) {
+      setError(e.data?.message || e.message || 'Carry-forward run failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const lines = result?.lines || [];
+  const columns = [
+    { key: 'employeeId', header: 'Employee', render: (r) => <span className="text-gray-700">{r.employeeId}</span> },
+    { key: 'toPeriod', header: 'Into period', render: (r) => r.toPeriod || '—' },
+    { key: 'closing', header: 'Closing', cellClassName: 'text-right tabular-nums text-gray-700', className: 'text-right', render: (r) => qty(r.closing) },
+    { key: 'carried', header: 'Carried', cellClassName: 'text-right tabular-nums text-emerald-700', className: 'text-right', render: (r) => qty(r.carried) },
+    { key: 'lapsed', header: 'Lapsed', cellClassName: 'text-right tabular-nums text-red-700', className: 'text-right', render: (r) => qty(r.lapsed) },
+  ];
+
+  return (
+    <div className="max-w-3xl space-y-5">
+      <p className="text-sm text-gray-500">
+        Rolls each employee&apos;s closing balance into the next period&apos;s opening — capped and expiring per policy. The
+        run is idempotent: balances already carried are skipped, so re-running is safe. Always preview before applying.
+      </p>
+
+      {error && <ErrorBanner message={error} />}
+
+      <div className="rounded-2xl border border-gray-200 bg-white p-5 space-y-4">
+        <div className="max-w-xs">
+          <TextInput
+            label="Source period code"
+            value={periodCode}
+            onChange={(v) => {
+              setPeriodCode(v);
+              setResult(null);
+              setApplied(null);
+            }}
+            hint='e.g. "2025-26" (India FY) or "2025-ANNIV"'
+          />
+        </div>
+        <div className="flex gap-2">
+          <PrimaryButton onClick={() => run(true)} loading={busy && !applied} disabled={!periodCode.trim()}>
+            Preview run
+          </PrimaryButton>
+          {result && !applied && (
+            <button
+              type="button"
+              onClick={() => run(false)}
+              disabled={busy}
+              className="px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50"
+              style={{ backgroundColor: 'var(--theme-primary)' }}
+            >
+              Apply carry-forward
+            </button>
+          )}
+        </div>
+      </div>
+
+      {result && (
+        <div className="space-y-4">
+          <div
+            className={`rounded-2xl border p-5 text-sm ${
+              applied ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-blue-200 bg-blue-50 text-blue-800'
+            }`}
+          >
+            {applied ? (
+              <>
+                Carry-forward applied for <span className="font-medium">{result.periodCode}</span> → <span className="font-medium">{result.nextPeriodCode}</span>.{' '}
+                Rolled <span className="font-medium tabular-nums">{result.rolled}</span>, skipped{' '}
+                <span className="font-medium tabular-nums">{result.skipped}</span>.
+              </>
+            ) : (
+              <>
+                Preview for <span className="font-medium">{result.periodCode}</span> → <span className="font-medium">{result.nextPeriodCode}</span>:{' '}
+                <span className="font-medium tabular-nums">{result.lineCount}</span> balance{result.lineCount === 1 ? '' : 's'} to roll.
+                Nothing has been written yet.
+              </>
+            )}
+            <div className="mt-2 flex gap-6">
+              <span>Carried total: <span className="font-medium tabular-nums">{qty(result.carriedTotal)}</span></span>
+              <span>Lapsed total: <span className="font-medium tabular-nums">{qty(result.lapsedTotal)}</span></span>
+            </div>
+          </div>
+
+          {lines.length === 0 ? (
+            <Empty text="No balances qualify for carry-forward in this period (already rolled, or zero closing)." />
+          ) : (
+            <DataTable columns={columns} rows={lines} emptyText="No lines." rowKey={(r, i) => `${r.employeeId}-${i}`} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Config (Types + Policies) ───────────────────────────────────────────────
+
+const CATEGORY_OPTS = ['ANNUAL', 'CASUAL', 'SICK', 'MATERNITY', 'PATERNITY', 'BEREAVEMENT', 'PUBLIC_HOLIDAY', 'ALTERNATIVE_DAY', 'COMP_OFF', 'UNPAID', 'SABBATICAL', 'MARRIAGE', 'ADOPTION', 'FAMILY_VIOLENCE', 'OTHER'];
+const UNIT_OPTS = ['DAYS', 'HOURS', 'WEEKS'];
+const NZ_BASIS_OPTS = ['', 'RDP', 'ADP', 'AWE_8PCT', 'OWP'];
+const SANDWICH_OPTS = ['', 'INCLUSIVE', 'EXCLUSIVE'];
+const COUNTRY_OPTS = ['', 'IN', 'NZ'];
+const ACCRUAL_METHOD_OPTS = ['UPFRONT_ANNUAL', 'MONTHLY_ACCRUAL', 'ANNIVERSARY_GRANT', 'WORKED_HOURS_RATIO', 'CONTINUOUS_NZ'];
+const ACCRUAL_FREQ_OPTS = ['MONTHLY', 'QUARTERLY', 'ANNUAL', 'PER_PAY_PERIOD'];
+const GENDER_OPTS = ['', 'MALE', 'FEMALE', 'OTHER'];
+
+function prettyEnum(v) {
+  return String(v || '')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// Per-resource column definitions so each config table shows its key fields
+// instead of a shared name/code/paid trio (#21). Each entry: { key, header, render? }.
+function typeColumns() {
+  return [
+    {
+      key: 'name',
+      header: 'Name',
+      render: (r) => (
+        <span className="inline-flex items-center gap-2 font-medium text-gray-900">
+          {r.color && <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: r.color }} aria-hidden="true" />}
+          {r.name}
+        </span>
+      ),
+    },
+    { key: 'code', header: 'Code', render: (r) => r.code || '—' },
+    { key: 'category', header: 'Category', render: (r) => prettyEnum(r.category) || '—' },
+    { key: 'unit', header: 'Unit', render: (r) => prettyEnum(r.unit) || '—' },
+    { key: 'countryCode', header: 'Country', render: (r) => r.countryCode || 'All' },
+    { key: 'isPaid', header: 'Paid', render: (r) => ((r.isPaid ?? r.paid) === false ? <span className="text-gray-500">Unpaid</span> : 'Paid') },
+  ];
+}
+
+function policyColumns(typeById) {
+  return [
+    { key: 'name', header: 'Policy', render: (r) => <span className="font-medium text-gray-900">{r.name}</span> },
+    { key: 'code', header: 'Code', render: (r) => r.code || '—' },
+    {
+      key: 'leaveType',
+      header: 'Leave type',
+      render: (r) => {
+        const t = r.leaveType || typeById?.get(r.leaveTypeId);
+        return t ? `${t.name}${t.code ? ` (${t.code})` : ''}` : (r.leaveTypeId || '—');
+      },
+    },
+    { key: 'accrualMethod', header: 'Accrual', render: (r) => prettyEnum(r.accrualMethod) || '—' },
+    {
+      key: 'entitlementPerYear',
+      header: 'Entitlement / yr',
+      className: 'text-right',
+      cellClassName: 'text-right tabular-nums text-gray-700',
+      render: (r) => (r.entitlementPerYear != null ? qty(r.entitlementPerYear) : '—'),
+    },
+  ];
+}
+
+function ConfigTab({ resource, title, fields, columns }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -145,7 +756,7 @@ function ConfigTab({ resource, title, fields }) {
     get(`/api/hr/leave/${resource}`)
       .then((r) => setRows(asList(r)))
       .catch((e) => {
-        setError(e.message || `Failed to load ${title.toLowerCase()}.`);
+        setError(e.data?.message || e.message || `Failed to load ${title.toLowerCase()}.`);
         setRows([]);
       });
   }, [resource, title]);
@@ -163,18 +774,12 @@ function ConfigTab({ resource, title, fields }) {
       await post(`/api/hr/leave/${resource}`, payload);
       setDraft(Object.fromEntries(fields.map((f) => [f.key, ''])));
       load();
-    } catch (e) {
-      setError(e.data?.message || e.message || 'Failed to create.');
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Failed to create.');
     } finally {
       setSaving(false);
     }
   }
-
-  const columns = [
-    { key: 'name', header: 'Name', render: (r) => <span className="font-medium text-gray-900">{r.name}</span> },
-    { key: 'code', header: 'Code', render: (r) => r.code || '—' },
-    { key: 'paid', header: 'Paid', render: (r) => (r.isPaid ?? r.paid) === false ? 'Unpaid' : 'Paid' },
-  ];
 
   return (
     <div className="grid lg:grid-cols-3 gap-4">
@@ -226,15 +831,6 @@ function ConfigTab({ resource, title, fields }) {
   );
 }
 
-const CATEGORY_OPTS = ['ANNUAL', 'CASUAL', 'SICK', 'MATERNITY', 'PATERNITY', 'BEREAVEMENT', 'PUBLIC_HOLIDAY', 'ALTERNATIVE_DAY', 'COMP_OFF', 'UNPAID', 'SABBATICAL', 'MARRIAGE', 'ADOPTION', 'FAMILY_VIOLENCE', 'OTHER'];
-const UNIT_OPTS = ['DAYS', 'HOURS', 'WEEKS'];
-const NZ_BASIS_OPTS = ['', 'RDP', 'ADP', 'AWE_8PCT', 'OWP'];
-const SANDWICH_OPTS = ['', 'INCLUSIVE', 'EXCLUSIVE'];
-const COUNTRY_OPTS = ['', 'IN', 'NZ'];
-const ACCRUAL_METHOD_OPTS = ['UPFRONT_ANNUAL', 'MONTHLY_ACCRUAL', 'ANNIVERSARY_GRANT', 'WORKED_HOURS_RATIO', 'CONTINUOUS_NZ'];
-const ACCRUAL_FREQ_OPTS = ['MONTHLY', 'QUARTERLY', 'ANNUAL', 'PER_PAY_PERIOD'];
-const GENDER_OPTS = ['', 'MALE', 'FEMALE', 'OTHER'];
-
 // Full LeaveType allow-list (matches the controller LEAVE_TYPE_FIELDS + §5.1 spec).
 // Country-aware: `countries` is the tenant's distinct operating-country set. For a
 // single-country tenant the Country select is constrained to THAT country (no
@@ -244,8 +840,6 @@ function typeFields(countries) {
   const list = Array.isArray(countries) ? countries : [];
   const hasNZ = list.includes('NZ');
   const single = list.length === 1;
-  // Country options: a single-country tenant offers only its own country (no blank
-  // "both" — there is only one). Multi/unknown keeps the blank+full list.
   const countryOpts = single ? [list[0]] : COUNTRY_OPTS;
   const fields = [
     { key: 'name', label: 'Name', required: true },
@@ -254,7 +848,6 @@ function typeFields(countries) {
     { key: 'unit', label: 'Unit', type: 'select', options: UNIT_OPTS },
     { key: 'countryCode', label: single ? 'Country' : 'Country (blank = both)', type: 'select', options: countryOpts },
   ];
-  // NZ-only statutory leave fields — present only for tenants operating in NZ.
   if (hasNZ || list.length === 0) {
     fields.push(
       { key: 'nzPayBasis', label: 'NZ pay basis', type: 'select', options: NZ_BASIS_OPTS },
@@ -306,13 +899,24 @@ function LeaveInner() {
   useEffect(() => {
     get('/api/hr/leave/types').then((r) => setTypes(asList(r))).catch(() => setTypes([]));
   }, [tab]);
+
+  const typeById = useMemo(() => new Map((types || []).map((t) => [t.id, t])), [types]);
+
   return (
     <div>
-      <PageHeader title="Leave" subtitle="Requests, leave types and policies" />
+      <PageHeader title="Leave" subtitle="Requests, balances, calendar, reports, year-end and config" />
       <Tabs tabs={TABS} active={tab} onChange={setTab} />
       {tab === 'requests' && <RequestsTab />}
-      {tab === 'types' && <ConfigTab resource="types" title="Leave types" fields={typeFields(countries)} />}
-      {tab === 'policies' && <ConfigTab resource="policies" title="Policies" fields={policyFields(types)} />}
+      {tab === 'balances' && <BalancesTab />}
+      {tab === 'calendar' && <CalendarTab />}
+      {tab === 'reports' && <ReportsTab />}
+      {tab === 'carryforward' && <CarryForwardTab />}
+      {tab === 'types' && (
+        <ConfigTab resource="types" title="Leave types" fields={typeFields(countries)} columns={typeColumns()} />
+      )}
+      {tab === 'policies' && (
+        <ConfigTab resource="policies" title="Policies" fields={policyFields(types)} columns={policyColumns(typeById)} />
+      )}
     </div>
   );
 }
