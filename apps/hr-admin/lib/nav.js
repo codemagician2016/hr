@@ -12,6 +12,12 @@
 export const NAV_ITEMS = [
   { key: 'dashboard', label: 'Dashboard', href: '/' },
   { key: 'people', label: 'People', href: '/people', feature: 'hr', permission: 'canViewEmployees' },
+  // Employee lifecycle (Feature 4). The onboarding pipeline + checklist tasks are
+  // visible to anyone who can view employees (a Manager sees only their reporting
+  // sub-tree, server-scoped); separations are gated on canRunSeparation (HR-Admin/
+  // Owner). The server is the real enforcement boundary — this just hides nav.
+  { key: 'onboarding', label: 'Onboarding', href: '/onboarding', feature: 'hr', permission: 'canViewEmployees' },
+  { key: 'separations', label: 'Separations', href: '/separations', feature: 'hr', permission: 'canRunSeparation' },
   { key: 'org', label: 'Org', href: '/org', feature: 'hr', permission: 'canViewEmployees' },
   { key: 'leave', label: 'Leave', href: '/leave', feature: 'leave', permission: 'canApproveLeave' },
   { key: 'attendance', label: 'Attendance', href: '/attendance', feature: 'attendance', permission: 'canManageAttendance' },
