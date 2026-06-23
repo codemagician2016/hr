@@ -173,6 +173,68 @@ async function main() {
     assert(tooBig.statusCode === 413, 'oversize upload → 413');
 
     // ════════════════════════════════════════════════════════════════════════
+    // SIG-UPLOAD — signature-image upload is MIME/size/sha256 validated (HIGH fix)
+    // The e-sign signature image must NOT trust the raw client data URL: IMAGE-only
+    // MIME allow-list, decoded-size cap (DoS guard), base64 data URL, server-side
+    // sha256 of the DECODED bytes. Validator is the gate `sign()` calls before store.
+    // ════════════════════════════════════════════════════════════════════════
+    log('\nSIG-UPLOAD) signature image is MIME/size/sha256 validated (no raw-dataURL trust):');
+    {
+      // (a) Valid small PNG → ok + a real 64-hex server-computed sha256 of the bytes.
+      const okPng = builtin.validateSignatureImageDataUrl('data:image/png;base64,iVBORw0KGgo=');
+      assert(okPng.ok === true, 'valid PNG signature data URL passes');
+      assert(okPng.mime === 'image/png', 'valid PNG → mime image/png');
+      assert(typeof okPng.sha256 === 'string' && okPng.sha256.length === 64, 'valid PNG → 64-char server-side sha256 of decoded bytes');
+      assert(okPng.sha256 === sha256Hex(Buffer.from('iVBORw0KGgo=', 'base64')), 'sha256 is over the DECODED bytes (not the client string)');
+      // A small valid JPEG passes too (the other allow-listed image type).
+      const okJpg = builtin.validateSignatureImageDataUrl(`data:image/jpeg;base64,${Buffer.from([0xff, 0xd8, 0xff, 0xe0]).toString('base64')}`);
+      assert(okJpg.ok === true && okJpg.mime === 'image/jpeg', 'valid JPEG signature data URL passes');
+
+      // (b) Non-image MIME (application/pdf, text/html, svg) → rejected 422.
+      const pdfSig = builtin.validateSignatureImageDataUrl('data:application/pdf;base64,JVBERi0=');
+      assert(pdfSig.ok === false && pdfSig.status === 422, 'application/pdf signature → rejected 422');
+      const htmlSig = builtin.validateSignatureImageDataUrl(`data:text/html;base64,${Buffer.from('<script>alert(1)</script>').toString('base64')}`);
+      assert(htmlSig.ok === false && htmlSig.status === 422, 'text/html signature → rejected 422 (no XSS artifact)');
+      const svgSig = builtin.validateSignatureImageDataUrl(`data:image/svg+xml;base64,${Buffer.from('<svg/>').toString('base64')}`);
+      assert(svgSig.ok === false && svgSig.status === 422, 'image/svg+xml signature → rejected 422 (not in PNG/JPEG allow-list)');
+
+      // (c) Oversize decoded payload (> cap) → rejected 422 (DoS guard, pre-allocation).
+      const oversize = `data:image/png;base64,${'A'.repeat(7 * 1024 * 1024)}`; // ~5.25MB decoded > 5MB cap
+      const bigSig = builtin.validateSignatureImageDataUrl(oversize);
+      assert(bigSig.ok === false && bigSig.status === 422, 'oversize (> cap) signature image → rejected 422');
+
+      // (d) Malformed / non-data-URL / non-base64 / empty → rejected 422.
+      const rawSig = builtin.validateSignatureImageDataUrl('not-a-data-url');
+      assert(rawSig.ok === false && rawSig.status === 422, 'bare string (non-data-URL) → rejected 422');
+      const utf8Sig = builtin.validateSignatureImageDataUrl('data:image/png,iVBORw0KGgo='); // no ;base64
+      assert(utf8Sig.ok === false && utf8Sig.status === 422, 'non-base64 data URL → rejected 422');
+      const emptySig = builtin.validateSignatureImageDataUrl('data:image/png;base64,');
+      assert(emptySig.ok === false && emptySig.status === 422, 'empty base64 payload → rejected 422');
+      const nullSig = builtin.validateSignatureImageDataUrl(null);
+      assert(nullSig.ok === false && nullSig.status === 422, 'null input → rejected 422');
+
+      // (e) End-to-end through sign(): a bad-MIME signature is rejected and NO
+      // signature is recorded on the signer (the artifact never reaches storeArtifact).
+      const sigDoc = await prisma.employeeDocument.create({
+        data: { businessId, employeeId: report.id, category: 'POLICY_ACK', name: 'SigGuard', fileUrl: pdfDataUrl('sigguard'), fileHash: sha256Hex('sigguard'), visibility: 'EMPLOYEE_VISIBLE' },
+      });
+      const sigEnv = await builtin.createEnvelope({
+        businessId, subject: 'Sig guard', employeeDocumentId: sigDoc.id,
+        signers: [{ role: 'EMPLOYEE', name: 'Rep Ort', email: `${PREFIX}-rpt@x.com` }],
+      }, prisma);
+      const sigTok = sigEnv.signers[0].rawToken;
+      let sigErr = null;
+      try { await builtin.sign({ token: sigTok, signatureImageDataUrl: 'data:application/pdf;base64,JVBERi0=', consent: true }, prisma); }
+      catch (e) { sigErr = e; }
+      assert(sigErr && sigErr.status === 422, 'sign() with a non-image signature → 422 (EsignError)');
+      const sigSignerAfter = await prisma.signatureSigner.findUnique({ where: { id: sigEnv.signers[0].id } });
+      assert(sigSignerAfter.status !== 'SIGNED' && !sigSignerAfter.signatureHash, 'no signature recorded when the image fails validation');
+      // The SAME envelope still accepts a valid PNG afterwards (flow stays working).
+      const sigOk = await builtin.sign({ token: sigTok, signatureImageDataUrl: 'data:image/png;base64,iVBORw0KGgo=', consent: true }, prisma);
+      assert(sigOk && sigOk.signer.status === 'SIGNED', 'a valid PNG still signs successfully after a rejected attempt');
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
     // QA16 — single-signer offer → signatureHash + envelope COMPLETED + doc SIGNED
     // ════════════════════════════════════════════════════════════════════════
     log('\nQA16) single-signer offer sign → hash + COMPLETED + EmployeeDocument SIGNED:');
@@ -188,7 +250,9 @@ async function main() {
 
     const docHash = await builtin.resolveDocHash(prisma, created.envelope);
     const before = Date.now();
-    const signed = await builtin.sign({ token: rawToken, signatureImageDataUrl: 'data:image/png;base64,iVBORw0KGgo=', consent: true, ip: '1.2.3.4', userAgent: 'jest' }, prisma);
+    const sigPngDataUrl = 'data:image/png;base64,iVBORw0KGgo=';
+    const sigPngSha256 = sha256Hex(Buffer.from('iVBORw0KGgo=', 'base64'));
+    const signed = await builtin.sign({ token: rawToken, signatureImageDataUrl: sigPngDataUrl, consent: true, ip: '1.2.3.4', userAgent: 'jest' }, prisma);
     assert(signed.completed === true, 'single signer → envelope completed');
     assert(signed.envelope.status === 'COMPLETED', 'envelope status COMPLETED');
 
@@ -196,10 +260,11 @@ async function main() {
     assert(signerAfter.status === 'SIGNED', 'signer status SIGNED');
     assert(!!signerAfter.consentAt, 'consentAt captured');
     assert(signerAfter.ipAddress === '1.2.3.4', 'ipAddress captured');
-    // signatureHash = SHA-256(docHash + signerId + ISO-ts) — recompute with the
-    // stored signedAt and confirm it matches.
-    const expectHash = sha256Hex(`${docHash}${signerAfter.id}${new Date(signerAfter.signedAt).toISOString()}`);
-    assert(signerAfter.signatureHash === expectHash, 'signatureHash === SHA-256(docHash + signerId + ISO-ts)');
+    // signatureHash = SHA-256(docHash + signerId + ISO-ts + imageSha256) — recompute
+    // with the stored signedAt + the server-computed hash of the signature image
+    // bytes and confirm it matches (the artifact is now integrity-bound, not just URL'd).
+    const expectHash = sha256Hex(`${docHash}${signerAfter.id}${new Date(signerAfter.signedAt).toISOString()}${sigPngSha256}`);
+    assert(signerAfter.signatureHash === expectHash, 'signatureHash === SHA-256(docHash + signerId + ISO-ts + imageSha256)');
 
     const docAfter = await prisma.employeeDocument.findUnique({ where: { id: docRow.id } });
     assert(docAfter.signatureStatus === 'SIGNED', 'EmployeeDocument.signatureStatus = SIGNED');

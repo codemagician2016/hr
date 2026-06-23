@@ -84,6 +84,54 @@ async function resolveDocHash(prisma, envelope) {
   return sha256Hex(`envelope:${envelope.id}`);
 }
 
+// ── signature-image upload guard (MIME allow-list + decoded-size cap + sha256) ─
+// The signature image is a legally-significant artifact; like every other upload
+// in the platform (documents.controller validateDocDataUrl, letterheads), it must
+// NOT trust the raw client data URL. We enforce: a base64 `data:` URL, an IMAGE-
+// only MIME allow-list (PNG/JPEG — what pdf-lib can embed for the letter render),
+// a DECODED-size ceiling (DoS guard, checked from the base64 length BEFORE we
+// allocate the Buffer), and we compute a server-side SHA-256 of the DECODED bytes
+// (the client's mimeType/size are never trusted). Mirrors documents.controller's
+// validateDocDataUrl but scoped to the image set this artifact path accepts.
+const MAX_SIGNATURE_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB decoded ceiling
+const ALLOWED_SIGNATURE_IMAGE_MIME = new Set(['image/png', 'image/jpeg', 'image/jpg']);
+
+// Returns { ok, mime, buffer, bytes, sha256 } or { ok:false, status, message }.
+function validateSignatureImageDataUrl(dataUrl) {
+  if (typeof dataUrl !== 'string') {
+    return { ok: false, status: 422, message: 'A signature image (base64 data URL) is required' };
+  }
+  const m = /^data:([^;,]+)(;base64)?,(.*)$/i.exec(dataUrl);
+  // Require a base64 data URL (m[2] is the ';base64' group) — a raw / non-data /
+  // utf8 data URL is rejected, as is a bare string token.
+  if (!m || !m[2]) {
+    return { ok: false, status: 422, message: 'Only base64 image data URLs are supported for the signature' };
+  }
+  const mime = m[1].toLowerCase();
+  if (!ALLOWED_SIGNATURE_IMAGE_MIME.has(mime)) {
+    return { ok: false, status: 422, message: `Unsupported signature image type: ${mime}. Allowed: PNG, JPEG.` };
+  }
+  // Pre-check the decoded size from the base64 length WITHOUT allocating the
+  // Buffer (DoS guard): 4 base64 chars → 3 bytes, minus padding.
+  const b64 = m[3] || '';
+  if (!b64) {
+    return { ok: false, status: 422, message: 'The signature image is empty' };
+  }
+  const padding = b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0;
+  const approxBytes = Math.floor((b64.length * 3) / 4) - padding;
+  if (approxBytes > MAX_SIGNATURE_IMAGE_BYTES) {
+    return { ok: false, status: 422, message: `Signature image exceeds the ${MAX_SIGNATURE_IMAGE_BYTES / (1024 * 1024)} MB limit` };
+  }
+  const buffer = Buffer.from(b64, 'base64');
+  if (buffer.length > MAX_SIGNATURE_IMAGE_BYTES) {
+    return { ok: false, status: 422, message: `Signature image exceeds the ${MAX_SIGNATURE_IMAGE_BYTES / (1024 * 1024)} MB limit` };
+  }
+  if (buffer.length === 0) {
+    return { ok: false, status: 422, message: 'The signature image decoded to zero bytes' };
+  }
+  return { ok: true, mime, buffer, bytes: buffer.length, sha256: sha256Hex(buffer) };
+}
+
 // Store a small artifact (signature image data-URL or the audit certificate). When
 // S3 is configured we upload; otherwise we keep the data URL itself (dev/test) so
 // the URL is real and the hash computable either way.
@@ -306,13 +354,29 @@ async function sign(input, prisma) {
       }
     }
 
+    // Validate the signature image BEFORE it is stored or hashed: IMAGE-only MIME
+    // allow-list (PNG/JPEG), decoded-size cap (DoS guard), base64 data URL. The
+    // raw client data URL is NEVER trusted — a non-image MIME / oversize / malformed
+    // payload is rejected (422) and NO signature is recorded. The server-computed
+    // sha256 of the decoded bytes (imgCheck.sha256) is the artifact integrity anchor.
+    let imgSha256 = null;
+    if (signatureImageDataUrl) {
+      const imgCheck = validateSignatureImageDataUrl(signatureImageDataUrl);
+      if (!imgCheck.ok) throw new EsignError(imgCheck.message, imgCheck.status || 422);
+      imgSha256 = imgCheck.sha256;
+    }
+
     const docHash = await resolveDocHash(tx, envelope);
     const nowIso = new Date().toISOString();
-    // signatureHash = SHA-256(docHash + signerId + ISO-ts) — binds the document
-    // integrity anchor to this specific signer + the moment of signing (§4.4).
-    const signatureHash = sha256Hex(`${docHash}${candidate.id}${nowIso}`);
+    // signatureHash = SHA-256(docHash + signerId + ISO-ts [+ imageSha256]) — binds
+    // the document integrity anchor to this specific signer + the moment of signing
+    // (§4.4), AND to the server-computed hash of the signature artifact bytes when a
+    // signature image is present (so the artifact is integrity-bound, not just URL'd).
+    const signatureHash = imgSha256
+      ? sha256Hex(`${docHash}${candidate.id}${nowIso}${imgSha256}`)
+      : sha256Hex(`${docHash}${candidate.id}${nowIso}`);
 
-    // Store the signature artifact (drawn/typed image data URL).
+    // Store the signature artifact (drawn/typed image data URL) — already validated.
     let signatureImageUrl = null;
     if (signatureImageDataUrl) {
       signatureImageUrl = await storeArtifact({
@@ -455,4 +519,7 @@ module.exports = {
   buildAuditCertificate,
   certHmac,
   getCertSecret,
+  validateSignatureImageDataUrl,
+  MAX_SIGNATURE_IMAGE_BYTES,
+  ALLOWED_SIGNATURE_IMAGE_MIME,
 };
