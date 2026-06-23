@@ -118,13 +118,19 @@ function PeopleInner() {
           <h1 className="text-2xl font-semibold text-gray-900">People</h1>
           <p className="text-sm text-gray-500">{pageInfo}</p>
         </div>
-        <Link
-          href="/people/new"
-          className="px-4 py-2 text-white text-sm font-semibold rounded-lg"
-          style={{ backgroundColor: 'var(--theme-primary)' }}
-        >
-          Add employee
-        </Link>
+        {/* FLAG (Feature 17): the default "Add employee" CTA is now the Onboard-by-CTC
+            wizard (creates the person AND their pay in one step). The bare pay-less
+            form stays as an explicit "Add without pay (advanced)" link. */}
+        <div className="flex items-center gap-3">
+          <Link href="/people/new" className="text-sm text-gray-500 hover:underline">Add without pay (advanced)</Link>
+          <Link
+            href="/people/onboard"
+            className="px-4 py-2 text-white text-sm font-semibold rounded-lg"
+            style={{ backgroundColor: 'var(--theme-primary)' }}
+          >
+            Add employee
+          </Link>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-3 mb-4">

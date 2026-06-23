@@ -467,6 +467,9 @@ model Business {
   salaryStructures         SalaryStructure[]
   salaryComponentLines     SalaryComponentLine[]
   compensationRevisions    CompensationRevision[]
+  // Feature 17 — friendly CTC-policy templates (rules-only; compile to structures)
+  ctcPolicies              CtcPolicy[]
+  ctcPolicyLines           CtcPolicyLine[]
   // Feature 5 — increment cycles
   incrementCycles          IncrementCycle[]
   incrementProposals       IncrementProposal[]
@@ -6960,9 +6963,68 @@ model SalaryComponent {
   version         Int     @default(0)
 
   structureLines  SalaryComponentLine[]
+  // Feature 17 — back-relation for the friendly CTC-policy builder. A policy line
+  // references the pay-head master (Restrict on delete: a component used by a policy
+  // cannot be hard-deleted out from under it). Additive; no behaviour change.
+  ctcPolicyLines  CtcPolicyLine[]
 
   @@unique([businessId, code])
   @@index([businessId, entityId, category])
+}
+
+/// Feature 17 — a reusable, CTC-AGNOSTIC salary template authored in the friendly
+/// builder (sliders / % / flat / balancing / statutory). It holds the RULES for how
+/// to split a CTC, never a person's resolved amounts. It compiles to the
+/// SalaryComponentLine[] shape (→ deriveBreakup / materializeRevisionLines) at a
+/// chosen target CTC. India-first: countryCode is ALWAYS the tenant country (the
+/// single-country invariant — never user-chosen cross-country). Distinct from a
+/// SalaryStructure (which is the RESOLVED package at a specific CTC).
+model CtcPolicy {
+  id           String   @id @default(uuid())
+  businessId   String
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId     String? // NULL = all entities of the tenant
+  code         String // "STAFF-2026"
+  name         String // "Staff CTC Policy 2026"
+  countryCode  String   @db.Char(2) // ALWAYS the tenant country (IN). Server-stamped.
+  currencyCode String   @db.Char(3)
+  basis        StructureBasis @default(CTC) // CTC for IN; reserved for future
+  // Quote-time employer-cost knobs (drive the deriveBreakup ctx; they do NOT change
+  // the runtime engine — only how the CTC fixed point quotes employer cost):
+  esiApplicable  Boolean @default(false) // include employer ESI in the CTC fixed point
+  capPfAtCeiling Boolean @default(true)  // cap PF at the ₹15,000 wage ceiling in the quote
+  isActive     Boolean  @default(true)
+  lines        CtcPolicyLine[]
+  createdById  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  deletedAt    DateTime?
+  version      Int      @default(0)
+
+  @@unique([businessId, code])
+  @@index([businessId, entityId, isActive])
+}
+
+/// Feature 17 — one rule row in a CtcPolicy. Maps 1:1 onto a SalaryComponentLine at
+/// compile time. The friendly UI exposes only PERCENT_OF / FLAT / BALANCING /
+/// STATUTORY; pct/flatMonthly carry the rule INPUT (never a resolved amount).
+model CtcPolicyLine {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  policyId    String
+  policy      CtcPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  componentId String
+  component   SalaryComponent @relation(fields: [componentId], references: [id], onDelete: Restrict)
+  calcMethod  ComponentCalcMethod // PERCENT_OF | FLAT | BALANCING | STATUTORY
+  pct         Decimal? @db.Decimal(8, 4)  // for PERCENT_OF (e.g. 50.0000)
+  flatMonthly Decimal? @db.Decimal(15, 2) // for FLAT (monthly amount)
+  baseCode    String? // PERCENT_OF base: "CTC" | "GROSS" | a component code ("BASIC")
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([businessId, policyId])
 }
 
 enum ComponentKind {

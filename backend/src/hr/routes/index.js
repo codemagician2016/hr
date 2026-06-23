@@ -29,6 +29,18 @@ router.use('/org', require('./org.routes'));
 router.use('/leave', require('./leave.routes'));
 router.use('/attendance', require('./attendance.routes'));
 router.use('/compensation', require('./compensation.routes'));
+// FLAG (Feature 17 — NEW mount): the friendly CTC-policy builder (reusable,
+// CTC-agnostic salary templates) + a pure preview (compile → deriveBreakup →
+// waterfall + India 50% verdict) + a sample CTC-statement PDF. Reads gated on
+// canViewCompensation, writes on canManageCompensation; countryCode is server
+// -stamped from the tenant (single-country invariant). Policies carry NO person
+// money, so no per-employee scope/masking applies.
+router.use('/ctc-policies', require('./ctcPolicy.routes'));
+// FLAG (Feature 17 — NEW mount): Onboard-by-CTC — POST /api/hr/onboard/by-ctc
+// creates an Employee + a CompensationRevision(HIRE,EFFECTIVE) from { policyId,
+// ctcAnnual, dateOfJoining } in ONE transaction, reusing the SHARED hire-pay math
+// (buildHireRevisionLines) so a direct hire matches an ATS hire to the paise.
+router.use('/onboard', require('./onboard.routes'));
 router.use('/documents', require('./documents.routes'));
 router.use('/assets', require('./assets.routes'));
 router.use('/expenses', require('./expenses.routes'));
