@@ -64,14 +64,21 @@ export function formatPeriod(p) {
   return p.id || '';
 }
 
-// Resolve the logged-in employee id from the various customer-session shapes.
+// Resolve the logged-in employee id from the customer-session shapes.
+//
+// IMPORTANT (audit #55): the customer/session id is NOT the employee id. The
+// authoritative employeeId is resolved SERVER-SIDE from the session by the
+// /api/hr/me/* surfaces (and exposed by /api/hr/me/profile.profile.employeeId).
+// We therefore only read an id that is genuinely an employee anchor here, and
+// NEVER fall back to me.customer.id / me.id — passing the customer id as an
+// employeeId queried the WRONG subject for every self-service read. When none is
+// present, callers rely on the self-deriving /me/* endpoints (preferred).
 export function employeeIdOf(me) {
   return (
     me?.employee?.id ||
     me?.employeeId ||
     me?.customer?.employeeId ||
-    me?.customer?.id ||
-    me?.id ||
+    me?.profile?.employeeId ||
     null
   );
 }

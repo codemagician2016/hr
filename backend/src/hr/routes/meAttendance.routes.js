@@ -1,0 +1,41 @@
+'use strict';
+
+/**
+ * meAttendance.routes.js — Employee Self-Service (ESS) attendance API, mounted at
+ * /api/hr/me/attendance. Uses the CUSTOMER-auth middleware (req.customer): the ESS
+ * runs on the customer session, not an operator session.
+ *
+ * SELF_ONLY by construction — the subject employee is resolved from the session
+ * inside the controller; there is NO :employeeId (or any employee id) in any path
+ * or accepted from a body, so a cross-employee read/write is structurally
+ * impossible. Terminated/inactive employees are locked out (404).
+ */
+
+const express = require('express');
+const router = express.Router();
+const { requireCustomer } = require('../../core/middleware/auth.middleware');
+const c = require('../controllers/meAttendance.controller');
+
+router.use(requireCustomer);
+
+// Clock + punches
+router.post('/punch', c.createPunch);
+router.get('/punches', c.listPunches);
+
+// Dashboard rollup (own daily summary buckets)
+router.get('/summary', c.summary);
+
+// Timesheets (read + self-submit)
+router.get('/timesheets', c.listTimesheets);
+router.get('/timesheets/:id', c.getTimesheet);
+router.post('/timesheets/:id/submit', c.submitTimesheet);
+
+// Corrections (regularizations)
+router.get('/regularizations', c.listRegularizations);
+router.post('/regularizations', c.createRegularization);
+
+// Schedule + holidays
+router.get('/schedule', c.getSchedule);
+router.get('/holidays', c.listHolidays);
+
+module.exports = router;

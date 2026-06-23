@@ -1,27 +1,30 @@
 'use client';
 
 // Leave — apply for leave, see balances + own requests (Feature 6).
-//   Balances : GET  /api/hr/leave/employees/:id/balances  (id from session)
-//   Types    : GET  /api/hr/leave/types
-//   Apply    : POST /api/hr/leave/requests
-//   Mine     : GET  /api/hr/leave/me/requests
-//   Withdraw : POST /api/hr/leave/requests/:id/cancel  (PENDING)
+//
+// SELF-SERVICE SURFACE (audit #54/#55): every call goes to the customer-session
+// /api/hr/me/leave/* endpoints, which resolve the employee SERVER-SIDE from the
+// session. The page NEVER sends an employeeId — the operator /api/hr/leave/* API
+// 401s for a customer session, and a client-derived employeeId resolved to the
+// WRONG subject (the customer id).
+//   Balances : GET  /api/hr/me/leave/balances
+//   Types    : GET  /api/hr/me/leave/types
+//   Apply    : POST /api/hr/me/leave/requests   { leaveTypeId, startDate, endDate, ... }
+//   Mine     : GET  /api/hr/me/leave/requests
+//   Withdraw : POST /api/hr/me/leave/requests/:id/cancel  (PENDING)
 //
 // Balance card fix (§9.7): the old card read `b.available ?? b.balance ??
-// b.remaining ?? 0` — none of those keys existed, so every card rendered 0.
-// We now compute Available = closing − pendingApproval from the real payload
-// (the API also returns `available`, used as the primary source). There is NO
-// `carryForward` field; carried units are folded into `opening`.
+// b.remaining ?? 0` — none of those keys existed, so every card rendered 0. We
+// now use the server-computed `available` (= closing − pendingApproval), with the
+// raw buckets as a fallback. There is NO `carryForward` field; carried units are
+// folded into `opening`.
 
 import { useMemo, useState } from 'react';
-import AppShell, { useSession } from '@/components/AppShell';
+import AppShell from '@/components/AppShell';
 import { ErrorBanner, Empty, Spinner, Centered } from '@hr/ui';
 import { useApi } from '@/lib/useApi';
 import { apiPost } from '@/lib/api';
-
-function employeeId(me) {
-  return me?.employee?.id || me?.employeeId || me?.customer?.employeeId || me?.id || null;
-}
+import { useProfile } from '@/lib/useProfile';
 
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 
@@ -40,18 +43,20 @@ function unitLabel(b) {
 }
 
 function LeaveInner() {
-  const me = useSession();
-  const empId = employeeId(me);
+  // The employee is resolved SERVER-SIDE by every /api/hr/me/leave/* call; we read
+  // the profile only to gate the apply form when there is genuinely no record.
+  const { employeeId } = useProfile();
+  const canAct = !!employeeId;
 
-  const { data: types, loading: typesLoading } = useApi('/api/hr/leave/types', {
+  const { data: types, loading: typesLoading } = useApi('/api/hr/me/leave/types', {
     select: (b) => (Array.isArray(b) ? b : b?.items || []),
   });
   const { data: balances, loading: balLoading, reload: reloadBalances } = useApi(
-    empId ? `/api/hr/leave/employees/${encodeURIComponent(empId)}/balances` : null,
+    '/api/hr/me/leave/balances',
     { select: (b) => (Array.isArray(b) ? b : b?.items || b?.balances || []) }
   );
   const { data: myReqs, loading: reqLoading, reload: reloadReqs } = useApi(
-    '/api/hr/leave/me/requests',
+    '/api/hr/me/leave/requests',
     { select: (b) => (Array.isArray(b) ? b : b?.items || []) }
   );
 
@@ -76,8 +81,7 @@ function LeaveInner() {
     setError(null);
     setSuccess(false);
     try {
-      await apiPost('/api/hr/leave/requests', {
-        employeeId: empId,
+      await apiPost('/api/hr/me/leave/requests', {
         leaveTypeId: typeId,
         startDate,
         endDate,
@@ -98,7 +102,7 @@ function LeaveInner() {
 
   async function onWithdraw(id) {
     try {
-      await apiPost(`/api/hr/leave/requests/${encodeURIComponent(id)}/cancel`, {});
+      await apiPost(`/api/hr/me/leave/requests/${encodeURIComponent(id)}/cancel`, {});
       reloadReqs();
       reloadBalances();
     } catch (err) {
@@ -199,7 +203,7 @@ function LeaveInner() {
               className="w-full rounded-lg border px-3 py-2 text-sm outline-none" style={{ borderColor: 'var(--theme-border)' }} />
           </label>
 
-          <button type="submit" disabled={submitting || !empId}
+          <button type="submit" disabled={submitting || !canAct}
             className="w-full rounded-lg py-2.5 text-sm font-semibold transition disabled:opacity-60"
             style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}>
             {submitting ? 'Submitting…' : 'Submit request'}

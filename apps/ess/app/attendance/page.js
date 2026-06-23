@@ -2,29 +2,34 @@
 
 // Attendance (ESS) — clock, timesheets, corrections, schedule (Feature 2, Phase 4).
 //
-//   Punch        : POST /api/hr/attendance/punch  { employeeId, type, source }
-//                  (type ∈ IN | OUT | BREAK_START | BREAK_END)
-//   Punches      : GET  /api/hr/attendance/punches?employeeId=&from=&to=
-//   Timesheets   : GET  /api/hr/attendance/timesheets?employeeId=
-//                  GET  /api/hr/attendance/timesheets/:id   (per-day entries)
-//                  POST /api/hr/attendance/timesheets/:id/submit  (self allowed)
-//   Corrections  : GET  /api/hr/attendance/regularizations?employeeId=
-//                  POST /api/hr/attendance/regularizations
-//                  { date, requestedInAt, requestedOutAt, kind, reason }
-//   Schedule     : (from punches' resolved shift / shifts assignments) — best-effort
-//   Holidays     : GET  /api/hr/attendance/holidays?countryCode=&year=
+// SELF-SERVICE SURFACE (audit #53/#55): every call goes to the customer-session
+// /api/hr/me/attendance/* endpoints, which resolve the employee SERVER-SIDE from
+// the session. The page NEVER sends an employeeId — a client-derived id was the
+// wrong subject (it resolved to the customer id) and the operator /api/hr/* API
+// 401s for a customer session. Writes (punch / timesheet submit / correction)
+// land on the right employee because the backend derives it.
 //
-// All reads/writes are cookie-authed and tenant-/scope-filtered server-side; we
-// pass our own employeeId so writes land on the right employee. Headline figures
-// here are client-side indicative; the authoritative payable comes from the
-// frozen period summary.
+//   Punch        : POST /api/hr/me/attendance/punch       { type }
+//   Punches      : GET  /api/hr/me/attendance/punches?from=&to=
+//   Timesheets   : GET  /api/hr/me/attendance/timesheets
+//                  GET  /api/hr/me/attendance/timesheets/:id   (per-day entries)
+//                  POST /api/hr/me/attendance/timesheets/:id/submit
+//   Corrections  : GET  /api/hr/me/attendance/regularizations
+//                  POST /api/hr/me/attendance/regularizations
+//                  { date, requestedInAt, requestedOutAt, kind, reason }
+//   Schedule     : GET  /api/hr/me/attendance/schedule  → { shift, assignment }
+//   Holidays     : GET  /api/hr/me/attendance/holidays?year=  (country server-resolved)
+//
+// Headline figures here are client-side indicative; the authoritative payable
+// comes from the frozen period summary.
 
 import { useMemo, useState } from 'react';
-import AppShell, { useSession } from '@/components/AppShell';
+import AppShell from '@/components/AppShell';
 import { ErrorBanner, Empty, Spinner, Centered } from '@hr/ui';
 import { useApi } from '@/lib/useApi';
 import { apiPost } from '@/lib/api';
-import { formatTime, formatDate, employeeIdOf } from '@/lib/format';
+import { useProfile } from '@/lib/useProfile';
+import { formatTime, formatDate } from '@/lib/format';
 
 function startOfToday() {
   const d = new Date();
@@ -102,12 +107,12 @@ function StatusPill({ status }) {
 
 // ─── Clock (existing behaviour, kept) ────────────────────────────────────────
 
-function ClockSection({ empId }) {
+function ClockSection({ canAct }) {
   const from = useMemo(() => startOfPeriod().toISOString(), []);
   const to = useMemo(() => endOfToday().toISOString(), []);
 
   const { data: punches, loading, error, reload } = useApi(
-    empId ? `/api/hr/attendance/punches?employeeId=${encodeURIComponent(empId)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}` : null,
+    `/api/hr/me/attendance/punches?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
     { select: (b) => (Array.isArray(b) ? b : b?.items || b?.punches || []) }
   );
 
@@ -130,11 +135,10 @@ function ClockSection({ empId }) {
   const [actionError, setActionError] = useState(null);
 
   async function punch(type) {
-    if (!empId) return;
     setBusy(true);
     setActionError(null);
     try {
-      await apiPost('/api/hr/attendance/punch', { employeeId: empId, type, source: 'WEB' });
+      await apiPost('/api/hr/me/attendance/punch', { type });
       reload();
     } catch (e) {
       setActionError(e.message || 'Could not record your punch.');
@@ -164,7 +168,7 @@ function ClockSection({ empId }) {
         <div className="grid grid-cols-2 gap-3">
           <button
             onClick={() => punch('IN')}
-            disabled={busy || !empId || isClockedIn}
+            disabled={busy || !canAct || isClockedIn}
             className="rounded-lg py-3 text-sm font-semibold transition disabled:opacity-50"
             style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}
           >
@@ -172,7 +176,7 @@ function ClockSection({ empId }) {
           </button>
           <button
             onClick={() => punch('OUT')}
-            disabled={busy || !empId || !isClockedIn}
+            disabled={busy || !canAct || !isClockedIn}
             className="rounded-lg border py-3 text-sm font-semibold transition disabled:opacity-50"
             style={{ borderColor: 'var(--theme-primary)', color: 'var(--theme-primary)' }}
           >
@@ -182,7 +186,7 @@ function ClockSection({ empId }) {
         <div className="mt-3 grid grid-cols-2 gap-3">
           <button
             onClick={() => punch('BREAK_START')}
-            disabled={busy || !empId || !isClockedIn}
+            disabled={busy || !canAct || !isClockedIn}
             className="rounded-lg border py-2 text-xs font-medium transition disabled:opacity-50"
             style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-muted)' }}
           >
@@ -190,7 +194,7 @@ function ClockSection({ empId }) {
           </button>
           <button
             onClick={() => punch('BREAK_END')}
-            disabled={busy || !empId || lastType !== 'BREAK_START'}
+            disabled={busy || !canAct || lastType !== 'BREAK_START'}
             className="rounded-lg border py-2 text-xs font-medium transition disabled:opacity-50"
             style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-muted)' }}
           >
@@ -242,7 +246,7 @@ function ClockSection({ empId }) {
 
 function TimesheetDetail({ timesheet, onSubmitted }) {
   const { data, loading, error } = useApi(
-    `/api/hr/attendance/timesheets/${encodeURIComponent(timesheet.id)}`,
+    `/api/hr/me/attendance/timesheets/${encodeURIComponent(timesheet.id)}`,
     { select: (b) => b }
   );
   const [busy, setBusy] = useState(false);
@@ -260,7 +264,7 @@ function TimesheetDetail({ timesheet, onSubmitted }) {
     setBusy(true);
     setSubmitError(null);
     try {
-      await apiPost(`/api/hr/attendance/timesheets/${encodeURIComponent(timesheet.id)}/submit`, {});
+      await apiPost(`/api/hr/me/attendance/timesheets/${encodeURIComponent(timesheet.id)}/submit`, {});
       onSubmitted();
     } catch (e) {
       setSubmitError(e.message || 'Could not submit your timesheet.');
@@ -308,9 +312,9 @@ function TimesheetDetail({ timesheet, onSubmitted }) {
   );
 }
 
-function TimesheetSection({ empId }) {
+function TimesheetSection() {
   const { data: timesheets, loading, error, reload } = useApi(
-    empId ? `/api/hr/attendance/timesheets?employeeId=${encodeURIComponent(empId)}` : null,
+    '/api/hr/me/attendance/timesheets',
     { select: (b) => (Array.isArray(b) ? b : b?.items || b?.timesheets || []) }
   );
   const [openId, setOpenId] = useState(null);
@@ -366,9 +370,9 @@ function TimesheetSection({ empId }) {
 
 // ─── Request correction ──────────────────────────────────────────────────────
 
-function CorrectionsSection({ empId }) {
+function CorrectionsSection({ canAct }) {
   const { data: requests, loading, error, reload } = useApi(
-    empId ? `/api/hr/attendance/regularizations?employeeId=${encodeURIComponent(empId)}` : null,
+    '/api/hr/me/attendance/regularizations',
     { select: (b) => (Array.isArray(b) ? b : b?.items || b?.requests || []) }
   );
 
@@ -398,8 +402,7 @@ function CorrectionsSection({ empId }) {
     }
     setSubmitting(true);
     try {
-      await apiPost('/api/hr/attendance/regularizations', {
-        employeeId: empId,
+      await apiPost('/api/hr/me/attendance/regularizations', {
         date,
         requestedInAt: toInstant(date, inAt),
         requestedOutAt: toInstant(date, outAt),
@@ -470,7 +473,7 @@ function CorrectionsSection({ empId }) {
           </div>
           <button
             type="submit"
-            disabled={submitting || !empId}
+            disabled={submitting || !canAct}
             className="rounded-lg px-4 py-2 text-sm font-semibold transition disabled:opacity-50"
             style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}
           >
@@ -516,42 +519,25 @@ function CorrectionsSection({ empId }) {
 
 const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-function countryOf(me) {
-  return (
-    me?.employee?.countryCode ||
-    me?.employee?.country ||
-    me?.countryCode ||
-    me?.customer?.countryCode ||
-    null
-  );
-}
-
-function ScheduleSection({ empId, me }) {
-  const countryCode = countryOf(me);
+function ScheduleSection() {
   const year = new Date().getFullYear();
 
-  // Current shift assignment for this employee (best-effort: the backend scopes
-  // /shifts to the tenant; we surface the one whose assignment covers today).
+  // Current shift assignment for the signed-in employee. The backend resolves the
+  // employee + the assignment that covers today server-side → { shift, assignment }.
   const { data: assignment, loading: aLoading } = useApi(
-    empId ? `/api/hr/attendance/shifts?employeeId=${encodeURIComponent(empId)}` : null,
+    '/api/hr/me/attendance/schedule',
     {
       select: (b) => {
-        const shifts = Array.isArray(b) ? b : b?.items || b?.shifts || [];
-        // Find the shift carrying an assignment for this employee.
-        for (const s of shifts) {
-          const assigns = s.assignments || [];
-          const mine = assigns.find((a) => a.employeeId === empId);
-          if (mine) return { shift: s, assignment: mine };
-        }
-        // Fall back to the single shift if the API already filtered to this employee.
-        if (shifts.length === 1) return { shift: shifts[0], assignment: shifts[0].assignment || null };
-        return null;
+        if (!b || !b.shift) return null;
+        return { shift: b.shift, assignment: b.assignment || null };
       },
     }
   );
 
+  // Holidays for the employee's own market — country is resolved server-side from
+  // the employee (never a client-derived country).
   const { data: holidays, loading: hLoading, error: hError } = useApi(
-    `/api/hr/attendance/holidays?year=${year}${countryCode ? `&countryCode=${encodeURIComponent(countryCode)}` : ''}`,
+    `/api/hr/me/attendance/holidays?year=${year}`,
     { select: (b) => (Array.isArray(b) ? b : b?.items || b?.holidays || []) }
   );
 
@@ -617,7 +603,7 @@ function ScheduleSection({ empId, me }) {
 
       <section>
         <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--theme-muted)' }}>
-          Upcoming holidays{countryCode ? ` (${countryCode})` : ''}
+          Upcoming holidays
         </h2>
         {hLoading ? (
           <Centered><Spinner small /></Centered>
@@ -648,8 +634,11 @@ function ScheduleSection({ empId, me }) {
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 function AttendanceInner() {
-  const me = useSession();
-  const empId = employeeIdOf(me);
+  // The employee is resolved SERVER-SIDE by every /api/hr/me/attendance/* call;
+  // we only read the profile to gate the "couldn't resolve your record" banner
+  // and to disable write actions when there is genuinely no employee record.
+  const { employeeId, loading: profileLoading } = useProfile();
+  const canAct = !!employeeId;
   const [section, setSection] = useState('clock');
 
   return (
@@ -680,14 +669,14 @@ function AttendanceInner() {
         })}
       </div>
 
-      {!empId && (
+      {!profileLoading && !canAct && (
         <ErrorBanner message="We couldn't resolve your employee record. Please contact HR." />
       )}
 
-      {section === 'clock' && <ClockSection empId={empId} />}
-      {section === 'timesheet' && <TimesheetSection empId={empId} />}
-      {section === 'corrections' && <CorrectionsSection empId={empId} />}
-      {section === 'schedule' && <ScheduleSection empId={empId} me={me} />}
+      {section === 'clock' && <ClockSection canAct={canAct} />}
+      {section === 'timesheet' && <TimesheetSection />}
+      {section === 'corrections' && <CorrectionsSection canAct={canAct} />}
+      {section === 'schedule' && <ScheduleSection />}
     </div>
   );
 }
