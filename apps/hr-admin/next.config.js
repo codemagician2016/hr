@@ -22,6 +22,16 @@ const nextConfig = {
     // router owns /api, so a relative self-rewrite would loop.
     return apiOrigin ? [{ source: '/api/:path*', destination: `${apiOrigin}/api/:path*` }] : [];
   },
+  // Letters slice 9C visual position-picker rasterizes PDFs client-side via
+  // pdfjs-dist. pdfjs declares `canvas` as an OPTIONAL (Node-only) dependency;
+  // in the browser it is unused (the package's own `browser` field maps it to
+  // false). Alias it to false so webpack does not try to bundle the native
+  // `canvas` addon into the client bundle (the documented Next.js + pdf.js step).
+  webpack(config) {
+    config.resolve = config.resolve || {};
+    config.resolve.alias = { ...(config.resolve.alias || {}), canvas: false };
+    return config;
+  },
 };
 
 module.exports = nextConfig;
