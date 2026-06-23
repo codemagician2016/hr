@@ -30,6 +30,10 @@ export const ICONS = {
   bell: 'M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 01-3.4 0',
   search: 'M11 18a7 7 0 100-14 7 7 0 000 14zM21 21l-4.3-4.3',
   menu: 'M4 6h16M4 12h16M4 18h16',
+  // Feature 10 — approvals chain (a checkmark-in-flow), roles (shield), hierarchy (tree)
+  approvals: 'M4 6h10M4 12h7M4 18h10M16 14l2 2 4-4',
+  shield: 'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z',
+  hierarchy: 'M9 3h6v4H9zM3 17h6v4H3zM15 17h6v4h-6zM12 7v4M6 17v-2a1 1 0 011-1h10a1 1 0 011 1v2',
 };
 
 export function Icon({ name, size = 18, className, strokeWidth = 1.7 }) {

@@ -39,6 +39,8 @@ const ICONS = {
   chart: 'M3 17l6-6 4 4 8-8M14 7h7v7',
   exit: 'M16 17l5-5-5-5M21 12H9M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4',
   onboarding: 'M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11',
+  // Feature 10 — approvals inbox (checklist + tick)
+  approvals: 'M4 6h10M4 12h7M4 18h10M16 14l2 2 4-4',
 };
 
 function Icon({ name, className }) {
@@ -120,6 +122,9 @@ export default function Sidebar({ onNavigate }) {
     select: (b) => (Array.isArray(b) ? b : b?.items || b?.tasks || []),
   });
   const hasOnboarding = Array.isArray(tasks) && tasks.some((t) => t.kind === 'ONBOARDING');
+  // Feature 10: show the Approvals inbox item only to people who actually have
+  // something to approve (the tasks feed includes APPROVAL kinds for approvers).
+  const hasApprovals = Array.isArray(tasks) && tasks.some((t) => t.kind === 'APPROVAL');
 
   const fullName = profile?.name || nameFromSession(me);
   const emp = me?.employee || me?.customer || me || {};
@@ -135,13 +140,18 @@ export default function Sidebar({ onNavigate }) {
   // Inject a conditional "Onboarding" item (top of the rail) only while an
   // onboarding journey is in progress for this employee — otherwise it stays off
   // so the chrome never advertises a flow the employee has already finished.
-  const navItems = hasOnboarding
-    ? [
-        NAV[0],
-        { type: 'item', href: '/onboarding', label: 'Onboarding', icon: 'onboarding' },
-        ...NAV.slice(1),
-      ]
-    : NAV;
+  const navItems = (() => {
+    let items = NAV;
+    if (hasOnboarding) {
+      items = [NAV[0], { type: 'item', href: '/onboarding', label: 'Onboarding', icon: 'onboarding' }, ...NAV.slice(1)];
+    }
+    if (hasApprovals) {
+      // Insert "Approvals" right after Dashboard (and after Onboarding if present).
+      const at = hasOnboarding ? 2 : 1;
+      items = [...items.slice(0, at), { type: 'item', href: '/approvals', label: 'Approvals', icon: 'approvals' }, ...items.slice(at)];
+    }
+    return items;
+  })();
 
   // Groups start expanded when they contain the active route; the user can toggle.
   const [open, setOpen] = useState(() => {

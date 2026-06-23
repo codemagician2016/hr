@@ -88,6 +88,11 @@ router.use('/me/tasks', require('./meTasks.routes'));
 // Feature 10 ESS — "Delegate while I'm away" (out-of-office approval delegation).
 // Customer session; the delegating user is resolved from the session (self-only).
 router.use('/me/delegations', require('./meDelegations.routes'));
+// Feature 10 ESS (slice 10e) — unified approvals inbox + act + preview hint for
+// the employee portal. Customer session; the operator inbox (/approvals/*) is
+// protect-gated and unreachable from ESS, so this mirrors it for req.customer,
+// reusing the same engine.recordDecision (SoD/version/active-step guards intact).
+router.use('/me/approvals', require('./meApprovals.routes'));
 
 // Reports / analytics — read-only payroll register, statutory summary,
 // headcount & attrition, leave liability. RBAC: canViewPayrollReports.

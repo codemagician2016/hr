@@ -46,6 +46,15 @@ export const NAV_ITEMS = [
   { key: 'letters-letterheads', label: 'Letterheads', href: '/letters/letterheads', feature: 'hr', permission: 'canManageLetters', parent: 'letters', icon: 'letterhead' },
   { key: 'letters-issue', label: 'Issue', href: '/letters/issue', feature: 'hr', anyPermission: ['canGenerateLetters', 'canManageLetters'], parent: 'letters', icon: 'send' },
   { key: 'letters-register', label: 'Register', href: '/letters/register', feature: 'hr', anyPermission: ['canGenerateLetters', 'canManageLetters'], parent: 'letters', icon: 'register' },
+  // ── Feature 10 (slices 10d/10e) — Approvals & Access ────────────────────────
+  // FLAG FOR MERGE: these three nav items are NEW in Feature 10. Each is gated on
+  // one of the new rbac.js permission keys (canManageApprovalWorkflows /
+  // canManageRoles / canManageHierarchy), seeded true for Owner + HR-Admin. The
+  // server is the real boundary; this just hides the link from operators who lack
+  // the key. They are arranged into a new "Approvals & Access" group below.
+  { key: 'approvals', label: 'Approvals', href: '/approvals', permission: 'canManageApprovalWorkflows', icon: 'approvals' },
+  { key: 'access-roles', label: 'Roles & access', href: '/approvals/roles', permission: 'canManageRoles', icon: 'shield' },
+  { key: 'access-hierarchy', label: 'Reporting tree', href: '/approvals/org', permission: 'canManageHierarchy', icon: 'hierarchy' },
   // Settings groups Branding, Roles, Domain and Billing. Show it to anyone who
   // can manage ANY of those — a Finance role (canEditBilling, no canEditBranding)
   // must still reach the Billing tab. Per-tab/per-action gating happens inside.
@@ -68,6 +77,8 @@ export const NAV_GROUPS = [
   { key: 'talent', label: 'Talent', icon: 'onboarding', items: ['onboarding', 'separations', 'performance'] },
   { key: 'time', label: 'Time', icon: 'calendar', items: ['leave', 'attendance'] },
   { key: 'pay', label: 'Pay', icon: 'wallet', items: ['compensation', 'payroll', 'expenses', 'loans', 'reports'] },
+  // FLAG FOR MERGE: new Feature 10 group — approval chains + RBAC + reporting tree.
+  { key: 'approvals-access', label: 'Approvals & Access', icon: 'approvals', items: ['approvals', 'access-roles', 'access-hierarchy'] },
 ];
 
 // Build the grouped sidebar tree from the already-permission-filtered flat list.
@@ -137,6 +148,8 @@ const PERMISSION_KEYS = [
   'canManagePerformanceCycle', 'canCalibrateRatings', 'canViewTeamPerformance',
   // Feature 9 — Letters
   'canGenerateLetters', 'canManageLetters',
+  // Feature 10 — Approvals + RBAC + hierarchy (FLAG FOR MERGE)
+  'canManageApprovalWorkflows', 'canManageRoles', 'canManageHierarchy',
 ];
 const ALL_TRUE = Object.fromEntries(PERMISSION_KEYS.map((k) => [k, true]));
 

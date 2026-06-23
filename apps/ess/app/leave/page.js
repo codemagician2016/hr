@@ -29,6 +29,16 @@ import { ErrorBanner, Empty, Spinner, Centered } from '@hr/ui';
 import { useApi } from '@/lib/useApi';
 import { apiPost } from '@/lib/api';
 import { useProfile } from '@/lib/useProfile';
+import WhoApprovesHint from '@/components/WhoApprovesHint';
+
+// Inclusive day count between two yyyy-mm-dd dates (best-effort, for the
+// "who will approve this?" hint's sample context — the server is authoritative).
+function daysBetween(a, b) {
+  if (!a || !b) return undefined;
+  const ms = new Date(b).getTime() - new Date(a).getTime();
+  if (Number.isNaN(ms) || ms < 0) return undefined;
+  return Math.round(ms / 86_400_000) + 1;
+}
 
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 
@@ -413,6 +423,14 @@ function LeaveInner() {
                 <textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)} required={reasonRequired}
                   className="w-full rounded-lg border px-3 py-2 text-sm outline-none" style={{ borderColor: 'var(--theme-border)' }} />
               </label>
+
+              {/* Feature 10 — "who will approve this?" hint. Shows once a date range
+                  is chosen, previewing the resolved approval chain for this employee. */}
+              {startDate && endDate && (
+                <div className="rounded-lg border px-3 py-2" style={{ borderColor: 'var(--theme-border)' }}>
+                  <WhoApprovesHint module="LEAVE" ctx={{ days: daysBetween(startDate, endDate) }} />
+                </div>
+              )}
 
               <button type="submit" disabled={submitting || !canAct}
                 className="w-full rounded-lg py-2.5 text-sm font-semibold transition disabled:opacity-60"
