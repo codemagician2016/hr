@@ -462,7 +462,7 @@ async function issueLetter(client, args = {}) {
   const requiresSignature = !!ctx.template.requiresSignature;
   const docCategory = CATEGORY_TO_DOC[ctx.template.category] || 'OTHER';
 
-  const result = await inTx(db, async (tx) => {
+  const runIssueTx = () => inTx(db, async (tx) => {
     // Allocate the sequence value INSIDE the tx (atomic, row-locked). For
     // requiresSignature we DEFER the human ref-no to COMPLETED, but still need a
     // DRAFT row — we do NOT consume a sequence number until COMPLETED there.
@@ -589,6 +589,41 @@ async function issueLetter(client, args = {}) {
       masked: render.masked,
     };
   });
+
+  // Mint with a bounded retry: if the ref-no collides on @@unique(businessId,
+  // referenceNo) — a sequence that fell behind reality (out-of-band insert/restore,
+  // or a concurrent issuance that won the row-lock) — re-sync the LETTER sequence
+  // past the highest existing letter for this (entity, period) key, then retry.
+  // (Spec §6: "caller retries on P2002.") Only attempted when `db` is a real client
+  // (issueLetter opens its own tx per attempt); never for deferred-ref drafts.
+  let result;
+  for (let attempt = 0; ; attempt += 1) {
+    try { result = await runIssueTx(); break; }
+    catch (e) {
+      const refDup = e && e.code === 'P2002'
+        && String((e.meta && e.meta.target) || '').toLowerCase().includes('referenceno');
+      if (refDup && !requiresSignature && attempt < 6 && typeof db.$transaction === 'function') {
+        const agg = await db.issuedLetter.aggregate({
+          where: { businessId, entityId: issueEntityId, seqScope: 'LETTER', seqPeriodKey: periodKey },
+          _max: { seqValue: true },
+        });
+        const nextVal = ((agg._max && agg._max.seqValue) || 0) + 1;
+        const existing = await db.numberSequence.findFirst({
+          where: { businessId, entityId: issueEntityId, scope: 'LETTER', periodKey },
+          select: { id: true },
+        });
+        if (existing) {
+          await db.numberSequence.update({ where: { id: existing.id }, data: { nextValue: nextVal } });
+        } else {
+          await db.numberSequence.create({
+            data: { businessId, entityId: issueEntityId, scope: 'LETTER', prefix, padding: 4, nextValue: nextVal, periodKey },
+          });
+        }
+        continue;
+      }
+      throw e;
+    }
+  }
 
   // Audit OUTSIDE the tx (best-effort, never throws; append-only).
   await writeAudit({
