@@ -533,6 +533,10 @@ model Business {
   // Tenant brand + HR RBAC
   tenantBrands             TenantBrand[]
   hrRolePermissionGrants   HrRolePermissionGrant[]
+  // Letters & Communication (Feature 9)
+  letterheads              CompanyLetterhead[]
+  letterTemplates          LetterTemplate[]
+  issuedLetters            IssuedLetter[]
 }
 
 // BusinessPage — multi-page CMS. Each row is a single sub-page under one
@@ -6604,6 +6608,8 @@ model Employee {
   profileChangeRequests ProfileChangeRequest[]
   documentRequests  DocumentRequest[]
   regularizationRequests AttendanceRegularizationRequest[]
+  // Letters & Communication (Feature 9) — letters issued to this employee
+  issuedLetters     IssuedLetter[]
 
   @@unique([businessId, code])
   @@index([businessId, status])
@@ -8588,6 +8594,7 @@ model SignatureEnvelope {
   business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
   employeeDocumentId String?                          // the doc the signed PDF lands on
   documentTemplateId String?                          // generated-on-the-fly source
+  issuedLetterId String?                              // Feature 9: letter routed through built-in e-sign; on COMPLETED → IssuedLetter.fileUrl/fileHash
   provider    EsignProvider @default(BUILTIN)
   providerEnvelopeId String?                          // external id (vendor adapters; idempotency)
   subject     String
@@ -8764,6 +8771,158 @@ enum TemplateKind {
   FNF_STATEMENT
   POLICY_ACK
   OTHER
+}
+
+// ── Feature 9: Letters & Communication ──
+// Letters as a first-class module: letterhead manager (uploaded A4 PDF + visual
+// layout), versioned merge-field templates, and an immutable per-tenant issuance
+// register with atomic reference numbers (NumberSequence scope "LETTER"). Config
+// models (CompanyLetterhead/LetterTemplate) carry deletedAt; IssuedLetter is a
+// legal record — NEVER soft-deleted (voidedAt/voidReason + supersede chain instead).
+enum LetterCategory {
+  EXPERIENCE          // experience / service certificate
+  BONAFIDE            // bonafide / "To Whomsoever It May Concern"
+  EMPLOYMENT_PROOF    // proof of employment (embassy/visa)
+  SALARY_PROOF        // salary certificate / salary slip cover
+  BANK                // bank-account / salary-routing confirmation
+  CONTRACT            // appointment / employment agreement (e-sign route)
+  CUSTOM              // free-form / tenant-defined
+}
+
+enum IssuedLetterStatus {
+  DRAFT               // rendered preview saved, ref-no NOT yet committed
+  PENDING_SIGNATURE   // routed to SignatureEnvelope, awaiting authority sign
+  ISSUED              // finalized PDF minted, ref-no committed
+  DELIVERED           // emailed/handed (optional milestone, v1.1 sets this)
+  VOIDED              // legally retracted; supersededByLetterId chains a re-issue
+}
+
+model CompanyLetterhead {                               // uploaded A4 PDF + visual layout
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId      String?                                 // NULL = tenant-wide; else per legal entity / brand
+  code          String                                  // "ACME-DEFAULT", "ACME-EXPERIENCE"
+  name          String
+  // Background single-page A4 PDF used as the stationery underlay (reuses EmployeeDocument storage convention)
+  fileUrl       String   @db.Text                       // R2/S3 object key of the A4 PDF
+  fileHash      String?                                 // SHA-256 integrity (server-computed)
+  mimeType      String?  @default("application/pdf")
+  sizeBytes     Int?
+  pageWidthPt   Float?                                  // measured at upload via page.getSize() (non-A4 guard)
+  pageHeightPt  Float?
+  // Visual layout: normalized rects, origin TOP-LEFT, values 0..1. Schema-validated on save.
+  layoutJson    Json
+  fontKey       String?  @default("noto-sans")          // which bundled Unicode TTF to embed (₹/non-Latin safe)
+  // Binding: NULL category + isDefault=true → tenant fixed default.
+  // category set → used only for that LetterCategory (overrides default). Resolution: category → default.
+  letterCategory LetterCategory?
+  isDefault     Boolean  @default(false)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+  version       Int      @default(0)
+
+  templates     LetterTemplate[]
+  issuedLetters IssuedLetter[]
+
+  @@unique([businessId, code])
+  @@index([businessId, entityId, isActive])
+  @@index([businessId, letterCategory, isActive])
+}
+
+model LetterTemplate {                                  // reusable body + merge fields (versioned)
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId      String?
+  code          String                                  // tenant-unique, e.g. "EXP-STD-IN"
+  name          String
+  category      LetterCategory
+  countryCode   String?  @db.Char(2)                    // "IN" / "NZ" (IN/NZ wording split)
+  subject       String?                                 // "Re:" / subject line (mergeable)
+  // Body with placeholders {{employee.name}} — MERGE FIELDS ONLY, no raw HTML/script
+  bodyMarkdown  String   @db.Text
+  // Declared allow-list of merge fields → validation + UI palette
+  mergeFieldsJson Json?
+  // Default letterhead for this template (else resolve by category at issue). SetNull keeps history.
+  defaultLetterheadId String?
+  defaultLetterhead   CompanyLetterhead? @relation(fields: [defaultLetterheadId], references: [id], onDelete: SetNull)
+  requiresSignature Boolean @default(false)             // route minted letters through e-sign (CONTRACT)
+  refNoPrefix   String?                                 // override sequence prefix, e.g. "ACME/HR"
+  locale        String?                                 // BCP-47, e.g. "en-IN" / "en-NZ" (date/number format)
+  isSystem      Boolean  @default(false)                // seeded IN/NZ template (non-deletable)
+  isActive      Boolean  @default(true)                 // PUBLISHED. false = DRAFT/ARCHIVED
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+  version       Int      @default(0)                    // bumped on edit; pinned onto IssuedLetter at issue
+
+  issuedLetters IssuedLetter[]
+
+  @@unique([businessId, code])
+  @@index([businessId, category, isActive])
+  @@index([businessId, countryCode, category])
+}
+
+model IssuedLetter {                                    // immutable issuance record (the register row)
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId      String?                                 // entity whose sequence/letterhead applied
+  referenceNo   String                                  // "ACME/HR/2026/0001" — unique per tenant
+  category      LetterCategory
+  // Subject employee — NULL for generic/company-wide letters
+  employeeId    String?
+  employee      Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  // Provenance (nullable SetNull — the rendered snapshot below is the immutable truth)
+  templateId    String?
+  template      LetterTemplate?    @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  letterheadId  String?
+  letterhead    CompanyLetterhead? @relation(fields: [letterheadId], references: [id], onDelete: SetNull)
+  // Content snapshot frozen at issue (what the recipient actually got)
+  subject       String?
+  renderedBody  String   @db.Text                       // merge fields resolved → final text
+  mergeDataJson Json                                    // exact values fed to the template (audit/regen)
+  templateVersionAtIssue Int?
+  letterheadHash String?                                // CompanyLetterhead.fileHash at issue
+  // Rendered PDF (letterhead underlay + body composited, flattened)
+  fileUrl       String?  @db.Text
+  fileHash      String?                                 // SHA-256 of issued PDF (tamper anchor)
+  mimeType      String?  @default("application/pdf")
+  sizeBytes     Int?
+  status        IssuedLetterStatus @default(DRAFT)
+  // E-sign linkage (built-in) — set when requiresSignature
+  signatureEnvelopeId String?
+  // Lands in the employee's vault → ESS + expiry reminders (plain id link, mirrors DocumentRequest.generatedDocumentId)
+  employeeDocumentId  String?
+  // Fulfilment of an ESS letter request, when applicable
+  documentRequestId   String?
+  // Actors / milestones
+  issuedBy      String                                  // userId of HR issuer
+  issuedAt      DateTime?                                // set when status → ISSUED (ref committed)
+  deliveredAt   DateTime?
+  deliveryChannel String?                               // EMAIL | DOWNLOAD | PRINT (v1.1)
+  // Sequence bookkeeping (audit / regeneration of the human ref string)
+  seqScope      String   @default("LETTER")
+  seqPeriodKey  String?                                 // taxYear "2026-27"
+  seqValue      Int?                                    // raw number consumed (0001 → 1)
+  // Re-issue / void chain (no soft-delete on legal records)
+  supersedesLetterId   String?                          // this re-issues an older letter
+  supersededByLetterId String?                          // an older letter retracted by a newer one
+  voidedAt      DateTime?
+  voidedBy      String?
+  voidReason    String?
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  version       Int      @default(0)
+
+  @@unique([businessId, referenceNo])
+  @@index([businessId, employeeId, category, issuedAt])
+  @@index([businessId, category, status])
+  @@index([businessId, entityId, seqScope, seqPeriodKey])
 }
 
 // ── §12.1 ESS request entities ──

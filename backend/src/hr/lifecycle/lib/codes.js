@@ -21,6 +21,10 @@ const SCOPE_DEFAULTS = Object.freeze({
   OFFBOARD: { prefix: 'OFB-', padding: 6 },
   // Separation cases (Feature 4 §4.3 / §8 slice 4f) — SEP-000017 etc.
   SEP: { prefix: 'SEP-', padding: 6 },
+  // Letters & Communication (Feature 9 §6) — LTR-0001 etc. The caller passes a
+  // periodKey (the tax year, e.g. "2026-27") so the sequence resets yearly via
+  // the (businessId, entityId, scope, periodKey) NumberSequence row.
+  LETTER: { prefix: 'LTR-', padding: 4 },
 });
 
 function format(prefix, value, padding) {
@@ -28,11 +32,16 @@ function format(prefix, value, padding) {
 }
 
 /**
- * allocateCode(tx, { businessId, entityId?, scope, prefix?, padding? }) -> string
+ * allocateCode(tx, { businessId, entityId?, scope, prefix?, padding?, periodKey? }) -> string
  * Increments the sequence and returns the formatted code. Defaults for the
  * lifecycle scopes (ONBOARD/OFFBOARD) are baked in; pass prefix/padding to override.
+ *
+ * `periodKey` (Feature 9) selects a resetting sub-sequence — e.g. the tax year
+ * "2026-27" for LETTER, so the count resets each year. It defaults to null, so the
+ * lifecycle scopes (ONBOARD/OFFBOARD/SEP) that pass no periodKey continue to use the
+ * single tenant-wide, non-resetting (…, periodKey: null) row exactly as before.
  */
-async function allocateCode(tx, { businessId, entityId = null, scope, prefix, padding }) {
+async function allocateCode(tx, { businessId, entityId = null, scope, prefix, padding, periodKey = null }) {
   if (!tx || !businessId || !scope) {
     throw new Error('allocateCode requires (tx, { businessId, scope })');
   }
@@ -40,13 +49,15 @@ async function allocateCode(tx, { businessId, entityId = null, scope, prefix, pa
   const pfx = prefix != null ? prefix : (dflt.prefix != null ? dflt.prefix : `${scope}-`);
   const pad = padding != null ? padding : (dflt.padding != null ? dflt.padding : 6);
 
-  // Find-or-create the sequence row (tenant-wide, non-resetting → periodKey null).
+  // Find-or-create the sequence row. periodKey === null → the tenant-wide,
+  // non-resetting row (lifecycle scopes); a non-null periodKey → a per-period
+  // resetting row (LETTER, keyed on the tax year).
   let seq = await tx.numberSequence.findFirst({
-    where: { businessId, entityId, scope, periodKey: null },
+    where: { businessId, entityId, scope, periodKey },
   });
   if (!seq) {
     seq = await tx.numberSequence.create({
-      data: { businessId, entityId, scope, prefix: pfx, padding: pad, nextValue: 1 },
+      data: { businessId, entityId, scope, prefix: pfx, padding: pad, nextValue: 1, periodKey },
     });
   }
 

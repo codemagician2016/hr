@@ -36,6 +36,9 @@ const PERMISSIONS = Object.freeze({
   canManageOnboarding:  'Onboarding templates + run pipeline + provision',
   canRunSeparation:     'Initiate/run separation + FnF (distinct from terminate)',
   canGenerateLetters:   'Generate offer/relieving/experience letters',
+  // Letters & Communication (Feature 9) — config/checker key (distinct from the
+  // canGenerateLetters maker/issue key): letterhead + template CRUD, ref schemes, revoke.
+  canManageLetters:     'Letters config: letterheads, templates, ref schemes, revoke (the admin/checker key)',
   // Performance & Goals (Feature 8) — additive; no migration. canViewTeamPerformance
   // is the Manager TEAM-band read key; canManagePerformanceCycle is HR-admin config
   // (cycles/templates/scales/reopen/release); canCalibrateRatings is the skip-level
@@ -67,6 +70,8 @@ const SYSTEM_ROLES = Object.freeze({
     canManageOrg: true, canEditBranding: true,
     // Feature 4 — HR-Admin owns the lifecycle (onboarding/separation/letters).
     canManageOnboarding: true, canRunSeparation: true, canGenerateLetters: true,
+    // Feature 9 — HR-Admin owns letters config + revoke (the checker key).
+    canManageLetters: true,
     // Feature 8 — HR-Admin owns performance config + calibration + team visibility.
     canManagePerformanceCycle: true, canCalibrateRatings: true, canViewTeamPerformance: true,
     // No canEditBilling / canEditDomain / canApprovePayroll — Owner/Finance only
