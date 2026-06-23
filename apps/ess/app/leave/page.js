@@ -30,6 +30,10 @@ import { useApi } from '@/lib/useApi';
 import { apiPost } from '@/lib/api';
 import { useProfile } from '@/lib/useProfile';
 import WhoApprovesHint from '@/components/WhoApprovesHint';
+import { ServerPagination } from '@/lib/pagination';
+import { FieldLabel } from '@/components/InfoTip';
+
+const HISTORY_PAGE_SIZES = [10, 25, 50];
 
 // Inclusive day count between two yyyy-mm-dd dates (best-effort, for the
 // "who will approve this?" hint's sample context — the server is authoritative).
@@ -209,6 +213,12 @@ function LeaveInner() {
   const canAct = !!employeeId;
   const [tab, setTab] = useState('overview'); // 'overview' | 'history'
 
+  // Server-side paginated leave history (the ledger can grow without bound). The
+  // path carries ?page&pageSize so useApi refetches on change; the backend pages
+  // AFTER computing the running balance, so each page's "balance after" is correct.
+  const [histPage, setHistPage] = useState(1);
+  const [histPageSize, setHistPageSize] = useState(HISTORY_PAGE_SIZES[0]);
+
   const { data: types, loading: typesLoading } = useApi('/api/hr/me/leave/types', {
     select: (b) => (Array.isArray(b) ? b : b?.items || []),
   });
@@ -220,10 +230,12 @@ function LeaveInner() {
     '/api/hr/me/leave/requests',
     { select: (b) => (Array.isArray(b) ? b : b?.items || []) }
   );
-  const { data: history, loading: histLoading, reload: reloadHistory } = useApi(
-    '/api/hr/me/leave/history',
-    { select: (b) => (Array.isArray(b) ? b : b?.items || []) }
+  const { data: historyRes, loading: histLoading, reload: reloadHistory } = useApi(
+    `/api/hr/me/leave/history?page=${histPage}&pageSize=${histPageSize}`,
+    { select: (b) => (Array.isArray(b) ? { items: b, total: b.length } : { items: b?.items || [], total: b?.total ?? (b?.items || []).length }) }
   );
+  const history = historyRes?.items || [];
+  const historyTotal = historyRes?.total ?? history.length;
 
   const typeOptions = useMemo(() => types || [], [types]);
 
@@ -313,6 +325,15 @@ function LeaveInner() {
             (accrued), and anything that lapsed or was paid out. Green adds to your balance, red takes away.
           </p>
           <HistoryFeed items={history} loading={histLoading} />
+          <ServerPagination
+            page={histPage}
+            pageSize={histPageSize}
+            total={historyTotal}
+            sizes={HISTORY_PAGE_SIZES}
+            noun="entries"
+            onPageChange={setHistPage}
+            onPageSizeChange={(ps) => { setHistPage(1); setHistPageSize(ps); }}
+          />
         </section>
       ) : (
         <>
@@ -382,7 +403,9 @@ function LeaveInner() {
               )}
 
               <label className="block text-sm">
-                <span className="mb-1 block font-medium" style={{ color: 'var(--theme-text)' }}>Leave type</span>
+                <FieldLabel tip="Pick the kind of leave you're taking — e.g. Casual, Sick or Earned. Each type has its own balance and rules.">
+                  <span className="font-medium" style={{ color: 'var(--theme-text)' }}>Leave type</span>
+                </FieldLabel>
                 <select
                   required value={typeId} onChange={(e) => setTypeId(e.target.value)} disabled={typesLoading}
                   className="w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none"
@@ -395,7 +418,9 @@ function LeaveInner() {
 
               <div className="grid grid-cols-2 gap-3">
                 <label className="block text-sm">
-                  <span className="mb-1 block font-medium" style={{ color: 'var(--theme-text)' }}>From</span>
+                  <FieldLabel tip="First day of leave. Use the half-day option below if you're only away for the second half of this day.">
+                    <span className="font-medium" style={{ color: 'var(--theme-text)' }}>From</span>
+                  </FieldLabel>
                   <input type="date" required value={startDate} onChange={(e) => setStartDate(e.target.value)}
                     className="w-full rounded-lg border px-3 py-2 text-sm outline-none" style={{ borderColor: 'var(--theme-border)' }} />
                   <select value={startHalf} onChange={(e) => setStartHalf(e.target.value)}
@@ -405,7 +430,9 @@ function LeaveInner() {
                   </select>
                 </label>
                 <label className="block text-sm">
-                  <span className="mb-1 block font-medium" style={{ color: 'var(--theme-text)' }}>To</span>
+                  <FieldLabel tip="Last day of leave (inclusive). For a single day, set this the same as 'From'.">
+                    <span className="font-medium" style={{ color: 'var(--theme-text)' }}>To</span>
+                  </FieldLabel>
                   <input type="date" required value={endDate} min={startDate || undefined} onChange={(e) => setEndDate(e.target.value)}
                     className="w-full rounded-lg border px-3 py-2 text-sm outline-none" style={{ borderColor: 'var(--theme-border)' }} />
                   <select value={endHalf} onChange={(e) => setEndHalf(e.target.value)}
@@ -417,9 +444,11 @@ function LeaveInner() {
               </div>
 
               <label className="block text-sm">
-                <span className="mb-1 block font-medium" style={{ color: 'var(--theme-text)' }}>
-                  Reason{reasonRequired ? ' (required)' : ''}
-                </span>
+                <FieldLabel tip="A short note for your manager about why you're taking leave. Some leave types make this mandatory.">
+                  <span className="font-medium" style={{ color: 'var(--theme-text)' }}>
+                    Reason{reasonRequired ? ' (required)' : ''}
+                  </span>
+                </FieldLabel>
                 <textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)} required={reasonRequired}
                   className="w-full rounded-lg border px-3 py-2 text-sm outline-none" style={{ borderColor: 'var(--theme-border)' }} />
               </label>

@@ -17,18 +17,18 @@ import {
 } from '@hr/ui';
 import { get, post } from '@/lib/api';
 import {
-  PageHeader, DataTable, StatusBadge, ActionButton, asList,
+  PageHeader, DataTable, StatusBadge, ActionButton, asList, ServerPagination,
 } from '@/lib/ui';
 import { getPdf, downloadBlob, LETTER_CATEGORIES, LETTER_STATUSES, InfoTip } from '../lib';
 
-const PAGE_SIZE = 25;
+const PAGE_SIZES = [25, 50, 100];
 
 export default function RegisterPage() {
   const router = useRouter();
   const [rows, setRows] = useState(null);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);
   const [total, setTotal] = useState(0);
-  const [totalPages, setTotalPages] = useState(1);
   const [filters, setFilters] = useState({ search: '', category: '', status: '' });
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState('');
@@ -38,16 +38,15 @@ export default function RegisterPage() {
   const load = useCallback(() => {
     setError('');
     get('/api/hr/letters/register', {
-      page, pageSize: PAGE_SIZE,
+      page, pageSize,
       search: filters.search.trim(), category: filters.category, status: filters.status,
     })
       .then((r) => {
         setRows(asList(r));
         setTotal(r.total ?? 0);
-        setTotalPages(r.totalPages ?? 1);
       })
       .catch((e) => { setRows([]); setError(e.message || 'Failed to load the register.'); });
-  }, [page, filters]);
+  }, [page, pageSize, filters]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -159,16 +158,15 @@ export default function RegisterPage() {
       />
 
       {/* ── pagination ── */}
-      {rows && rows.length > 0 && (
-        <div className="flex items-center justify-between mt-4 text-sm text-gray-500">
-          <span>{total} letter{total === 1 ? '' : 's'}</span>
-          <div className="flex items-center gap-2">
-            <button type="button" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="px-2 py-1 border border-gray-300 rounded-md disabled:opacity-40">Prev</button>
-            <span>Page {page} / {totalPages}</span>
-            <button type="button" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)} className="px-2 py-1 border border-gray-300 rounded-md disabled:opacity-40">Next</button>
-          </div>
-        </div>
-      )}
+      <ServerPagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        sizes={PAGE_SIZES}
+        noun="letters"
+        onPageChange={setPage}
+        onPageSizeChange={(ps) => { setPage(1); setPageSize(ps); }}
+      />
 
       {revokeTarget && (
         <RevokeModal target={revokeTarget} busy={busyId === revokeTarget.id} onClose={() => setRevokeTarget(null)} onConfirm={onRevokeConfirm} />

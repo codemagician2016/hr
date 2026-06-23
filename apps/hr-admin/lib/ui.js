@@ -91,6 +91,79 @@ export function DataTable({ columns, rows, loading, emptyText = 'Nothing here ye
   );
 }
 
+// ─── ServerPagination ────────────────────────────────────────────────────────
+// Controlled pager for SERVER-paginated lists. Unlike the client-side
+// `Pagination` in widgets.js (which slices an in-memory array), this drives the
+// `?page=&pageSize=` round-trip: the parent owns `page`/`pageSize` state, passes
+// the server's `total`, and refetches in the onChange callbacks. Renders
+// "Showing X–Y of N" + a page-size selector + Prev/Next. Works WITH any active
+// search/filter because the parent filters server-side first, then pages.
+export function ServerPagination({
+  page,
+  pageSize,
+  total,
+  onPageChange,
+  onPageSizeChange,
+  sizes = [10, 25, 50, 100],
+  noun = 'items',
+}) {
+  const t = Number(total) || 0;
+  const ps = Number(pageSize) || 25;
+  const p = Math.max(1, Number(page) || 1);
+  const pageCount = Math.max(1, Math.ceil(t / ps));
+  const start = t === 0 ? 0 : (p - 1) * ps + 1;
+  const end = Math.min(p * ps, t);
+  if (t === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 px-1 py-3 text-sm text-gray-600">
+      <div className="flex items-center gap-2">
+        <span>
+          Showing <span className="font-medium text-gray-900">{start}</span>–
+          <span className="font-medium text-gray-900">{end}</span> of{' '}
+          <span className="font-medium text-gray-900">{t}</span> {noun}
+        </span>
+        {onPageSizeChange && (
+          <label className="ml-2 inline-flex items-center gap-1 text-gray-500">
+            <span className="sr-only">Rows per page</span>
+            <select
+              value={ps}
+              onChange={(e) => onPageSizeChange(Number(e.target.value))}
+              className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs"
+            >
+              {sizes.map((s) => (
+                <option key={s} value={s}>
+                  {s} / page
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onPageChange(p - 1)}
+          disabled={p <= 1}
+          className="rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+        >
+          ← Prev
+        </button>
+        <span className="text-xs text-gray-500">
+          Page {p} of {pageCount}
+        </span>
+        <button
+          type="button"
+          onClick={() => onPageChange(p + 1)}
+          disabled={p >= pageCount}
+          className="rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+        >
+          Next →
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // Status pill. Color is derived from a coarse semantic bucket so every domain
 // (leave / expense / loan / payrun) shares one vocabulary.
 const POSITIVE = new Set(['APPROVED', 'ACTIVE', 'FULFILLED', 'REIMBURSED', 'DISBURSED', 'CLOSED', 'CALCULATED', 'PAID', 'LOCKED']);

@@ -18,10 +18,21 @@ import { ErrorBanner } from '@hr/ui';
 import { get, post, patch, put, del } from '@/lib/apiExt';
 import { PageHeader, Tabs } from '@/lib/ui';
 import { InfoTip, FieldLabel, SectionTitle } from '@/lib/widgets';
+import { useTenantCountries } from '@/lib/useTenantCountries';
 
 const TIERS = ['TIER_1', 'TIER_2', 'TIER_3'];
 const BANDS = [['FULL_24H', 'Full day (24h)'], ['HALF_12H', 'Half (12h)'], ['HALF_DAY', 'Half-day']];
 const MODES = [['PUBLIC_TRANSPORT', 'Public transport'], ['TAXI_CAB', 'Taxi / cab'], ['SELF_CAR', 'Own car (per-km)'], ['TRAIN', 'Train'], ['FLIGHT', 'Flight']];
+
+// India-first country options for the policy/city pickers. Constrain to the
+// tenant's operating countries; when unknown, default to India alone (the NZ
+// engine stays intact — it just isn't surfaced to an India-only tenant).
+const COUNTRY_META = { IN: { label: 'India (INR)', short: 'IN' }, NZ: { label: 'New Zealand (NZD)', short: 'NZ' } };
+function countryChoices(countries) {
+  const list = Array.isArray(countries) && countries.length ? countries : ['IN'];
+  // Keep a stable India-first order.
+  return ['IN', 'NZ'].filter((c) => list.includes(c)).map((c) => ({ value: c, ...COUNTRY_META[c] }));
+}
 
 export default function TravelPolicyPage() {
   const [policies, setPolicies] = useState([]);
@@ -31,6 +42,9 @@ export default function TravelPolicyPage() {
   const [tab, setTab] = useState('perdiem');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const { countries } = useTenantCountries();
+  const choices = countryChoices(countries);
+  const multiCountry = choices.length > 1;
 
   const loadPolicies = useCallback(() => {
     get('/api/hr/expenses/policies', { pageSize: 50 })
@@ -45,7 +59,10 @@ export default function TravelPolicyPage() {
   async function createPolicy() {
     setError('');
     try {
-      const p = await post('/api/hr/expenses/policies', { name: 'New travel policy', countryCode: 'IN', currencyCode: 'INR', effectiveFrom: new Date().toISOString().slice(0, 10) });
+      // Default to the tenant's first operating country (India-first when single).
+      const cc = choices[0]?.value || 'IN';
+      const currencyCode = cc === 'NZ' ? 'NZD' : 'INR';
+      const p = await post('/api/hr/expenses/policies', { name: 'New travel policy', countryCode: cc, currencyCode, effectiveFrom: new Date().toISOString().slice(0, 10) });
       setActiveId(p.id); loadPolicies();
     } catch (e) { setError(e.data?.message || e.message); }
   }
@@ -69,9 +86,9 @@ export default function TravelPolicyPage() {
         <button onClick={createPolicy} className="rounded-lg border border-gray-300 px-4 py-2.5 text-sm hover:bg-gray-50">+ New policy</button>
       </div>
 
-      {!policy ? <p className="text-gray-500">Create a policy to start. India + New Zealand are supported.</p> : (
+      {!policy ? <p className="text-gray-500">Create a policy to start.{multiCountry ? ' India + New Zealand are supported.' : ''}</p> : (
         <>
-          <PolicyHeader policy={policy} onSave={savePolicy} />
+          <PolicyHeader policy={policy} onSave={savePolicy} choices={choices} />
           <Tabs
             active={tab} onChange={setTab}
             tabs={[
@@ -85,7 +102,7 @@ export default function TravelPolicyPage() {
           {tab === 'perdiem' && <PerDiemTab policy={policy} onSaved={() => setActiveId(activeId)} reload={() => get(`/api/hr/expenses/policies/${activeId}`).then(setPolicy)} />}
           {tab === 'hotel' && <HotelTab policy={policy} grades={grades} reload={() => get(`/api/hr/expenses/policies/${activeId}`).then(setPolicy)} />}
           {tab === 'transport' && <TransportTab policy={policy} grades={grades} reload={() => get(`/api/hr/expenses/policies/${activeId}`).then(setPolicy)} />}
-          {tab === 'cities' && <CityTiersTab />}
+          {tab === 'cities' && <CityTiersTab choices={choices} />}
           {tab === 'preview' && <PreviewTab policy={policy} grades={grades} />}
         </>
       )}
@@ -93,13 +110,18 @@ export default function TravelPolicyPage() {
   );
 }
 
-function PolicyHeader({ policy, onSave }) {
+function PolicyHeader({ policy, onSave, choices = [{ value: 'IN', label: 'India (INR)' }] }) {
+  // Always include the policy's own country so an existing NZ policy still renders
+  // its value even on a tenant whose operating set has since narrowed.
+  const opts = choices.some((c) => c.value === policy.countryCode)
+    ? choices
+    : [...choices, { value: policy.countryCode, label: COUNTRY_META[policy.countryCode]?.label || policy.countryCode }];
   return (
     <div className="mb-5 grid gap-3 rounded-xl border bg-gray-50 p-4 sm:grid-cols-4">
       <label className="block text-sm"><FieldLabel tip="A name for this policy set.">Name</FieldLabel>
         <input defaultValue={policy.name} onBlur={(e) => e.target.value !== policy.name && onSave({ name: e.target.value })} className="w-full rounded border px-2 py-1.5" /></label>
-      <label className="block text-sm"><FieldLabel tip="Country drives the currency + sensible defaults (IN / NZ).">Country</FieldLabel>
-        <select defaultValue={policy.countryCode} onChange={(e) => onSave({ countryCode: e.target.value, currencyCode: e.target.value === 'NZ' ? 'NZD' : 'INR' })} className="w-full rounded border px-2 py-1.5"><option value="IN">India (INR)</option><option value="NZ">New Zealand (NZD)</option></select></label>
+      <label className="block text-sm"><FieldLabel tip="The country this policy applies to. Drives the currency and sensible defaults.">Country</FieldLabel>
+        <select defaultValue={policy.countryCode} onChange={(e) => onSave({ countryCode: e.target.value, currencyCode: e.target.value === 'NZ' ? 'NZD' : 'INR' })} className="w-full rounded border px-2 py-1.5">{opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></label>
       <label className="block text-sm"><FieldLabel tip="The tier used when a city isn't listed in the city-tier map.">Default tier</FieldLabel>
         <select defaultValue={policy.defaultTier} onChange={(e) => onSave({ defaultTier: e.target.value })} className="w-full rounded border px-2 py-1.5">{TIERS.map((t) => <option key={t} value={t}>{t}</option>)}</select></label>
       <label className="block text-sm">
@@ -244,9 +266,9 @@ function TransportTab({ policy, grades, reload }) {
   );
 }
 
-function CityTiersTab() {
+function CityTiersTab({ choices = [{ value: 'IN', short: 'IN' }] }) {
   const [rows, setRows] = useState([]);
-  const [form, setForm] = useState({ city: '', tier: 'TIER_1', countryCode: 'IN' });
+  const [form, setForm] = useState({ city: '', tier: 'TIER_1', countryCode: choices[0]?.value || 'IN' });
   const [err, setErr] = useState('');
   const reload = useCallback(() => get('/api/hr/expenses/city-tiers', { pageSize: 100 }).then((d) => setRows(d.items || [])).catch((e) => setErr(e.message)), []);
   useEffect(() => { reload(); }, [reload]);
@@ -265,7 +287,7 @@ function CityTiersTab() {
       <div className="mt-3 flex flex-wrap items-end gap-2">
         <label className="text-sm">City<input value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} className="mt-0.5 block rounded border px-2 py-1" /></label>
         <label className="text-sm">Tier<select value={form.tier} onChange={(e) => setForm({ ...form, tier: e.target.value })} className="mt-0.5 block rounded border px-2 py-1">{TIERS.map((t) => <option key={t} value={t}>{t}</option>)}</select></label>
-        <label className="text-sm">Country<select value={form.countryCode} onChange={(e) => setForm({ ...form, countryCode: e.target.value })} className="mt-0.5 block rounded border px-2 py-1"><option value="IN">IN</option><option value="NZ">NZ</option></select></label>
+        <label className="text-sm">Country<select value={form.countryCode} onChange={(e) => setForm({ ...form, countryCode: e.target.value })} className="mt-0.5 block rounded border px-2 py-1">{choices.map((o) => <option key={o.value} value={o.value}>{o.short || o.value}</option>)}</select></label>
         <button onClick={add} disabled={!form.city} className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50">Add</button>
       </div>
       <table className="mt-4 w-full max-w-lg text-sm">

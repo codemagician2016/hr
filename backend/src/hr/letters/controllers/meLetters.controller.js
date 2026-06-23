@@ -89,15 +89,25 @@ function serializeLetter(l) {
 async function listMyLetters(req, res, next) {
   try {
     const { businessId } = req.customer;
+    const paged = req.query.page !== undefined || req.query.pageSize !== undefined;
+    const take = Math.min(Math.max(parseInt(req.query.pageSize, 10) || 25, 1), 100);
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const employee = await resolveSelfEmployee(businessId, req.customer);
-    if (!employee) return res.json({ items: [], total: 0 });
+    if (!employee) return res.json(paged ? { items: [], total: 0, page, pageSize: take } : { items: [], total: 0 });
 
-    const rows = await prisma.issuedLetter.findMany({
-      where: myLetterWhere(businessId, employee.id),
-      orderBy: [{ issuedAt: 'desc' }, { createdAt: 'desc' }],
-    });
-    const items = rows.map(serializeLetter);
-    res.json({ items, total: items.length });
+    // Self-only scope (myLetterWhere) applies to BOTH the page query and the count.
+    const where = myLetterWhere(businessId, employee.id);
+    const orderBy = [{ issuedAt: 'desc' }, { createdAt: 'desc' }];
+    if (!paged) {
+      const rows = await prisma.issuedLetter.findMany({ where, orderBy });
+      const items = rows.map(serializeLetter);
+      return res.json({ items, total: items.length });
+    }
+    const [rows, total] = await Promise.all([
+      prisma.issuedLetter.findMany({ where, orderBy, skip: (page - 1) * take, take }),
+      prisma.issuedLetter.count({ where }),
+    ]);
+    res.json({ items: rows.map(serializeLetter), total, page, pageSize: take });
   } catch (e) { next(e); }
 }
 
@@ -202,14 +212,25 @@ function essRequestStatus(reqRow) {
 async function listMyLetterRequests(req, res, next) {
   try {
     const { businessId } = req.customer;
+    const paged = req.query.page !== undefined || req.query.pageSize !== undefined;
+    const take = Math.min(Math.max(parseInt(req.query.pageSize, 10) || 25, 1), 100);
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const employee = await resolveSelfEmployee(businessId, req.customer);
-    if (!employee) return res.json({ items: [], total: 0 });
+    if (!employee) return res.json(paged ? { items: [], total: 0, page, pageSize: take } : { items: [], total: 0 });
 
-    const rows = await prisma.documentRequest.findMany({
-      where: { businessId, employeeId: employee.id },
-      orderBy: { createdAt: 'desc' },
-      take: 200,
-    });
+    // Self-only scope on BOTH the page query and the count. No-params callers get
+    // the historical full list (take: 200); paged callers get a LIMIT/OFFSET window.
+    const reqWhere = { businessId, employeeId: employee.id };
+    let total = null;
+    const findArgs = { where: reqWhere, orderBy: { createdAt: 'desc' } };
+    if (paged) {
+      findArgs.skip = (page - 1) * take;
+      findArgs.take = take;
+      total = await prisma.documentRequest.count({ where: reqWhere });
+    } else {
+      findArgs.take = 200;
+    }
+    const rows = await prisma.documentRequest.findMany(findArgs);
 
     // For fulfilled requests, resolve the downloadable ISSUED letter. We link via
     // IssuedLetter.documentRequestId (set by the fulfilment hook). Only ISSUED,
@@ -248,7 +269,7 @@ async function listMyLetterRequests(req, res, next) {
         issuedAt: letter ? letter.issuedAt : null,
       };
     });
-    res.json({ items, total: items.length });
+    res.json(paged ? { items, total, page, pageSize: take } : { items, total: items.length });
   } catch (e) { next(e); }
 }
 

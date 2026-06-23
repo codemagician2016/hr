@@ -11,6 +11,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Spinner, ErrorBanner, Empty, formatAdminDate } from '@hr/ui';
 import { get } from '@/lib/api';
+import { ServerPagination } from '@/lib/ui';
 
 const STATUSES = [
   { value: '', label: 'All statuses' },
@@ -19,7 +20,8 @@ const STATUSES = [
   { value: 'terminated', label: 'Terminated' },
 ];
 
-const PAGE_SIZE = 20;
+const DEFAULT_PAGE_SIZE = 20;
+const PAGE_SIZES = [20, 50, 100];
 
 // Backend stores the EmployeeStatus enum in UPPER_SNAKE (ACTIVE, ON_LEAVE…).
 // Normalise before matching so badges/labels render regardless of casing.
@@ -57,6 +59,9 @@ function PeopleInner() {
   const q = params.get('q') || '';
   const status = params.get('status') || '';
   const page = Math.max(1, parseInt(params.get('page') || '1', 10) || 1);
+  const pageSize = PAGE_SIZES.includes(parseInt(params.get('pageSize') || '', 10))
+    ? parseInt(params.get('pageSize'), 10)
+    : DEFAULT_PAGE_SIZE;
 
   const [search, setSearch] = useState(q);
   const [data, setData] = useState(null);
@@ -71,7 +76,7 @@ function PeopleInner() {
     let alive = true;
     setLoading(true);
     setError('');
-    get('/api/hr/employees', { q, status, page, pageSize: PAGE_SIZE })
+    get('/api/hr/employees', { q, status, page, pageSize })
       .then((res) => {
         if (alive) setData(res);
       })
@@ -84,27 +89,27 @@ function PeopleInner() {
     return () => {
       alive = false;
     };
-  }, [q, status, page]);
+  }, [q, status, page, pageSize]);
 
   function pushQuery(next) {
     const sp = new URLSearchParams();
-    const merged = { q, status, page, ...next };
+    const merged = { q, status, page, pageSize, ...next };
     if (merged.q) sp.set('q', merged.q);
     if (merged.status) sp.set('status', merged.status);
     if (merged.page && merged.page > 1) sp.set('page', String(merged.page));
+    if (merged.pageSize && merged.pageSize !== DEFAULT_PAGE_SIZE) sp.set('pageSize', String(merged.pageSize));
     router.push(`/people${sp.toString() ? `?${sp.toString()}` : ''}`);
   }
 
   const items = data?.items || [];
   const total = data?.total ?? items.length;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const pageInfo = useMemo(() => {
     if (!total) return '0 employees';
-    const from = (page - 1) * PAGE_SIZE + 1;
-    const to = Math.min(total, page * PAGE_SIZE);
+    const from = (page - 1) * pageSize + 1;
+    const to = Math.min(total, page * pageSize);
     return `${from}–${to} of ${total}`;
-  }, [page, total]);
+  }, [page, pageSize, total]);
 
   return (
     <div>
@@ -229,29 +234,15 @@ function PeopleInner() {
         )}
       </div>
 
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between mt-4 text-sm">
-          <button
-            type="button"
-            disabled={page <= 1}
-            onClick={() => pushQuery({ page: page - 1 })}
-            className="px-3 py-1.5 border border-gray-300 rounded-lg disabled:opacity-40 hover:bg-gray-50"
-          >
-            Previous
-          </button>
-          <span className="text-gray-500">
-            Page {page} of {totalPages}
-          </span>
-          <button
-            type="button"
-            disabled={page >= totalPages}
-            onClick={() => pushQuery({ page: page + 1 })}
-            className="px-3 py-1.5 border border-gray-300 rounded-lg disabled:opacity-40 hover:bg-gray-50"
-          >
-            Next
-          </button>
-        </div>
-      )}
+      <ServerPagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        sizes={PAGE_SIZES}
+        noun="employees"
+        onPageChange={(p) => pushQuery({ page: p })}
+        onPageSizeChange={(ps) => pushQuery({ pageSize: ps, page: 1 })}
+      />
     </div>
   );
 }

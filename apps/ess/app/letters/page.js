@@ -19,8 +19,10 @@ import { ErrorBanner, Empty, Spinner, Centered } from '@hr/ui';
 import { useApi } from '@/lib/useApi';
 import { apiPost } from '@/lib/api';
 import { formatDate } from '@/lib/format';
+import { ServerPagination } from '@/lib/pagination';
 
 const LETTERS_PATH = '/api/hr/me/letters';
+const PAGE_SIZES = [10, 25, 50];
 
 // The letter types an employee can request (maps to DocumentRequest.templateKind).
 const REQUEST_TYPES = [
@@ -47,10 +49,16 @@ function titleOf(l) {
 }
 
 function MyLettersInner() {
-  const { data, loading, error } = useApi(LETTERS_PATH, {
-    select: (b) => (Array.isArray(b) ? b : b?.items || b?.letters || []),
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);
+  const { data, loading, error } = useApi(`${LETTERS_PATH}?page=${page}&pageSize=${pageSize}`, {
+    deps: [page, pageSize],
+    select: (b) => (Array.isArray(b)
+      ? { items: b, total: b.length }
+      : { items: b?.items || b?.letters || [], total: b?.total ?? (b?.items || []).length }),
   });
-  const letters = useMemo(() => data || [], [data]);
+  const letters = useMemo(() => data?.items || [], [data]);
+  const lettersTotal = data?.total ?? letters.length;
 
   // Request-a-letter form state
   const [reqType, setReqType] = useState('SALARY_CERTIFICATE');
@@ -102,6 +110,7 @@ function MyLettersInner() {
       {letters.length === 0 ? (
         <Empty text="No letters have been issued to you yet." />
       ) : (
+        <>
         <ul className="space-y-2">
           {letters.map((l) => {
             const voided = !!l.voided || l.status === 'VOIDED';
@@ -177,6 +186,16 @@ function MyLettersInner() {
             );
           })}
         </ul>
+        <ServerPagination
+          page={page}
+          pageSize={pageSize}
+          total={lettersTotal}
+          sizes={PAGE_SIZES}
+          noun="letters"
+          onPageChange={setPage}
+          onPageSizeChange={(ps) => { setPage(1); setPageSize(ps); }}
+        />
+        </>
       )}
 
       {/* My requests (pending / in-progress / fulfilled) */}

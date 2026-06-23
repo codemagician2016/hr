@@ -31,6 +31,7 @@ import { useApi } from '@/lib/useApi';
 import { apiPost } from '@/lib/api';
 import { useProfile } from '@/lib/useProfile';
 import { formatTime, formatDate } from '@/lib/format';
+import InfoTip from '@/components/InfoTip';
 
 // ── time helpers ─────────────────────────────────────────────────────────────
 
@@ -287,22 +288,22 @@ function RegRequestModal({ open, onClose, day, canAct, onSubmitted }) {
             {error && <ErrorBanner message={error} />}
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label htmlFor="reg-in" className="mb-1 block text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Corrected in-time</label>
+                <label htmlFor="reg-in" className="mb-1 flex items-center text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Corrected in-time<InfoTip text="The clock-in time it should have been. Leave blank if only the out-time was wrong." /></label>
                 <input id="reg-in" type="time" value={inAt} onChange={(e) => setInAt(e.target.value)} className={inputCls} style={inputStyle} />
               </div>
               <div>
-                <label htmlFor="reg-out" className="mb-1 block text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Corrected out-time</label>
+                <label htmlFor="reg-out" className="mb-1 flex items-center text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Corrected out-time<InfoTip text="The clock-out time it should have been. Leave blank if only the in-time was wrong." /></label>
                 <input id="reg-out" type="time" value={outAt} onChange={(e) => setOutAt(e.target.value)} className={inputCls} style={inputStyle} />
               </div>
             </div>
             <div>
-              <label htmlFor="reg-kind" className="mb-1 block text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Reason type</label>
+              <label htmlFor="reg-kind" className="mb-1 flex items-center text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Reason type<InfoTip text="Why the punch needs fixing — e.g. you forgot to clock in, were on a work-from-home day, or were out on official duty." /></label>
               <select id="reg-kind" value={kind} onChange={(e) => setKind(e.target.value)} className={`${inputCls} bg-white`} style={inputStyle}>
                 {CORRECTION_KINDS.map(([v, l]) => (<option key={v} value={v}>{l}</option>))}
               </select>
             </div>
             <div>
-              <label htmlFor="reg-reason" className="mb-1 block text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Reason</label>
+              <label htmlFor="reg-reason" className="mb-1 flex items-center text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Reason<InfoTip text="A short explanation for your manager. Required — this is recorded with the request." /></label>
               <textarea
                 id="reg-reason"
                 value={reason}
@@ -1064,21 +1065,21 @@ function CorrectionsSection({ canAct }) {
         )}
         <form onSubmit={submit} className="space-y-3">
           <div>
-            <label htmlFor="corr-date" className="mb-1 block text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Date</label>
+            <label htmlFor="corr-date" className="mb-1 flex items-center text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Date<InfoTip text="The day whose attendance you want corrected." /></label>
             <input id="corr-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} required className={inputCls} style={inputStyle} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label htmlFor="corr-in" className="mb-1 block text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Clock-in time</label>
+              <label htmlFor="corr-in" className="mb-1 flex items-center text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Clock-in time<InfoTip text="The time you actually started. Leave blank if only the clock-out was wrong." /></label>
               <input id="corr-in" type="time" value={inAt} onChange={(e) => setInAt(e.target.value)} className={inputCls} style={inputStyle} />
             </div>
             <div>
-              <label htmlFor="corr-out" className="mb-1 block text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Clock-out time</label>
+              <label htmlFor="corr-out" className="mb-1 flex items-center text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Clock-out time<InfoTip text="The time you actually finished. Leave blank if only the clock-in was wrong." /></label>
               <input id="corr-out" type="time" value={outAt} onChange={(e) => setOutAt(e.target.value)} className={inputCls} style={inputStyle} />
             </div>
           </div>
           <div>
-            <label htmlFor="corr-kind" className="mb-1 block text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Kind</label>
+            <label htmlFor="corr-kind" className="mb-1 flex items-center text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Kind<InfoTip text="The type of correction — e.g. a missed punch, a work-from-home day, or official duty." /></label>
             <select id="corr-kind" value={kind} onChange={(e) => setKind(e.target.value)} className={inputCls} style={inputStyle}>
               {CORRECTION_KINDS.map(([v, l]) => (
                 <option key={v} value={v}>{l}</option>
@@ -1086,7 +1087,7 @@ function CorrectionsSection({ canAct }) {
             </select>
           </div>
           <div>
-            <label htmlFor="corr-reason" className="mb-1 block text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Reason</label>
+            <label htmlFor="corr-reason" className="mb-1 flex items-center text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Reason<InfoTip text="A short explanation for your manager. Required and recorded with the request." /></label>
             <textarea
               id="corr-reason"
               value={reason}
