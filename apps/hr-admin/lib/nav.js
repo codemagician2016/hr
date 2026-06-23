@@ -30,6 +30,10 @@ export const NAV_ITEMS = [
   // canManagePerformanceCycle, hidden via hasPermission on the page). Server is the
   // real boundary; this just shows the tab to anyone with team-performance read.
   { key: 'performance', label: 'Performance', href: '/performance', feature: 'hr', permission: 'canViewTeamPerformance', icon: 'chart' },
+  // Recruitment / ATS (Feature 12). Visible to anyone with the new canViewHiring
+  // read key OR canManageHiring (recruiters/HR) OR the legacy canManageEmployees
+  // super-set. The server is the real boundary; this just hides the nav link.
+  { key: 'recruitment', label: 'Recruitment', href: '/recruitment', feature: 'hr', anyPermission: ['canViewHiring', 'canManageHiring', 'canManageEmployees'], icon: 'people' },
   { key: 'payroll', label: 'Payroll', href: '/payroll', feature: 'payroll', permission: 'canRunPayroll', icon: 'wallet' },
   { key: 'reports', label: 'Reports', href: '/reports', feature: 'payroll', permission: 'canViewPayrollReports', icon: 'report' },
   // Letters & Communication (Feature 9). The group header is gated on EITHER key:
@@ -89,7 +93,7 @@ export const NAV_ITEMS = [
 // emitted as its own expandable section, so it is intentionally omitted here.
 export const NAV_GROUPS = [
   { key: 'people-org', label: 'People & Org', icon: 'people', items: ['people', 'org'] },
-  { key: 'talent', label: 'Talent', icon: 'onboarding', items: ['onboarding', 'separations', 'performance'] },
+  { key: 'talent', label: 'Talent', icon: 'onboarding', items: ['recruitment', 'onboarding', 'separations', 'performance'] },
   { key: 'time', label: 'Time', icon: 'calendar', items: ['leave', 'attendance'] },
   { key: 'pay', label: 'Pay', icon: 'wallet', items: ['compensation', 'payroll', 'expenses', 'loans', 'reports'] },
   // FLAG FOR MERGE: new Feature 10 group — approval chains + RBAC + reporting tree.
@@ -185,6 +189,8 @@ const PERMISSION_KEYS = [
   'canGenerateLetters', 'canManageLetters',
   // Feature 10 — Approvals + RBAC + hierarchy (FLAG FOR MERGE)
   'canManageApprovalWorkflows', 'canManageRoles', 'canManageHierarchy',
+  // Feature 12 — Recruitment / ATS (FLAG FOR MERGE)
+  'canManageHiring', 'canViewHiring', 'canScoreInterview',
 ];
 const ALL_TRUE = Object.fromEntries(PERMISSION_KEYS.map((k) => [k, true]));
 
