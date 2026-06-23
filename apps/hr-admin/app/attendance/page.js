@@ -35,6 +35,7 @@ import {
 import { get, post, patch, del } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, employeeLabel } from '@/lib/ui';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
+import { useTenantCountries } from '@/lib/useTenantCountries';
 
 const BASE_TABS = [
   { key: 'dashboard', label: 'Dashboard' },
@@ -747,11 +748,17 @@ const COUNTRY_OPTIONS = [
   ['NZ', 'New Zealand'],
 ];
 
-function HolidayForm({ defaults, canManage, onClose, onSaved }) {
+function HolidayForm({ defaults, canManage, countries = [], onClose, onSaved }) {
+  // Default the country to the tenant's own when single-country (so an NZ tenant
+  // defaults to NZ, not a hardcoded India). Multi/unknown falls back to any passed
+  // default, else blank (operator must choose) — never silently India.
+  const single = Array.isArray(countries) && countries.length === 1;
+  const defaultCountry = defaults.countryCode || (single ? countries[0] : '');
+  const hasNZ = !Array.isArray(countries) || countries.length === 0 || countries.includes('NZ');
   const [draft, setDraft] = useState({
     name: '',
     date: '',
-    countryCode: defaults.countryCode || 'IN',
+    countryCode: defaultCountry,
     type: 'PUBLIC',
     isRestricted: false,
     entityId: defaults.entityId || '',
@@ -798,8 +805,11 @@ function HolidayForm({ defaults, canManage, onClose, onSaved }) {
               onChange={(e) => set('countryCode', e.target.value)}
               className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm bg-white"
             >
-              <option value="IN">India</option>
-              <option value="NZ">New Zealand</option>
+              {/* Offer only the tenant's operating countries (no cross-country leak). */}
+              {(single ? [] : [['', 'Select…']]).map(([v, l]) => <option key="blank" value={v}>{l}</option>)}
+              {(Array.isArray(countries) && countries.length ? countries : ['IN', 'NZ']).map((cc) => (
+                <option key={cc} value={cc}>{cc === 'NZ' ? 'New Zealand' : cc === 'IN' ? 'India' : cc}</option>
+              ))}
             </select>
           </div>
           <div>
@@ -812,7 +822,8 @@ function HolidayForm({ defaults, canManage, onClose, onSaved }) {
             >
               <option value="PUBLIC">Public</option>
               <option value="RESTRICTED">Restricted / optional</option>
-              <option value="PROVINCIAL">Provincial</option>
+              {/* PROVINCIAL (anniversary) holidays are an NZ concept — NZ tenants only. */}
+              {hasNZ && <option value="PROVINCIAL">Provincial</option>}
             </select>
           </div>
           <TextInput label="Entity ID" value={draft.entityId} onChange={(v) => set('entityId', v)} hint="Optional scope" />
@@ -835,8 +846,11 @@ function HolidayForm({ defaults, canManage, onClose, onSaved }) {
   );
 }
 
-function ImportHolidaysModal({ year, onClose, onDone }) {
-  const [countryCode, setCountryCode] = useState('NZ');
+function ImportHolidaysModal({ year, countries = [], onClose, onDone }) {
+  // Offer/seed only the tenant's operating countries. Default to the tenant's own
+  // when single-country, else the first available — never a hardcoded NZ default.
+  const importCountries = Array.isArray(countries) && countries.length ? countries : ['NZ', 'IN'];
+  const [countryCode, setCountryCode] = useState(importCountries[0]);
   const [importYear, setImportYear] = useState(String(year));
   const [entityId, setEntityId] = useState('');
   const [busy, setBusy] = useState(false);
@@ -896,8 +910,9 @@ function ImportHolidaysModal({ year, onClose, onDone }) {
                 onChange={(e) => setCountryCode(e.target.value)}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm bg-white"
               >
-                <option value="NZ">New Zealand</option>
-                <option value="IN">India</option>
+                {importCountries.map((cc) => (
+                  <option key={cc} value={cc}>{cc === 'NZ' ? 'New Zealand' : cc === 'IN' ? 'India' : cc}</option>
+                ))}
               </select>
             </div>
             <TextInput label="Year" type="number" value={importYear} onChange={setImportYear} />
@@ -919,6 +934,9 @@ function ImportHolidaysModal({ year, onClose, onDone }) {
 
 function HolidaysTab({ canManage }) {
   const thisYear = new Date().getFullYear();
+  // The tenant's operating countries gate the country filter + add/import forms so
+  // an NZ-only tenant is never shown India options (and vice-versa).
+  const { countries } = useTenantCountries();
   const [year, setYear] = useState(thisYear);
   const [countryCode, setCountryCode] = useState('');
   const [entityId, setEntityId] = useState('');
@@ -1023,9 +1041,11 @@ function HolidaysTab({ canManage }) {
             onChange={(e) => setCountryCode(e.target.value)}
             className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
           >
-            {COUNTRY_OPTIONS.map(([v, l]) => (
-              <option key={v} value={v}>{l}</option>
-            ))}
+            {COUNTRY_OPTIONS
+              .filter(([v]) => v === '' || !Array.isArray(countries) || countries.length === 0 || countries.includes(v))
+              .map(([v, l]) => (
+                <option key={v} value={v}>{l}</option>
+              ))}
           </select>
         </div>
         <div>
@@ -1066,8 +1086,9 @@ function HolidaysTab({ canManage }) {
 
       {adding && (
         <HolidayForm
-          defaults={{ countryCode: countryCode || 'IN', entityId, locationId }}
+          defaults={{ countryCode: countryCode || '', entityId, locationId }}
           canManage={canManage}
+          countries={countries}
           onClose={() => setAdding(false)}
           onSaved={() => {
             setAdding(false);
@@ -1076,7 +1097,7 @@ function HolidaysTab({ canManage }) {
         />
       )}
       {importing && (
-        <ImportHolidaysModal year={year} onClose={() => setImporting(false)} onDone={load} />
+        <ImportHolidaysModal year={year} countries={countries} onClose={() => setImporting(false)} onDone={load} />
       )}
       {deleting && (
         <Modal title={`Delete ${deleting.name}?`} onClose={() => setDeleting(null)}>

@@ -57,3 +57,13 @@ export function resolveTenant() {
 export function fetchMe() {
   return apiGet('/api/customer/me');
 }
+
+// Resolve the signed-in employee's operating country + pay currency. This is the
+// AUTHORITATIVE country source for the ESS app (global payroll: IN + NZ). The
+// backend resolves it from the employee's StatutoryProfile / Employee row / the
+// entity they work in. Returns { employeeId, countryCode, payCurrency } where
+// countryCode is null when it cannot be determined — callers must FAIL CLOSED
+// (render neither country's blocks) rather than assume a default.
+export function fetchMyProfile() {
+  return apiGet('/api/hr/me/profile');
+}

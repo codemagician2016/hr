@@ -11,6 +11,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { Spinner, ErrorBanner, PrimaryButton, TextInput, formatAdminDate } from '@hr/ui';
 import { get, post } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, employeeLabel } from '@/lib/ui';
+import { useTenantCountries } from '@/lib/useTenantCountries';
 
 const TABS = [
   { key: 'requests', label: 'Requests' },
@@ -235,21 +236,41 @@ const ACCRUAL_FREQ_OPTS = ['MONTHLY', 'QUARTERLY', 'ANNUAL', 'PER_PAY_PERIOD'];
 const GENDER_OPTS = ['', 'MALE', 'FEMALE', 'OTHER'];
 
 // Full LeaveType allow-list (matches the controller LEAVE_TYPE_FIELDS + §5.1 spec).
-const TYPE_FIELDS = [
-  { key: 'name', label: 'Name', required: true },
-  { key: 'code', label: 'Code', required: true },
-  { key: 'category', label: 'Category', type: 'select', options: CATEGORY_OPTS, required: true },
-  { key: 'unit', label: 'Unit', type: 'select', options: UNIT_OPTS },
-  { key: 'countryCode', label: 'Country (blank = both)', type: 'select', options: COUNTRY_OPTS },
-  { key: 'nzPayBasis', label: 'NZ pay basis', type: 'select', options: NZ_BASIS_OPTS },
-  { key: 'sandwichPolicy', label: 'Sandwich policy', type: 'select', options: SANDWICH_OPTS },
-  { key: 'color', label: 'Calendar colour (#hex)' },
-  { key: 'isPaid', label: 'Paid', type: 'checkbox' },
-  { key: 'isStatutory', label: 'Statutory', type: 'checkbox' },
-  { key: 'requiresReason', label: 'Requires reason', type: 'checkbox' },
-  { key: 'affectsLOP', label: 'Affects LOP (unpaid)', type: 'checkbox' },
-  { key: 'isEncashable', label: 'Encashable', type: 'checkbox' },
-];
+// Country-aware: `countries` is the tenant's distinct operating-country set. For a
+// single-country tenant the Country select is constrained to THAT country (no
+// cross-country option) and NZ-only fields (nzPayBasis, sandwichPolicy) are shown
+// only when the tenant operates in NZ — an India-only tenant never sees them.
+function typeFields(countries) {
+  const list = Array.isArray(countries) ? countries : [];
+  const hasNZ = list.includes('NZ');
+  const single = list.length === 1;
+  // Country options: a single-country tenant offers only its own country (no blank
+  // "both" — there is only one). Multi/unknown keeps the blank+full list.
+  const countryOpts = single ? [list[0]] : COUNTRY_OPTS;
+  const fields = [
+    { key: 'name', label: 'Name', required: true },
+    { key: 'code', label: 'Code', required: true },
+    { key: 'category', label: 'Category', type: 'select', options: CATEGORY_OPTS, required: true },
+    { key: 'unit', label: 'Unit', type: 'select', options: UNIT_OPTS },
+    { key: 'countryCode', label: single ? 'Country' : 'Country (blank = both)', type: 'select', options: countryOpts },
+  ];
+  // NZ-only statutory leave fields — present only for tenants operating in NZ.
+  if (hasNZ || list.length === 0) {
+    fields.push(
+      { key: 'nzPayBasis', label: 'NZ pay basis', type: 'select', options: NZ_BASIS_OPTS },
+      { key: 'sandwichPolicy', label: 'Sandwich policy', type: 'select', options: SANDWICH_OPTS },
+    );
+  }
+  fields.push(
+    { key: 'color', label: 'Calendar colour (#hex)' },
+    { key: 'isPaid', label: 'Paid', type: 'checkbox' },
+    { key: 'isStatutory', label: 'Statutory', type: 'checkbox' },
+    { key: 'requiresReason', label: 'Requires reason', type: 'checkbox' },
+    { key: 'affectsLOP', label: 'Affects LOP (unpaid)', type: 'checkbox' },
+    { key: 'isEncashable', label: 'Encashable', type: 'checkbox' },
+  );
+  return fields;
+}
 
 // Full LeavePolicy allow-list (sectioned: entitlement/carry-forward/rules/eligibility/exit).
 function policyFields(typeOptions) {
@@ -279,6 +300,9 @@ function policyFields(typeOptions) {
 function LeaveInner() {
   const [tab, setTab] = useState('requests');
   const [types, setTypes] = useState([]);
+  // The tenant's operating countries drive which country-specific leave-type
+  // fields/options are offered (NZ-only fields hidden for an India-only tenant).
+  const { countries } = useTenantCountries();
   useEffect(() => {
     get('/api/hr/leave/types').then((r) => setTypes(asList(r))).catch(() => setTypes([]));
   }, [tab]);
@@ -287,7 +311,7 @@ function LeaveInner() {
       <PageHeader title="Leave" subtitle="Requests, leave types and policies" />
       <Tabs tabs={TABS} active={tab} onChange={setTab} />
       {tab === 'requests' && <RequestsTab />}
-      {tab === 'types' && <ConfigTab resource="types" title="Leave types" fields={TYPE_FIELDS} />}
+      {tab === 'types' && <ConfigTab resource="types" title="Leave types" fields={typeFields(countries)} />}
       {tab === 'policies' && <ConfigTab resource="policies" title="Policies" fields={policyFields(types)} />}
     </div>
   );

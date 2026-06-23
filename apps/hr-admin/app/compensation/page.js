@@ -19,6 +19,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { ErrorBanner, PrimaryButton, TextInput, DateField, formatAdminDate } from '@hr/ui';
 import { get, post } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, moneyish } from '@/lib/ui';
+// Entities (and their authoritative countryCode) back the structure form's
+// country/currency derivation; imported directly via /api/hr/payroll/entities.
 
 const TABS = [
   { key: 'components', label: 'Pay components' },
@@ -91,13 +93,17 @@ function StructuresTab() {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const [draft, setDraft] = useState({ name: '', code: '', entityId: '', countryCode: 'IN', currencyCode: 'INR', basis: 'CTC' });
+  // countryCode/currencyCode are DERIVED from the chosen entity — never typed and
+  // never hardcoded to India. An NZ entity yields NZ + NZD, so the India 50% wage
+  // rule is gated off for NZ structures (the engine keys the rule on countryCode).
+  const [draft, setDraft] = useState({ name: '', code: '', entityId: '', countryCode: '', currencyCode: '', basis: 'CTC' });
   // Live preview: a target CTC + the structure's lines → /structures/preview.
   const [previewCtc, setPreviewCtc] = useState('1200000');
   const [previewLines, setPreviewLines] = useState([]); // [{ componentId, calcMethod, calcValue }]
   const [preview, setPreview] = useState(null);
   const [previewErr, setPreviewErr] = useState('');
   const [components, setComponents] = useState([]);
+  const [entities, setEntities] = useState([]);
 
   const load = useCallback(() => {
     setError('');
@@ -106,12 +112,29 @@ function StructuresTab() {
       .catch((e) => { setError(e.message || 'Failed to load structures.'); setRows([]); });
     get('/api/hr/compensation/components', { page: 1, pageSize: 100 })
       .then((r) => setComponents(asList(r))).catch(() => {});
+    // Entities carry the authoritative countryCode + payCurrency per market.
+    get('/api/hr/payroll/entities')
+      .then((r) => setEntities(r?.items || [])).catch(() => {});
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  // Debounced live preview of the CTC waterfall + 50% chip.
+  // When the operator picks an entity, derive its country + currency so the form
+  // (and the preview's 50%-rule gating) follow the entity's market automatically.
+  function selectEntity(id) {
+    const en = entities.find((e) => e.id === id) || null;
+    setDraft((d) => ({
+      ...d,
+      entityId: id,
+      countryCode: en ? String(en.countryCode || '').toUpperCase() : '',
+      currencyCode: en ? (en.payCurrency || '') : '',
+    }));
+  }
+
+  // Debounced live preview of the CTC waterfall + 50% chip. Requires a resolved
+  // country (from the chosen entity) so the preview's statutory gating matches
+  // the entity's market — no India 50% chip before an entity is picked.
   useEffect(() => {
-    if (!previewLines.length || !previewCtc) { setPreview(null); return; }
+    if (!previewLines.length || !previewCtc || !draft.countryCode) { setPreview(null); return; }
     const h = setTimeout(() => {
       setPreviewErr('');
       post('/api/hr/compensation/structures/preview', {
@@ -132,7 +155,7 @@ function StructuresTab() {
     try {
       // entityId/countryCode/currencyCode/basis are required by the API.
       await post('/api/hr/compensation/structures', { ...draft, lines: previewLines });
-      setDraft({ name: '', code: '', entityId: '', countryCode: 'IN', currencyCode: 'INR', basis: 'CTC' });
+      setDraft({ name: '', code: '', entityId: '', countryCode: '', currencyCode: '', basis: 'CTC' });
       load();
     } catch (e) { setError(e.data?.message || e.message || 'Failed to create.'); }
     finally { setSaving(false); }
@@ -200,9 +223,26 @@ function StructuresTab() {
         <h2 className="text-sm font-semibold text-gray-900">Add structure</h2>
         <TextInput label="Name" value={draft.name} onChange={(v) => setDraft((d) => ({ ...d, name: v }))} required />
         <TextInput label="Code" value={draft.code} onChange={(v) => setDraft((d) => ({ ...d, code: v }))} required />
-        <TextInput label="Entity ID" value={draft.entityId} onChange={(v) => setDraft((d) => ({ ...d, entityId: v }))} required />
-        <TextInput label="Country" value={draft.countryCode} onChange={(v) => setDraft((d) => ({ ...d, countryCode: v }))} required />
-        <TextInput label="Currency" value={draft.currencyCode} onChange={(v) => setDraft((d) => ({ ...d, currencyCode: v }))} required />
+        {/* Entity drives the market: countryCode + currency are derived from it,
+            not typed, so an NZ entity can never be saved as an India structure. */}
+        <label className="block text-sm">
+          <span className="text-gray-700 font-medium">Entity</span>
+          <select
+            value={draft.entityId}
+            onChange={(e) => selectEntity(e.target.value)}
+            required
+            className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+          >
+            <option value="">Select entity…</option>
+            {entities.map((en) => (
+              <option key={en.id} value={en.id}>{en.code} — {en.legalName} ({en.countryCode})</option>
+            ))}
+          </select>
+        </label>
+        <div className="text-xs text-gray-500">
+          Country: <span className="font-medium text-gray-700">{draft.countryCode || '—'}</span>
+          {' · '}Currency: <span className="font-medium text-gray-700">{draft.currencyCode || '—'}</span>
+        </div>
         <Select label="Basis" value={draft.basis} options={['CTC', 'GROSS', 'NET']} onChange={(v) => setDraft((d) => ({ ...d, basis: v }))} />
         {verdict && verdict.applies && !verdict.ok && (
           <p className="text-xs text-red-600">Basic + DA must be ≥ 50% of gross — save is blocked.</p>

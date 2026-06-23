@@ -16,11 +16,11 @@
 // then a 404/405 is shown as a friendly "saved locally for now" note rather
 // than a hard error, so the page is fully shippable.
 
-import { useMemo, useState } from 'react';
-import AppShell, { useSession } from '@/components/AppShell';
+import { useState } from 'react';
+import AppShell from '@/components/AppShell';
 import { ErrorBanner } from '@hr/ui';
-import { useTenant } from '@/components/TenantProvider';
 import { apiPost } from '@/lib/api';
+import { useCountry } from '@/lib/useCountry';
 
 const TAX_PATH = '/api/hr/me/tax-declaration';
 
@@ -36,17 +36,6 @@ const INDIA_HEADS = [
 
 const NZ_TAX_CODES = ['M', 'M SL', 'ME', 'ME SL', 'SB', 'S', 'SH', 'ST', 'SA', 'CAE', 'WT'];
 const KIWISAVER_RATES = ['0', '3', '4', '6', '8', '10'];
-
-function detectCountry(me, tenant) {
-  const c =
-    me?.employee?.country ||
-    me?.employee?.taxCountry ||
-    me?.country ||
-    tenant?.business?.country ||
-    tenant?.business?.countryCode ||
-    'IN';
-  return String(c).toUpperCase().startsWith('N') ? 'NZ' : 'IN';
-}
 
 function Card({ children }) {
   return (
@@ -73,9 +62,11 @@ function MoneyField({ label, hint, value, onChange }) {
 }
 
 function TaxInner() {
-  const me = useSession();
-  const { tenant } = useTenant();
-  const country = useMemo(() => detectCountry(me, tenant), [me, tenant]);
+  // Country is the AUTHORITATIVE employee country from the backend. It is null
+  // while loading and whenever it cannot be resolved — in which case we render
+  // NEITHER country's block (fail-closed), so an NZ employee never sees India
+  // fields and vice-versa.
+  const { country, loading: countryLoading } = useCountry();
 
   // India state
   const [regime, setRegime] = useState('NEW');
@@ -94,20 +85,29 @@ function TaxInner() {
     if (country === 'NZ') {
       return { country: 'NZ', taxCode, kiwiSaverRate: Number(kiwiSaver) };
     }
-    const investments = Object.fromEntries(
-      Object.entries(india).map(([k, v]) => [k, Number(v) || 0])
-    );
-    return { country: 'IN', regime, investments };
+    if (country === 'IN') {
+      const investments = Object.fromEntries(
+        Object.entries(india).map(([k, v]) => [k, Number(v) || 0])
+      );
+      return { country: 'IN', regime, investments };
+    }
+    // Unknown country — never submit a wrong-country declaration.
+    return null;
   }
 
   async function onSubmit(e) {
     e.preventDefault();
+    const payload = buildPayload();
+    if (!payload) {
+      setError('We could not determine your tax jurisdiction. Please contact HR.');
+      return;
+    }
     setSubmitting(true);
     setError(null);
     setNote(null);
     setSuccess(false);
     try {
-      await apiPost(TAX_PATH, buildPayload());
+      await apiPost(TAX_PATH, payload);
       setSuccess(true);
     } catch (err) {
       // Endpoint not yet wired — degrade gracefully, stay shippable.
@@ -126,11 +126,30 @@ function TaxInner() {
       <div>
         <h1 className="text-2xl font-semibold" style={{ color: 'var(--theme-text)' }}>Tax declaration</h1>
         <p className="text-sm" style={{ color: 'var(--theme-muted)' }}>
-          {country === 'NZ' ? 'New Zealand (IRD) tax code & KiwiSaver' : 'India income-tax declaration'}
+          {country === 'NZ'
+            ? 'New Zealand (IRD) tax code & KiwiSaver'
+            : country === 'IN'
+            ? 'India income-tax declaration'
+            : 'Tax declaration'}
         </p>
       </div>
 
       {error && <ErrorBanner message={error} />}
+
+      {/* Fail-closed: while the country is loading, or if it cannot be resolved,
+          render NEITHER country's block — never a wrong-country default. */}
+      {countryLoading && (
+        <Card>
+          <p className="text-sm" style={{ color: 'var(--theme-muted)' }}>Loading your tax details…</p>
+        </Card>
+      )}
+      {!countryLoading && country == null && (
+        <Card>
+          <p className="text-sm" style={{ color: 'var(--theme-text)' }}>
+            We could not determine your tax jurisdiction yet. Please contact HR to complete your profile.
+          </p>
+        </Card>
+      )}
       {note && (
         <div className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-text)' }}>
           {note}
@@ -142,7 +161,7 @@ function TaxInner() {
         </div>
       )}
 
-      {country === 'IN' ? (
+      {country === 'IN' && (
         <>
           <Card>
             <h2 className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--theme-muted)' }}>Tax regime</h2>
@@ -191,7 +210,9 @@ function TaxInner() {
             )}
           </Card>
         </>
-      ) : (
+      )}
+
+      {country === 'NZ' && (
         <>
           <Card>
             <h2 className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--theme-muted)' }}>IRD tax code</h2>
@@ -235,14 +256,17 @@ function TaxInner() {
         </>
       )}
 
-      <button
-        type="submit"
-        disabled={submitting}
-        className="w-full rounded-lg py-3 text-sm font-semibold transition disabled:opacity-60"
-        style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}
-      >
-        {submitting ? 'Submitting…' : 'Submit declaration'}
-      </button>
+      {/* Only allow submission once we know the jurisdiction (IN or NZ). */}
+      {(country === 'IN' || country === 'NZ') && (
+        <button
+          type="submit"
+          disabled={submitting}
+          className="w-full rounded-lg py-3 text-sm font-semibold transition disabled:opacity-60"
+          style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}
+        >
+          {submitting ? 'Submitting…' : 'Submit declaration'}
+        </button>
+      )}
     </form>
   );
 }
