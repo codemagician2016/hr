@@ -47,6 +47,29 @@ const ASSET_PREFIX_SUBAPP = {
 //   {"app-staging.drifthr.com":"app.staging.drifthr.com", ...}
 const HOST_ALIAS = (() => { try { return JSON.parse(process.env.ROUTER_HOST_ALIAS || '{}'); } catch { return {}; } })();
 
+// Reverse of HOST_ALIAS: canonical dotted host → external (browser-resolvable)
+// host. The router rewrites the incoming hyphenated staging host to its dotted
+// canonical form for routing, but any redirect URL we hand back to the browser
+// MUST use the EXTERNAL host that actually has DNS + SSL — otherwise a 302 to
+// app.staging.drifthr.com (two-level, no cert/no DNS) dead-ends on NXDOMAIN.
+const HOST_ALIAS_REVERSE = (() => {
+  const out = {};
+  for (const [external, canonical] of Object.entries(HOST_ALIAS)) {
+    out[String(canonical).toLowerCase()] = String(external).toLowerCase();
+  }
+  return out;
+})();
+
+// Map a (possibly canonical/dotted) host back to the external host the browser
+// can resolve. Preserves any :port suffix. No-op when no reverse alias exists.
+function externalHost(host) {
+  if (!host) return host;
+  const [bare, port] = String(host).toLowerCase().split(':');
+  const ext = HOST_ALIAS_REVERSE[bare];
+  if (!ext) return host;
+  return port ? `${ext}:${port}` : ext;
+}
+
 const QA_PORTAL_PORT = parseInt(process.env.QA_PORTAL_PORT || '3801', 10);
 const PUBLIC_MICROCACHE_TTL_SECONDS = parseInt(process.env.PUBLIC_MICROCACHE_TTL_SECONDS || '300', 10);
 const PUBLIC_MICROCACHE_MAX_BYTES = parseInt(process.env.PUBLIC_MICROCACHE_MAX_BYTES || String(2 * 1024 * 1024), 10);
@@ -407,7 +430,7 @@ function unknownSiteHtml(host, platformDomain) {
   const safeHost = escapeHtml(host);
   const base = platformDomain || 'drifthr.com';
   const homeUrl = `https://${base}/`;
-  const loginUrl = `https://app.${base}/login`;
+  const loginUrl = `https://${adminHostForPlatformDomain(base)}/login`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -573,7 +596,8 @@ function adminHostLoginRedirectUrl(host, requestUrl) {
 
   const protocol = process.env.ROUTER_REDIRECT_PROTOCOL || 'https';
   const incomingPort = (host || '').includes(':') ? `:${(host || '').split(':').pop()}` : '';
-  return `${protocol}://${cleanHost}${platformDomain === 'localhost' ? incomingPort : ''}/login`;
+  const browserHost = externalHost(cleanHost);
+  return `${protocol}://${browserHost}${platformDomain === 'localhost' ? incomingPort : ''}/login`;
 }
 
 function hasOperatorCookie(cookieHeader) {
@@ -592,9 +616,28 @@ function unauthenticatedDashboardRedirectUrl(host, requestUrl, cookieHeader) {
 
   const protocol = process.env.ROUTER_REDIRECT_PROTOCOL || 'https';
   const incomingPort = (host || '').includes(':') ? `:${(host || '').split(':').pop()}` : '';
-  const login = new URL(`${protocol}://${cleanHost}${platformDomain === 'localhost' ? incomingPort : ''}/login`);
+  // Redirect to the EXTERNAL host the browser can resolve (app-staging.…), not
+  // the canonical dotted alias the router rewrote the request to (app.staging.…).
+  const browserHost = externalHost(cleanHost);
+  const login = new URL(`${protocol}://${browserHost}${platformDomain === 'localhost' ? incomingPort : ''}/login`);
   login.searchParams.set('redirect', `${parsed.pathname}${parsed.search || ''}`);
   return login.toString();
+}
+
+// Canonical tenant-admin host for a platform domain. A sub-labelled deploy
+// (staging.drifthr.com) maps to the HYPHENATED host (app-staging.drifthr.com)
+// because Cloudflare SSL only covers one subdomain level; an apex (drifthr.com)
+// maps to the dotted host (app.drifthr.com). Mirrors platform middleware's
+// hrAdminBase so router + middleware + page redirects all agree.
+function adminHostForPlatformDomain(platformDomain) {
+  const pd = String(platformDomain || 'hr.com').toLowerCase();
+  if (pd === 'localhost') return `app.${pd}`;
+  const firstDot = pd.indexOf('.');
+  if (firstDot <= 0) return `app.${pd}`;
+  const sub = pd.slice(0, firstDot);
+  const apex = pd.slice(firstDot + 1);
+  if (!apex.includes('.')) return `app.${pd}`; // pd was already an apex
+  return `app-${sub}.${apex}`;
 }
 
 function unifiedAdminRedirectUrl(host, requestUrl) {
@@ -610,10 +653,12 @@ function unifiedAdminRedirectUrl(host, requestUrl) {
 
   const protocol = process.env.ROUTER_REDIRECT_PROTOCOL || 'https';
   const incomingPort = (host || '').includes(':') ? (host || '').split(':').pop() : '';
+  const adminHost = adminHostForPlatformDomain(platformDomain);
   const targetHost = platformDomain === 'localhost' && incomingPort
-    ? `app.${platformDomain}:${incomingPort}`
-    : `app.${platformDomain}`;
-  const target = new URL(`${protocol}://${targetHost}/dashboard`);
+    ? `${adminHost}:${incomingPort}`
+    : adminHost;
+  // The hr-admin app's dashboard lives at "/", not "/dashboard".
+  const target = new URL(`${protocol}://${targetHost}/`);
   target.search = parsed.search;
   return target.toString();
 }

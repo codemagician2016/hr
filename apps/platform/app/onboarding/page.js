@@ -27,6 +27,7 @@ import Link from 'next/link';
 import LanguageSelector from '@/components/LanguageSelector';
 
 import { STYLES, STYLE_KEYS, DEFAULT_STYLE_KEY } from '@/lib/themeStyles';
+import { isUnifiedAdminHost } from '@/lib/platformDomain';
 
 // Brand colors (12 curated) — resolved once from the theme engine so the
 // onboarding swatches match what the admin Branding panel shows.
@@ -103,7 +104,7 @@ const STYLE_OPTIONS = STYLE_KEYS.map((key) => {
 const STEPS = [
   { key: 'company', label: 'Company', hint: 'Name and country' },
   { key: 'entity', label: 'Legal entity', hint: 'Statutory registration details' },
-  { key: 'paycal', label: 'Pay calendar', hint: 'How often you run payroll' },
+  { key: 'paycal', label: 'Pay calendar', hint: 'Your payroll cadence (preference)' },
   { key: 'people', label: 'Employees', hint: 'Add a few now — or skip', optional: true },
   { key: 'branding', label: 'Branding', hint: 'Style, color and logo' },
   { key: 'finish', label: 'Finish', hint: 'Review and launch' },
@@ -137,14 +138,6 @@ const DEFAULT_STATE = {
   colorKey: BRAND_COLORS[0]?.key || 'indigo',
   logoDataUrl: '',
 };
-
-// `/dashboard` is the JWT-scoped admin that exists ONLY on the unified admin
-// host (app.*). On the marketing host the tenant admin is /<slug>/admin, which
-// middleware bounces to the hr-admin app. Mirror the login flow's helper so
-// signup→onboarding and login agree on where an already-set-up user lands.
-function isUnifiedAdminHost() {
-  return typeof window !== 'undefined' && window.location.hostname.startsWith('app.');
-}
 
 function slugify(value, max = 60) {
   return String(value || '')
@@ -270,12 +263,13 @@ export default function OnboardingPage() {
             const { data: ctx } = await axios.get('/api/business/context', { withCredentials: true });
             if (ctx?.billingState === 'onboarding' || ctx?.billingState === 'expired') return;
             // Already fully set up → into the admin. Mirror the login flow:
-            // `/dashboard` exists ONLY on the unified admin host (app.*). On the
-            // marketing host we send them to /<slug>/admin (same-origin so the
-            // auth cookie rides along; middleware bounces that to the hr-admin
-            // app), falling back to /onboarding when the slug can't be resolved.
+            // on the unified admin host (app. / app-…) the dashboard is at "/"
+            // (the hr-admin app has no /dashboard route). On the marketing host
+            // we send them to /<slug>/admin (same-origin so the auth cookie
+            // rides along; middleware bounces that to the hr-admin app),
+            // falling back to /onboarding when the slug can't be resolved.
             if (isUnifiedAdminHost()) {
-              window.location.href = '/dashboard';
+              window.location.href = '/';
               return;
             }
             const slug = ctx?.business?.slug || data?.user?.businessSlug || null;
@@ -838,7 +832,7 @@ function StepPayCalendar({ s, patch }) {
   const payDay = PAY_DAY_DEFAULT[s.payFrequency];
   return (
     <div className="space-y-5">
-      <p className="text-sm text-gray-500">Choose how often you run payroll for this entity. We&rsquo;ll set up a pay calendar with a sensible pay day you can fine-tune later in HR · Payroll.</p>
+      <p className="text-sm text-gray-500">How often do you plan to run payroll for this entity? We&rsquo;ll use this to pre-fill your pay calendar — you create and confirm it (with the exact pay day) in HR · Payroll after setup.</p>
       <div className="grid gap-3">
         {options.map((opt) => {
           const selected = s.payFrequency === opt.key;
@@ -862,9 +856,10 @@ function StepPayCalendar({ s, patch }) {
       {payDay && (
         <div className="flex items-center gap-2 rounded-lg bg-gray-50 border border-gray-200 px-4 py-3 text-xs text-gray-600">
           <Icon name="calendar" className="h-4 w-4 text-gray-400" />
-          Default pay day: <span className="font-semibold text-gray-800">{payDay.label}</span>
+          Suggested pay day: <span className="font-semibold text-gray-800">{payDay.label}</span>
         </div>
       )}
+      <p className="text-xs text-gray-400">This is a preference to speed up payroll setup — no pay run is scheduled until you create the calendar in HR · Payroll.</p>
     </div>
   );
 }
@@ -1016,7 +1011,7 @@ function StepFinish({ s, country, error }) {
     ['Country', `${country.flag} ${country.name} · ${country.currency}`],
     ['Legal entity', `${s.legalName} (${s.entityCode})`],
     ['Statutory IDs', statutory || '—'],
-    ['Pay calendar', `${freqLabel} · ${PAY_DAY_DEFAULT[s.payFrequency]?.label || ''}`],
+    ['Payroll cadence', `${freqLabel} · ${PAY_DAY_DEFAULT[s.payFrequency]?.label || ''} (set up in HR · Payroll)`],
     ['Employees seeded', s.employees.filter((e) => e.firstName && e.lastName).length || 'None (add later)'],
     ['Branding', `${styleLabel} style · ${colorLabel}`],
   ];
@@ -1040,12 +1035,12 @@ function StepFinish({ s, country, error }) {
 // Completion + loaders
 // --------------------------------------------------------------------------
 function CompletionScreen({ done }) {
-  // Where "Go to your dashboard" points. `/dashboard` is valid ONLY on the
-  // unified admin host (app.*); on the marketing host we use the freshly
-  // created tenant's /<slug>/admin (middleware bounces it to the hr-admin app).
-  // Fall back to "/" rather than a guaranteed-404 /dashboard if no slug.
+  // Where "Go to your dashboard" points. On the unified admin host (app. /
+  // app-…) the dashboard is at "/" (the hr-admin app has no /dashboard route);
+  // on the marketing host we use the freshly created tenant's /<slug>/admin
+  // (middleware bounces it to the hr-admin app). Fall back to "/" if no slug.
   const adminHref = isUnifiedAdminHost()
-    ? '/dashboard'
+    ? '/'
     : (done.slug ? `/${done.slug}/admin` : '/');
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#f6f7f9] px-4">
@@ -1063,7 +1058,7 @@ function CompletionScreen({ done }) {
               ? <><Icon name="check" className="h-4 w-4 text-emerald-600" /> Legal entity {done.entity.code} with statutory IDs</>
               : <><span className="text-amber-500 font-bold">!</span> {done.entity?.message || 'Finish your legal entity in HR · Org'}</>}
           </li>
-          <li className="flex items-center gap-2 text-gray-700"><Icon name="check" className="h-4 w-4 text-emerald-600" /> {String(done.payFrequency).toLowerCase()} pay calendar — {done.payDay}</li>
+          <li className="flex items-center gap-2 text-gray-700"><Icon name="calendar" className="h-4 w-4 text-indigo-500" /> Payroll cadence noted: {String(done.payFrequency).toLowerCase()} — create the calendar in HR · Payroll</li>
           {done.employeesCreated > 0 && (
             <li className="flex items-center gap-2 text-gray-700"><Icon name="check" className="h-4 w-4 text-emerald-600" /> {done.employeesCreated} employee{done.employeesCreated === 1 ? '' : 's'} added</li>
           )}

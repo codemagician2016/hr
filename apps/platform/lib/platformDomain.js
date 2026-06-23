@@ -64,18 +64,48 @@ export function getPlatformDomain() {
   return ENV_FALLBACK;
 }
 
-// Build a URL on the unified-admin host (app.<platform-domain>).
-// Used by login redirects from the marketing site and any link that
-// wants to land in the new admin shell.
-export function getUnifiedAdminUrl(path = '/') {
-  const domain = getPlatformDomain();
-  // localhost dev → no app. prefix; just use the current origin so links
-  // keep working without env wrangling. Use a relative URL so SSR and the
-  // browser hydrate the same href on 127.0.0.1 vs localhost.
-  if (domain === 'localhost' || domain.startsWith('localhost:')) {
-    return path.startsWith('/') ? path : `/${path}`;
+// Resolve the tenant HR-admin (app) host the SAME way platform middleware does
+// (middleware.js → hrAdminBase): the live admin host is hyphenated on a
+// sub-labelled deploy (staging.drifthr.com → app-staging.drifthr.com) and
+// dotted on the apex (drifthr.com → app.drifthr.com). Deriving from the
+// current hostname keeps the marketing host and the admin host in lock-step so
+// redirects never point at a non-existent app.staging.drifthr.com (NXDOMAIN).
+function hrAdminOrigin() {
+  if (typeof process !== 'undefined' && process.env && process.env.NEXT_PUBLIC_HR_ADMIN_URL) {
+    return process.env.NEXT_PUBLIC_HR_ADMIN_URL.replace(/\/$/, '');
   }
-  return `https://app.${domain}${path.startsWith('/') ? path : `/${path}`}`;
+  const raw = (typeof window !== 'undefined' && window.location?.hostname) || '';
+  const host = normalizeHost(raw);
+  if (!host || isLoopbackHost(host)) return null; // localhost dev → same-origin
+  // Already on the admin host (app. / app-…)? Use it verbatim.
+  if (host.startsWith('app.') || host.startsWith('app-')) return `https://${host}`;
+  const firstDot = host.indexOf('.');
+  if (firstDot <= 0) return 'https://app.drifthr.com';
+  const sub = host.slice(0, firstDot);   // "staging"
+  const apex = host.slice(firstDot + 1); // "drifthr.com"
+  if (!apex.includes('.')) return `https://app.${host}`; // host was already an apex
+  return `https://app-${sub}.${apex}`;
+}
+
+// Build a URL on the unified tenant-admin (hr-admin) host. Used by login +
+// onboarding redirects from the marketing site to land in the admin shell.
+// The admin app's dashboard lives at "/", so default the path to "/".
+export function getUnifiedAdminUrl(path = '/') {
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  const origin = hrAdminOrigin();
+  // localhost dev (or no resolvable host) → relative URL so SSR + browser
+  // hydrate the same href on 127.0.0.1 vs localhost.
+  if (!origin) return cleanPath;
+  return `${origin}${cleanPath}`;
+}
+
+// True when the page is being served FROM the unified tenant-admin host
+// (app.<domain> on prod, app-<sub>.<domain> on staging). Mirrors the
+// middleware's isUnifiedAdminHost so page-level redirects agree with it.
+export function isUnifiedAdminHost() {
+  if (typeof window === 'undefined' || !window.location?.hostname) return false;
+  const host = window.location.hostname.toLowerCase();
+  return host.startsWith('app.') || host.startsWith('app-');
 }
 
 // Build the public URL for a tenant's site. When an ACTIVE custom domain is

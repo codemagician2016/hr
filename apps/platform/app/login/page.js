@@ -7,7 +7,7 @@ import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import AuthShell, { Input, PrimaryButton, ErrorBanner } from '@/components/AuthShell';
 import LanguageSelector from '@/components/LanguageSelector';
-import { getPlatformDomain } from '@/lib/platformDomain';
+import { getPlatformDomain, getUnifiedAdminUrl, isUnifiedAdminHost } from '@/lib/platformDomain';
 
 const PLATFORM_DOMAIN = getPlatformDomain();
 
@@ -93,10 +93,6 @@ function normaliseRedirectForRole(path, role) {
   }
 
   return path;
-}
-
-function isUnifiedAdminHost() {
-  return typeof window !== 'undefined' && window.location.hostname.startsWith('app.');
 }
 
 function FloatingLanguagePicker() {
@@ -188,9 +184,10 @@ function LoginForm() {
           return;
         }
         if (isUnifiedAdminHost()) {
-          // replace (not href) so the login page is NOT left in the back stack —
-          // otherwise the browser Back button from the dashboard returns to login.
-          window.location.replace('/dashboard');
+          // Already on the tenant-admin host — the dashboard lives at "/", not
+          // "/dashboard" (the hr-admin app has no /dashboard route). replace (not
+          // href) so login is NOT left in the back stack.
+          window.location.replace('/');
           return;
         }
         if (isPortalRedirectForRole(roleRedirect, user.role)) {

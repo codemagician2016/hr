@@ -38,6 +38,24 @@ const prisma = new PrismaClient();
 // per-active-employee overage on each TierPrice row.
 const TIERS = [
   {
+    // The Free landing tier. EVERY self-signup tenant is auto-provisioned onto
+    // this at setup (business.controller → getFreeTierForVertical → 'free') and
+    // any downgrade lands here, so it MUST exist — without it signup leaves the
+    // tenant with NO Subscription and a broken billing portal. It is hidden from
+    // the public pricing API (publicPricing filters slug==='free'); it exists
+    // purely as the always-available zero-cost landing/fallback plan.
+    slug: 'free', vertical: 'HR', name: 'Free', sortOrder: 0, badge: null,
+    description: 'Get started free — core HR for your first few employees.',
+    tagline: 'Free forever for small teams.',
+    ctaLabel: 'Start free', highlighted: false, includedStaff: 5, trialDays: null,
+    features: [
+      'Up to 5 active employees',
+      'Core HR — employee records & org chart',
+      'Attendance & leave',
+      'Employee self-service portal',
+    ],
+  },
+  {
     slug: 'starter', vertical: 'HR', name: 'Starter', sortOrder: 1, badge: null,
     description: 'Core HR for small teams — people, org, attendance and leave.',
     tagline: 'Run your people ops without spreadsheets.',

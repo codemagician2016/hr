@@ -56,18 +56,23 @@ async function resolveCountryPricing(countryCode, vertical = null) {
   // Shop / Marketing). Empty result for ECOMMERCE/STATIC falls back to
   // APPOINTMENT so the page never dead-ends; missing vertical param also
   // defaults to APPOINTMENT (the master).
-  const v = (vertical && ['STATIC', 'APPOINTMENT', 'ECOMMERCE'].includes(vertical)) ? vertical : 'APPOINTMENT';
-  let tiers = await prisma.pricingTier.findMany({
-    where: { isActive: true, vertical: v },
-    orderBy: { sortOrder: 'asc' },
-  });
-  if (tiers.length === 0 && v !== 'APPOINTMENT') {
+  // DriftHR fork: the live catalog is the HR vertical (Starter/Growth/
+  // Enterprise on vertical='HR'). The website/commerce verticals
+  // (STATIC/APPOINTMENT/ECOMMERCE) carry no tiers, so prefer the requested
+  // vertical, then fall back through 'HR' (the real catalog) and finally
+  // 'APPOINTMENT' (legacy master) so the public pricing API never dead-ends on
+  // an empty list (which forced the 'fallback' source + "Tier not found").
+  const requested = (vertical && ['STATIC', 'APPOINTMENT', 'ECOMMERCE'].includes(vertical)) ? vertical : null;
+  const verticalChain = [requested, 'HR', 'APPOINTMENT'].filter((v, i, a) => v && a.indexOf(v) === i);
+  let tiers = [];
+  for (const v of verticalChain) {
     tiers = await prisma.pricingTier.findMany({
-      where: { isActive: true, vertical: 'APPOINTMENT' },
+      where: { isActive: true, vertical: v },
       orderBy: { sortOrder: 'asc' },
     });
+    tiers = tiers.filter((tier) => tier.slug !== 'free');
+    if (tiers.length > 0) break;
   }
-  tiers = tiers.filter((tier) => tier.slug !== 'free');
   if (tiers.length === 0) return null;
 
   let country = null;

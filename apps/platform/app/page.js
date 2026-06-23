@@ -194,10 +194,13 @@ function HowItWorks() {
 }
 
 function Pricing() {
+  // Plan names + headline features mirror the seeded catalog
+  // (backend/prisma/seeds/pricing.seed.js — Starter / Growth / Enterprise) so the
+  // landing matches what's actually billed and what the in-app Billing page shows.
   const tiers = [
-    ['Starter', 'For small teams getting organised', ['Up to 25 employees', 'Core HR + self-service', 'Single country payroll'], false],
-    ['Growth', 'For scaling companies', ['Up to 200 employees', 'Multi-entity payroll', 'White-label domain', 'Expenses & loans'], true],
-    ['Scale', 'For groups & agencies', ['Unlimited employees', 'Multi-country payroll', 'Multiple tenants', 'Priority support'], false],
+    ['Starter', 'For small teams getting organised', ['Up to 25 employees included', 'Core HR + employee self-service', 'Attendance & leave'], false],
+    ['Growth', 'For scaling companies', ['Up to 50 employees included', 'Payroll engine + IN/NZ compliance', 'Document management', 'White-label custom domain'], true],
+    ['Enterprise', 'For larger, integrated teams', ['Up to 100 employees included', 'Recruiting, performance & LMS', 'API access & webhooks', 'Priority support'], false],
   ];
   return (
     <section id="pricing" className="mx-auto max-w-6xl px-5 py-20">
