@@ -87,6 +87,8 @@ async function cleanup(businessId) {
   await prisma.leaveType.deleteMany({ where: { businessId, code: { startsWith: PREFIX } } });
   await prisma.employee.updateMany({ where: { businessId, code: { startsWith: PREFIX } }, data: { managerEmployeeId: null } });
   await prisma.employee.deleteMany({ where: { businessId, code: { startsWith: PREFIX } } });
+  // Geofence-test location (deleted AFTER employments, FK is onDelete:SetNull).
+  await prisma.location.deleteMany({ where: { businessId, code: { startsWith: PREFIX } } });
 }
 
 async function main() {
@@ -350,6 +352,86 @@ async function main() {
       assert(r.skippedLocked === 1, 'recompute reports 1 skippedLocked');
       assert(after.workedMinutes === before.workedMinutes && after.status === 'PRESENT',
         'locked row is unchanged by recompute (updateMany where isLocked=false matched nothing)');
+    }
+
+    /* ── GEO — Cycle 0 geofence wiring (Haversine → OUT_OF_GEOFENCE via derive) ── */
+    log('GEO — punch outside the geofence radius surfaces OUT_OF_GEOFENCE; inside / no-config does not:');
+    {
+      // A geofenced site: Bengaluru office, 100 m radius, WARN by default.
+      const loc = await prisma.location.create({
+        data: {
+          businessId, entityId: inEntity.id, code: `${PREFIX}-LOC`, name: 'Geo Office',
+          countryCode: 'IN', timezone: 'Asia/Kolkata',
+          geoLat: 12.971600, geoLng: 77.594600, geofenceM: 100, geofenceEnforce: false,
+        },
+      });
+      const geoEmp = await mkEmp('GEOE');
+      await prisma.employmentRecord.create({
+        data: { businessId, employeeId: geoEmp.id, entityId: inEntity.id, locationId: loc.id, employmentType: 'FULL_TIME', workerCategory: 'STAFF', changeReason: 'HIRE', effectiveFrom: day('2027-01-01'), isCurrent: true },
+      });
+      const dayShift = await prisma.shiftPattern.create({
+        data: { businessId, entityId: inEntity.id, code: `${PREFIX}-GEO`, name: 'GeoDay', startTime: '09:00', endTime: '18:00', breakMinutes: 60, graceInMinutes: 10, fullDayMinutes: 480, halfDayThresholdMinutes: 240, weeklyOffDays: '0,6', isActive: true },
+      });
+      await prisma.shiftAssignment.create({
+        data: { businessId, employeeId: geoEmp.id, shiftPatternId: dayShift.id, effectiveFrom: day('2027-10-01'), effectiveTo: day('2027-10-31') },
+      });
+
+      const flagsOf = async (d) => {
+        const row = await prisma.attendance.findFirst({ where: { businessId, employeeId: geoEmp.id, date: day(d) } });
+        return { row, flags: (row && row.exceptionsJson && row.exceptionsJson.flags) || [], gf: row && row.exceptionsJson && row.exceptionsJson.geofence };
+      };
+
+      // (a) OUTSIDE the radius (~150 m north) → OUT_OF_GEOFENCE flag + marker.
+      // Fri 2027-10-01. 09:00 IST = 03:30Z, 18:00 IST = 12:30Z.
+      const outIn = await prisma.attendancePunch.create({ data: { businessId, employeeId: geoEmp.id, punchType: 'IN', source: 'WEB', punchAt: new Date('2027-10-01T03:30:00Z'), geoLat: 12.973000, geoLng: 77.594600 } });
+      await prisma.attendancePunch.create({ data: { businessId, employeeId: geoEmp.id, punchType: 'OUT', source: 'WEB', punchAt: new Date('2027-10-01T12:30:00Z'), geoLat: 12.973000, geoLng: 77.594600 } });
+      await recompute(businessId, geoEmp.id, day('2027-10-01'), day('2027-10-01'));
+      const a = await flagsOf('2027-10-01');
+      assert(a.flags.includes('OUT_OF_GEOFENCE'), 'punch ~150m outside 100m radius → OUT_OF_GEOFENCE surfaces via derive');
+      const stampedIn = await prisma.attendancePunch.findUnique({ where: { id: outIn.id } });
+      assert(stampedIn.outOfGeofence === true && stampedIn.geoDistanceM > 100, 'out-of-geofence marker persisted on the punch (+distance)');
+      assert(a.gf && a.gf.outOfGeofence === true && a.gf.enforce === false, 'day row carries geofence detail (warn mode, enforce=false)');
+
+      // (b) INSIDE the radius (exactly on the office point) → NO flag, marker false.
+      // Mon 2027-10-04.
+      const inIn = await prisma.attendancePunch.create({ data: { businessId, employeeId: geoEmp.id, punchType: 'IN', source: 'WEB', punchAt: new Date('2027-10-04T03:30:00Z'), geoLat: 12.971600, geoLng: 77.594600 } });
+      await prisma.attendancePunch.create({ data: { businessId, employeeId: geoEmp.id, punchType: 'OUT', source: 'WEB', punchAt: new Date('2027-10-04T12:30:00Z'), geoLat: 12.971600, geoLng: 77.594600 } });
+      await recompute(businessId, geoEmp.id, day('2027-10-04'), day('2027-10-04'));
+      const b = await flagsOf('2027-10-04');
+      assert(!b.flags.includes('OUT_OF_GEOFENCE'), 'punch INSIDE the radius → NO OUT_OF_GEOFENCE');
+      const stampedInside = await prisma.attendancePunch.findUnique({ where: { id: inIn.id } });
+      assert(stampedInside.outOfGeofence === false, 'inside-radius punch marked outOfGeofence=false');
+
+      // (c) NO punch coords (kiosk-style) on a geofenced site → NO flag, NOT marked.
+      // Tue 2027-10-05.
+      const noCoord = await prisma.attendancePunch.create({ data: { businessId, employeeId: geoEmp.id, punchType: 'IN', source: 'WEB', punchAt: new Date('2027-10-05T03:30:00Z') } });
+      await prisma.attendancePunch.create({ data: { businessId, employeeId: geoEmp.id, punchType: 'OUT', source: 'WEB', punchAt: new Date('2027-10-05T12:30:00Z') } });
+      await recompute(businessId, geoEmp.id, day('2027-10-05'), day('2027-10-05'));
+      const c = await flagsOf('2027-10-05');
+      assert(!c.flags.includes('OUT_OF_GEOFENCE'), 'no punch coords → no flag (graceful)');
+      const stampedNoCoord = await prisma.attendancePunch.findUnique({ where: { id: noCoord.id } });
+      assert(stampedNoCoord.outOfGeofence == null, 'no-coord punch left unevaluated (outOfGeofence null)');
+
+      // (d) ENFORCE mode: same outside punch on an enforce=true location still flags,
+      // and the day row records enforce=true (the warn-vs-enforce lever is honoured).
+      await prisma.location.update({ where: { id: loc.id }, data: { geofenceEnforce: true } });
+      // Wed 2027-10-06, ~150 m outside again.
+      await prisma.attendancePunch.create({ data: { businessId, employeeId: geoEmp.id, punchType: 'IN', source: 'WEB', punchAt: new Date('2027-10-06T03:30:00Z'), geoLat: 12.973000, geoLng: 77.594600 } });
+      await prisma.attendancePunch.create({ data: { businessId, employeeId: geoEmp.id, punchType: 'OUT', source: 'WEB', punchAt: new Date('2027-10-06T12:30:00Z'), geoLat: 12.973000, geoLng: 77.594600 } });
+      await recompute(businessId, geoEmp.id, day('2027-10-06'), day('2027-10-06'));
+      const e = await flagsOf('2027-10-06');
+      assert(e.flags.includes('OUT_OF_GEOFENCE'), 'enforce mode still surfaces OUT_OF_GEOFENCE (we always flag)');
+      assert(e.gf && e.gf.enforce === true, 'day row records enforce=true under enforce mode');
+
+      // (e) NO geofence config (radius cleared) → punch with coords succeeds, no flag.
+      await prisma.location.update({ where: { id: loc.id }, data: { geofenceM: null } });
+      // Thu 2027-10-07, far away, but the site has no geofence now.
+      await prisma.attendancePunch.create({ data: { businessId, employeeId: geoEmp.id, punchType: 'IN', source: 'WEB', punchAt: new Date('2027-10-07T03:30:00Z'), geoLat: 13.500000, geoLng: 78.000000 } });
+      await prisma.attendancePunch.create({ data: { businessId, employeeId: geoEmp.id, punchType: 'OUT', source: 'WEB', punchAt: new Date('2027-10-07T12:30:00Z'), geoLat: 13.500000, geoLng: 78.000000 } });
+      const rNoFence = await recompute(businessId, geoEmp.id, day('2027-10-07'), day('2027-10-07'));
+      const f = await flagsOf('2027-10-07');
+      assert(rNoFence.written >= 1 && f.row && f.row.status === 'PRESENT', 'punch on a site without a geofence still derives (PRESENT)');
+      assert(!f.flags.includes('OUT_OF_GEOFENCE'), 'no location geofence → no flag, punch succeeds');
     }
   } finally {
     await cleanup(businessId);
