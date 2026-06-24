@@ -160,29 +160,35 @@ async function build24QAnnexureII({ businessId, entityId, financialYear, db = pr
     }, B));
   }
 
-  // Fallback: any employee with payslips in the FY but no certificate → compute Part B.
-  if (!batch || certs.length === 0) {
-    const payslipEmps = await db.payslip.findMany({
-      where: {
-        businessId, deletedAt: null, status: { in: ['PUBLISHED', 'VIEWED'] },
-        periodEnd: { gte: new Date(fyStartIso), lte: new Date(fyEndIso) },
-        payRun: { entityId },
-      },
-      select: { employeeId: true, employee: { select: { code: true, firstName: true, middleName: true, lastName: true, statutoryProfile: { select: { pan: true } } } } },
-      distinct: ['employeeId'],
-    });
-    for (const p of payslipEmps) {
-      if (seen.has(p.employeeId)) continue;
-      seen.add(p.employeeId);
-      const tds = await assembler._internals.readFyPayslipTds({ businessId, employeeId: p.employeeId, fyStartIso, fyEndIso, db });
-      const { partB } = await assembler.buildPartB({ businessId, employeeId: p.employeeId, financialYear, ptMinor: tds.ptMinor, db });
-      const emp = p.employee || {};
-      rows.push(annexureRow({
-        pan: (emp.statutoryProfile && emp.statutoryProfile.pan) || null,
-        name: [emp.firstName, emp.middleName, emp.lastName].filter(Boolean).join(' ') || emp.code,
-        code: emp.code,
-      }, partB));
-    }
+  // ALWAYS include EVERY salaried employee for the FY (Finding 3). 24Q Annexure-II
+  // is the statutory annual deductee list and MUST carry every salaried employee for
+  // the year — including NIL-TDS ones (who have payslips but, being below the TDS
+  // threshold, get no Form-16 certificate). The `seen` set already records which
+  // employees a cert covered, and the `if (seen.has(...)) continue` guard below makes
+  // this idempotent, so we run the payslip-driven fallback unconditionally and append
+  // any FY-payslip employee not already covered by a certificate. (The previous
+  // `certs.length === 0` gate dropped all nil-TDS employees the moment ANY cert
+  // existed → a defective FVU return that under-reports deductees.)
+  const payslipEmps = await db.payslip.findMany({
+    where: {
+      businessId, deletedAt: null, status: { in: ['PUBLISHED', 'VIEWED'] },
+      periodEnd: { gte: new Date(fyStartIso), lte: new Date(fyEndIso) },
+      payRun: { entityId },
+    },
+    select: { employeeId: true, employee: { select: { code: true, firstName: true, middleName: true, lastName: true, statutoryProfile: { select: { pan: true } } } } },
+    distinct: ['employeeId'],
+  });
+  for (const p of payslipEmps) {
+    if (seen.has(p.employeeId)) continue;
+    seen.add(p.employeeId);
+    const tds = await assembler._internals.readFyPayslipTds({ businessId, employeeId: p.employeeId, fyStartIso, fyEndIso, db });
+    const { partB } = await assembler.buildPartB({ businessId, employeeId: p.employeeId, financialYear, ptMinor: tds.ptMinor, db });
+    const emp = p.employee || {};
+    rows.push(annexureRow({
+      pan: (emp.statutoryProfile && emp.statutoryProfile.pan) || null,
+      name: [emp.firstName, emp.middleName, emp.lastName].filter(Boolean).join(' ') || emp.code,
+      code: emp.code,
+    }, partB));
   }
 
   return rows;
@@ -198,7 +204,12 @@ function annexureRow(employee, B) {
     code: employee.code || '',
     grossSalary: r2(g.total),
     exemptAllowances_section10: r2(B.exemptAllowances_section10_total),
-    deductions_section16: r2((B.standardDeduction_section16ia || 0) + (B.professionalTax_section16iii || 0)),
+    // §16 deductions that ACTUALLY reduce the certified income = standard deduction
+    // only (PT is disclosed separately as a memo and is not netted into the certified
+    // total income — see buildPartB), so the row foots: grossSalary − exempt − §16 ==
+    // incomeUnderHeadSalaries. PT is surfaced as its own memo field.
+    deductions_section16: r2(B.standardDeduction_section16ia || 0),
+    professionalTax_section16iii_memo: r2(B.professionalTax_section16iii || 0),
     incomeUnderHeadSalaries: r2(B.incomeUnderHeadSalaries),
     grossTotalIncome: r2(B.grossTotalIncome),
     chapterVIA_totalDeductible: r2(B.chapterVIA && B.chapterVIA.totalDeductible),

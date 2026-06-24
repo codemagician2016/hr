@@ -42,6 +42,12 @@ class Form16Error extends Error {
 // paise → "rupees.cc" string for Decimal edges (none here; BigInt is used directly).
 function toBig(minor) { return BigInt(Math.round(Number(minor) || 0)); }
 function fromBig(v) { return v == null ? 0 : Number(v); }
+// rupees (number | Prisma.Decimal) → integer paise (for challan-pool reconciliation).
+function toMinor(v) {
+  if (v == null) return 0;
+  const n = typeof v === 'object' && typeof v.toNumber === 'function' ? v.toNumber() : Number(v);
+  return Number.isFinite(n) ? Math.round(n * 100) : 0;
+}
 
 // FORM16 / IN_FORM130 (FY ≥ 2026-27) — effective-dated form succession (§11), data not branch.
 function resolveFormKind(financialYear) {
@@ -123,6 +129,28 @@ async function computeForm16Batch({ businessId, actorId, batchId, issueZeroTds =
     address: [entity.addressLine1, entity.addressLine2, entity.city, entity.stateCode, entity.postalCode].filter(Boolean).join(', ') || null,
   };
 
+  // ── ENTITY-LEVEL §201 challan pool (Finding 1) ────────────────────────────────
+  // The TRUE deducted-vs-deposited reconciliation is at the ENTITY (batch) level:
+  // Σ TDS the entity actually DEPOSITED (its PAID/FILED IN_TDS challan rows for the
+  // FY) vs Σ TDS it DEDUCTED across all employees. A per-employee "a covering challan
+  // exists" check cannot catch a short-DEPOSIT (deducted 6k but only 4k deposited) —
+  // only this pool comparison can. The per-cert deposited figure is now the
+  // employee's own slice (no entity-pool leak), so we compute the entity gap once
+  // here rather than smearing the pool total onto every certificate.
+  const { startYear } = assembler._internals.fyBounds(batch.financialYear);
+  const challanPeriods = ['Q1', 'Q2', 'Q3', 'Q4']
+    .flatMap((q) => assembler._internals.quarterTaxPeriods(q, startYear));
+  const entityChallans = await prisma.statutoryRemittance.findMany({
+    where: {
+      businessId, entityId: batch.entityId, kind: 'IN_TDS',
+      taxPeriod: { in: challanPeriods }, status: { in: ['PAID', 'FILED'] },
+    },
+    select: { amount: true },
+  });
+  const entityDepositedPoolMinor = entityChallans.reduce(
+    (s, r) => s + toMinor(r.amount), 0,
+  );
+
   // Build every employee's frozen certificate. allocateCode mints a deterministic,
   // tenant-unique, burned certificate number per (entity, FY). We compute in a tx
   // so a partial failure rolls back; idempotent recompute deletes + rewrites.
@@ -180,6 +208,16 @@ async function computeForm16Batch({ businessId, actorId, batchId, issueZeroTds =
       if (!cert.reconciledOk) reconciledOk = false;
     }
 
+    // ENTITY-LEVEL §201 gap: the batch is NOT reconciled if the entity's actual
+    // challan pool deposit is short of the entity's total deducted TDS — a real
+    // short-deposit liability that per-employee "challan exists" checks miss. We
+    // certify the entity-deposited POOL as the batch's totalTdsDeposited (the true
+    // amount in the government's hands), not the Σ of per-employee covered slices,
+    // so the register shows the genuine deducted-vs-deposited position.
+    const entityShortDeposit = entityDepositedPoolMinor < totalDeducted;
+    if (entityShortDeposit) reconciledOk = false;
+    totalDeposited = entityDepositedPoolMinor;
+
     await tx.form16Batch.update({
       where: { id: batchId },
       data: {
@@ -193,7 +231,10 @@ async function computeForm16Batch({ businessId, actorId, batchId, issueZeroTds =
         version: { increment: 1 },
       },
     });
-    rolled = { headcount, totalDeducted, totalDeposited, reconciledOk };
+    rolled = {
+      headcount, totalDeducted, totalDeposited, reconciledOk,
+      entityDepositedPoolMinor, entityShortDeposit,
+    };
   }, { timeout: 60000 });
 
   await writeAudit({ businessId, actorId, action: 'form16.batch.compute', entityType: 'Form16Batch', entityId: batchId, meta: rolled });
@@ -317,28 +358,57 @@ async function issueForm16Batch({ businessId, actorId, batchId, sign = false, si
     }
   }
 
-  await prisma.form16Batch.update({
-    where: { id: batchId },
-    data: { status: 'ISSUED', issuedAt: new Date(), issuedBy: actorId, version: { increment: 1 } },
-  });
-  await writeAudit({ businessId, actorId, action: 'form16.batch.issue', entityType: 'Form16Batch', entityId: batchId, meta: { issued, failed, sign: !!sign, force: !!force } });
+  // Only mark the batch ISSUED when at least one certificate actually reached a
+  // terminal issued/pending-signature state in this run (Finding 5). If every cert
+  // failed (issued === 0 && failed > 0 — e.g. storePdf / e-sign down), keep the
+  // batch APPROVED so the run is re-driveable and the status doesn't misrepresent a
+  // 0-issued run as completed. An already-ISSUED batch re-driven with nothing left
+  // to issue (issued === 0 && failed === 0 because certs.length === 0) stays ISSUED.
+  const anyIssued = issued > 0;
+  const alreadyIssued = batch.status === 'ISSUED';
+  if (anyIssued || alreadyIssued) {
+    await prisma.form16Batch.update({
+      where: { id: batchId },
+      data: {
+        status: 'ISSUED',
+        // Stamp issuedAt/By only on the first transition to ISSUED (don't overwrite
+        // the original issue stamp on a later re-drive of an already-ISSUED batch).
+        ...(alreadyIssued ? {} : { issuedAt: new Date(), issuedBy: actorId }),
+        version: { increment: 1 },
+      },
+    });
+  }
+  await writeAudit({ businessId, actorId, action: 'form16.batch.issue', entityType: 'Form16Batch', entityId: batchId, meta: { issued, failed, sign: !!sign, force: !!force, batchIssued: anyIssued || alreadyIssued } });
 
-  return { batchId, issued, failed, total: certs.length, signed: !!sign };
+  return {
+    batchId, issued, failed, total: certs.length, signed: !!sign,
+    batchStatus: (anyIssued || alreadyIssued) ? 'ISSUED' : batch.status,
+  };
 }
 
-// ── 5. regenerateForm16Certificate — void-old + re-mint ONE (supersede chain) ──
+// ── 5. regenerateForm16Certificate — SUPERSEDE the old cert + INSERT a fresh one ──
+// A re-generate NEVER mutates a frozen cert's partAJson/partBJson/certificateNo
+// (those are the legal record at issue). It marks the old row SUPERSEDED and INSERTs
+// a NEW cert row (fresh number, fresh Part A/B), linked both ways via the supersede
+// chain — mirroring the IssuedLetter supersede pattern. The old certified figures
+// remain immutable + recoverable from the SUPERSEDED row.
 async function regenerateForm16Certificate({ businessId, actorId, batchId, employeeId, reason }) {
   const batch = await loadBatch(businessId, batchId);
   if (batch.status !== 'APPROVED' && batch.status !== 'ISSUED') {
     throw new Form16Error('BAD_STATE', 'Re-generate requires an APPROVED/ISSUED batch', 409);
   }
-  const cert = await prisma.form16Certificate.findFirst({ where: { businessId, batchId, employeeId } });
+  // The ACTIVE cert (not an already-superseded history row) is the supersede source.
+  const cert = await prisma.form16Certificate.findFirst({
+    where: { businessId, batchId, employeeId, status: { not: 'SUPERSEDED' } },
+    orderBy: { createdAt: 'desc' },
+  });
   if (!cert) throw new Form16Error('NOT_FOUND', 'Certificate not found', 404);
 
   const entity = await prisma.entity.findFirst({ where: { id: batch.entityId, businessId } });
   if (!entity) throw new Form16Error('ENTITY_NOT_FOUND', 'Entity not found', 404);
 
-  // 1) Void the old IssuedLetter (revokeLetter flips the ESS vault doc → HR_ONLY).
+  // 1) Void the old IssuedLetter (revokeLetter flips the ESS vault doc → HR_ONLY). The
+  // revoked IssuedLetter + its PDF/sha256 stay linked to the SUPERSEDED cert row.
   if (cert.issuedLetterId) {
     try {
       await letters.revokeLetter(prisma, { businessId, actorUserId: actorId, id: cert.issuedLetterId, reason: reason || 'Form 16 re-generated (correction)' });
@@ -352,7 +422,9 @@ async function regenerateForm16Certificate({ businessId, actorId, batchId, emplo
     address: [entity.addressLine1, entity.addressLine2, entity.city, entity.stateCode, entity.postalCode].filter(Boolean).join(', ') || null,
   };
 
-  // 2) Re-compute Part A/B + mint a FRESH certificate number (the old one is burned).
+  // 2) Re-compute Part A/B + mint a FRESH certificate number (the old one is burned),
+  // INSERT a new row, and SUPERSEDE the old one — atomically. The old row's frozen
+  // partAJson/partBJson/certificateNo are NEVER touched.
   const updated = await prisma.$transaction(async (tx) => {
     const code = await allocateCode(tx, {
       businessId, entityId: batch.entityId, scope: 'FORM16',
@@ -361,9 +433,24 @@ async function regenerateForm16Certificate({ businessId, actorId, batchId, emplo
     const fresh = await assembler.buildCertificate({
       businessId, employeeId, entity, deductor, financialYear: batch.financialYear, certificateNo: code, db: tx,
     });
-    return tx.form16Certificate.update({
+    // SUPERSEDE the old row FIRST — its frozen partAJson/partBJson/certificateNo stay
+    // as-is (immutable); only status (→ SUPERSEDED) changes. This also clears it from
+    // the ACTIVE partial-unique set so the replacement row (same business/batch/
+    // employee) can be inserted without colliding on the one-active-cert constraint.
+    await tx.form16Certificate.update({
       where: { id: cert.id },
       data: {
+        status: 'SUPERSEDED',
+        version: { increment: 1 },
+      },
+    });
+    // INSERT the replacement cert (PENDING, ready for re-issue), linked to its source.
+    const created = await tx.form16Certificate.create({
+      data: {
+        businessId,
+        batchId,
+        employeeId,
+        financialYear: batch.financialYear,
         certificateNo: code,
         regime: fresh.regime,
         partAJson: fresh.partA,
@@ -374,18 +461,19 @@ async function regenerateForm16Certificate({ businessId, actorId, batchId, emplo
         tdsDeductedMinor: toBig(fresh.rollups.tdsDeductedMinor),
         tdsDepositedMinor: toBig(fresh.rollups.tdsDepositedMinor),
         anomaliesJson: fresh.anomalies && fresh.anomalies.length ? fresh.anomalies : null,
-        // Clear the issue linkage + mark VOIDED→PENDING for re-issue.
-        issuedLetterId: null,
-        employeeDocumentId: null,
-        fileHash: null,
-        signatureEnvelopeId: null,
         status: 'PENDING',
-        version: { increment: 1 },
+        supersedesCertId: cert.id,
       },
     });
+    // Back-link the superseded row to its replacement (forward + back chain).
+    await tx.form16Certificate.update({
+      where: { id: cert.id },
+      data: { supersededByCertId: created.id },
+    });
+    return created;
   });
 
-  await writeAudit({ businessId, actorId, action: 'form16.cert.regenerate', entityType: 'Form16Certificate', entityId: cert.id, meta: { employeeId, reason: reason || null, oldCertNo: cert.certificateNo, newCertNo: updated.certificateNo } });
+  await writeAudit({ businessId, actorId, action: 'form16.cert.regenerate', entityType: 'Form16Certificate', entityId: cert.id, meta: { employeeId, reason: reason || null, oldCertId: cert.id, oldCertNo: cert.certificateNo, newCertId: updated.id, newCertNo: updated.certificateNo } });
   return serializeCert(updated);
 }
 

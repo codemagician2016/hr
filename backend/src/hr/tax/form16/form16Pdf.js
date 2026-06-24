@@ -251,7 +251,12 @@ function renderForm16Pdf({ partA, partB, deductor, deductee, business, brand, si
 
       sectionTitle(doc, { left, contentW, title: '3. Deductions u/s 16' });
       kvRow(doc, { left, contentW, label: '(ia) Standard deduction', value: money(B.standardDeduction_section16ia) });
-      kvRow(doc, { left, contentW, label: '(iii) Professional tax', value: money(B.professionalTax_section16iii) });
+      // §16(iii) professional tax is DISCLOSED as a memo: the certified total income
+      // (and the tax on it) is the F15/payroll figure, which does not net PT into the
+      // income-tax computation, so PT is shown as a memo line and is NOT subtracted
+      // in the footing chain below (Net salary − §16(ia) = Income chargeable). Marking
+      // it "(memo)" keeps the printed chain footing to the certified total income.
+      kvRow(doc, { left, contentW, label: '(iii) Professional tax (memo — not netted in certified income)', value: money(B.professionalTax_section16iii), muted: true });
       kvRow(doc, { left, contentW, label: 'Income chargeable under "Salaries"', value: money(B.incomeUnderHeadSalaries), bold: true });
 
       if (B.previousEmployerIncome) {
