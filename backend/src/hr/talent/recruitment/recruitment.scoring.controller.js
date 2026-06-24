@@ -726,6 +726,10 @@ async function requestOfferSignature(req, res, next) {
       include: { application: { include: { candidate: true, job: true } } },
     });
     if (!offer) return res.status(404).json({ message: 'Not found' });
+    // F1 scope — a scoped recruiter cannot request a signature on an out-of-requisition offer.
+    if (!scopeAllowsJob(req.recruitmentScope, offer.application && offer.application.job)) {
+      return res.status(404).json({ message: 'Not found' });
+    }
     if (!offer.letterUrl) return res.status(422).json({ message: 'Render the offer letter before requesting a signature.' });
     const cand = offer.application && offer.application.candidate;
     if (!cand || !cand.email) return res.status(422).json({ message: 'The candidate has no email to send the signature request to.' });

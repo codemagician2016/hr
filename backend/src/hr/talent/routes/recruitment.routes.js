@@ -50,13 +50,18 @@ router.get('/jobs/:id', canView, c.getJob);
 router.get('/jobs/:id/share', canView, c.shareJob);
 router.get('/jobs/:id/summary', canView, c.jobSummary);
 router.post('/jobs', canManage, c.createJob);
-router.patch('/jobs/:id', canManage, c.updateJob);
-router.delete('/jobs/:id', canManage, c.removeJob);
-router.post('/jobs/:id/publish', canManage, c.publishJob);
+// Job WRITES are F1 read-scoped (same as close): a scoped recruiter can only
+// mutate/publish/unpublish/delete a requisition they own (out-of-scope → 404),
+// and updateJob additionally blocks a non-ALL band from reassigning
+// hiringManagerId to widen its own scope (priv-esc, §6/§9.3).
+const writeScoped = [canManage, ...attachRecruitmentScope('canViewHiring')];
+router.patch('/jobs/:id', writeScoped, c.updateJob);
+router.delete('/jobs/:id', writeScoped, c.removeJob);
+router.post('/jobs/:id/publish', writeScoped, c.publishJob);
 // Prominent Publish/Unpublish-to-careers toggle (auto-derives the public slug).
-router.post('/jobs/:id/set-public', canManage, c.setJobPublic);
+router.post('/jobs/:id/set-public', writeScoped, c.setJobPublic);
 // Close needs read-scope resolved so a recruiter can only close a job they own.
-router.post('/jobs/:id/close', [canManage, ...attachRecruitmentScope('canViewHiring')], c.closeJob);
+router.post('/jobs/:id/close', writeScoped, c.closeJob);
 
 // ── Job pipeline stages ──────────────────────────────────────────────────────
 router.get('/jobs/:jobId/stages', canView, c.listStages);
@@ -114,16 +119,22 @@ router.patch('/me/scorecards/:id', canScore, attachSelfEmployee, s.saveMyScoreca
 router.post('/me/scorecards/:id/submit', canScore, attachSelfEmployee, s.submitMyScorecard);
 
 // ── Offers (50% wage pre-flight runs in createOffer) ─────────────────────────
+// Offer create/send/accept/decline/render/sign are F1 read-scoped: a scoped
+// recruiter can only draft/extend/finalise an offer on an application in a
+// requisition they own (out-of-scope → 404). attachRecruitmentScope ALSO runs
+// attachSelfEmployee, so the offer-approval SoD (maker ≠ checker, §9.4) still has
+// the actor's own Employee resolved on send/accept.
+const offerScoped = [canManage, ...attachRecruitmentScope('canViewHiring')];
 router.get('/offers', canView, c.listOffers);
 router.get('/offers/:id', canView, c.getOffer);
-router.post('/offers', canManage, c.createOffer);
-// send/accept carry the offer-approval SoD: attachSelfEmployee resolves the
-// actor's own Employee so the controller can reject a scorer/panellist approving
-// their own candidate's offer (maker ≠ checker, §9.4).
-router.post('/offers/:id/send', canManage, attachSelfEmployee, c.sendOffer);
-router.post('/offers/:id/accept', canManage, attachSelfEmployee, c.acceptOffer);
-router.post('/offers/:id/decline', canManage, c.declineOffer);
-router.post('/offers/:id/render-letter', canManage, c.renderOfferLetter);
-router.post('/offers/:id/request-signature', canManage, s.requestOfferSignature);
+router.post('/offers', offerScoped, c.createOffer);
+// send/accept carry the offer-approval SoD: attachSelfEmployee (via the scope
+// middleware) resolves the actor's own Employee so the controller can reject a
+// scorer/panellist approving their own candidate's offer (maker ≠ checker, §9.4).
+router.post('/offers/:id/send', offerScoped, c.sendOffer);
+router.post('/offers/:id/accept', offerScoped, c.acceptOffer);
+router.post('/offers/:id/decline', offerScoped, c.declineOffer);
+router.post('/offers/:id/render-letter', offerScoped, c.renderOfferLetter);
+router.post('/offers/:id/request-signature', offerScoped, s.requestOfferSignature);
 
 module.exports = router;

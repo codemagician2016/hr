@@ -327,6 +327,106 @@ async function partB() {
       const body2 = JSON.stringify(applyRes2.body || {});
       assert(!/score/i.test(body2) && !/merit/i.test(body2) && !/knock/i.test(body2), 'the apply response is a thank-you only (no score / merit / knockout leaked)');
     }
+
+    log('B6) F1 WRITE-scope (HIGH) — a scoped recruiter cannot mutate / publish / unpublish / delete an out-of-scope job:');
+    {
+      const rScope = await withScope(rUser);
+      // PATCH job B (M's req) → 404 (IDOR-safe), and the row is untouched.
+      const patchB = await callController(spine.updateJob, { user: rUser, params: { id: jobB.id }, body: { title: 'HACKED title' }, ...rScope });
+      assert(patchB.statusCode === 404, 'recruiter R cannot PATCH job B (out-of-requisition → 404)');
+      const jobBafter = await prisma.job.findUnique({ where: { id: jobB.id } });
+      assert(jobBafter.title === 'Frontend (M owns)', 'job B title is unchanged after the blocked PATCH');
+
+      // set-public toggle on job B → 404, isPublic unchanged.
+      const setPubB = await callController(spine.setJobPublic, { user: rUser, params: { id: jobB.id }, body: { isPublic: true }, ...rScope });
+      assert(setPubB.statusCode === 404, 'recruiter R cannot set-public job B (out-of-requisition → 404)');
+      const jobBpub = await prisma.job.findUnique({ where: { id: jobB.id } });
+      assert(jobBpub.isPublic !== true, 'job B was NOT flipped public by the out-of-scope recruiter');
+
+      // DELETE (soft) job B → 404, deletedAt stays null.
+      const delB = await callController(spine.removeJob, { user: rUser, params: { id: jobB.id }, ...rScope });
+      assert(delB.statusCode === 404, 'recruiter R cannot DELETE job B (out-of-requisition → 404)');
+      const jobBdel = await prisma.job.findUnique({ where: { id: jobB.id } });
+      assert(jobBdel.deletedAt === null, 'job B was NOT soft-deleted by the out-of-scope recruiter');
+
+      // publish: make a DRAFT req owned by M, recruiter R cannot publish it.
+      const draftB = await prisma.job.create({ data: { businessId, entityId, code: `${PREFIX}-JOBBD`, title: 'Draft (M owns)', countryCode: 'IN', employmentType: 'FULL_TIME', status: 'DRAFT', hiringManagerId: managerM.id } });
+      const pubB = await callController(spine.publishJob, { user: rUser, params: { id: draftB.id }, ...rScope });
+      assert(pubB.statusCode === 404, 'recruiter R cannot PUBLISH M\'s draft job (out-of-requisition → 404)');
+      const draftBafter = await prisma.job.findUnique({ where: { id: draftB.id } });
+      assert(draftBafter.status === 'DRAFT', 'M\'s draft job stays DRAFT after the blocked publish');
+
+      // control: recruiter R CAN patch their OWN job A (non-escalating field).
+      const patchA = await callController(spine.updateJob, { user: rUser, params: { id: jobA.id }, body: { description: 'R edits own req' }, ...rScope });
+      assert(patchA.statusCode === 200, 'recruiter R CAN patch their own job A (in-scope write still works)');
+    }
+
+    log('B7) Priv-esc guard (HIGH) — a scoped recruiter cannot reassign hiringManagerId to widen scope:');
+    {
+      const rScope = await withScope(rUser);
+      // R tries to self-assign M's req → forbidden (would widen R's read scope).
+      const grabB = await callController(spine.updateJob, { user: rUser, params: { id: jobB.id }, body: { hiringManagerId: recruiterR.id }, ...rScope });
+      assert(grabB.statusCode === 404, 'recruiter R cannot even SEE job B to reassign it (404)');
+
+      // R tries to reassign their OWN job A to a different manager → 403 (only ALL band may reassign).
+      const reassignA = await callController(spine.updateJob, { user: rUser, params: { id: jobA.id }, body: { hiringManagerId: managerM.id }, ...rScope });
+      assert(reassignA.statusCode === 403 && reassignA.body.code === 'HIRING_MANAGER_REASSIGN_FORBIDDEN', 'scoped recruiter cannot reassign a requisition\'s hiring manager (403)');
+      const jobAhm = await prisma.job.findUnique({ where: { id: jobA.id } });
+      assert(jobAhm.hiringManagerId === recruiterR.id, 'job A hiringManagerId is unchanged after the blocked reassign');
+
+      // a no-op "reassign" to the SAME manager is allowed (not an escalation).
+      const sameHm = await callController(spine.updateJob, { user: rUser, params: { id: jobA.id }, body: { hiringManagerId: recruiterR.id, description: 'noop hm' }, ...rScope });
+      assert(sameHm.statusCode === 200, 'setting hiringManagerId to the SAME value is allowed (no escalation)');
+
+      // control: an ALL-band admin CAN reassign the hiring manager.
+      const opReassign = await callController(spine.updateJob, { user: op, params: { id: jobA.id }, body: { hiringManagerId: managerM.id }, ...(await withScope(op)) });
+      assert(opReassign.statusCode === 200, 'an ALL-band admin CAN reassign the hiring manager');
+      // restore job A's owner for the offer test below.
+      await prisma.job.update({ where: { id: jobA.id }, data: { hiringManagerId: recruiterR.id } });
+    }
+
+    log('B8) Offer create/send scope (MED) — a scoped recruiter cannot draft/send an offer out-of-scope:');
+    {
+      const rScope = await withScope(rUser);
+      // R drafts an offer on app B (M's req, out of R's scope) → 404, NO offer row.
+      const createOut = await callController(spine.createOffer, { user: rUser, params: {}, body: { applicationId: appB.id, currencyCode: 'INR', grossMonthly: 90000, basicMonthly: 50000, joiningDate: '2026-10-01' }, ...rScope });
+      assert(createOut.statusCode === 404, 'recruiter R cannot CREATE an offer on app B (out-of-requisition → 404)');
+      const leaked = await prisma.offer.findFirst({ where: { businessId, applicationId: appB.id } });
+      assert(!leaked, 'no DRAFT offer row was written for the out-of-scope application');
+
+      // HR drafts + the recruiter (out of scope) tries to SEND it → 404.
+      const hrDraft = await callController(spine.createOffer, { user: op, params: {}, body: { applicationId: appB.id, currencyCode: 'INR', grossMonthly: 90000, basicMonthly: 50000, joiningDate: '2026-10-01' } });
+      assert(hrDraft.statusCode === 201, 'HR (ALL band) drafts the offer on app B');
+      const outOfScopeOfferId = hrDraft.body.id;
+      const sendOut = await callController(spine.sendOffer, { user: rUser, params: { id: outOfScopeOfferId }, body: {}, ...rScope });
+      assert(sendOut.statusCode === 404, 'recruiter R cannot SEND an offer on app B (out-of-requisition → 404)');
+      const stillDraft = await prisma.offer.findUnique({ where: { id: outOfScopeOfferId } });
+      assert(stillDraft.status === 'DRAFT', 'the out-of-scope offer stays DRAFT (never SENT by the out-of-scope recruiter)');
+    }
+
+    log('B9) Bulk set-status (LOW) — cannot resurrect terminal apps nor set HIRED:');
+    {
+      const opScope = await withScope(op); // ALL band — scope is not the gate under test here
+      // fresh apps on job A: one terminal (REJECTED), one live (APPLIED).
+      const candR = await prisma.candidate.create({ data: { businessId, firstName: 'Rej', lastName: 'X', email: `${PREFIX}-rej@x.com` } });
+      const candL = await prisma.candidate.create({ data: { businessId, firstName: 'Live', lastName: 'Y', email: `${PREFIX}-live@x.com` } });
+      const appRej = await prisma.application.create({ data: { businessId, jobId: jobA.id, candidateId: candR.id, status: 'REJECTED' } });
+      const appLive = await prisma.application.create({ data: { businessId, jobId: jobA.id, candidateId: candL.id, status: 'APPLIED' } });
+
+      // (a) HIRED is NOT a valid bulk target → 400, nothing moves.
+      const toHired = await callController(spine.bulkApplicationAction, { user: op, body: { action: 'set-status', status: 'HIRED', filter: { jobId: jobA.id } }, ...opScope });
+      assert(toHired.statusCode === 400, 'bulk set-status to HIRED is rejected (400 — HIRED only via offer-accept SoD)');
+      const liveStill = await prisma.application.findUnique({ where: { id: appLive.id } });
+      assert(liveStill.status !== 'HIRED', 'no application was flipped to HIRED by the rejected bulk call');
+
+      // (b) bulk set-status cannot resurrect a REJECTED app; the live one DOES move.
+      const reopen = await callController(spine.bulkApplicationAction, { user: op, body: { action: 'set-status', status: 'APPLIED', ids: [appRej.id, appLive.id] }, ...opScope });
+      assert(reopen.statusCode === 200, 'bulk set-status to APPLIED returns 200');
+      const rejAfter = await prisma.application.findUnique({ where: { id: appRej.id } });
+      assert(rejAfter.status === 'REJECTED', 'the terminal REJECTED app is NOT resurrected (skipped)');
+      assert(reopen.body.skipped >= 1, 'the bulk response reports the terminal app as skipped');
+      // (the live APPLIED app was already APPLIED so it may report changed or no-op; the guard is that terminal stays terminal.)
+    }
   } finally {
     await cleanup();
     await prisma.$disconnect();
