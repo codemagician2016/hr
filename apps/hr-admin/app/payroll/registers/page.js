@@ -82,7 +82,7 @@ function RegistersTab() {
         setEntities(inOnly);
         if (inOnly[0]) { setEntityId(inOnly[0].id); setStateCode(inOnly[0].stateCode || ''); }
       })
-      .catch(() => {});
+      .catch((e) => setError(e.data?.message || e.message || 'Could not load entities — you may be missing a payroll permission.'));
   }, []);
 
   // Load the catalog when the entity/state changes.
@@ -283,7 +283,7 @@ function HistoryTab() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    get('/api/hr/payroll/entities').then((r) => { const l = Array.isArray(r) ? r : (r.items || []); setEntities(l); if (l[0]) setEntityId(l[0].id); }).catch(() => {});
+    get('/api/hr/payroll/entities').then((r) => { const l = Array.isArray(r) ? r : (r.items || []); setEntities(l); if (l[0]) setEntityId(l[0].id); }).catch((e) => setError(e.data?.message || e.message || 'Could not load entities — you may be missing a payroll permission.'));
   }, []);
 
   const load = useCallback(() => {
@@ -348,7 +348,7 @@ function DefinitionsTab() {
   const [forbidden, setForbidden] = useState(false);
 
   useEffect(() => {
-    get('/api/hr/payroll/entities').then((r) => { const l = Array.isArray(r) ? r : (r.items || []); setEntities(l); if (l[0]) setEntityId(l[0].id); }).catch(() => {});
+    get('/api/hr/payroll/entities').then((r) => { const l = Array.isArray(r) ? r : (r.items || []); setEntities(l); if (l[0]) setEntityId(l[0].id); }).catch((e) => setError(e.data?.message || e.message || 'Could not load entities — you may be missing a payroll permission.'));
   }, []);
 
   const load = useCallback(() => {
