@@ -899,6 +899,50 @@ function computeProfessionalTax({ stateCode, ptGrossMinor, gender, month, asOf }
 // ===========================================================================
 
 /**
+ * surchargeWithMarginalRelief — compute the banded surcharge on income-tax WITH
+ * statutory marginal relief at each surcharge threshold (₹50L / ₹1cr / ₹2cr /
+ * any higher band). PURE; regime-independent given the regime's threshold-tax fn.
+ *
+ * Marginal relief (Income-tax Act, proviso to §2 of the Finance Act): the
+ * incremental (income-tax + surcharge) on income marginally above a threshold
+ * cannot exceed the income that is in excess of that threshold, i.e.
+ *
+ *   (taxAfterRelief + surcharge)  ≤  taxAtThreshold + (taxableRupees − threshold)
+ *
+ * where taxAtThreshold = income-tax (after §87A rebate/relief, BEFORE surcharge)
+ * on income equal to the band's lower threshold. Surcharge is reduced (never
+ * below 0) to honour the cap. Without relief a ₹10 step over a band edge would
+ * impose a surcharge of lakhs — a tax cliff that flips regime advice. Surcharge
+ * is rounded to whole paise at the statutory point (after relief), matching the
+ * cess base.
+ *
+ * @param taxableRupees       total taxable income (RUPEES) — drives the band pick
+ * @param taxAfterReliefMinor income-tax after §87A (PAISE), pre-surcharge
+ * @param thresholdTaxFn      (rupees) -> income-tax after §87A at that income (PAISE)
+ * @returns surcharge in whole PAISE (relief applied), 0 if no band matches
+ */
+function surchargeWithMarginalRelief(taxableRupees, taxAfterReliefMinor, thresholdTaxFn) {
+  for (const band of rules.surchargeNewRegime) {
+    if (
+      taxableRupees > band.aboveRupees &&
+      (band.upToRupees == null || taxableRupees <= band.upToRupees)
+    ) {
+      let surchargeMinor = roundHalfUpPaise(pctExact(taxAfterReliefMinor, band.num, band.den));
+
+      // Marginal relief: cap (tax + surcharge) at threshold-tax + excess income.
+      const taxAtThresholdMinor = thresholdTaxFn(band.aboveRupees);
+      const excessIncomeMinor = rupees(taxableRupees - band.aboveRupees);
+      const capMinor = taxAtThresholdMinor + excessIncomeMinor;
+      if (taxAfterReliefMinor + surchargeMinor > capMinor) {
+        surchargeMinor = Math.max(0, capMinor - taxAfterReliefMinor);
+      }
+      return surchargeMinor;
+    }
+  }
+  return 0;
+}
+
+/**
  * Annual income-tax on a taxable income (RUPEES in, paise out), NEW regime.
  * Steps: slab tax -> §87A rebate -> §87A marginal relief -> surcharge
  * (+marginal relief) -> 4% cess. Returns paise.
@@ -933,17 +977,15 @@ function annualTaxNewRegime(taxableRupees) {
     }
   }
 
-  // 6./9. surcharge (new regime, capped 25%) on income-tax, with marginal relief.
-  let surchargeMinor = 0;
-  for (const band of rules.surchargeNewRegime) {
-    if (taxableRupees > band.aboveRupees && (band.upToRupees == null || taxableRupees <= band.upToRupees)) {
-      surchargeMinor = pctExact(taxMinor, band.num, band.den);
-      // marginal relief on surcharge: incremental (tax+surcharge) cannot exceed
-      // incremental income over the threshold. (Simplified per docs/05 §2.5.)
-      surchargeMinor = roundHalfUpPaise(surchargeMinor);
-      break;
-    }
-  }
+  // 6./9. surcharge (new regime, capped 25%) on income-tax, WITH marginal relief
+  // at each band threshold (₹50L/₹1cr/₹2cr): (tax+surcharge) is capped at
+  // taxAtThreshold + (income − threshold). Threshold-tax = NEW-regime income-tax
+  // after §87A at the band edge (surcharge 0 there, so no recursion).
+  const surchargeMinor = surchargeWithMarginalRelief(
+    taxableRupees,
+    taxMinor,
+    (r) => annualTaxNewRegime(r).taxAfterReliefMinor,
+  );
 
   const taxPlusSurchargeMinor = taxMinor + surchargeMinor;
 
@@ -962,22 +1004,30 @@ function annualTaxNewRegime(taxableRupees) {
 }
 
 /**
- * Monthly TDS via §192 annualised projection (new regime default).
+ * Monthly TDS via §192 annualised projection. REGIME-AWARE: branches to the
+ * employee's elected regime (employee.taxRegime 'OLD' | 'NEW', default NEW) so
+ * the live deduction reconciles to the F15 projection (projectAnnualIncomeTax)
+ * for BOTH regimes.
  *  1 project annual gross (YTD actual + remaining months × current month gross)
- *  2 regime select (NEW default)
- *  3 std deduction
- *  4 taxable
- *  5..10 annual tax (rebate/relief/surcharge/cess)
+ *  2 regime select (from employee.taxRegime; NEW default)
+ *  3 std deduction (regime-specific: NEW ₹75k, OLD ₹50k)
+ *  4 taxable  (or annualTaxableOverrideMinor — the projection's post-HRA/Ch-VIA taxable)
+ *  5..10 annual tax (rebate/relief/surcharge/cess) via the elected regime
  *  11 − YTD TDS already deducted
  *  12 ÷ months remaining -> round to ₹1
  *
- * If no PAN and tax is due -> 20% flat u/s 206AA on projected taxable (T16).
+ * If no PAN and tax is due -> §206AA at the HIGHER OF the normal computed rate
+ * vs 20% flat on taxable income (penal floor, never a discount).
  *
  * @param periodGrossMinor   this month's taxable salary (gross for projection)
  * @param ytd  { taxableGrossMinor, tdsDeductedMinor, monthsElapsed }  (optional)
  * @param period             pay period (for months-remaining + as-of)
- * @param employee           { hasPan }
- * @param annualProjectionOverrideMinor  optional pre-computed annual gross
+ * @param employee           { hasPan, taxRegime }
+ * @param annualProjectionOverrideMinor  optional pre-computed annual GROSS
+ * @param annualTaxableOverrideMinor     optional pre-computed annual TAXABLE income
+ *   (post-exemptions/Chapter-VIA, std deduction already removed). When provided,
+ *   it is used as-is (no further std deduction) so an OLD-regime live run can hand
+ *   in the SAME taxable the projection computed and reconcile to the paise.
  */
 function computeTds({
   periodGrossMinor,
@@ -985,10 +1035,15 @@ function computeTds({
   period,
   employee = {},
   annualProjectionOverrideMinor = null,
+  annualTaxableOverrideMinor = null,
 }) {
   const monthsElapsed = ytd.monthsElapsed || 0; // months already paid this FY
   const monthsTotal = 12;
   const monthsRemaining = Math.max(1, monthsTotal - monthsElapsed);
+
+  // 2. regime select — honour the employee's ELECTED regime (default NEW).
+  const isOld = employee.taxRegime === 'OLD';
+  const regimeFn = isOld ? annualTaxOldRegime : annualTaxNewRegime;
 
   // 1. project annual gross.
   const ytdGrossMinor = ytd.taxableGrossMinor || 0;
@@ -997,29 +1052,46 @@ function computeTds({
       ? annualProjectionOverrideMinor
       : ytdGrossMinor + periodGrossMinor * monthsRemaining;
 
-  // 3./4. taxable = annual gross − std deduction (new regime).
-  const stdDedMinor = rupees(rules.stdDeductionRupees);
-  const taxableMinor = Math.max(0, projectedAnnualGrossMinor - stdDedMinor);
+  // 3./4. taxable. If the caller hands in a fully-computed taxable (the F15
+  // projection's post-HRA/Chapter-VIA figure), use it verbatim; otherwise
+  // taxable = annual gross − regime-specific std deduction.
+  const stdDedRupees = isOld
+    ? rules.incomeTaxOldRegime.stdDeductionRupees
+    : rules.stdDeductionRupees;
+  const stdDedMinor = rupees(stdDedRupees);
+  const taxableMinor =
+    annualTaxableOverrideMinor != null
+      ? Math.max(0, annualTaxableOverrideMinor)
+      : Math.max(0, projectedAnnualGrossMinor - stdDedMinor);
   const taxableRupees = Math.round(taxableMinor / PAISE);
 
   let annualTaxMinor;
   let breakdown;
   const noPan = employee.hasPan === false;
 
+  const normal = regimeFn(taxableRupees);
+
   if (noPan) {
-    // §206AA: 20% flat on projected taxable income if any tax otherwise due.
-    const normal = annualTaxNewRegime(taxableRupees);
+    // §206AA (no PAN): TDS at the HIGHER OF the normal computed rate vs 20% flat
+    // on taxable income — NOT an unconditional flat 20% (that under-taxes high
+    // earners whose effective rate exceeds 20%, leaving the employer §201-liable).
     if (normal.totalAnnualTaxMinor > 0) {
-      annualTaxMinor = roundHalfUpPaise(
+      const flat20Minor = roundHalfUpPaise(
         pctExact(taxableMinor, rules.noPanFlatRate.num, rules.noPanFlatRate.den),
       );
-      breakdown = { mode: '206AA_NO_PAN_20PCT', totalAnnualTaxMinor: annualTaxMinor };
+      if (flat20Minor > normal.totalAnnualTaxMinor) {
+        annualTaxMinor = flat20Minor;
+        breakdown = { mode: '206AA_NO_PAN_20PCT', totalAnnualTaxMinor: annualTaxMinor };
+      } else {
+        annualTaxMinor = normal.totalAnnualTaxMinor;
+        breakdown = { ...normal, mode: '206AA_NO_PAN_NORMAL_HIGHER' };
+      }
     } else {
       annualTaxMinor = 0;
       breakdown = normal;
     }
   } else {
-    breakdown = annualTaxNewRegime(taxableRupees);
+    breakdown = normal;
     annualTaxMinor = breakdown.totalAnnualTaxMinor;
   }
 
@@ -1081,17 +1153,15 @@ function annualTaxOldRegime(taxableRupees) {
     taxMinor = taxBeforeRebateMinor - rebate;
   }
 
-  // surcharge (regime-independent bands) on income-tax, pre-cess.
-  let surchargeMinor = 0;
-  for (const band of rules.surchargeNewRegime) {
-    if (
-      taxableRupees > band.aboveRupees &&
-      (band.upToRupees == null || taxableRupees <= band.upToRupees)
-    ) {
-      surchargeMinor = roundHalfUpPaise(pctExact(taxMinor, band.num, band.den));
-      break;
-    }
-  }
+  // surcharge (regime-independent bands) on income-tax, pre-cess, WITH marginal
+  // relief at each band threshold (₹50L/₹1cr/₹2cr): (tax+surcharge) capped at
+  // taxAtThreshold + (income − threshold). Threshold-tax = OLD-regime income-tax
+  // after §87A at the band edge (surcharge 0 there, so no recursion).
+  const surchargeMinor = surchargeWithMarginalRelief(
+    taxableRupees,
+    taxMinor,
+    (r) => annualTaxOldRegime(r).taxAfterReliefMinor,
+  );
 
   const taxPlusSurchargeMinor = taxMinor + surchargeMinor;
 
@@ -1332,7 +1402,12 @@ function projectAnnualIncomeTax({
     taxBreakdown = annualTaxNewRegime(Math.round(taxableMinor / PAISE));
   }
 
-  // §206AA: no PAN and tax otherwise due → 20% flat on taxable income.
+  // §206AA: no PAN and tax otherwise due → TDS at the HIGHER OF the normal
+  // (slab+surcharge+cess) tax vs 20% flat on taxable income. The flat figure is a
+  // penal FLOOR, never a discount — for high earners the normal effective rate
+  // (30% slab + surcharge + 4% cess) exceeds 20%, so the normal breakdown wins
+  // and its surcharge/cess are KEPT (not zeroed). Only when flat actually exceeds
+  // the normal total do we swap to the flat figure (no surcharge/cess on a flat).
   let totalAnnualTaxMinor = taxBreakdown.totalAnnualTaxMinor;
   let taxPayableMinor = taxBreakdown.taxAfterReliefMinor;
   let surchargeMinor = taxBreakdown.surchargeMinor;
@@ -1342,11 +1417,14 @@ function projectAnnualIncomeTax({
     const flat = roundHalfUpPaise(
       pctExact(taxableMinor, rules.noPanFlatRate.num, rules.noPanFlatRate.den),
     );
-    totalAnnualTaxMinor = flat;
-    taxPayableMinor = flat;
-    surchargeMinor = 0;
-    cessMinor = 0;
     noPanApplied = true;
+    if (flat > totalAnnualTaxMinor) {
+      totalAnnualTaxMinor = flat;
+      taxPayableMinor = flat;
+      surchargeMinor = 0;
+      cessMinor = 0;
+    }
+    // else: normal computed tax is higher → keep taxBreakdown's tax/surcharge/cess.
   }
 
   const grossAfterExemptMinor =

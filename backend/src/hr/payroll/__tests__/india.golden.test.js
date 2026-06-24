@@ -463,6 +463,50 @@ function amt(arr, code) {
   check('Surcharge taxable 60,00,000 (₹15,78,720)', R(1578720), t.totalAnnualTaxMinor);
 }
 
+// --- SURCHARGE MARGINAL RELIEF (docs/05 §2.5; Finance Act proviso). ₹10 over a
+//   band edge must NOT trigger the full banded surcharge: (tax+surcharge) is
+//   capped at taxAtThreshold + (income − threshold). Hand-derived to the paise.
+//
+//   NEW ₹50,00,010 (>₹50L, 10% band):
+//     slab tax at 50L = ₹10,80,000; +30%×₹10 = ₹3 -> tax 10,80,003 (108000300p).
+//     raw surcharge 10%×10,80,003 = 1,08,000.30. taxAtThreshold (NEW @50L) =
+//     10,80,000 (108000000p); excess income ₹10 (1000p); cap = 108001000p.
+//     relief: surcharge = cap − tax = 108001000 − 108000300 = 700p (₹7).
+//     tax+sur = 108001000; cess 4% = 4,32,004 (4320040p);
+//     total = 108001000 + 4320040 = 112321040p = ₹11,23,210.40.
+//   (Without relief this would be ₹12,35,523 — a ₹1.12L cliff for ₹10 income.)
+{
+  const t = annualTaxNewRegime(5000010);
+  check('Marginal relief NEW ₹50,00,010 surcharge -> ₹7', 700, t.surchargeMinor);
+  check('Marginal relief NEW ₹50,00,010 total -> ₹11,23,210.40', 112321040, t.totalAnnualTaxMinor);
+  // continuity: ₹10 over the edge costs only the marginal ₹10.40 of tax, not lakhs.
+  check('Marginal relief NEW continuity (₹50L total ₹11,23,200)', R(1123200), annualTaxNewRegime(5000000).totalAnnualTaxMinor);
+}
+
+//   NEW ₹1,00,00,010 (>₹1cr, 15% band):
+//     slab tax at 1cr = ₹25,80,000; +30%×₹10 = ₹3 -> tax 25,80,003 (258000300p).
+//     taxAtThreshold (NEW @1cr) = 25,80,000 (258000000p); excess ₹10 (1000p);
+//     cap = 258001000p. surcharge = 258001000 − 258000300 = 700p (₹7).
+//     tax+sur = 258001000; cess 4% = 10,32,004 (10320040p);
+//     total = 268321040p = ₹26,83,210.40. (Without relief: ₹30,85,683.)
+{
+  const t = annualTaxNewRegime(10000010);
+  check('Marginal relief NEW ₹1,00,00,010 surcharge -> ₹7', 700, t.surchargeMinor);
+  check('Marginal relief NEW ₹1,00,00,010 total -> ₹26,83,210.40', 268321040, t.totalAnnualTaxMinor);
+}
+
+//   NEW ₹2,00,00,010 (>₹2cr, 25%-capped band):
+//     slab tax at 2cr = ₹55,80,000; +30%×₹10 = ₹3 -> tax 55,80,003 (558000300p).
+//     taxAtThreshold (NEW @2cr) = 55,80,000 (558000000p); excess ₹10 (1000p);
+//     cap = 558001000p. surcharge = 558001000 − 558000300 = 700p (₹7).
+//     tax+sur = 558001000; cess 4% = 22,32,004 (22320040p);
+//     total = 580321040p = ₹58,03,210.40. (Without relief: ₹72,54,003.)
+{
+  const t = annualTaxNewRegime(20000010);
+  check('Marginal relief NEW ₹2,00,00,010 surcharge -> ₹7', 700, t.surchargeMinor);
+  check('Marginal relief NEW ₹2,00,00,010 total -> ₹58,03,210.40', 580321040, t.totalAnnualTaxMinor);
+}
+
 // --- TDS monthly via compute() with explicit annual projection override.
 //   docs/05 §7.1 averaging: annual tax ÷ remaining months − YTD.
 //   Annual projection ₹18,00,000 (override), monthsElapsed 0 -> remaining 12,
@@ -690,6 +734,46 @@ const {
   check('F3 OLD taxable 15L -> ₹2,73,000', R(273000), annualTaxOldRegime(1500000).totalAnnualTaxMinor);
 }
 
+// --- F3b: SURCHARGE MARGINAL RELIEF (OLD regime). Same proviso as NEW; bands are
+//   regime-independent. ₹10 over each edge must not trigger the full surcharge.
+//
+//   OLD ₹50,00,010 (>₹50L, 10% band):
+//     slab tax at 50L = ₹13,12,500; +30%×₹10 = ₹3 -> tax 13,12,503 (131250300p).
+//     taxAtThreshold (OLD @50L) = 13,12,500 (131250000p); excess ₹10 (1000p);
+//     cap = 131251000p. surcharge = 131251000 − 131250300 = 700p (₹7).
+//     tax+sur = 131251000; cess 4% = 5,25,004 (5250040p);
+//     total = 136501040p = ₹13,65,010.40. (Without relief: ₹15,01,503.)
+{
+  const t = annualTaxOldRegime(5000010);
+  check('F3b marginal relief OLD ₹50,00,010 surcharge -> ₹7', 700, t.surchargeMinor);
+  check('F3b marginal relief OLD ₹50,00,010 total -> ₹13,65,010.40', 136501040, t.totalAnnualTaxMinor);
+  check('F3b OLD continuity (₹50L total ₹13,65,000)', R(1365000), annualTaxOldRegime(5000000).totalAnnualTaxMinor);
+}
+
+//   OLD ₹1,00,00,010 (>₹1cr, 15% band):
+//     slab tax at 1cr = ₹28,12,500; +30%×₹10 = ₹3 -> tax 28,12,503 (281250300p).
+//     taxAtThreshold (OLD @1cr) = 28,12,500 (281250000p); excess ₹10 (1000p);
+//     cap = 281251000p. surcharge = 281251000 − 281250300 = 700p (₹7).
+//     tax+sur = 281251000; cess 4% = 11,25,004 (11250040p);
+//     total = 292501040p = ₹29,25,010.40. (Without relief: ₹33,63,753.)
+{
+  const t = annualTaxOldRegime(10000010);
+  check('F3b marginal relief OLD ₹1,00,00,010 surcharge -> ₹7', 700, t.surchargeMinor);
+  check('F3b marginal relief OLD ₹1,00,00,010 total -> ₹29,25,010.40', 292501040, t.totalAnnualTaxMinor);
+}
+
+//   OLD ₹2,00,00,010 (>₹2cr, 25%-capped band):
+//     slab tax at 2cr = ₹58,12,500; +30%×₹10 = ₹3 -> tax 58,12,503 (581250300p).
+//     taxAtThreshold (OLD @2cr) = 58,12,500 (581250000p); excess ₹10 (1000p);
+//     cap = 581251000p. surcharge = 581251000 − 581250300 = 700p (₹7).
+//     tax+sur = 581251000; cess 4% = 23,25,004 (23250040p);
+//     total = 604501040p = ₹60,45,010.40. (Without relief: ₹75,56,253.)
+{
+  const t = annualTaxOldRegime(20000010);
+  check('F3b marginal relief OLD ₹2,00,00,010 surcharge -> ₹7', 700, t.surchargeMinor);
+  check('F3b marginal relief OLD ₹2,00,00,010 total -> ₹60,45,010.40', 604501040, t.totalAnnualTaxMinor);
+}
+
 // --- F4: HRA exemption least-of-three (§10(13A)).
 //   Basic+DA 6L, received 2.4L, rent 3L, metro.
 //   legs: received 2.4L; rent-10%(6L)=3L-60k=2.4L; 50%×6L=3L. least=2.4L (received/rentMinus10 tie).
@@ -874,6 +958,49 @@ const {
   });
   check('F13 prev-employer taxable folded -> ₹7,35,000', R(735000), out.taxableIncomeMinor);
   check('F13 total tax with prev-employer -> ₹61,880', R(61880), out.totalAnnualTaxMinor);
+}
+
+// --- F14: §206AA no-PAN is HIGHER-OF (normal vs 20% flat), NOT an unconditional
+//   flat. At a HIGH income the normal effective rate (30% slab + surcharge + 4%
+//   cess) exceeds 20%, so the normal tax is kept and no-PAN tax must be >= with-PAN.
+//   NEW Basic+DA ₹60,00,000: taxable 60L − 75k std = 59,25,000.
+//     normal = ₹15,52,980 (incl. surcharge ₹1,35,750 + cess ₹59,730).
+//     flat 20% × 59,25,000 = ₹11,85,000 < normal -> higher-of keeps normal.
+//   The OLD bug applied flat ₹11,85,000 (LOWER) — a missing PAN cut the tax.
+{
+  const noPan = projectAnnualIncomeTax({ regime: 'NEW', annualEarnings: { basicDaMinor: R(6000000) }, hasPan: false });
+  const withPan = projectAnnualIncomeTax({ regime: 'NEW', annualEarnings: { basicDaMinor: R(6000000) }, hasPan: true });
+  check('F14 no-PAN §206AA higher-of keeps normal -> ₹15,52,980', R(1552980), noPan.totalAnnualTaxMinor);
+  check('F14 no-PAN flag still set', true, noPan.noPanApplied);
+  check('F14 no-PAN keeps surcharge (not zeroed) -> ₹1,35,750', R(135750), noPan.surchargeMinor);
+  check('F14 no-PAN keeps cess (not zeroed) -> ₹59,730', R(59730), noPan.cessMinor);
+  check('F14 no-PAN tax >= with-PAN tax (penal floor, never a discount)', true, noPan.totalAnnualTaxMinor >= withPan.totalAnnualTaxMinor);
+}
+
+// --- F15: §192 PARITY for OLD-regime employees. computeTds is REGIME-AWARE
+//   (employee.taxRegime + a pre-computed taxable) so the live deduction reconciles
+//   to the OLD-regime projection to the paise. (Old bug: computeTds hard-wired
+//   NEW regime -> an OLD employee's payslip TDS never matched the projection.)
+//   OLD projection taxable 5,35,000 -> total tax ₹20,280; computeTds fed that
+//   taxable under OLD regime must also yield ₹20,280; monthly = 20,280/12 = ₹1,690.
+{
+  const proj = projectAnnualIncomeTax({
+    regime: 'OLD',
+    annualEarnings: { basicDaMinor: R(600000), hraReceivedMinor: R(240000), otherAllowancesMinor: R(120000), residualChoicePayMinor: R(90000) },
+    hraInput: { hraReceivedAnnualMinor: R(240000), rentPaidAnnualMinor: R(300000), metro: true },
+    chapterVIAInput: { sec80cGrossMinor: R(180000), sec80ccd1bGrossMinor: R(50000), sec80dGrossMinor: R(28000) },
+    hasPan: true,
+  });
+  const tds = computeTds({
+    periodGrossMinor: 0,
+    ytd: { taxableGrossMinor: 0, tdsDeductedMinor: 0, monthsElapsed: 0 },
+    period: { end: '2025-04-30', year: 2025, month: 4 },
+    employee: { hasPan: true, taxRegime: 'OLD' },
+    annualTaxableOverrideMinor: proj.taxableIncomeMinor,
+  });
+  check('F15 OLD-regime projection total -> ₹20,280', R(20280), proj.totalAnnualTaxMinor);
+  check('F15 OLD-regime computeTds annual === projection (PARITY)', proj.totalAnnualTaxMinor, tds.annualTaxMinor);
+  check('F15 OLD-regime computeTds monthly -> ₹1,690', R(1690), tds.monthlyTdsMinor);
 }
 
 // ===========================================================================
