@@ -19,6 +19,10 @@
  */
 
 const consumers = require('./consumers');
+// Cycle 0 — notify the REQUESTER of the decision on a real channel (email/WhatsApp/
+// push) with a deep-link. Fire-and-forget + OUTSIDE the engine tx (default prisma
+// client), so a notify failure can never roll back the claim status flip.
+const notify = require('./notify');
 
 async function loadClaim(tx, approvalRequest) {
   return tx.expenseClaim.findFirst({
@@ -35,6 +39,7 @@ async function onApprove(approvalRequest, tx) {
     where: { id: claim.id, status: 'SUBMITTED' },
     data: { status: 'APPROVED', decidedAt: new Date(), decidedBy: approvalRequest.decidedBy || null, rejectReason: null },
   });
+  notify.fanOutApprovalDecided({ businessId: approvalRequest.businessId, request: approvalRequest, outcome: 'APPROVED' }).catch(() => {});
 }
 
 // onReject — SUBMITTED → REJECTED.
@@ -46,6 +51,7 @@ async function onReject(approvalRequest, tx) {
     where: { id: claim.id, status: 'SUBMITTED' },
     data: { status: 'REJECTED', decidedAt: new Date(), decidedBy: approvalRequest.decidedBy || null, rejectReason: reason },
   });
+  notify.fanOutApprovalDecided({ businessId: approvalRequest.businessId, request: approvalRequest, outcome: 'REJECTED' }).catch(() => {});
 }
 
 // onCancel — requester withdraws an open claim → CANCELLED.

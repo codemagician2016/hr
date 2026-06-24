@@ -29,6 +29,9 @@
 const prisma = require('../../core/lib/prisma');
 const engine = require('./engine');
 const { walkManagers, usersWithPermission } = require('./approverResolver');
+// Cycle 0 — real-channel SLA fan-out (email/WhatsApp/push). Fire-and-forget; runs
+// AFTER the version-guarded tx commits so it never affects the sweep's idempotency.
+const notify = require('./notify');
 
 const SYSTEM_ACTOR = 'SYSTEM';
 
@@ -97,17 +100,23 @@ async function sweepEscalations({ businessId = null, asOf = new Date(), dryRun =
 async function remind(request, slaHours, now) {
   const windowMs = (slaHours && slaHours > 0 ? slaHours : 24) * 3600 * 1000;
   const next = new Date(now.getTime() + windowMs);
+  // Capture the notified approver set + the freshly-bumped request so the real-channel
+  // fan-out runs AFTER the tx commits (never inside it).
+  let notified = null;
+  let fresh = null;
   await prisma.$transaction(async (tx) => {
-    const fresh = await tx.approvalRequest.findUnique({ where: { id: request.id } });
-    if (!fresh || fresh.status !== 'PENDING') return;
+    fresh = await tx.approvalRequest.findUnique({ where: { id: request.id } });
+    if (!fresh || fresh.status !== 'PENDING') { fresh = null; return; }
     const active = fresh.payloadJson && fresh.payloadJson._active;
     const flip = await tx.approvalRequest.updateMany({
       where: { id: request.id, status: 'PENDING', version: fresh.version },
       data: { slaDueAt: next, version: { increment: 1 } },
     });
-    if (flip.count === 0) return; // raced; safe no-op
+    if (flip.count === 0) { fresh = null; return; } // raced; safe no-op
+    notified = [];
     for (const uid of (active && active.approverUserIds) || []) {
       if (!uid || uid === SYSTEM_ACTOR) continue;
+      notified.push(uid);
       try {
         await tx.notification.create({
           data: {
@@ -121,12 +130,23 @@ async function remind(request, slaHours, now) {
       } catch (_e) { /* best-effort */ }
     }
   });
+  // Post-commit REMINDER fan-out (email/WhatsApp/push) with a deep-link. The dedupe
+  // token embeds currentStepOrder, so a nag pushed within the SAME window won't re-send
+  // until the slaDueAt window genuinely advances. Best-effort; never throws.
+  if (fresh && notified && notified.length) {
+    await notify.fanOutApprovalPending({
+      businessId: request.businessId, request: fresh, approverUserIds: notified, reminder: true,
+    }).catch(() => {});
+  }
 }
 
 // ESCALATE: add one-manager-up of the timed-out approver(s) to the active set; if no
 // higher manager, fall to HR. Stamp ESCALATED provenance + reset slaDueAt.
 async function escalate(request, slaHours, now) {
-  return prisma.$transaction(async (tx) => {
+  // Capture for the post-commit fan-out (run OUTSIDE the tx so it can't affect it).
+  let escalatedUsers = null;
+  let freshAfter = null;
+  const did = await prisma.$transaction(async (tx) => {
     const fresh = await tx.approvalRequest.findUnique({ where: { id: request.id } });
     if (!fresh || fresh.status !== 'PENDING') return false;
     const active = (fresh.payloadJson && fresh.payloadJson._active) || { approverUserIds: [] };
@@ -186,8 +206,21 @@ async function escalate(request, slaHours, now) {
         });
       } catch (_e) { /* best-effort */ }
     }
+    // Stash for the post-commit real-channel fan-out.
+    escalatedUsers = escalationUsers;
+    freshAfter = await tx.approvalRequest.findUnique({ where: { id: request.id } });
     return true;
   });
+  // Post-commit fan-out (email/WhatsApp/push) to the newly-added escalation approvers,
+  // with a deep-link. currentStepOrder is unchanged by escalation, so the PEND dedupe
+  // token is distinct per approver — newly-added escalation approvers (who were not on
+  // the original set) get notified exactly once. Best-effort; never throws.
+  if (did && freshAfter && escalatedUsers && escalatedUsers.length) {
+    await notify.fanOutApprovalPending({
+      businessId: request.businessId, request: freshAfter, approverUserIds: escalatedUsers,
+    }).catch(() => {});
+  }
+  return did;
 }
 
 async function requesterUserId(tx, request) {
