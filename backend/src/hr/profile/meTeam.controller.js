@@ -23,7 +23,7 @@ const { resolveCustomerScope } = require('../lib/customerScope');
 const { scopeWhere, scopeAllows } = require('../lib/scopeResolver');
 const engine = require('../approvals/engine');
 const orgTree = require('../lib/orgTree');
-const { essOrgPolicy, isExpandable, isEssVisibleStatus } = require('../lib/orgVisibility');
+const { essOrgPolicy, isExpandable, isEssVisibleStatus, ESS_ACTIVE_STATUSES } = require('../lib/orgVisibility');
 
 const EMPTY = (res) => res.json({ items: [], total: 0 });
 
@@ -367,8 +367,24 @@ async function essOrgContext(req) {
 }
 
 // Filter inactive nodes for ESS (default policy hides TERMINATED/PRE_HIRE/RETIRED).
+// This is now ONLY a defensive backstop — the visible-status predicate is pushed
+// INTO the lib's paginated query (Finding #1) so pages/cursors are already correct.
 function essVisible(nodes, policy) {
   return nodes.filter((n) => isEssVisibleStatus(n.status, policy));
+}
+
+// The status whitelist the lib must AND into its WHERE for an ESS read. When the
+// tenant policy shows inactive nodes, return null (no status restriction).
+function essStatusFilter(policy) {
+  return policy.showInactive ? null : [...ESS_ACTIVE_STATUSES];
+}
+
+// Finding #3: a non-expandable card (an ancestor/peer outside the actor's own
+// sub-tree) must not reveal the real, org-wide subordinate count of senior people
+// the employee cannot enumerate. Clamp reportsCount to 0 on card-only nodes.
+function clampReportsCountForEss(node, scopeIds, policy) {
+  if (isExpandable(node.id, scopeIds, policy)) return node;
+  return { ...node, reportsCount: 0 };
 }
 
 // GET /me/team/org/self — the viewer's node + its ancestor path to the top, in ONE
@@ -384,13 +400,19 @@ async function orgSelf(req, res, next) {
       select: { id: true, code: true, firstName: true, lastName: true, photoUrl: true, managerEmployeeId: true, status: true },
       take: 1,
     });
-    const [selfNode] = await orgTree.projectNodes(businessId, selfRows, { isSelfId: employee.id });
+    const [selfNode] = await orgTree.projectNodes(businessId, selfRows, {
+      isSelfId: employee.id,
+      countScopeIds: scopeIds, // clamp own reportsCount to in-scope direct reports
+      countStatuses: essStatusFilter(policy), // count only visible reports
+    });
     // Ancestor chain (root → … → me). expandable per policy (above self → card-only),
     // unless the tenant opens the directory (lateralDepth Infinity).
     let ancestors = [];
     if (policy.canSeeAncestorsToTop) {
       const { path } = await orgTree.getAncestors({ businessId, scope: null, nodeId: employee.id, isSelfId: employee.id });
-      ancestors = essVisible(path, policy).map((n) => ({ ...n, expandable: isExpandable(n.id, scopeIds, policy) }));
+      // Ancestors live above the actor's sub-tree (card-only): clamp reportsCount so a
+      // senior's org-wide span-of-control is not disclosed on the breadcrumb (Finding #3).
+      ancestors = essVisible(path, policy).map((n) => clampReportsCountForEss({ ...n, expandable: isExpandable(n.id, scopeIds, policy) }, scopeIds, policy));
     }
     res.json({ self: selfNode || null, ancestors });
   } catch (e) { next(e); }
@@ -408,10 +430,15 @@ async function orgChildren(req, res, next) {
     // Children are themselves scope-restricted via the lib (so even an in-sub-tree
     // node only ever yields in-sub-tree reports under the default policy).
     const childScope = policy.lateralDepth === Infinity ? { kind: 'ALL' } : scope;
+    // Finding #1: push the visible-status whitelist into the lib's WHERE so the keyset
+    // page + nextCursor are computed over visible rows only (inactive reports can no
+    // longer consume the window and silently hide active reports / break the cursor).
     const out = await orgTree.getChildren({
-      businessId, scope: childScope, parentId: id, cursor: req.query.cursor, limit: req.query.limit, isSelfId: employee.id,
+      businessId, scope: childScope, parentId: id, cursor: req.query.cursor, limit: req.query.limit,
+      isSelfId: employee.id, statuses: essStatusFilter(policy),
     });
-    out.nodes = essVisible(out.nodes, policy).map((n) => ({ ...n, expandable: isExpandable(n.id, scopeIds, policy) }));
+    // essVisible is now a defensive backstop; reportsCount is clamped on card-only nodes.
+    out.nodes = essVisible(out.nodes, policy).map((n) => clampReportsCountForEss({ ...n, expandable: isExpandable(n.id, scopeIds, policy) }, scopeIds, policy));
     res.json(out);
   } catch (e) { next(e); }
 }
@@ -433,7 +460,8 @@ async function orgAncestors(req, res, next) {
       return res.status(404).json({ message: 'Not found' });
     }
     const { path } = await orgTree.getAncestors({ businessId, scope: null, nodeId: id, isSelfId: employee.id });
-    const out = essVisible(path, policy).map((n) => ({ ...n, expandable: isExpandable(n.id, scopeIds, policy) }));
+    // Card-only ancestors get reportsCount clamped (Finding #3 — no span-of-control leak).
+    const out = essVisible(path, policy).map((n) => clampReportsCountForEss({ ...n, expandable: isExpandable(n.id, scopeIds, policy) }, scopeIds, policy));
     res.json({ path: out });
   } catch (e) { next(e); }
 }
@@ -446,11 +474,17 @@ async function orgTop(req, res, next) {
     if (!employee) return res.json({ nodes: [], nextCursor: null });
     if (!policy.canSeeTop) return res.status(403).json({ message: 'Org top view is not enabled.' });
     // Roots under the WHOLE tenant (ALL) — the employee may see the org's shape; the
-    // policy gates which roots are drillable.
+    // policy gates which roots are drillable. getRoots is now keyset-bounded (Finding
+    // #2): it returns at most one page of roots and NEVER materialises the tenant, so an
+    // ESS user can't stampede a full-table load by hammering /me/team/org/top. The
+    // visible-status whitelist is pushed into the query (Finding #1).
     const out = await orgTree.getRoots({
-      businessId, scope: { kind: 'ALL' }, cursor: req.query.cursor, limit: req.query.limit, isSelfId: employee.id,
+      businessId, scope: { kind: 'ALL' }, cursor: req.query.cursor, limit: req.query.limit,
+      isSelfId: employee.id, statuses: essStatusFilter(policy),
     });
-    out.nodes = essVisible(out.nodes, policy).map((n) => ({ ...n, expandable: isExpandable(n.id, scopeIds, policy) }));
+    // Card-only roots (outside the actor's own sub-tree) get reportsCount clamped so a
+    // senior root's org-wide span-of-control is not disclosed (Finding #3).
+    out.nodes = essVisible(out.nodes, policy).map((n) => clampReportsCountForEss({ ...n, expandable: isExpandable(n.id, scopeIds, policy) }, scopeIds, policy));
     res.json(out);
   } catch (e) { next(e); }
 }
@@ -462,10 +496,16 @@ async function orgSearch(req, res, next) {
   try {
     const { businessId, scope, employee, scopeIds, policy } = await essOrgContext(req);
     if (!employee) return res.json({ results: [] });
-    const out = await orgTree.searchNodes({ businessId, scope, q: req.query.q, limit: req.query.limit, isSelfId: employee.id });
+    // Finding #1: status filter pushed into the lib query. Finding #3: clamp ancestorIds
+    // to the actor's scope so search-to-locate never leaks the raw ids of out-of-band
+    // managers above each hit.
+    const out = await orgTree.searchNodes({
+      businessId, scope, q: req.query.q, limit: req.query.limit, isSelfId: employee.id,
+      statuses: essStatusFilter(policy), clampAncestorsToScope: true,
+    });
     out.results = out.results
-      .filter((r) => isEssVisibleStatus(r.node.status, policy))
-      .map((r) => ({ ...r, node: { ...r.node, expandable: isExpandable(r.node.id, scopeIds, policy) } }));
+      .filter((r) => isEssVisibleStatus(r.node.status, policy)) // defensive backstop
+      .map((r) => ({ ...r, node: clampReportsCountForEss({ ...r.node, expandable: isExpandable(r.node.id, scopeIds, policy) }, scopeIds, policy) }));
     res.json(out);
   } catch (e) { next(e); }
 }
