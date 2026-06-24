@@ -1136,6 +1136,57 @@ function initScheduler() {
       console.error('[Scheduler] leave year-end roll failed:', err.message);
     }
   });
+
+  // HR Approvals (Feature 10 §5.5) — SLA escalation sweep. The engine's whole
+  // SLA / auto-decision feature (REMIND / ESCALATE / AUTO_APPROVE / AUTO_REJECT)
+  // is dead in prod until this is scheduled. Every 10 min: scan PENDING requests
+  // whose slaDueAt has lapsed and apply the active level's onTimeoutAction. The
+  // runner is tenant-safe (each request is businessId-scoped), idempotent, and
+  // every state change is version-guarded — but we also gate on an in-process
+  // `escalationRunning` flag so a slow sweep can never overlap the next tick.
+  let escalationRunning = false;
+  cron.schedule('*/10 * * * *', async () => {
+    if (escalationRunning) { console.log('[Scheduler] escalation sweep still running — skipping tick'); return; }
+    escalationRunning = true;
+    try {
+      const { sweepEscalations } = require('../../hr/approvals/escalationRunner');
+      const r = await sweepEscalations({ asOf: new Date() });
+      if (r.scanned > 0 || r.errors > 0) {
+        console.log(`[Scheduler] approval escalation: ${JSON.stringify(r)}`);
+      }
+    } catch (err) {
+      console.error('[Scheduler] approval escalation failed:', err.message);
+    } finally {
+      escalationRunning = false;
+    }
+  });
+
+  // HR Attendance (Feature 2) — nightly absent/no-punch sweep. Recompute is
+  // event-driven (a punch/regularization/import fires it), so a scheduled
+  // employee who never punches produces NO Attendance row and the day's ABSENT
+  // status + LOP never materialise. Nightly at 01:30 (after leave accrual at
+  // 01:00, before payroll windows) we re-derive the PRIOR civil day for every
+  // ACTIVE employee per tenant via the SAME service.recompute the punch flow
+  // calls — so absent days book their status + lopFraction. Idempotent (recompute
+  // upserts + never touches a locked/frozen row), batched, per-tenant. Guarded
+  // against overlap with an in-process flag (a 1000+-employee sweep can outrun a
+  // tick).
+  let attendanceSweepRunning = false;
+  cron.schedule('30 1 * * *', async () => {
+    if (attendanceSweepRunning) { console.log('[Scheduler] attendance sweep still running — skipping tick'); return; }
+    attendanceSweepRunning = true;
+    try {
+      const { sweepPriorDay } = require('../../hr/attendance/attendanceSweep');
+      const r = await sweepPriorDay({ asOf: new Date() });
+      if (r.written > 0 || r.errors > 0) {
+        console.log(`[Scheduler] attendance sweep: ${JSON.stringify(r)}`);
+      }
+    } catch (err) {
+      console.error('[Scheduler] attendance sweep failed:', err.message);
+    } finally {
+      attendanceSweepRunning = false;
+    }
+  });
 }
 
 // Find PENDING orders older than `maxAgeMinutes` (default 30) and cancel
