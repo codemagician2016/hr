@@ -4,13 +4,12 @@
 //
 //   India : regime choice (OLD vs NEW) + investment declaration (80C, 80D,
 //           HRA, home-loan interest, etc.).
-//   NZ    : IRD tax code election + KiwiSaver contribution rate.
 //
-// The form picks the jurisdiction from the employee's RESOLVED country (the
-// backend gates IN vs NZ; fail-closed). It prefills from the saved declaration
-// (GET) and persists on submit (POST) — both at /api/hr/me/tax-declaration, which
-// writes onto the employee's StatutoryProfile (audit #57: the page could collect
-// a declaration but had nowhere to persist it, so every submission was lost).
+// The product is single-country India (Feature 14). The form prefills from the
+// saved declaration (GET) and persists on submit (POST) — both at
+// /api/hr/me/tax-declaration, which writes onto the employee's StatutoryProfile
+// (audit #57: the page could collect a declaration but had nowhere to persist it,
+// so every submission was lost).
 
 import { useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
@@ -29,9 +28,6 @@ const INDIA_HEADS = [
   { key: 'nps80ccd1b', label: 'NPS (Sec 80CCD(1B))', hint: 'Max 50,000' },
   { key: 'sec80e', label: 'Section 80E (Education loan interest)', hint: '' },
 ];
-
-const NZ_TAX_CODES = ['M', 'M SL', 'ME', 'ME SL', 'SB', 'S', 'SH', 'ST', 'SA', 'CAE', 'WT'];
-const KIWISAVER_RATES = ['0', '3', '4', '6', '8', '10'];
 
 function Card({ children }) {
   return (
@@ -59,27 +55,22 @@ function MoneyField({ label, hint, value, onChange }) {
 
 function TaxInner() {
   // Country is the AUTHORITATIVE employee country from the backend. It is null
-  // while loading and whenever it cannot be resolved — in which case we render
-  // NEITHER country's block (fail-closed), so an NZ employee never sees India
-  // fields and vice-versa.
+  // while loading and whenever it cannot be resolved — in which case we render no
+  // country block (fail-closed). India is the only supported country (Feature 14).
   const { country, loading: countryLoading } = useCountry();
 
   // India state
   const [regime, setRegime] = useState('NEW');
   const [india, setIndia] = useState(() => Object.fromEntries(INDIA_HEADS.map((h) => [h.key, ''])));
 
-  // NZ state
-  const [taxCode, setTaxCode] = useState('M');
-  const [kiwiSaver, setKiwiSaver] = useState('3');
-
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [note, setNote] = useState(null);
   const [success, setSuccess] = useState(false);
 
-  // Prefill from the saved declaration (GET). Seeds the regime/80C (IN) or tax
-  // code/KiwiSaver (NZ) so the employee sees + edits their current election, not
-  // a blank form. Best-effort: a missing/empty declaration leaves the defaults.
+  // Prefill from the saved declaration (GET). Seeds the regime/80C so the employee
+  // sees + edits their current election, not a blank form. Best-effort: a
+  // missing/empty declaration leaves the defaults.
   useEffect(() => {
     let alive = true;
     apiGet(TAX_PATH)
@@ -92,9 +83,6 @@ function TaxInner() {
           if (d.investments && d.investments.sec80c != null) {
             setIndia((s) => ({ ...s, sec80c: String(d.investments.sec80c || '') }));
           }
-        } else if (d.country === 'NZ') {
-          if (d.taxCode) setTaxCode(d.taxCode);
-          if (d.kiwiSaverRate != null) setKiwiSaver(String(d.kiwiSaverRate));
         }
       })
       .catch(() => { /* prefill is best-effort — keep the defaults on error */ });
@@ -102,9 +90,6 @@ function TaxInner() {
   }, []);
 
   function buildPayload() {
-    if (country === 'NZ') {
-      return { country: 'NZ', taxCode, kiwiSaverRate: Number(kiwiSaver) };
-    }
     if (country === 'IN') {
       const investments = Object.fromEntries(
         Object.entries(india).map(([k, v]) => [k, Number(v) || 0])
@@ -131,7 +116,7 @@ function TaxInner() {
       setSuccess(true);
     } catch (err) {
       // 422 carries a friendly validation message from the backend (wrong-country
-      // payload, invalid tax code / KiwiSaver rate, jurisdiction not set up).
+      // payload, jurisdiction not set up).
       setError(err.message || 'Could not submit your tax declaration.');
     } finally {
       setSubmitting(false);
@@ -143,18 +128,14 @@ function TaxInner() {
       <div>
         <h1 className="text-2xl font-semibold" style={{ color: 'var(--theme-text)' }}>Tax declaration</h1>
         <p className="text-sm" style={{ color: 'var(--theme-muted)' }}>
-          {country === 'NZ'
-            ? 'New Zealand (IRD) tax code & KiwiSaver'
-            : country === 'IN'
-            ? 'India income-tax declaration'
-            : 'Tax declaration'}
+          {country === 'IN' ? 'India income-tax declaration' : 'Tax declaration'}
         </p>
       </div>
 
       {error && <ErrorBanner message={error} />}
 
       {/* Fail-closed: while the country is loading, or if it cannot be resolved,
-          render NEITHER country's block — never a wrong-country default. */}
+          render no country block — never a wrong-country default. */}
       {countryLoading && (
         <Card>
           <p className="text-sm" style={{ color: 'var(--theme-muted)' }}>Loading your tax details…</p>
@@ -229,52 +210,8 @@ function TaxInner() {
         </>
       )}
 
-      {country === 'NZ' && (
-        <>
-          <Card>
-            <h2 className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--theme-muted)' }}>IRD tax code</h2>
-            <label className="block text-sm">
-              <span className="mb-1 block font-medium" style={{ color: 'var(--theme-text)' }}>Tax code</span>
-              <select
-                value={taxCode} onChange={(e) => setTaxCode(e.target.value)}
-                className="w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none"
-                style={{ borderColor: 'var(--theme-border)' }}
-              >
-                {NZ_TAX_CODES.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-              <span className="mt-1 block text-xs" style={{ color: 'var(--theme-muted)' }}>
-                Use the code from your IR330. "M" is the main job; add "SL" if you have a student loan.
-              </span>
-            </label>
-          </Card>
-
-          <Card>
-            <h2 className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--theme-muted)' }}>KiwiSaver</h2>
-            <div className="grid grid-cols-3 gap-2">
-              {KIWISAVER_RATES.map((r) => {
-                const active = kiwiSaver === r;
-                return (
-                  <button
-                    type="button" key={r} onClick={() => setKiwiSaver(r)}
-                    className="rounded-lg border py-2.5 text-sm font-semibold"
-                    style={active
-                      ? { background: 'var(--theme-primary)', color: 'var(--theme-on-primary)', borderColor: 'var(--theme-primary)' }
-                      : { borderColor: 'var(--theme-border)', color: 'var(--theme-text)' }}
-                  >
-                    {r === '0' ? 'Opt out' : `${r}%`}
-                  </button>
-                );
-              })}
-            </div>
-            <p className="text-xs" style={{ color: 'var(--theme-muted)' }}>
-              Employee contribution rate. Standard rates are 3%, 4%, 6%, 8% or 10%.
-            </p>
-          </Card>
-        </>
-      )}
-
-      {/* Only allow submission once we know the jurisdiction (IN or NZ). */}
-      {(country === 'IN' || country === 'NZ') && (
+      {/* Only allow submission once we know the jurisdiction (India). */}
+      {country === 'IN' && (
         <button
           type="submit"
           disabled={submitting}

@@ -3,9 +3,8 @@
 // CountrySetupCard — Feature 14 (strict single-country mode). Settings → Company
 // profile → Country tab. Two states:
 //   1. NOT set up (hrCountry NULL → GET /api/hr/country-context 409s): a one-time
-//      "Which country do you run payroll in?" picker. India is selected and the
-//      ONLY enabled choice; NZ is shown DISABLED with "Coming soon" (the UI is
-//      ready for the roadmap without offering it). Submitting POSTs /setup/country.
+//      "Which country do you run payroll in?" picker. India is the ONLY choice.
+//      Submitting POSTs /setup/country.
 //   2. ALREADY set: a READ-ONLY badge — "Payroll country: India 🇮🇳 · Currency:
 //      INR" — with a tooltip explaining a country change means a new workspace.
 //      There is NO edit control (the server locks it after the first set).
@@ -18,12 +17,10 @@ import { ErrorBanner, PrimaryButton, Spinner } from '@hr/ui';
 import { get, post } from '@/lib/api';
 import { InfoTip } from '@/lib/widgets';
 
-// v1 the only registrable HR country is India. NZ is shown disabled (Coming soon)
-// so the picker is ready for the roadmap flip. This mirrors the backend
+// The only registrable HR country is India. This mirrors the backend
 // REGISTRABLE_HR_COUNTRIES constant — the server is the authority.
 const HR_COUNTRY_CHOICES = [
   { code: 'IN', label: 'India', flag: '🇮🇳', enabled: true },
-  { code: 'NZ', label: 'New Zealand', flag: '🇳🇿', enabled: false, note: 'Coming soon' },
 ];
 
 export default function CountrySetupCard({ canEdit = false }) {

@@ -3,7 +3,7 @@
 // Reports console — read-only analytics over the HR REPORTS API:
 //   GET /api/hr/reports/runs                 pay-run selector
 //   GET /api/hr/reports/runs/:id/register    payroll register (+ column totals)
-//   GET /api/hr/reports/runs/:id/statutory   statutory summary (IN/NZ)
+//   GET /api/hr/reports/runs/:id/statutory   statutory summary (India)
 //   GET /api/hr/reports/headcount?from&to&groupBy   headcount & attrition
 //
 // Tabs live in the URL (?tab=register|statutory|headcount) so views are

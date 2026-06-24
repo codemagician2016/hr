@@ -8,7 +8,7 @@
 //
 // Backs onto /api/hr/ctc-policies/* (reads need canViewCompensation, writes
 // canManageCompensation — enforced backend-side). countryCode/currency are the
-// tenant's (read-only here, server-stamped on save). No NZ surface for an IN tenant.
+// tenant's (read-only here, server-stamped on save) — India only.
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';

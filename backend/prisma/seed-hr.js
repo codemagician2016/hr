@@ -9,31 +9,38 @@
 // Run with:   node prisma/seed-hr.js
 // Registered as the prisma seed (backend/package.json -> "prisma": { "seed" }).
 //
+// INDIA-ONLY demo. The product ships single-country (Feature 14) and the demo
+// tenant is 100% India: hrCountry IN, ONE IN entity, all India employees, one
+// India payroll run. The New Zealand payroll engine still exists in the codebase
+// (backend/src/hr/payroll/compliance/newzealand.js + the compliance registry) for
+// a future roadmap, but NO NZ entity / employee / pay run / statutory data is
+// seeded and nothing NZ is ever shown.
+//
 // What it builds (counts):
 //   1  Business (slug 'demo', region 'IN') + 1 Subscription (Growth, white-label
 //                                                             theme + branding)
 //   1  TenantBrand (tenant-wide default brand)
-//   1  super-admin User + 1 tenant-admin (operator) User + 1 BusinessRole
-//   3  Employee-portal Users (ESS logins, linked to 3 of the employees)
-//   2  Entities  — IN (INR, monthly) and NZ (NZD, fortnightly)
+//   1  super-admin User + 1 tenant-admin (operator) + 1 finance (checker) User
+//   4  Employee-portal Users (ESS logins, linked to 4 of the employees)
+//   1  Entity  — IN (INR, monthly)
 //   per entity: 1 Location, 1 Department, 1 Designation, 1 Grade, 1 Band,
 //               1 PayCalendar, statutory Registrations
-//   5  Employees (3 IN + 2 NZ), each with:
+//   5  Employees (ALL India, in the IN entity), each with:
 //        - EmploymentRecord (current, effective-dated)
-//        - StatutoryProfile  (IN: PAN/UAN/PF/ESI/PT-state; NZ: IRD/KiwiSaver/tax code)
-//        - SalaryStructure   (per entity) + SalaryComponents (shared) + lines
+//        - StatutoryProfile  (IN: PAN/UAN/PF/ESI/PT-state)
+//        - SalaryStructure   (IN CTC) + SalaryComponents (shared) + lines
 //          (IN Basic >= 50% of CTC per Code-on-Wages; HRA; Special Allowance
 //           as the BALANCING line; statutory employer-cost components)
 //        - CompensationRevision (current, links the structure) + lines
 //        - AttendancePayInput for the current period (payable days; some LOP)
 //   LeaveType(s) + LeavePolicy(ies) + a LeaveBalance per employee
-//   2  PayRun rows (DRAFT, one per entity) so the AttendancePayInputs attach and
+//   1  PayRun row (DRAFT, IN entity) so the AttendancePayInputs attach and
 //      `payrollService.computeRun` can run against frozen inputs immediately.
 //
 // All Decimal fields are passed as strings or plain numbers (never floats built
 // from arithmetic) so Prisma's Decimal coercion is exact — see schema.prisma.
 //
-// The amounts are realistic INR (IN entity) / NZD (NZ entity) monthly figures.
+// The amounts are realistic INR (IN entity) monthly figures.
 // =============================================================================
 
 const { PrismaClient } = require('@prisma/client');
@@ -66,9 +73,9 @@ function d(s) {
   return new Date(s + 'T00:00:00.000Z');
 }
 
-// Current period for the demo pay runs. The IN run is the calendar month; the
-// NZ run is a fortnight inside it. Chosen relative to "today" so payslips look
-// current, but pinned to month boundaries so proration math is clean.
+// Current period for the demo pay run. The IN run is the calendar month, chosen
+// relative to "today" so payslips look current, but pinned to month boundaries
+// so proration math is clean.
 const NOW = new Date();
 const PERIOD_YEAR = NOW.getUTCFullYear();
 const PERIOD_MONTH = NOW.getUTCMonth() + 1; // 1..12
@@ -80,18 +87,12 @@ const IN_PERIOD_END = ymd(PERIOD_YEAR, PERIOD_MONTH, lastDayOfMonth(PERIOD_YEAR,
 const IN_PAY_DATE = IN_PERIOD_END; // last working day approximation
 const IN_CAL_DAYS = lastDayOfMonth(PERIOD_YEAR, PERIOD_MONTH);
 
-const NZ_PERIOD_START = ymd(PERIOD_YEAR, PERIOD_MONTH, 1);
-const NZ_PERIOD_END = ymd(PERIOD_YEAR, PERIOD_MONTH, 14);
-const NZ_PAY_DATE = ymd(PERIOD_YEAR, PERIOD_MONTH, 17);
-const NZ_CAL_DAYS = 14;
-
 // Tax-year strings (entity fiscal start = April).
 const taxYearFor = (y, m, startMonth = 4) => {
   const startY = m >= startMonth ? y : y - 1;
   return `${startY}-${String((startY + 1) % 100).padStart(2, '0')}`;
 };
 const IN_TAX_YEAR = taxYearFor(PERIOD_YEAR, PERIOD_MONTH, 4);
-const NZ_TAX_YEAR = taxYearFor(PERIOD_YEAR, PERIOD_MONTH, 4);
 
 // ---------------------------------------------------------------------------
 // Tiny idempotent helpers (create-if-absent on a deterministic id).
@@ -104,9 +105,8 @@ async function ensure(model, id, data) {
 }
 
 async function main() {
-  console.log('▶ Seeding DEMO HRMS tenant…');
+  console.log('▶ Seeding DEMO HRMS tenant (India-only)…');
   console.log(`  IN period ${IN_PERIOD_START} → ${IN_PERIOD_END} (pay ${IN_PAY_DATE}), tax year ${IN_TAX_YEAR}`);
-  console.log(`  NZ period ${NZ_PERIOD_START} → ${NZ_PERIOD_END} (pay ${NZ_PAY_DATE}), tax year ${NZ_TAX_YEAR}`);
 
   // ═════════════════════════════════════════════════════════════════════════
   // 1. BUSINESS (demo tenant) + SUBSCRIPTION + TENANT BRAND
@@ -117,7 +117,7 @@ async function main() {
     create: {
       name: 'Demo HR Co',
       slug: 'demo',
-      description: 'Demo tenant for the HRMS — IN + NZ entities.',
+      description: 'Demo tenant for the HRMS — India entity.',
       country: 'IN',
       region: 'IN', // HR fork: deployment market (drives default statutory modules)
       timezone: 'Asia/Kolkata',
@@ -268,7 +268,7 @@ async function main() {
   console.log(`✓ Users: super-admin (${superAdmin.email}) + operator (${operator.email}, ${adminRole.name}) + finance (${finance.email}, ${financeRole.name})`);
 
   // ═════════════════════════════════════════════════════════════════════════
-  // 3. ENTITIES (IN + NZ) and their org scaffolding
+  // 3. ENTITY (India) and its org scaffolding
   // ═════════════════════════════════════════════════════════════════════════
   const inEntity = await prisma.entity.upsert({
     where: { businessId_code: { businessId, code: 'IN-HQ' } },
@@ -298,29 +298,7 @@ async function main() {
     },
   });
 
-  const nzEntity = await prisma.entity.upsert({
-    where: { businessId_code: { businessId, code: 'NZ-AKL' } },
-    update: {},
-    create: {
-      businessId,
-      code: 'NZ-AKL',
-      legalName: 'Demo HR Co NZ Limited',
-      tradeName: 'Demo HR Co NZ',
-      countryCode: 'NZ',
-      payCurrency: 'NZD',
-      timezone: 'Pacific/Auckland',
-      taxYearStartMonth: 4,
-      addressLine1: '1 Queen Street',
-      city: 'Auckland',
-      stateCode: 'AUK',
-      postalCode: '1010',
-      nzbn: '9429000000001',
-      irdEntityNumber: '012-345-678',
-      status: 'ACTIVE',
-      activeFrom: d('2021-04-01'),
-    },
-  });
-  console.log(`✓ Entities: ${inEntity.code} (IN/INR) + ${nzEntity.code} (NZ/NZD)`);
+  console.log(`✓ Entity: ${inEntity.code} (IN/INR)`);
 
   // Statutory registrations (nice-to-have for filing aggregates).
   await prisma.statutoryRegistration.upsert({
@@ -332,11 +310,6 @@ async function main() {
     where: { businessId_entityId_kind_stateCode: { businessId, entityId: inEntity.id, kind: 'PT_STATE', stateCode: 'KA' } },
     update: {},
     create: { businessId, entityId: inEntity.id, kind: 'PT_STATE', number: 'PT-KA-0012345', stateCode: 'KA', effectiveFrom: d('2020-04-01') },
-  }).catch(() => {});
-  await prisma.statutoryRegistration.upsert({
-    where: { businessId_entityId_kind_stateCode: { businessId, entityId: nzEntity.id, kind: 'IRD_PAYE', stateCode: '' } },
-    update: {},
-    create: { businessId, entityId: nzEntity.id, kind: 'IRD_PAYE', number: '012-345-678', stateCode: '', effectiveFrom: d('2021-04-01') },
   }).catch(() => {});
 
   // --- Per-entity org rows (Band -> Grade -> Designation, Location, Department) ---
@@ -351,8 +324,8 @@ async function main() {
       update: {},
       create: {
         businessId, code: `${p}-L3`, name: `${p} Level 3`, rank: 3, bandId: band.id,
-        minSalary: entity.countryCode === 'IN' ? '600000.00' : '60000.00',
-        maxSalary: entity.countryCode === 'IN' ? '2400000.00' : '160000.00',
+        minSalary: '600000.00',
+        maxSalary: '2400000.00',
         currencyCode: entity.payCurrency,
       },
     });
@@ -366,7 +339,7 @@ async function main() {
       update: {},
       create: {
         businessId, entityId: entity.id, code: `${p}-LOC1`,
-        name: entity.countryCode === 'IN' ? 'Bengaluru HQ' : 'Auckland Office',
+        name: 'Bengaluru HQ',
         city: entity.city, stateCode: entity.stateCode, postalCode: entity.postalCode,
         countryCode: entity.countryCode, timezone: entity.timezone,
         isPrimary: true, isActive: true,
@@ -380,10 +353,9 @@ async function main() {
     return { band, grade, designation, location, department };
   }
   const inOrg = await buildOrg(inEntity, 'IN');
-  const nzOrg = await buildOrg(nzEntity, 'NZ');
-  console.log('✓ Org scaffolding per entity (Band/Grade/Designation/Location/Department)');
+  console.log('✓ Org scaffolding (Band/Grade/Designation/Location/Department)');
 
-  // --- Pay calendars ---
+  // --- Pay calendar ---
   const inCalendar = await prisma.payCalendar.upsert({
     where: { businessId_entityId_code: { businessId, entityId: inEntity.id, code: 'IN-MONTHLY' } },
     update: {},
@@ -393,16 +365,7 @@ async function main() {
       cutoffDayRule: 'FIXED_DOM', cutoffDayValue: 25, prorationMethod: 'CALENDAR_DAYS', isActive: true,
     },
   });
-  const nzCalendar = await prisma.payCalendar.upsert({
-    where: { businessId_entityId_code: { businessId, entityId: nzEntity.id, code: 'NZ-FORTNIGHTLY' } },
-    update: {},
-    create: {
-      businessId, entityId: nzEntity.id, code: 'NZ-FORTNIGHTLY', name: 'NZ Fortnightly',
-      frequency: 'FORTNIGHTLY', payDayRule: 'N_DAYS_AFTER_PERIOD_END', payDayValue: 3,
-      cutoffDayRule: 'N_DAYS_AFTER_PERIOD_END', cutoffDayValue: 0, prorationMethod: 'CALENDAR_DAYS', isActive: true,
-    },
-  });
-  console.log('✓ Pay calendars: IN monthly + NZ fortnightly');
+  console.log('✓ Pay calendar: IN monthly');
 
   // ═════════════════════════════════════════════════════════════════════════
   // 4. SALARY COMPONENTS (shared) — behaviour is driven by `kind` + flags
@@ -443,17 +406,7 @@ async function main() {
     calcMethod: 'STATUTORY', isTaxable: false, isRecurring: true, sortOrder: 20,
   });
 
-  // NZ earning component (single gross salary line)
-  const cNzSalary = await component('NZ_SALARY', {
-    name: 'Salary', kind: 'BASIC', category: 'EARNING', calcMethod: 'FLAT',
-    isKiwiSaverable: true, isPayeable: true, isTaxable: true,
-    prorationMethod: 'CALENDAR_DAYS', sortOrder: 1,
-  });
-  const cNzKsEr = await component('KIWISAVER_ER', {
-    name: 'KiwiSaver (Employer)', kind: 'KIWISAVER_EMPLOYER', category: 'EMPLOYER_COST',
-    calcMethod: 'STATUTORY', isTaxable: false, isRecurring: true, sortOrder: 20,
-  });
-  console.log('✓ Salary components (IN: BASIC/HRA/SPECIAL/EPF_ER ; NZ: NZ_SALARY/KIWISAVER_ER)');
+  console.log('✓ Salary components (IN: BASIC/HRA/SPECIAL/EPF_ER)');
 
   // ═════════════════════════════════════════════════════════════════════════
   // 5. SALARY STRUCTURES (per entity) + structure lines
@@ -466,15 +419,6 @@ async function main() {
       countryCode: 'IN', currencyCode: 'INR', basis: 'CTC', isActive: true,
     },
   });
-  const nzStructure = await prisma.salaryStructure.upsert({
-    where: { businessId_entityId_code: { businessId, entityId: nzEntity.id, code: 'NZ-SALARIED' } },
-    update: {},
-    create: {
-      businessId, entityId: nzEntity.id, code: 'NZ-SALARIED', name: 'NZ Salaried Gross',
-      countryCode: 'NZ', currencyCode: 'NZD', basis: 'GROSS', isActive: true,
-    },
-  });
-
   // Template lines (amounts are illustrative; per-employee lines on the
   // CompensationRevision carry the real money). Basic >= 50% of monthly gross.
   async function structureLine(key, structureId, component, line) {
@@ -485,8 +429,7 @@ async function main() {
   await structureLine('in-basic', inStructure.id, cBasic, { calcMethod: 'FLAT', amountMonthly: '50000.00', sortOrder: 1 });
   await structureLine('in-hra', inStructure.id, cHra, { calcMethod: 'PERCENT_OF', calcValue: '50.0000', sortOrder: 2 });
   await structureLine('in-special', inStructure.id, cSpecial, { calcMethod: 'BALANCING', amountMonthly: '20000.00', sortOrder: 3 });
-  await structureLine('nz-salary', nzStructure.id, cNzSalary, { calcMethod: 'FLAT', amountMonthly: '3000.00', sortOrder: 1 });
-  console.log('✓ Salary structures (IN CTC + NZ Gross) with template lines');
+  console.log('✓ Salary structure (IN CTC) with template lines');
 
   // ═════════════════════════════════════════════════════════════════════════
   // 6. LEAVE TYPES + POLICIES
@@ -525,14 +468,6 @@ async function main() {
       businessId, code: 'LWP', name: 'Leave Without Pay', countryCode: 'IN', category: 'UNPAID',
       unit: 'DAYS', isPaid: false, isStatutory: false, affectsLOP: true, isEncashable: false,
       requiresReason: true, sandwichPolicy: 'EXCLUSIVE', color: '#9CA3AF',
-    },
-  });
-  const ltNZAnnual = await prisma.leaveType.upsert({
-    where: { businessId_code: { businessId, code: 'ANNUAL' } },
-    update: {},
-    create: {
-      businessId, code: 'ANNUAL', name: 'Annual Holidays', countryCode: 'NZ', category: 'ANNUAL',
-      unit: 'WEEKS', isPaid: true, isStatutory: true, nzPayBasis: 'AWE_8PCT', color: '#6366f1',
     },
   });
   // Feature 30 — Comp-off: paid, no LOP, fed ONLY by earned credits (the balance's
@@ -586,15 +521,6 @@ async function main() {
       minNoticeDays: 1, isActive: true,
     },
   });
-  const polNZ = await prisma.leavePolicy.upsert({
-    where: { businessId_code: { businessId, code: 'NZ-ANNUAL' } },
-    update: {},
-    create: {
-      businessId, leaveTypeId: ltNZAnnual.id, entityId: nzEntity.id, code: 'NZ-ANNUAL', name: 'Annual Holidays (NZ)',
-      accrualMethod: 'CONTINUOUS_NZ', entitlementPerYear: '4.0000', accrualFrequency: 'PER_PAY_PERIOD',
-      minTenureMonths: 12, isActive: true,
-    },
-  });
   // Feature 30 — Comp-off policy: accrualMethod=NONE (the balance is fed ONLY by
   // earned credits; the accrual runner skips NONE). compOffConfig carries the knobs
   // (60-day India expiry, manager approval, auto-earn on, half-day allowed).
@@ -611,14 +537,13 @@ async function main() {
       },
     },
   });
-  console.log('✓ Leave types (EL/SL/CL/LWP/ANNUAL/COMP_OFF) + policies (incl. Feature 30 comp-off NONE-accrual)');
+  console.log('✓ Leave types (EL/SL/CL/LWP/COMP_OFF) + policies (incl. Feature 30 comp-off NONE-accrual)');
 
   // ═════════════════════════════════════════════════════════════════════════
-  // 7. PAY RUNS (DRAFT) — one per entity, so AttendancePayInputs attach and a
+  // 7. PAY RUN (DRAFT) — IN entity, so AttendancePayInputs attach and a
   //    real pay run can compute against frozen inputs.
   // ═════════════════════════════════════════════════════════════════════════
   const inRunCode = `PR-${IN_PERIOD_START.slice(0, 7)}-IN`;
-  const nzRunCode = `PR-${NZ_PERIOD_START.slice(0, 7)}-NZ`;
   const inRun = await prisma.payRun.upsert({
     where: { businessId_code: { businessId, code: inRunCode } },
     update: {},
@@ -629,20 +554,11 @@ async function main() {
       type: 'REGULAR', status: 'DRAFT', currencyCode: 'INR',
     },
   });
-  const nzRun = await prisma.payRun.upsert({
-    where: { businessId_code: { businessId, code: nzRunCode } },
-    update: {},
-    create: {
-      businessId, entityId: nzEntity.id, payCalendarId: nzCalendar.id, code: nzRunCode,
-      periodStart: d(NZ_PERIOD_START), periodEnd: d(NZ_PERIOD_END), payDate: d(NZ_PAY_DATE),
-      sequenceInYear: (((PERIOD_MONTH - 4 + 12) % 12) + 1) * 2, taxYear: NZ_TAX_YEAR,
-      type: 'REGULAR', status: 'DRAFT', currencyCode: 'NZD',
-    },
-  });
-  console.log(`✓ Pay runs (DRAFT): ${inRun.code}, ${nzRun.code}`);
+  console.log(`✓ Pay run (DRAFT): ${inRun.code}`);
 
   // ═════════════════════════════════════════════════════════════════════════
-  // 8. EMPLOYEES — 3 IN + 2 NZ. Each gets the full payroll-ready bundle.
+  // 8. EMPLOYEES — 5, ALL India, in the IN entity. Each gets the full
+  //    payroll-ready bundle.
   // ═════════════════════════════════════════════════════════════════════════
   // Per-employee specs. monthlyBasic/HRA/special must satisfy IN Basic >= 50%
   // of monthly gross (Basic / (Basic+HRA+Special)). With HRA = 50% of Basic and
@@ -669,20 +585,19 @@ async function main() {
       pan: 'ABCPV9012C', uan: '100200300403', pfMemberId: 'KABLR00123450000003', esicIp: null,
       esiApplicable: false, payable: IN_CAL_DAYS, lop: 0,
     },
-  ];
-  const nzEmployees = [
     {
-      seq: 1, code: 'EMP-NZ-0001', first: 'Olivia', last: 'Williams', gender: 'FEMALE', dob: '1991-07-08',
-      email: 'olivia.williams@demo.test', portal: true,
-      salaryFortnight: 3200, ctcAnnual: 83200,
-      irdNumber: '012345678', taxCode: 'M', ksRate: '0.0300', esct: '0.1750', payable: NZ_CAL_DAYS, lop: 0,
+      seq: 4, code: 'EMP-IN-0004', first: 'Meera', last: 'Iyer', gender: 'FEMALE', dob: '1995-08-19',
+      email: 'meera.iyer@demo.test', portal: true,
+      basic: 18000, special: 5400, ctcAnnual: 468000,
+      pan: 'ABCPI3456D', uan: '100200300404', pfMemberId: 'KABLR00123450000004', esicIp: '3100123458',
+      esiApplicable: true, payable: IN_CAL_DAYS, lop: 0, // ESI-covered (gross under threshold)
     },
     {
-      seq: 2, code: 'EMP-NZ-0002', first: 'Liam', last: 'Brown', gender: 'MALE', dob: '1986-03-15',
-      email: 'liam.brown@demo.test', portal: false,
-      salaryFortnight: 2800, ctcAnnual: 72800,
-      irdNumber: '098765432', taxCode: 'M SL', ksRate: '0.0400', esct: '0.1750', studentLoan: true,
-      payable: NZ_CAL_DAYS - 1, lop: 1,
+      seq: 5, code: 'EMP-IN-0005', first: 'Karthik', last: 'Reddy', gender: 'MALE', dob: '1985-12-03',
+      email: 'karthik.reddy@demo.test', portal: true,
+      basic: 75000, special: 22500, ctcAnnual: 1860000,
+      pan: 'ABCPR7890E', uan: '100200300405', pfMemberId: 'KABLR00123450000005', esicIp: null,
+      esiApplicable: false, payable: IN_CAL_DAYS - 1, lop: 1, // 1 LOP day this period
     },
   ];
 
@@ -712,7 +627,9 @@ async function main() {
     return u.id;
   }
 
-  async function makeEmployee(entity, org, structure, spec, country) {
+  // All demo employees are India (single-country tenant). entity/org/structure are
+  // always the IN ones.
+  async function makeEmployee(entity, org, structure, spec) {
     const userId = await portalUser(spec);
     const employee = await prisma.employee.upsert({
       where: { businessId_code: { businessId, code: spec.code } },
@@ -720,9 +637,9 @@ async function main() {
       create: {
         businessId, code: spec.code, userId,
         firstName: spec.first, lastName: spec.last, gender: spec.gender,
-        dateOfBirth: d(spec.dob), nationality: country === 'IN' ? 'Indian' : 'New Zealander',
+        dateOfBirth: d(spec.dob), nationality: 'Indian',
         workEmail: spec.email, personalEmail: spec.email,
-        countryCode: country, stateCode: entity.stateCode, city: entity.city,
+        countryCode: 'IN', stateCode: entity.stateCode, city: entity.city,
         isActive: true, status: 'ACTIVE',
         hireDate: d('2022-04-01'), preferredLanguage: 'en',
       },
@@ -736,24 +653,18 @@ async function main() {
         businessId, employeeId: employee.id, entityId: entity.id,
         locationId: org.location.id, departmentId: org.department.id, designationId: org.designation.id,
         gradeId: org.grade.id, employmentType: 'FULL_TIME', workerCategory: 'STAFF',
-        payCalendarId: country === 'IN' ? inCalendar.id : nzCalendar.id,
+        payCalendarId: inCalendar.id,
         fteRatio: '1.0000', effectiveFrom: d('2022-04-01'), changeReason: 'HIRE', isCurrent: true,
       },
     });
     await prisma.employee.update({ where: { id: employee.id }, data: { currentEmploymentRecordId: empRec.id } });
 
-    // StatutoryProfile (1:1).
-    const spData = country === 'IN'
-      ? {
-          countryCode: 'IN', pan: spec.pan, uan: spec.uan, pfMemberId: spec.pfMemberId,
-          pfOptIn: false, pfJoinDate: d('2022-04-01'), esicIp: spec.esicIp, esiApplicable: spec.esiApplicable,
-          ptStateCode: entity.stateCode, taxRegime: 'NEW', aadhaarVerified: true,
-        }
-      : {
-          countryCode: 'NZ', irdNumber: spec.irdNumber, taxCode: spec.taxCode,
-          kiwiSaverStatus: 'ACTIVE', kiwiSaverEmployeeRate: spec.ksRate, esctRate: spec.esct,
-          studentLoan: !!spec.studentLoan,
-        };
+    // StatutoryProfile (1:1) — India PAN/UAN/PF/ESI/PT.
+    const spData = {
+      countryCode: 'IN', pan: spec.pan, uan: spec.uan, pfMemberId: spec.pfMemberId,
+      pfOptIn: false, pfJoinDate: d('2022-04-01'), esicIp: spec.esicIp, esiApplicable: spec.esiApplicable,
+      ptStateCode: entity.stateCode, taxRegime: 'NEW', aadhaarVerified: true,
+    };
     await prisma.statutoryProfile.upsert({
       where: { employeeId: employee.id },
       update: spData,
@@ -766,56 +677,40 @@ async function main() {
       update: { isCurrent: true, structureId: structure.id },
       create: {
         businessId, employeeId: employee.id, entityId: entity.id, structureId: structure.id,
-        currencyCode: entity.payCurrency, basis: country === 'IN' ? 'CTC' : 'GROSS',
+        currencyCode: entity.payCurrency, basis: 'CTC',
         ctcAnnual: spec.ctcAnnual != null ? String(spec.ctcAnnual) + '.00' : null,
-        grossMonthly: country === 'IN'
-          ? String(spec.basic + Math.round(spec.basic * 0.5) + spec.special) + '.00'
-          : String(spec.salaryFortnight) + '.00',
+        grossMonthly: String(spec.basic + Math.round(spec.basic * 0.5) + spec.special) + '.00',
         effectiveFrom: d('2022-04-01'), isCurrent: true, revisionReason: 'HIRE',
       },
     });
     await prisma.employee.update({ where: { id: employee.id }, data: { currentCompensationId: comp.id } });
 
     // Compensation lines (the real money the engine reads).
-    if (country === 'IN') {
-      const hra = Math.round(spec.basic * 0.5); // HRA = 50% of Basic (PERCENT_OF base=BASIC)
-      await ensure('salaryComponentLine', det(`compline:${spec.code}:basic`), {
-        businessId, compensationId: comp.id, componentId: cBasic.id,
-        calcMethod: 'FLAT', amountMonthly: String(spec.basic) + '.00', amountAnnual: String(spec.basic * 12) + '.00', sortOrder: 1,
-      });
-      await ensure('salaryComponentLine', det(`compline:${spec.code}:hra`), {
-        businessId, compensationId: comp.id, componentId: cHra.id,
-        calcMethod: 'PERCENT_OF', calcValue: '50.0000', amountMonthly: String(hra) + '.00', sortOrder: 2,
-      });
-      await ensure('salaryComponentLine', det(`compline:${spec.code}:special`), {
-        businessId, compensationId: comp.id, componentId: cSpecial.id,
-        calcMethod: 'BALANCING', amountMonthly: String(spec.special) + '.00', sortOrder: 3,
-      });
-      await ensure('salaryComponentLine', det(`compline:${spec.code}:pfer`), {
-        businessId, compensationId: comp.id, componentId: cPfEr.id, calcMethod: 'STATUTORY', sortOrder: 20,
-      });
-    } else {
-      await ensure('salaryComponentLine', det(`compline:${spec.code}:salary`), {
-        businessId, compensationId: comp.id, componentId: cNzSalary.id,
-        calcMethod: 'FLAT', amountMonthly: String(spec.salaryFortnight) + '.00', sortOrder: 1,
-      });
-      await ensure('salaryComponentLine', det(`compline:${spec.code}:kser`), {
-        businessId, compensationId: comp.id, componentId: cNzKsEr.id, calcMethod: 'STATUTORY', sortOrder: 20,
-      });
-    }
+    const hra = Math.round(spec.basic * 0.5); // HRA = 50% of Basic (PERCENT_OF base=BASIC)
+    await ensure('salaryComponentLine', det(`compline:${spec.code}:basic`), {
+      businessId, compensationId: comp.id, componentId: cBasic.id,
+      calcMethod: 'FLAT', amountMonthly: String(spec.basic) + '.00', amountAnnual: String(spec.basic * 12) + '.00', sortOrder: 1,
+    });
+    await ensure('salaryComponentLine', det(`compline:${spec.code}:hra`), {
+      businessId, compensationId: comp.id, componentId: cHra.id,
+      calcMethod: 'PERCENT_OF', calcValue: '50.0000', amountMonthly: String(hra) + '.00', sortOrder: 2,
+    });
+    await ensure('salaryComponentLine', det(`compline:${spec.code}:special`), {
+      businessId, compensationId: comp.id, componentId: cSpecial.id,
+      calcMethod: 'BALANCING', amountMonthly: String(spec.special) + '.00', sortOrder: 3,
+    });
+    await ensure('salaryComponentLine', det(`compline:${spec.code}:pfer`), {
+      businessId, compensationId: comp.id, componentId: cPfEr.id, calcMethod: 'STATUTORY', sortOrder: 20,
+    });
 
     // AttendancePayInput for the current pay run (frozen days; some LOP).
-    const run = country === 'IN' ? inRun : nzRun;
-    const calDays = country === 'IN' ? IN_CAL_DAYS : NZ_CAL_DAYS;
-    const pStart = country === 'IN' ? IN_PERIOD_START : NZ_PERIOD_START;
-    const pEnd = country === 'IN' ? IN_PERIOD_END : NZ_PERIOD_END;
     await prisma.attendancePayInput.upsert({
-      where: { payRunId_employeeId: { payRunId: run.id, employeeId: employee.id } },
+      where: { payRunId_employeeId: { payRunId: inRun.id, employeeId: employee.id } },
       update: { payableDays: String(spec.payable) + '.0000', lopDays: String(spec.lop) + '.0000' },
       create: {
-        businessId, payRunId: run.id, employeeId: employee.id,
-        periodStart: d(pStart), periodEnd: d(pEnd),
-        calendarDays: String(calDays) + '.0000',
+        businessId, payRunId: inRun.id, employeeId: employee.id,
+        periodStart: d(IN_PERIOD_START), periodEnd: d(IN_PERIOD_END),
+        calendarDays: String(IN_CAL_DAYS) + '.0000',
         payableDays: String(spec.payable) + '.0000',
         lopDays: String(spec.lop) + '.0000',
         paidLeaveDays: '0.0000', weeklyOffDays: '0.0000', holidayDays: '0.0000', overtimeHours: '0.00',
@@ -826,35 +721,31 @@ async function main() {
     await ensure('bankAccount', det(`bank:${spec.code}`), {
       businessId, employeeId: employee.id,
       accountName: `${spec.first} ${spec.last}`,
-      accountNumber: country === 'IN' ? '5012345678' + spec.seq : '01-0123-0123456-0' + spec.seq,
-      ifsc: country === 'IN' ? 'HDFC0001234' : null,
-      nzBankAccount: country === 'NZ' ? '01-0123-0123456-00' : null,
-      bankName: country === 'IN' ? 'HDFC Bank' : 'ANZ', currencyCode: entity.payCurrency, isPrimary: true,
+      accountNumber: '5012345678' + spec.seq,
+      ifsc: 'HDFC0001234',
+      bankName: 'HDFC Bank', currencyCode: entity.payCurrency, isPrimary: true,
     });
 
-    // LeaveBalance per employee (current period).
-    const balType = country === 'IN' ? ltEL : ltNZAnnual;
-    const period = country === 'IN' ? IN_TAX_YEAR : NZ_TAX_YEAR;
+    // LeaveBalance per employee (current period) — Earned Leave (India).
     await prisma.leaveBalance.upsert({
-      where: { businessId_employeeId_leaveTypeId_periodCode: { businessId, employeeId: employee.id, leaveTypeId: balType.id, periodCode: period } },
+      where: { businessId_employeeId_leaveTypeId_periodCode: { businessId, employeeId: employee.id, leaveTypeId: ltEL.id, periodCode: IN_TAX_YEAR } },
       update: {},
       create: {
-        businessId, employeeId: employee.id, leaveTypeId: balType.id, periodCode: period,
-        unit: country === 'IN' ? 'DAYS' : 'WEEKS',
-        opening: country === 'IN' ? '6.0000' : '0.0000',
-        accrued: country === 'IN' ? '9.0000' : '1.5000',
-        taken: country === 'IN' ? '2.0000' : '0.0000',
-        closing: country === 'IN' ? '13.0000' : '1.5000',
+        businessId, employeeId: employee.id, leaveTypeId: ltEL.id, periodCode: IN_TAX_YEAR,
+        unit: 'DAYS',
+        opening: '6.0000',
+        accrued: '9.0000',
+        taken: '2.0000',
+        closing: '13.0000',
       },
     });
 
     return employee;
   }
 
-  let inCount = 0, nzCount = 0;
-  for (const spec of inEmployees) { await makeEmployee(inEntity, inOrg, inStructure, spec, 'IN'); inCount += 1; }
-  for (const spec of nzEmployees) { await makeEmployee(nzEntity, nzOrg, nzStructure, spec, 'NZ'); nzCount += 1; }
-  console.log(`✓ Employees: ${inCount} IN + ${nzCount} NZ (with employment, statutory, compensation, attendance, bank, leave balance)`);
+  let inCount = 0;
+  for (const spec of inEmployees) { await makeEmployee(inEntity, inOrg, inStructure, spec); inCount += 1; }
+  console.log(`✓ Employees: ${inCount} IN (with employment, statutory, compensation, attendance, bank, leave balance)`);
   console.log(`✓ ESS portal logins created: ${portalUserCount}`);
 
   // ═════════════════════════════════════════════════════════════════════════
@@ -975,16 +866,16 @@ async function main() {
   console.log('────────────────────────────────────────────────────────');
   console.log('✅ DEMO tenant seeded.');
   console.log(`   Business slug ......... demo`);
-  console.log(`   Entities .............. IN-HQ (INR/monthly), NZ-AKL (NZD/fortnightly)`);
+  console.log(`   Entity ................ IN-HQ (INR/monthly)`);
   console.log(`   Employees ............. ${empTotal}`);
   console.log(`   AttendancePayInputs ... ${attTotal}`);
-  console.log(`   Pay runs (DRAFT) ...... ${inRun.code}, ${nzRun.code}`);
+  console.log(`   Pay run (DRAFT) ....... ${inRun.code}`);
   console.log('');
   console.log('   Run a pay run with payrollService.computeRun, e.g.:');
   console.log(`     computeRun({ businessId: '${businessId}', actorId: '${operator.id}', payRunId: '${inRun.id}' })`);
   console.log('   Logins (password: Demo@12345):');
   console.log('     superadmin@demo.test  operator@demo.test (Owner/maker)  finance@demo.test (Finance/checker)');
-  console.log('     ESS: aarav.sharma@demo.test  priya.nair@demo.test  olivia.williams@demo.test');
+  console.log('     ESS: aarav.sharma@demo.test  priya.nair@demo.test  meera.iyer@demo.test  karthik.reddy@demo.test');
   console.log('────────────────────────────────────────────────────────');
 }
 

@@ -11,7 +11,7 @@
 // server-side — never a body id). When a token is present it is appended to
 // every request as ?token= (the backend accepts it on the query).
 //
-// Steps: Welcome → Personal → Statutory (IN PAN/Aadhaar/UAN · NZ IRD/tax/KiwiSaver)
+// Steps: Welcome → Personal → Statutory (India PAN/Aadhaar/UAN)
 //        → Bank → Emergency → Documents → e-sign (placeholder, 4d) → Review/Submit.
 // Inline statutory validation MIRRORS backend/src/hr/lifecycle/validators.js so
 // the field-level feedback matches the server gate exactly.
@@ -40,26 +40,6 @@ function isAadhaar(v) {
   for (let i = 0; i < r.length; i += 1) c = VD[c][VP[i % 8][Number(r[i])]];
   return c === 0;
 }
-// IRD mod-11 (last digit = check; base left-padded to 8).
-const IRD_W1 = [3,2,7,6,5,4,3,2]; const IRD_W2 = [7,4,3,2,5,2,7,6];
-function irdCd(base8, w) { let s = 0; for (let i = 0; i < 8; i += 1) s += Number(base8[i]) * w[i]; const m = s % 11; return m === 0 ? 0 : 11 - m; }
-function isIRD(v) {
-  const d = String(v || '').replace(/\D/g, '');
-  if (d.length < 8 || d.length > 9) return false;
-  const whole = Number(d); if (whole < 10000000 || whole > 150000000) return false;
-  const provided = Number(d[d.length - 1]); const base8 = d.slice(0, -1).padStart(8, '0');
-  let c = irdCd(base8, IRD_W1); if (c === 10) { c = irdCd(base8, IRD_W2); if (c === 10) return false; }
-  return c === provided;
-}
-const NZ_TAX = new Set(['M','ME','SB','S','SH','ST','SA','M SL','ME SL','SB SL','S SL','SH SL','ST SL','SA SL','WT','ND','STC','CAE','EDW','NSW']);
-function isTaxCode(v) { const s = String(v || '').trim().toUpperCase().replace(/\s+/g, ' ').replace(/^([A-Z]{1,2})SL$/, '$1 SL'); return NZ_TAX.has(s); }
-const KIWI = new Set([3, 4, 6, 8, 10]);
-const isKiwi = (v) => v == null || v === '' || KIWI.has(Number(String(v).replace('%', '').trim()));
-function isNZBank(v) {
-  const p = String(v || '').trim().split('-');
-  return p.length === 4 && /^\d{2}$/.test(p[0]) && /^\d{4}$/.test(p[1]) && /^\d{6,8}$/.test(p[2]) && /^\d{2,4}$/.test(p[3]);
-}
-
 // ─── small field UI ──────────────────────────────────────────────────────────
 function Field({ label, value, onChange, hint, error, type = 'text', placeholder, maxLength }) {
   return (
@@ -199,8 +179,8 @@ function Wizard() {
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [token]);
 
-  const countryCode = state?.countryCode || 'IN';
-  const isIN = countryCode !== 'NZ';
+  // Single-country India (Feature 14): the tenant country is always India, so all
+  // statutory/bank fields are the India set (PAN/Aadhaar/UAN, IFSC).
 
   // ── per-step inline validation (mirrors the server) ──
   const personalErrors = useMemo(() => {
@@ -212,29 +192,20 @@ function Wizard() {
 
   const statutoryErrors = useMemo(() => {
     const e = {};
-    if (isIN) {
-      if (!statutory.pan) e.pan = 'PAN is required';
-      else if (!isPAN(statutory.pan)) e.pan = 'Enter a valid PAN (e.g. ABCDE1234F)';
-      if (statutory.aadhaar && !isAadhaar(statutory.aadhaar)) e.aadhaar = 'Enter a valid 12-digit Aadhaar';
-      if (statutory.uan && !isUAN(statutory.uan)) e.uan = 'UAN must be 12 digits';
-    } else {
-      if (!statutory.irdNumber) e.irdNumber = 'IRD number is required';
-      else if (!isIRD(statutory.irdNumber)) e.irdNumber = 'Enter a valid IRD number';
-      if (!statutory.taxCode) e.taxCode = 'Tax code is required';
-      else if (!isTaxCode(statutory.taxCode)) e.taxCode = 'Enter a valid tax code (e.g. M, ME, S SL)';
-      if (statutory.kiwiSaverRate && !isKiwi(statutory.kiwiSaverRate)) e.kiwiSaverRate = 'Rate must be 3, 4, 6, 8 or 10%';
-    }
+    if (!statutory.pan) e.pan = 'PAN is required';
+    else if (!isPAN(statutory.pan)) e.pan = 'Enter a valid PAN (e.g. ABCDE1234F)';
+    if (statutory.aadhaar && !isAadhaar(statutory.aadhaar)) e.aadhaar = 'Enter a valid 12-digit Aadhaar';
+    if (statutory.uan && !isUAN(statutory.uan)) e.uan = 'UAN must be 12 digits';
     return e;
-  }, [statutory, isIN]);
+  }, [statutory]);
 
   const bankErrors = useMemo(() => {
     const e = {};
     if (!bank.accountNumber) e.accountNumber = 'Account number is required';
     if (!bank.accountHolderName) e.accountHolderName = 'Account holder name is required';
-    if (isIN) { if (!bank.ifsc) e.ifsc = 'IFSC is required'; else if (!isIFSC(bank.ifsc)) e.ifsc = 'Enter a valid IFSC code'; }
-    else { if (!bank.nzBankAccount) e.nzBankAccount = 'Bank account is required'; else if (!isNZBank(bank.nzBankAccount)) e.nzBankAccount = 'Enter a valid NZ bank account'; }
+    if (!bank.ifsc) e.ifsc = 'IFSC is required'; else if (!isIFSC(bank.ifsc)) e.ifsc = 'Enter a valid IFSC code';
     return e;
-  }, [bank, isIN]);
+  }, [bank]);
 
   const emergencyErrors = useMemo(() => {
     const e = {};
@@ -337,7 +308,7 @@ function Wizard() {
         <Card title="Let's get you set up" subtitle="This takes about 5 minutes. Your details are private and visible only to HR.">
           <ul className="space-y-2 text-sm" style={{ color: 'var(--theme-text)' }}>
             <li>• Personal & contact details</li>
-            <li>• Statutory information ({isIN ? 'PAN, Aadhaar, UAN' : 'IRD, tax code, KiwiSaver'})</li>
+            <li>• Statutory information (PAN, Aadhaar, UAN)</li>
             <li>• Bank account for salary</li>
             <li>• Emergency contact</li>
             <li>• A few documents to upload &amp; sign</li>
@@ -359,21 +330,11 @@ function Wizard() {
       )}
 
       {step === 'statutory' && (
-        <Card title="Statutory details" subtitle={isIN ? 'Required for tax (TDS) and provident fund.' : 'Required for PAYE and KiwiSaver.'}>
-          {isIN ? (
-            <>
-              <Field label="PAN" value={statutory.pan} onChange={(v) => setStatutory({ ...statutory, pan: v.toUpperCase() })} error={statutoryErrors.pan} maxLength={10} hint="10 characters, e.g. ABCDE1234F" />
-              <Field label="Aadhaar (optional)" value={statutory.aadhaar} onChange={(v) => setStatutory({ ...statutory, aadhaar: v })} error={statutoryErrors.aadhaar} maxLength={14} hint="12 digits" />
-              <Field label="UAN (optional)" value={statutory.uan} onChange={(v) => setStatutory({ ...statutory, uan: v })} error={statutoryErrors.uan} maxLength={12} hint="Universal Account Number, if you have one" />
-              <Select label="Tax regime" value={statutory.taxRegime} onChange={(v) => setStatutory({ ...statutory, taxRegime: v })} options={[['NEW', 'New regime (default)'], ['OLD', 'Old regime']]} />
-            </>
-          ) : (
-            <>
-              <Field label="IRD number" value={statutory.irdNumber} onChange={(v) => setStatutory({ ...statutory, irdNumber: v })} error={statutoryErrors.irdNumber} maxLength={11} hint="8 or 9 digits" />
-              <Select label="Tax code" value={statutory.taxCode} onChange={(v) => setStatutory({ ...statutory, taxCode: v })} options={[['M', 'M'], ['ME', 'ME'], ['M SL', 'M SL'], ['S', 'S'], ['S SL', 'S SL'], ['SH', 'SH'], ['ST', 'ST'], ['SB', 'SB'], ['SA', 'SA']]} error={statutoryErrors.taxCode} />
-              <Select label="KiwiSaver rate (optional)" value={statutory.kiwiSaverRate} onChange={(v) => setStatutory({ ...statutory, kiwiSaverRate: v })} options={[['3', '3%'], ['4', '4%'], ['6', '6%'], ['8', '8%'], ['10', '10%']]} error={statutoryErrors.kiwiSaverRate} />
-            </>
-          )}
+        <Card title="Statutory details" subtitle="Required for tax (TDS) and provident fund.">
+          <Field label="PAN" value={statutory.pan} onChange={(v) => setStatutory({ ...statutory, pan: v.toUpperCase() })} error={statutoryErrors.pan} maxLength={10} hint="10 characters, e.g. ABCDE1234F" />
+          <Field label="Aadhaar (optional)" value={statutory.aadhaar} onChange={(v) => setStatutory({ ...statutory, aadhaar: v })} error={statutoryErrors.aadhaar} maxLength={14} hint="12 digits" />
+          <Field label="UAN (optional)" value={statutory.uan} onChange={(v) => setStatutory({ ...statutory, uan: v })} error={statutoryErrors.uan} maxLength={12} hint="Universal Account Number, if you have one" />
+          <Select label="Tax regime" value={statutory.taxRegime} onChange={(v) => setStatutory({ ...statutory, taxRegime: v })} options={[['NEW', 'New regime (default)'], ['OLD', 'Old regime']]} />
           <NavButtons onBack={back} onNext={saveAndNext} busy={busy} nextDisabled={Object.keys(statutoryErrors).length > 0} />
         </Card>
       )}
@@ -382,11 +343,7 @@ function Wizard() {
         <Card title="Bank account" subtitle="Where we'll credit your salary.">
           <Field label="Account holder name" value={bank.accountHolderName} onChange={(v) => setBank({ ...bank, accountHolderName: v })} error={bankErrors.accountHolderName} />
           <Field label="Account number" value={bank.accountNumber} onChange={(v) => setBank({ ...bank, accountNumber: v })} error={bankErrors.accountNumber} />
-          {isIN ? (
-            <Field label="IFSC" value={bank.ifsc} onChange={(v) => setBank({ ...bank, ifsc: v.toUpperCase() })} error={bankErrors.ifsc} maxLength={11} hint="e.g. HDFC0001234" />
-          ) : (
-            <Field label="Bank account (BB-bbbb-account-suffix)" value={bank.nzBankAccount} onChange={(v) => setBank({ ...bank, nzBankAccount: v })} error={bankErrors.nzBankAccount} hint="e.g. 12-3456-1234567-00" />
-          )}
+          <Field label="IFSC" value={bank.ifsc} onChange={(v) => setBank({ ...bank, ifsc: v.toUpperCase() })} error={bankErrors.ifsc} maxLength={11} hint="e.g. HDFC0001234" />
           <NavButtons onBack={back} onNext={saveAndNext} busy={busy} nextDisabled={Object.keys(bankErrors).length > 0} />
         </Card>
       )}
@@ -402,7 +359,7 @@ function Wizard() {
 
       {step === 'documents' && (
         <Card title="Documents" subtitle="Upload your ID proof and any required documents (max 10 MB each).">
-          <DocUpload label={isIN ? 'ID proof (PAN / Aadhaar)' : 'Passport / visa / work permit'} category={isIN ? 'AADHAAR' : 'WORK_PERMIT'} onUpload={uploadDoc} busy={busy} done={c.documents} />
+          <DocUpload label="ID proof (PAN / Aadhaar)" category="AADHAAR" onUpload={uploadDoc} busy={busy} done={c.documents} />
           <p className="text-xs" style={{ color: 'var(--theme-muted)' }}>
             {c.documents ? 'Documents received. You can re-upload if needed.' : 'A document upload is required before you can submit.'}
           </p>

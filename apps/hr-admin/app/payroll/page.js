@@ -44,16 +44,12 @@ const STAGES = [
 ];
 const STAGE_INDEX = { DRAFT: 0, INPUTS_LOCKED: 0, COMPUTED: 1, REVIEW: 2, APPROVED: 3, PAID: 4, FILED: 5, CANCELLED: -1 };
 
-// Country-aware filing exports (so an IN run never shows NZ links that 404).
+// Country-aware filing exports. India-only product: only IN filing links surface.
 const FILE_KINDS_BY_COUNTRY = {
   IN: [
     { kind: 'ecr', label: 'EPF ECR' },
     { kind: 'esic', label: 'ESIC' },
     { kind: 'form24q', label: 'Form 24Q' },
-  ],
-  NZ: [
-    { kind: 'ei', label: 'Payday EI' },
-    { kind: 'bank', label: 'Bank file' },
   ],
 };
 

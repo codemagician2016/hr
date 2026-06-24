@@ -543,7 +543,7 @@ function QuestionModal({ jobId, question, onClose, onSaved }) {
             <label className="flex items-center gap-2 text-sm text-gray-700">
               <input type="checkbox" checked={isKnockout} onChange={(e) => setIsKnockout(e.target.checked)} />
               Knockout question
-              <Info text="A knockout auto-rejects the candidate if they don't give a passing answer (e.g. 'Must be eligible to work in NZ → Yes'). Their merit drops to 0 but they stay visible." />
+              <Info text="A knockout auto-rejects the candidate if they don't give a passing answer (e.g. 'Must be eligible to work in India → Yes'). Their merit drops to 0 but they stay visible." />
             </label>
           </div>
         </div>

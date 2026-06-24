@@ -163,10 +163,9 @@ export default function Sidebar({ onNavigate }) {
     select: (b) => (Array.isArray(b) ? b : b?.items || []),
   });
   const hasTeam = Array.isArray(teamRoster) && teamRoster.length > 0;
-  // FLAG (Feature 15): the India income-tax PROJECTION nav item is country-gated —
-  // it only appears for IN employees (the surface 422s for non-IN, and NZ
-  // projection is roadmap). Fail-closed: country is null while loading / when
-  // unresolved, so the item stays hidden until India is confirmed.
+  // Feature 15: the India income-tax PROJECTION nav item is country-gated — it
+  // only appears for India employees. Fail-closed: country is null while loading /
+  // when unresolved, so the item stays hidden until India is confirmed.
   const { country } = useCountry();
   const showTaxProjection = country === 'IN';
 

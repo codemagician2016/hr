@@ -798,16 +798,14 @@ function ShiftsTab({ canManage }) {
 const COUNTRY_OPTIONS = [
   ['', 'All countries'],
   ['IN', 'India'],
-  ['NZ', 'New Zealand'],
 ];
 
 function HolidayForm({ defaults, canManage, countries = [], onClose, onSaved }) {
-  // Default the country to the tenant's own when single-country (so an NZ tenant
-  // defaults to NZ, not a hardcoded India). Multi/unknown falls back to any passed
-  // default, else blank (operator must choose) — never silently India.
+  // Default the country to the tenant's own when single-country. The tenant operates
+  // in exactly ONE HR country (Feature 14), so single-country is the norm; multi/unknown
+  // falls back to any passed default, else blank (operator must choose).
   const single = Array.isArray(countries) && countries.length === 1;
   const defaultCountry = defaults.countryCode || (single ? countries[0] : '');
-  const hasNZ = !Array.isArray(countries) || countries.length === 0 || countries.includes('NZ');
   const [draft, setDraft] = useState({
     name: '',
     date: '',
@@ -858,10 +856,11 @@ function HolidayForm({ defaults, canManage, countries = [], onClose, onSaved }) 
               onChange={(e) => set('countryCode', e.target.value)}
               className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm bg-white"
             >
-              {/* Offer only the tenant's operating countries (no cross-country leak). */}
+              {/* Offer only the tenant's operating country (no cross-country leak).
+                  Falls back to India alone — the product is single-country India. */}
               {(single ? [] : [['', 'Select…']]).map(([v, l]) => <option key="blank" value={v}>{l}</option>)}
-              {(Array.isArray(countries) && countries.length ? countries : ['IN', 'NZ']).map((cc) => (
-                <option key={cc} value={cc}>{cc === 'NZ' ? 'New Zealand' : cc === 'IN' ? 'India' : cc}</option>
+              {(Array.isArray(countries) && countries.length ? countries : ['IN']).map((cc) => (
+                <option key={cc} value={cc}>{cc === 'IN' ? 'India' : cc}</option>
               ))}
             </select>
           </div>
@@ -875,8 +874,6 @@ function HolidayForm({ defaults, canManage, countries = [], onClose, onSaved }) 
             >
               <option value="PUBLIC">Public</option>
               <option value="RESTRICTED">Restricted / optional</option>
-              {/* PROVINCIAL (anniversary) holidays are an NZ concept — NZ tenants only. */}
-              {hasNZ && <option value="PROVINCIAL">Provincial</option>}
             </select>
           </div>
           <TextInput label="Entity ID" value={draft.entityId} onChange={(v) => set('entityId', v)} hint="Optional scope" />
@@ -900,12 +897,10 @@ function HolidayForm({ defaults, canManage, countries = [], onClose, onSaved }) 
 }
 
 function ImportHolidaysModal({ year, countries = [], onClose, onDone }) {
-  // Offer/seed only the tenant's operating countries. India-first: when the
-  // tenant's country set is unknown, fall back to India ahead of NZ (so an
-  // India tenant never lands on a New Zealand default).
-  // Default to the tenant's own
-  // when single-country, else the first available — never a hardcoded NZ default.
-  const importCountries = Array.isArray(countries) && countries.length ? countries : ['IN', 'NZ'];
+  // Offer/seed only the tenant's operating country. The product is single-country
+  // India (Feature 14); when the tenant's country set is unknown, fall back to
+  // India alone — never any other country.
+  const importCountries = Array.isArray(countries) && countries.length ? countries : ['IN'];
   const [countryCode, setCountryCode] = useState(importCountries[0]);
   const [importYear, setImportYear] = useState(String(year));
   const [entityId, setEntityId] = useState('');
@@ -960,7 +955,7 @@ function ImportHolidaysModal({ year, countries = [], onClose, onDone }) {
       ) : (
         <div className="space-y-4">
           <p className="text-sm text-gray-600">
-            Seeds the official public-holiday set (NZ mondayised + provincial, India restricted/optional) for the chosen country and year.
+            Seeds the official India public-holiday set (national + restricted/optional) for the chosen year.
           </p>
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
@@ -972,7 +967,7 @@ function ImportHolidaysModal({ year, countries = [], onClose, onDone }) {
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm bg-white"
               >
                 {importCountries.map((cc) => (
-                  <option key={cc} value={cc}>{cc === 'NZ' ? 'New Zealand' : cc === 'IN' ? 'India' : cc}</option>
+                  <option key={cc} value={cc}>{cc === 'IN' ? 'India' : cc}</option>
                 ))}
               </select>
             </div>
@@ -995,8 +990,8 @@ function ImportHolidaysModal({ year, countries = [], onClose, onDone }) {
 
 function HolidaysTab({ canManage }) {
   const thisYear = new Date().getFullYear();
-  // The tenant's operating countries gate the country filter + add/import forms so
-  // an NZ-only tenant is never shown India options (and vice-versa).
+  // The tenant's operating country (Feature 14) gates the country filter + add/import
+  // forms so the tenant is only ever shown its own country (India).
   const { countries } = useTenantCountries();
   const [year, setYear] = useState(thisYear);
   const [countryCode, setCountryCode] = useState('');

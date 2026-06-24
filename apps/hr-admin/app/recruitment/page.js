@@ -157,7 +157,6 @@ function NewJobModal({ onClose, onCreated }) {
             <FieldLabel hint="The hiring country. Drives the offer pre-flight (India 50% wage rule) and the onboarding template seeded on hire.">Country</FieldLabel>
             <select value={d.countryCode} onChange={(e) => set('countryCode')(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
               <option value="IN">India</option>
-              <option value="NZ">New Zealand</option>
             </select>
           </div>
           <div>

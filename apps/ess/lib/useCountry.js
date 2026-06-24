@@ -5,22 +5,24 @@
 // mode). It calls /api/hr/me/country-context, which resolves off the tenant's
 // Business.hrCountry (the ONE source of truth). The capability matrix drives every
 // country-specific surface (statutory ids, tax regime, currency) so no ESS page
-// hard-codes 'IN'/'NZ'.
+// hard-codes a country literal.
 //
-// FAIL-CLOSED contract: `country` is one of 'IN' | 'NZ' | null. It is `null` while
-// loading AND whenever the tenant country is not set up / ambiguous (the endpoint
-// 409s). Callers MUST NOT default a null country to a market — they render neither
-// country's fields/components/validators when country is null. `capabilities` is
-// null until resolved; gate UI on `capabilities.*`, never a literal.
+// FAIL-CLOSED contract: `country` is one of 'IN' | null. The product is
+// single-country India (Feature 14): India is the only registrable HR country, so
+// the only non-null value is 'IN'. It is `null` while loading AND whenever the
+// tenant country is not set up / ambiguous (the endpoint 409s). Callers MUST NOT
+// default a null country to a market — they render no country fields when country
+// is null. `capabilities` is null until resolved; gate UI on `capabilities.*`.
 
 import { useEffect, useState } from 'react';
 import { fetchMyCountryContext } from '@/lib/api';
 
-// Normalize whatever the backend returns to exactly 'IN' | 'NZ' | null.
+// Normalize whatever the backend returns to exactly 'IN' | null. India is the only
+// supported HR country; anything else fails closed to null (never another market).
 function normalize(cc) {
   if (typeof cc !== 'string') return null;
   const s = cc.trim().toUpperCase();
-  if (s === 'IN' || s === 'NZ') return s;
+  if (s === 'IN') return s;
   return null;
 }
 

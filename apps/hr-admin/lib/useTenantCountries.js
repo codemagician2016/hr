@@ -4,8 +4,8 @@
 // in exactly ONE HR country: Business.hrCountry, the authoritative selector. This
 // hook reads /api/hr/country-context (the single source of truth) and returns that
 // ONE country as a one-element array, so every config surface (holidays, leave
-// types, statutory fields) offers ONLY the tenant country — an IN tenant is NEVER
-// offered NZ, and vice-versa.
+// types, statutory fields) offers ONLY the tenant country — an India tenant is
+// only ever offered India.
 //
 // Returns { countries: string[], country, currency, capabilities, loading, error }.
 // `countries` is kept (one element, e.g. ['IN']) so existing consumers that gate on

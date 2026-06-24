@@ -60,7 +60,7 @@ export function fetchMe() {
 
 // Resolve the signed-in employee's operating country + pay currency AND their
 // profile details. This is the AUTHORITATIVE country source for the ESS app
-// (global payroll: IN + NZ) — the backend resolves country from the employee's
+// (single-country India) — the backend resolves country from the employee's
 // StatutoryProfile / Employee row / the entity they work in. Returns
 // { employeeId, countryCode, payCurrency, profile } where countryCode is null
 // when it cannot be determined — callers must FAIL CLOSED (render neither

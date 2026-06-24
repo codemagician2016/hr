@@ -39,19 +39,17 @@ function SelectField({ label, value, onChange, options, required }) {
   );
 }
 
-// The two markets DriftHR ships for. Picking a country pre-fills a sensible pay
-// currency + timezone so the operator rarely has to touch them.
+// DriftHR ships single-country India (Feature 14): a tenant only ever creates IN
+// entities. Picking a country pre-fills a sensible pay currency + timezone so the
+// operator rarely has to touch them.
 const COUNTRIES = [
   { value: 'IN', label: 'India', payCurrency: 'INR', timezone: 'Asia/Kolkata' },
-  { value: 'NZ', label: 'New Zealand', payCurrency: 'NZD', timezone: 'Pacific/Auckland' },
 ];
 const CURRENCIES = [
   { value: 'INR', label: 'INR — Indian Rupee' },
-  { value: 'NZD', label: 'NZD — New Zealand Dollar' },
 ];
 const TIMEZONES = [
   { value: 'Asia/Kolkata', label: 'Asia/Kolkata (IST)' },
-  { value: 'Pacific/Auckland', label: 'Pacific/Auckland (NZST)' },
 ];
 
 const EMPTY_ENTITY = { legalName: '', tradeName: '', code: '', countryCode: 'IN', payCurrency: 'INR', timezone: 'Asia/Kolkata' };

@@ -287,7 +287,7 @@ function OfferModal({ applicationId, onClose, onDone }) {
           <div>
             <FieldLabel hint="Currency of the offer. INR triggers the India 50% wage pre-flight.">Currency</FieldLabel>
             <select value={d.currencyCode} onChange={(e) => set('currencyCode')(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
-              {['INR', 'NZD', 'USD'].map((c) => <option key={c} value={c}>{c}</option>)}
+              {['INR', 'USD'].map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
           <div>

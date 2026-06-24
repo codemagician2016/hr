@@ -182,8 +182,8 @@ function CompensationInner() {
     );
   }
 
-  // Pay currency comes from the revision (entity pay currency: INR for IN, NZD
-  // for NZ) — never hardcoded, so an NZ employee sees NZD, not INR.
+  // Pay currency comes from the revision (entity pay currency: INR for India) —
+  // never hardcoded.
   const currency = current.currencyCode || undefined;
   const { earnings, employeeDed, employer } = splitLines(current);
   const abs = current.absolute || {};

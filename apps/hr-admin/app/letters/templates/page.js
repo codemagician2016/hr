@@ -4,13 +4,13 @@
  * Letters → Template library (Feature 9, slice 9D).
  *
  * Two surfaces on one page:
- *  (a) Library grid — every LetterTemplate (system IN/NZ + tenant custom) as a
+ *  (a) Library grid — every LetterTemplate (system India + tenant custom) as a
  *      card with category · country · version · status (PUBLISHED/DRAFT). System
  *      rows are badged + non-deletable. Filter by category / country / status.
  *  (b) Editor — a slide-over panel with the body textarea + a MERGE-FIELD
  *      INSERTER DRAWER (typeahead palette from GET /api/hr/letters/templates/
  *      merge-fields, inserts {{employee.name}} at the caret), category +
- *      country/locale toggle (IN vs NZ wording variant), default-letterhead
+ *      country/locale toggle (India wording variant), default-letterhead
  *      picker (GET /api/hr/letters/letterheads — degrades gracefully if 9C's
  *      route 404s), requiresSignature toggle, ref-prefix override, and
  *      publish/archive actions.
@@ -50,7 +50,7 @@ const CATEGORIES = [
   ['CUSTOM', 'Custom'],
 ];
 const CATEGORY_LABEL = Object.fromEntries(CATEGORIES);
-const COUNTRIES = [['', 'Any'], ['IN', 'India'], ['NZ', 'New Zealand']];
+const COUNTRIES = [['', 'Any'], ['IN', 'India']];
 
 const TEMPLATES_BASE = '/api/hr/letters/templates';
 
@@ -62,14 +62,13 @@ const SAMPLE_VALUES = {
   'employee.dateOfJoining': '01/04/2022', 'employee.lastWorkingDay': '31/03/2026', 'employee.tenureYears': '4',
   'employee.employmentType': 'Permanent', 'employee.workLocation': 'Bengaluru', 'employee.email': 'asha@acme.com',
   'employee.phone': '+91 90000 00000', 'employee.pan': 'ABCDE1234F', 'employee.uan': '100200300400',
-  'employee.pfNumber': 'KN/BNG/0012345', 'employee.esiNumber': '3100000000', 'employee.irdNumber': '012-345-678',
-  'employee.taxCode': 'M', 'employee.kiwiSaverRate': '3%', 'employee.bankName': 'HDFC Bank',
+  'employee.pfNumber': 'KN/BNG/0012345', 'employee.esiNumber': '3100000000', 'employee.bankName': 'HDFC Bank',
   'employee.bankAccountMasked': '••••6789', 'employee.ifsc': 'HDFC0000123', 'employee.bankBranch': 'MG Road',
   'comp.ctcAnnual': '₹18,00,000.00', 'comp.basic': '₹7,20,000.00', 'comp.hra': '₹2,88,000.00',
   'comp.grossMonthly': '₹1,50,000.00', 'comp.netMonthly': '₹1,18,000.00', 'comp.da': '₹0.00', 'comp.specialAllowance': '₹3,00,000.00',
   'company.legalName': 'Acme Technologies Pvt. Ltd.', 'company.tradeName': 'Acme', 'company.addressBlock': '12 Residency Road, Bengaluru 560025',
   'company.registeredAddress': '12 Residency Road, Bengaluru 560025', 'company.cin': 'U72900KA2015PTC000000',
-  'company.gstin': '29ABCDE1234F1Z5', 'company.nzbn': '9429000000000', 'company.logoUrl': '',
+  'company.gstin': '29ABCDE1234F1Z5', 'company.logoUrl': '',
   'company.signatoryName': 'R. Iyer', 'company.signatoryDesignation': 'Head of HR',
   'date.today': '24/06/2026', 'date.issueDate': '24/06/2026', 'date.effectiveDate': '24/06/2026',
   'letter.refNo': 'ACME/HR/2026/0001', 'letter.subject': 'Subject', 'letter.purpose': 'visa application',
@@ -296,7 +295,7 @@ function TemplateEditor({ template, letterheads, letterheadsAvailable, onClose, 
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Country / wording<InfoTip text="The market this template's wording targets (IN or NZ). Tenants only see their own country's templates when issuing." label="Country" /></label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Country / wording<InfoTip text="The market this template's wording targets (India). Tenants only see their own country's templates when issuing." label="Country" /></label>
               <select
                 value={form.countryCode}
                 onChange={(e) => {
@@ -304,14 +303,13 @@ function TemplateEditor({ template, letterheads, letterheadsAvailable, onClose, 
                   // auto-suggest a locale to pair with the wording variant
                   set('countryCode', cc);
                   if (cc === 'IN' && !form.locale) set('locale', 'en-IN');
-                  if (cc === 'NZ' && !form.locale) set('locale', 'en-NZ');
                 }}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
               >
                 {COUNTRIES.map(([v, l]) => <option key={v || 'any'} value={v}>{l}</option>)}
               </select>
             </div>
-            <TextInput label={<>Locale <InfoTip text="Controls date + currency formatting (e.g. en-IN uses ₹ and dd/mm/yyyy)." label="Locale" /></>} value={form.locale} onChange={(v) => set('locale', v)} hint="e.g. en-IN / en-NZ" />
+            <TextInput label={<>Locale <InfoTip text="Controls date + currency formatting (e.g. en-IN uses ₹ and dd/mm/yyyy)." label="Locale" /></>} value={form.locale} onChange={(v) => set('locale', v)} hint="e.g. en-IN" />
           </div>
 
           <TextInput label={<>Subject (optional) <InfoTip text="The letter's subject line. May contain merge fields like {{letter.subject}}." label="Subject" /></>} value={form.subject} onChange={(v) => set('subject', v)} hint="Mergeable, e.g. {{letter.subject}}" />
@@ -486,7 +484,7 @@ export default function TemplatesPage() {
     <div className="p-6 max-w-6xl mx-auto">
       <PageHeader
         title="Letter templates"
-        subtitle="System (IN / NZ) and custom letter templates with merge fields, versioning and publish state."
+        subtitle="System (India) and custom letter templates with merge fields, versioning and publish state."
         actions={<PrimaryButton onClick={() => setEditing(null)}>New template</PrimaryButton>}
       />
 
@@ -520,7 +518,7 @@ export default function TemplatesPage() {
       {loading ? (
         <div className="py-16 flex justify-center"><Spinner /></div>
       ) : !rows || rows.length === 0 ? (
-        <Empty text="No templates yet. Create one, or seed the IN/NZ system library." />
+        <Empty text="No templates yet. Create one, or seed the India system library." />
       ) : (
         <>
           {grouped.system.length > 0 && (

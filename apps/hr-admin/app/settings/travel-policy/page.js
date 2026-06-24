@@ -24,14 +24,13 @@ const TIERS = ['TIER_1', 'TIER_2', 'TIER_3'];
 const BANDS = [['FULL_24H', 'Full day (24h)'], ['HALF_12H', 'Half (12h)'], ['HALF_DAY', 'Half-day']];
 const MODES = [['PUBLIC_TRANSPORT', 'Public transport'], ['TAXI_CAB', 'Taxi / cab'], ['SELF_CAR', 'Own car (per-km)'], ['TRAIN', 'Train'], ['FLIGHT', 'Flight']];
 
-// India-first country options for the policy/city pickers. Constrain to the
-// tenant's operating countries; when unknown, default to India alone (the NZ
-// engine stays intact — it just isn't surfaced to an India-only tenant).
-const COUNTRY_META = { IN: { label: 'India (INR)', short: 'IN' }, NZ: { label: 'New Zealand (NZD)', short: 'NZ' } };
+// India-only country options for the policy/city pickers. The product is
+// single-country India (Feature 14); when unknown, default to India alone.
+const COUNTRY_META = { IN: { label: 'India (INR)', short: 'IN' } };
 function countryChoices(countries) {
   const list = Array.isArray(countries) && countries.length ? countries : ['IN'];
-  // Keep a stable India-first order.
-  return ['IN', 'NZ'].filter((c) => list.includes(c)).map((c) => ({ value: c, ...COUNTRY_META[c] }));
+  // Only India is registrable, so the choices collapse to India.
+  return ['IN'].filter((c) => list.includes(c)).map((c) => ({ value: c, ...COUNTRY_META[c] }));
 }
 
 export default function TravelPolicyPage() {
@@ -44,7 +43,6 @@ export default function TravelPolicyPage() {
   const [loading, setLoading] = useState(true);
   const { countries } = useTenantCountries();
   const choices = countryChoices(countries);
-  const multiCountry = choices.length > 1;
 
   const loadPolicies = useCallback(() => {
     get('/api/hr/expenses/policies', { pageSize: 50 })
@@ -59,9 +57,9 @@ export default function TravelPolicyPage() {
   async function createPolicy() {
     setError('');
     try {
-      // Default to the tenant's first operating country (India-first when single).
+      // Default to the tenant's operating country (India).
       const cc = choices[0]?.value || 'IN';
-      const currencyCode = cc === 'NZ' ? 'NZD' : 'INR';
+      const currencyCode = 'INR';
       const p = await post('/api/hr/expenses/policies', { name: 'New travel policy', countryCode: cc, currencyCode, effectiveFrom: new Date().toISOString().slice(0, 10) });
       setActiveId(p.id); loadPolicies();
     } catch (e) { setError(e.data?.message || e.message); }
@@ -86,7 +84,7 @@ export default function TravelPolicyPage() {
         <button onClick={createPolicy} className="rounded-lg border border-gray-300 px-4 py-2.5 text-sm hover:bg-gray-50">+ New policy</button>
       </div>
 
-      {!policy ? <p className="text-gray-500">Create a policy to start.{multiCountry ? ' India + New Zealand are supported.' : ''}</p> : (
+      {!policy ? <p className="text-gray-500">Create a policy to start.</p> : (
         <>
           <PolicyHeader policy={policy} onSave={savePolicy} choices={choices} />
           <Tabs
@@ -111,7 +109,7 @@ export default function TravelPolicyPage() {
 }
 
 function PolicyHeader({ policy, onSave, choices = [{ value: 'IN', label: 'India (INR)' }] }) {
-  // Always include the policy's own country so an existing NZ policy still renders
+  // Always include the policy's own country so an existing policy still renders
   // its value even on a tenant whose operating set has since narrowed.
   const opts = choices.some((c) => c.value === policy.countryCode)
     ? choices
@@ -121,7 +119,7 @@ function PolicyHeader({ policy, onSave, choices = [{ value: 'IN', label: 'India 
       <label className="block text-sm"><FieldLabel tip="A name for this policy set.">Name</FieldLabel>
         <input defaultValue={policy.name} onBlur={(e) => e.target.value !== policy.name && onSave({ name: e.target.value })} className="w-full rounded border px-2 py-1.5" /></label>
       <label className="block text-sm"><FieldLabel tip="The country this policy applies to. Drives the currency and sensible defaults.">Country</FieldLabel>
-        <select defaultValue={policy.countryCode} onChange={(e) => onSave({ countryCode: e.target.value, currencyCode: e.target.value === 'NZ' ? 'NZD' : 'INR' })} className="w-full rounded border px-2 py-1.5">{opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></label>
+        <select defaultValue={policy.countryCode} onChange={(e) => onSave({ countryCode: e.target.value, currencyCode: 'INR' })} className="w-full rounded border px-2 py-1.5">{opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></label>
       <label className="block text-sm"><FieldLabel tip="The tier used when a city isn't listed in the city-tier map.">Default tier</FieldLabel>
         <select defaultValue={policy.defaultTier} onChange={(e) => onSave({ defaultTier: e.target.value })} className="w-full rounded border px-2 py-1.5">{TIERS.map((t) => <option key={t} value={t}>{t}</option>)}</select></label>
       <label className="block text-sm">

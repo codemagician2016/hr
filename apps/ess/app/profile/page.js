@@ -263,8 +263,7 @@ function ProfileInner() {
                 <>
                   <FieldRow fieldKey="bank.accountName" label="Account holder name" hint="Name on the bank account." field={sections.bank.accountName} pending={pending['bank.accountName']} onSave={saveField} />
                   <FieldRow fieldKey="bank.accountNumber" label="Account number" hint="Your salary account number — change needs HR approval." field={sections.bank.accountNumber} pending={pending['bank.accountNumber']} onSave={saveField} />
-                  <FieldRow fieldKey="bank.ifsc" label="IFSC (India)" hint="11-character IFSC of your branch — change needs HR approval." field={sections.bank.ifsc} pending={pending['bank.ifsc']} onSave={saveField} />
-                  <FieldRow fieldKey="bank.nzBankAccount" label="Bank account (NZ)" hint="NZ bank account BB-bbbb-AAAAAAA-SS — change needs HR approval." field={sections.bank.nzBankAccount} pending={pending['bank.nzBankAccount']} onSave={saveField} />
+                  <FieldRow fieldKey="bank.ifsc" label="IFSC" hint="11-character IFSC of your branch — change needs HR approval." field={sections.bank.ifsc} pending={pending['bank.ifsc']} onSave={saveField} />
                   <FieldRow fieldKey="bank.bankName" label="Bank name" hint="Your bank's name." field={sections.bank.bankName} pending={pending['bank.bankName']} onSave={saveField} />
                 </>
               ) : <Empty text="No bank account on file yet. Contact HR to add one." />}

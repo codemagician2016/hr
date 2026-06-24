@@ -931,10 +931,9 @@ function CarryForwardTab() {
 
 const CATEGORY_OPTS = ['ANNUAL', 'CASUAL', 'SICK', 'MATERNITY', 'PATERNITY', 'BEREAVEMENT', 'PUBLIC_HOLIDAY', 'ALTERNATIVE_DAY', 'COMP_OFF', 'UNPAID', 'SABBATICAL', 'MARRIAGE', 'ADOPTION', 'FAMILY_VIOLENCE', 'OTHER'];
 const UNIT_OPTS = ['DAYS', 'HOURS', 'WEEKS'];
-const NZ_BASIS_OPTS = ['', 'RDP', 'ADP', 'AWE_8PCT', 'OWP'];
 const SANDWICH_OPTS = ['', 'INCLUSIVE', 'EXCLUSIVE'];
-const COUNTRY_OPTS = ['', 'IN', 'NZ'];
-const ACCRUAL_METHOD_OPTS = ['UPFRONT_ANNUAL', 'MONTHLY_ACCRUAL', 'ANNIVERSARY_GRANT', 'WORKED_HOURS_RATIO', 'CONTINUOUS_NZ', 'NONE'];
+const COUNTRY_OPTS = ['', 'IN'];
+const ACCRUAL_METHOD_OPTS = ['UPFRONT_ANNUAL', 'MONTHLY_ACCRUAL', 'ANNIVERSARY_GRANT', 'WORKED_HOURS_RATIO', 'NONE'];
 const ACCRUAL_FREQ_OPTS = ['MONTHLY', 'QUARTERLY', 'ANNUAL', 'PER_PAY_PERIOD'];
 const GENDER_OPTS = ['', 'MALE', 'FEMALE', 'OTHER'];
 
@@ -1081,13 +1080,11 @@ function ConfigTab({ resource, title, fields, columns }) {
 }
 
 // Full LeaveType allow-list (matches the controller LEAVE_TYPE_FIELDS + §5.1 spec).
-// Country-aware: `countries` is the tenant's distinct operating-country set. For a
-// single-country tenant the Country select is constrained to THAT country (no
-// cross-country option) and NZ-only fields (nzPayBasis, sandwichPolicy) are shown
-// only when the tenant operates in NZ — an India-only tenant never sees them.
+// Single-country India (Feature 14): the Country select is constrained to the
+// tenant's own country (India). The sandwich policy (e.g. holidays inside an LWP
+// block) applies to India leave types too, so it's always available.
 function typeFields(countries) {
   const list = Array.isArray(countries) ? countries : [];
-  const hasNZ = list.includes('NZ');
   const single = list.length === 1;
   const countryOpts = single ? [list[0]] : COUNTRY_OPTS;
   const fields = [
@@ -1095,14 +1092,9 @@ function typeFields(countries) {
     { key: 'code', label: 'Code', required: true },
     { key: 'category', label: 'Category', type: 'select', options: CATEGORY_OPTS, required: true, hint: 'Choose UNPAID for Leave Without Pay (LWP): it applies with no balance and reduces pay for the days taken. CASUAL = Casual Leave (paid, lapses at year-end). India statutory floors apply to EL/SL/CL policies.' },
     { key: 'unit', label: 'Unit', type: 'select', options: UNIT_OPTS },
-    { key: 'countryCode', label: single ? 'Country' : 'Country (blank = both)', type: 'select', options: countryOpts },
+    { key: 'countryCode', label: single ? 'Country' : 'Country', type: 'select', options: countryOpts },
+    { key: 'sandwichPolicy', label: 'Sandwich policy', type: 'select', options: SANDWICH_OPTS },
   ];
-  if (hasNZ || list.length === 0) {
-    fields.push(
-      { key: 'nzPayBasis', label: 'NZ pay basis', type: 'select', options: NZ_BASIS_OPTS },
-      { key: 'sandwichPolicy', label: 'Sandwich policy', type: 'select', options: SANDWICH_OPTS },
-    );
-  }
   fields.push(
     { key: 'color', label: 'Calendar colour (#hex)' },
     { key: 'isPaid', label: 'Paid', type: 'checkbox' },
@@ -1142,8 +1134,8 @@ function policyFields(typeOptions) {
 function LeaveInner() {
   const [tab, setTab] = useState('requests');
   const [types, setTypes] = useState([]);
-  // The tenant's operating countries drive which country-specific leave-type
-  // fields/options are offered (NZ-only fields hidden for an India-only tenant).
+  // The tenant's operating country (Feature 14) drives the leave-type Country
+  // select — an India tenant only ever sees India.
   const { countries } = useTenantCountries();
   useEffect(() => {
     get('/api/hr/leave/types').then((r) => setTypes(asList(r))).catch(() => setTypes([]));
