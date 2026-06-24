@@ -23,7 +23,7 @@
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
-const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
+const { PDFDocument, StandardFonts, rgb, PDFName } = require('pdf-lib');
 const { renderLetter, _internals } = require('../renderLetter');
 
 const FONT_DIR = path.join(__dirname, '..', 'fonts');
@@ -317,6 +317,82 @@ async function main() {
   const minBodyX = bodyRuns.length ? Math.min(...bodyRuns.map((p) => p.x)) : 0;
   check('letterhead-overlay: body x-origin honours the MediaBox lower-left origin', minBodyX >= OX + 0.10 * PW - 1);
 
+  // 12) THE GARBLE BUG (rotated letterhead). A letterhead PDF with /Rotate
+  //     90/180/270 must still render the body UPRIGHT inside the visible writing
+  //     area. The pre-fix engine drew every line axis-aligned (Tm sub-matrix
+  //     1 0 0 1) regardless of /Rotate, so the viewer then spun the body
+  //     sideways/upside-down — it overflowed the page and overlapped the
+  //     stationery (scrambled glyphs scattered over the letterhead). We assert the
+  //     body's text matrices carry the CORRECT rotation for the page (proving the
+  //     glyphs are upright, not axis-aligned-then-spun) AND land inside the visible
+  //     writing band (visible-space, accounting for the 90/270 width/height swap).
+  const rotW = 595.28, rotH = 841.89;
+  for (const rot of [0, 90, 180, 270]) {
+    const swapped = rot === 90 || rot === 270;
+    const visW = swapped ? rotH : rotW;
+    const visH = swapped ? rotW : rotH;
+    const lh = await makeA4Fixture({ rotate: rot, width: rotW, height: rotH });
+    const out = await renderLetter({
+      letterheadPdf: lh, layout: {}, // EMPTY → default writing area
+      bodyText: cleanBody,
+      fields: { date: '24/06/2026', refNo: 'ACME/HR/2026/0009' },
+      fontBytes, fontBoldBytes,
+    });
+    check(`rotation ${rot}: renders to a valid %PDF`, isPdf(out));
+
+    // Every BODY text matrix must carry the page's rotation (upright glyphs). The
+    // field-anchor + body all use the same orientation; the pre-fix bug would leave
+    // these at identity (1 0 0 1) for ALL rotations.
+    const exp = expectedRotMatrix(rot);
+    const mats = extractTextMatrices(out);
+    // The body content is the bulk of the text; require that the drawn text uses the
+    // expected rotation matrix and that NONE is left axis-aligned when rotated.
+    const bodyMats = mats.filter((m) => Math.abs(m.a) > 1e-6 || Math.abs(m.b) > 1e-6 || Math.abs(m.c) > 1e-6 || Math.abs(m.d) > 1e-6);
+    const allUpright = bodyMats.length > 0 && bodyMats.every((m) => matrixMatches(m, exp));
+    check(`rotation ${rot}: body glyphs drawn UPRIGHT (Tm rotation matches /Rotate, not scrambled)`, allUpright);
+
+    // Recompute VISIBLE coords from each Tm translation (media e,f) by INVERTING
+    // place(): the engine emits media coords, we invert per rotation back to the
+    // visible page and assert each run sits inside the visible writing band.
+    const visPts = mats.map((m) => {
+      const mx = m.e, my = m.f;
+      switch (rot) {
+        case 90: return { vx: my, vy: rotW - mx }; // inverse of place() R=90
+        case 180: return { vx: rotW - mx, vy: rotH - my };
+        case 270: return { vx: rotH - my, vy: mx };
+        default: return { vx: mx, vy: my };
+      }
+    });
+    // body runs only (exclude the up-top field anchors near visible top)
+    const bodyVis = visPts.filter((p) => p.vy < visH * 0.84 && p.vy > 0);
+    const inBand = bodyVis.length > 0 && bodyVis.every(
+      (p) => p.vx >= 0.05 * visW && p.vx <= 0.95 * visW && p.vy >= 0.14 * visH && p.vy <= 0.80 * visH
+    );
+    check(`rotation ${rot}: body lands inside the VISIBLE writing band (upright, not overflowing)`, inBand);
+  }
+
+  // 13) CropBox-inset letterhead (real exports trim bleed via a CropBox). The body
+  //     must map onto the VISIBLE (cropped) page, not the untrimmed MediaBox.
+  const CW = 595.28, CH = 841.89, CIX = 27, CIY = 29, MW2 = CW + 2 * CIX, MH2 = CH + 2 * CIY;
+  const cropDoc = await PDFDocument.create();
+  const cropPage = cropDoc.addPage([MW2, MH2]);
+  cropPage.node.set(PDFName.of('CropBox'), cropDoc.context.obj([CIX, CIY, CIX + CW, CIY + CH]));
+  const cf = await cropDoc.embedFont(StandardFonts.Helvetica);
+  cropPage.drawText('CROP LETTERHEAD', { x: CIX + 40, y: CIY + CH - 50, size: 16, font: cf });
+  const cropLh = Buffer.from(await cropDoc.save());
+  const cropOut = await renderLetter({
+    letterheadPdf: cropLh, layout: {}, bodyText: cleanBody,
+    fields: { date: '24/06/2026', refNo: 'ACME/HR/2026/0010' }, fontBytes, fontBoldBytes,
+  });
+  check('cropbox: renders to a valid %PDF', isPdf(cropOut));
+  const cropPts = extractTextPositions(cropOut);
+  // Visible band on the CROPPED page (origin CIX/CIY): the body must sit within it.
+  const cBodyRuns = cropPts.filter((p) => p.y < CIY + 0.84 * CH);
+  const cInBand = cBodyRuns.length > 0 && cBodyRuns.every(
+    (p) => p.x >= CIX + 0.05 * CW && p.x <= CIX + 0.95 * CW && p.y >= CIY + 0.14 * CH && p.y <= CIY + 0.80 * CH
+  );
+  check('cropbox: body lands inside the VISIBLE (cropped) writing band', cInBand);
+
   // ── report ──────────────────────────────────────────────────────────────
   console.log('');
   console.log(`renderLetter test: ${passed} passed, ${failed} failed of ${passed + failed} assertions.`);
@@ -370,6 +446,50 @@ function extractTextPositions(buf) {
     while ((m = tmRe.exec(txt))) pts.push({ x: Number(m[5]), y: Number(m[6]) });
   }
   return pts;
+}
+
+// Collect the full text matrices `[a b c d e f] Tm` from the content streams the
+// ENGINE drew (those referencing our embedded NotoSans font, so we ignore the
+// underlay letterhead's own text). The [a b c d] sub-matrix encodes the glyph
+// ORIENTATION: identity (1 0 0 1) is upright/axis-aligned; a 90/180/270 rotation
+// matrix means the engine drew the text pre-rotated to cancel the page /Rotate. We
+// use this to prove the body is rendered UPRIGHT on a rotated letterhead instead of
+// axis-aligned-then-spun-by-the-viewer (the scramble bug).
+function extractTextMatrices(buf) {
+  const s = buf.toString('latin1');
+  const mats = [];
+  const streamRe = /stream\r?\n([\s\S]*?)\r?\nendstream/g;
+  let blk;
+  while ((blk = streamRe.exec(s))) {
+    const raw = Buffer.from(blk[1], 'latin1');
+    let txt = null;
+    try { txt = zlib.inflateSync(raw).toString('latin1'); } catch (_e) { txt = null; }
+    if (!txt) continue;
+    // Only matrices from runs that select OUR embedded font (renderLetter names it
+    // /NotoSans-…). This excludes the underlay's own header text.
+    if (!/\/NotoSans/.test(txt)) continue;
+    let m;
+    const tmRe = /(-?[\d.eE+-]+)\s+(-?[\d.eE+-]+)\s+(-?[\d.eE+-]+)\s+(-?[\d.eE+-]+)\s+(-?[\d.eE+-]+)\s+(-?[\d.eE+-]+)\s+Tm/g;
+    while ((m = tmRe.exec(txt))) {
+      mats.push({ a: Number(m[1]), b: Number(m[2]), c: Number(m[3]), d: Number(m[4]), e: Number(m[5]), f: Number(m[6]) });
+    }
+  }
+  return mats;
+}
+
+// The expected [a b c d] rotation sub-matrix for a given page /Rotate (the matrix
+// the engine must emit so glyphs read upright on the visible page).
+function expectedRotMatrix(rot) {
+  switch (((rot % 360) + 360) % 360) {
+    case 90: return { a: 0, b: 1, c: -1, d: 0 };
+    case 180: return { a: -1, b: 0, c: 0, d: -1 };
+    case 270: return { a: 0, b: -1, c: 1, d: 0 };
+    default: return { a: 1, b: 0, c: 0, d: 1 };
+  }
+}
+function matrixMatches(m, exp, tol = 1e-3) {
+  return Math.abs(m.a - exp.a) < tol && Math.abs(m.b - exp.b) < tol &&
+         Math.abs(m.c - exp.c) < tol && Math.abs(m.d - exp.d) < tol;
 }
 
 async function assertYFlip(buf) {
