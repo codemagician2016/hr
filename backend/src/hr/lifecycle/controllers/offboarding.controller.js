@@ -133,6 +133,9 @@ async function resolveEmployeeEntity(businessId, employeeId, db = prisma) {
 
 // Resolve last-drawn Basic+DA (minor) + monthly gross (minor) from the employee's
 // current CompensationRevision lines. Mirrors provision.resolveBasicDaMonthly.
+//
+// Also returns basicMonthlyMinor (BASIC kind ONLY) so the encashment BASIC_30 basis can
+// price Basic/30 — NOT (Basic+DA)/30 (finding #2). BASIC_DA_26 keeps Basic+DA.
 const BASIC_DA_KINDS = new Set(['BASIC', 'DEARNESS_ALLOWANCE']);
 async function resolveLastDrawnPay(businessId, employeeId, db = prisma) {
   const comp = await db.compensationRevision.findFirst({
@@ -140,14 +143,21 @@ async function resolveLastDrawnPay(businessId, employeeId, db = prisma) {
     orderBy: { effectiveFrom: 'desc' },
     include: { lines: { include: { component: { select: { kind: true } } } } },
   });
-  if (!comp) return { basicDaMonthlyMinor: 0, grossMonthlyMinor: 0 };
+  if (!comp) return { basicDaMonthlyMinor: 0, basicMonthlyMinor: 0, grossMonthlyMinor: 0 };
   let basicDa = 0;
+  let basic = 0;
   for (const ln of comp.lines || []) {
     const kind = ln.component && ln.component.kind;
-    if (BASIC_DA_KINDS.has(kind) && ln.amountMonthly != null) basicDa += Number(ln.amountMonthly);
+    if (ln.amountMonthly == null) continue;
+    if (BASIC_DA_KINDS.has(kind)) basicDa += Number(ln.amountMonthly);
+    if (kind === 'BASIC') basic += Number(ln.amountMonthly);
   }
   const grossMonthlyMinor = comp.grossMonthly != null ? decimalToMinor(comp.grossMonthly) : 0;
-  return { basicDaMonthlyMinor: Math.round(basicDa * 100), grossMonthlyMinor };
+  return {
+    basicDaMonthlyMinor: Math.round(basicDa * 100),
+    basicMonthlyMinor: Math.round(basic * 100),
+    grossMonthlyMinor,
+  };
 }
 
 // Sum the employee's outstanding loan balances (minor).

@@ -303,7 +303,7 @@ async function adminList(req, res, next) {
     const [rows, total] = await Promise.all([
       prisma.leaveEncashmentRequest.findMany({
         where,
-        include: { leaveType: { select: { code: true, name: true } }, employee: { select: { firstName: true, lastName: true, employeeCode: true } } },
+        include: { leaveType: { select: { code: true, name: true } }, employee: { select: { firstName: true, lastName: true, code: true } } },
         orderBy: { createdAt: 'desc' },
         take,
       }),
@@ -321,16 +321,52 @@ async function loadPendingForDecision(req, res, businessId) {
   return row;
 }
 
+// SoD self-approval guard (finding #5). driveTerminal drives the engine with
+// systemActor:true (the route's RBAC + F1 scope is the authorization boundary), which
+// DISABLES the engine's own maker≠checker re-check. So we MUST enforce the user-level
+// maker≠checker rule HERE, and fail CLOSED when either identity can't be resolved —
+// never skip the check just because the actor has no linked Employee.
+//
+// Canonical rule: the approving USER must differ from the requesting USER. We resolve
+// the requester's userId from the request's employee (the portal identity that raised
+// it) and compare to the actor's userId. employeeId equality is a secondary fast guard.
+async function assertNotSelfApproval(req, businessId, row) {
+  const actorUserId = req.user && (req.user.id || req.user.userId) || null;
+  // Fail closed: we cannot prove the actor ≠ requester without an actor identity.
+  if (!actorUserId) {
+    return { ok: false, reason: 'Approver identity could not be resolved', code: 'SELF_APPROVAL_BLOCKED' };
+  }
+  // Secondary employee-level guard (when the actor has a linked Employee).
+  const actorEmployeeId = req.user.employeeId || null;
+  if (actorEmployeeId && actorEmployeeId === row.employeeId) {
+    return { ok: false, reason: 'You cannot approve your own encashment request', code: 'SELF_APPROVAL_BLOCKED' };
+  }
+  // PRIMARY user-level guard: resolve the requester's userId from the row's employee.
+  const requester = await prisma.employee.findFirst({
+    where: { id: row.employeeId, businessId },
+    select: { userId: true },
+  });
+  // Fail closed: an encashment row must point at a real employee; if it doesn't, or the
+  // requester has a portal user that equals the actor, block.
+  if (!requester) {
+    return { ok: false, reason: 'Requester identity could not be resolved', code: 'SELF_APPROVAL_BLOCKED' };
+  }
+  if (requester.userId && requester.userId === actorUserId) {
+    return { ok: false, reason: 'You cannot approve your own encashment request', code: 'SELF_APPROVAL_BLOCKED' };
+  }
+  return { ok: true };
+}
+
 // POST /leave/encashment/:id/approve — debit the balance + queue payout.
 async function adminApprove(req, res, next) {
   try {
     const { businessId } = req.user;
     const row = await loadPendingForDecision(req, res, businessId);
     if (!row) return;
-    // SoD: an approver may never approve their own encashment.
-    const actorEmployeeId = req.user.employeeId || null;
-    if (actorEmployeeId && actorEmployeeId === row.employeeId) {
-      return res.status(403).json({ message: 'You cannot approve your own encashment request', reason: 'SELF_APPROVAL_BLOCKED' });
+    // SoD: an approver may never approve their own encashment (user-level, fail closed).
+    const sod = await assertNotSelfApproval(req, businessId, row);
+    if (!sod.ok) {
+      return res.status(403).json({ message: sod.reason, reason: sod.code });
     }
     const decidedBy = req.user.id || req.user.userId || null;
     const updated = await driveTerminal({ businessId, requestId: row.id, decision: 'APPROVED', decidedBy });
@@ -363,17 +399,22 @@ async function runEncashments(req, res, next) {
     const payRunId = req.params.id;
     const run = await prisma.payRun.findFirst({ where: { id: payRunId, businessId }, select: { id: true } });
     if (!run) return res.status(404).json({ message: 'Pay run not found' });
+    // F1 scope (finding #1): the route chained attachSelfEmployee → withEmployeeScope, so
+    // req.scope is the caller's accessible sub-tree. Apply scopeWhere(...,'employeeId') to
+    // BOTH lists so a department-scoped payroll viewer never sees a name + encashment amount
+    // outside their tree (mirror adminList). A NONE scope yields { employeeId: { in: [] } }.
+    const scopeFilter = scopeWhere(req.scope, 'employeeId');
     // Paid by this run (stamped) + still-queued APPROVED requests (un-paid) the next
     // run would pay; the preparer sees what rides this payslip before disburse.
     const [paid, queued] = await Promise.all([
       prisma.leaveEncashmentRequest.findMany({
-        where: { businessId, payRunId, status: 'PAID' },
-        include: { leaveType: { select: { code: true, name: true } }, employee: { select: { firstName: true, lastName: true, employeeCode: true } } },
+        where: { businessId, payRunId, status: 'PAID', ...scopeFilter },
+        include: { leaveType: { select: { code: true, name: true } }, employee: { select: { firstName: true, lastName: true, code: true } } },
         orderBy: { decidedAt: 'asc' },
       }),
       prisma.leaveEncashmentRequest.findMany({
-        where: { businessId, status: 'APPROVED', payRunId: null },
-        include: { leaveType: { select: { code: true, name: true } }, employee: { select: { firstName: true, lastName: true, employeeCode: true } } },
+        where: { businessId, status: 'APPROVED', payRunId: null, ...scopeFilter },
+        include: { leaveType: { select: { code: true, name: true } }, employee: { select: { firstName: true, lastName: true, code: true } } },
         orderBy: { decidedAt: 'asc' },
       }),
     ]);
@@ -397,4 +438,6 @@ module.exports = {
   meCreate, meList, meCancel,
   // operator
   adminList, adminApprove, adminReject, runEncashments,
+  // exported for tests (finding #5 SoD).
+  _internals: { assertNotSelfApproval },
 };

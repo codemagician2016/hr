@@ -1087,6 +1087,10 @@ async function computeRun({ businessId, actorId, payRunId, freezeAttendance: doF
     for (const bundle of loaded.bundles) {
       const { engineArgs, meta } = buildEmployeePayInput(bundle);
       let result = computePayslip(engineArgs);
+      // The args that ACTUALLY produced `result` (updated below if the reimbursement-defer
+      // guard strips a component + recomputes). The encashment reprice (finding #4) recomputes
+      // from THIS so it never re-adds a deferred reimbursement.
+      let finalEngineArgs = engineArgs;
       // Collect anomalies twice: the run-level list carries employeeId; the per-line
       // list keeps the engine shape (no employeeId) so it round-trips through
       // PayRunLine.errorJson the way getRun/approveRun expect.
@@ -1111,6 +1115,7 @@ async function computeRun({ businessId, actorId, payRunId, freezeAttendance: doF
             components: engineArgs.components.filter((c) => c.code !== 'EXPENSE_REIMBURSEMENT'),
           };
           result = computePayslip(strippedArgs);
+          finalEngineArgs = strippedArgs; // keep the encashment reprice in sync with reality
           meta.reimbursementPayout = null; // do not stamp the deferred claims
           if (guard.anomaly) pushAnom(guard.anomaly);
         }
@@ -1149,6 +1154,13 @@ async function computeRun({ businessId, actorId, payRunId, freezeAttendance: doF
         // Feature 31 (FLAGGED) — the encashment requests to reconcile + stamp PAID from
         // the engine's LEAVE_ENCASHMENT line (persistComputedRun re-selects under lock).
         leaveEncashmentPayout: meta.leaveEncashmentPayout || null,
+        // Feature 31 (FLAGGED) — carry the engine args so persistComputedRun can REPRICE
+        // (re-run computePayslip) when a concurrent run grabs an encashment request and it
+        // drops at reconcile: the taxable LEAVE_ENCASHMENT earning is baked into TDS/PF/ESI,
+        // so a post-hoc subtraction can't fix gross/net — we recompute the engine with the
+        // component set to the reconciled total so the persisted payslip pays exactly the
+        // stamped set. Only present when this employee has an encashment payout this run.
+        encashEngineArgs: meta.leaveEncashmentPayout ? finalEngineArgs : null,
         allAnomalies: lineAnoms, // persisted to errorJson so warnings survive re-read
       });
     }
@@ -1274,7 +1286,7 @@ async function persistComputedRun(tx, { businessId, payRun, actorId, now, inputH
 
   let totGross = 0, totDed = 0, totNet = 0, totEr = 0;
   for (const ln of lines) {
-    const r = ln.result;
+    let r = ln.result;
 
     // Feature 26 (FLAGGED) — RECONCILE the reimbursement payout to ONE locked claim set
     // BEFORE pricing the payslip, closing the compute-vs-persist double-pay race. The
@@ -1321,12 +1333,20 @@ async function persistComputedRun(tx, { businessId, payRun, actorId, now, inputH
     // locked request set BEFORE stamping. The engine priced the LEAVE_ENCASHMENT taxable
     // earning at COMPUTE off a non-tx select (ln.leaveEncashmentPayout.requests). We
     // RE-SELECT under lock (FOR UPDATE) in THIS persist tx and intersect: the authoritative
-    // set is the priced requests that are STILL lockable. We do NOT reprice the taxable
-    // earning post-engine (its TDS/PF/ESI are already baked into the engine result, unlike a
-    // post-tax reimbursement) — we only stamp the intersection, so we never pay a request
-    // that was settled by another run. On a clean recompute the unwind above re-opened this
-    // run's own stamps, so the lock re-select reproduces the priced set exactly (paid ==
-    // the engine figure). A request that dropped out stays APPROVED for the next run.
+    // set is the priced requests that are STILL lockable. On a clean recompute the unwind
+    // above re-opened this run's own stamps, so the lock re-select reproduces the priced set
+    // exactly (paid == the engine figure). A request that dropped out stays APPROVED for the
+    // next run.
+    //
+    // REPRICE (finding #4): unlike a post-tax reimbursement, the LEAVE_ENCASHMENT earning is
+    // TAXABLE — its amount is baked into gross/net AND the engine's TDS/PF/ESI. So if a
+    // request DROPS at reconcile (a concurrent run grabbed+stamped it), we CANNOT just stamp
+    // the smaller set and leave the priced payslip inflated — the dropped amount would be
+    // disbursed in THIS run's net AND paid+stamped by the other run = DOUBLE-PAY. We instead
+    // RE-RUN computePayslip with the LEAVE_ENCASHMENT component set to the reconciled total
+    // (or stripped when nothing remains), so gross/net/TDS/PF/ESI all reflect EXACTLY the
+    // stamped set — priced set == stamped set, to the paise. No drop ⇒ no reprice (the fast,
+    // race-free path is byte-identical to before).
     let encReconciled = null;
     if (ln.leaveEncashmentPayout && ln.leaveEncashmentPayout.requests && ln.leaveEncashmentPayout.requests.length) {
       const locked = await encashmentPass.selectPayableEncashments(tx, {
@@ -1336,6 +1356,20 @@ async function persistComputedRun(tx, { businessId, payRun, actorId, now, inputH
         currentPayRunId: payRun.id,
       });
       encReconciled = encashmentPass.reconcilePayout(ln.leaveEncashmentPayout.requests, locked.requests);
+      const pricedEncMinor = ln.leaveEncashmentPayout.totalPayableMinor || 0;
+      // Only reprice when the reconciled set differs from what the engine priced AND we have
+      // the engine args to recompute with (carried from compute for encashment lines).
+      if (encReconciled.totalMinor !== pricedEncMinor && ln.encashEngineArgs) {
+        const repricedArgs = {
+          ...ln.encashEngineArgs,
+          components: encReconciled.totalMinor > 0
+            ? ln.encashEngineArgs.components.map((c) => (c.code === 'LEAVE_ENCASHMENT'
+              ? { ...c, amountMinor: encReconciled.totalMinor }
+              : c))
+            : ln.encashEngineArgs.components.filter((c) => c.code !== 'LEAVE_ENCASHMENT'),
+        };
+        r = computePayslip(repricedArgs); // re-derives gross/net/TDS/PF/ESI for the stamped set
+      }
     }
 
     const lineRow = await tx.payRunLine.create({
