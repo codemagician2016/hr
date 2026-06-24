@@ -167,6 +167,40 @@ const VALID_SOURCES = Object.freeze([
   'literal', 'derived', 'daily',
 ]);
 
+// ── PII masking (Feature 32 §6 — "an exporter never emits a field the actor can't
+// read"). The controller derives the maskFields set per the actor's permissions
+// and passes it into buildRegister; resolveCell masks the bound value when the
+// column's key is in that set. PURE — no permission logic lives here.
+//
+// Statutory identifiers keep a short, non-identifying tail (so the register is
+// still reconcilable by an authorised reviewer) while the bulk is redacted;
+// free-text identity (DOB / address) is fully redacted.
+
+const PII_MASK_CHAR = '•';
+
+// Reveal only the last `keep` characters of an identifier; redact the rest.
+function maskTail(value, keep = 4) {
+  const s = value == null ? '' : String(value);
+  if (!s) return '';
+  if (s.length <= keep) return PII_MASK_CHAR.repeat(s.length);
+  return PII_MASK_CHAR.repeat(s.length - keep) + s.slice(-keep);
+}
+
+// Fully redact a free-text PII field (DOB / address) — emit a fixed token so the
+// column still renders but discloses nothing.
+function maskFull(value) {
+  const s = value == null ? '' : String(value);
+  return s ? '••••••' : '';
+}
+
+// A column is "fully redacted" (date/address) vs "tail-masked" (identifier). We
+// fully-redact non-identifier transforms (date/text) and tail-mask identifiers.
+function maskValueForColumn(column, displayText) {
+  const t = column && column.transform;
+  if (t === 'date' || t === 'text') return maskFull(displayText);
+  return maskTail(displayText, 4);
+}
+
 // Whitelisted derivations — small, named, pure roll-ups the column can request
 // without a definition needing to bind to a non-existent stored field. Each is a
 // READ over already-frozen figures (no recompute beyond +/- of frozen Decimals).
@@ -254,14 +288,45 @@ function lastDom(year, month1) {
   return new Date(Date.UTC(year, month1, 0)).getUTCDate();
 }
 
-// ── expandDailyColumns — muster: one column per day-of-month (1..N) ───────────
-// `period` = { year, month } (1-based month). Correctly handles 28/29/30/31-day
-// months (a leap-Feb yields 29 columns).
+// ── expandDailyColumns — muster: one column per day of the period ─────────────
+// Preferred: a `window` = { start, end } (the FROZEN pay run's actual period) ⇒
+// one column PER CALENDAR DATE across [start..end] inclusive, keyed by the full
+// ISO date so a non-calendar cycle (e.g. 26→25, spanning two months) prints the
+// right days and stays byte-identical to the frozen summary's span.
+//
+// Fallback: a `period` = { year, month } ⇒ one column per day-of-month (legacy
+// calendar-month muster). Correctly handles 28/29/30/31-day months (leap-Feb=29).
+//
+// Accepts (windowOrPeriod) — a { start, end } window OR a { year, month } period.
 
-function expandDailyColumns(period) {
-  const p = period || {};
-  const year = +p.year;
-  const month = +p.month;
+function isoDate(y, m1, d) {
+  return `${y}-${pad2(m1)}-${pad2(d)}`;
+}
+
+function expandDailyColumns(windowOrPeriod) {
+  const w = windowOrPeriod || {};
+  // window form — one column per date across the frozen run period.
+  if (w.start != null && w.end != null) {
+    const s = toDateParts(w.start);
+    const e = toDateParts(w.end);
+    if (!s || !e) return [];
+    const cols = [];
+    let cur = new Date(Date.UTC(s.y, s.m - 1, s.d));
+    const last = Date.UTC(e.y, e.m - 1, e.d);
+    let guard = 0;
+    while (cur.getTime() <= last && guard < 400) {
+      const y = cur.getUTCFullYear();
+      const m1 = cur.getUTCMonth() + 1;
+      const d = cur.getUTCDate();
+      cols.push({ key: `d${isoDate(y, m1, d)}`, label: String(d), align: 'center', _date: isoDate(y, m1, d) });
+      cur = new Date(cur.getTime() + 86400000);
+      guard += 1;
+    }
+    return cols;
+  }
+  // period (calendar-month) form — legacy day-of-month columns.
+  const year = +w.year;
+  const month = +w.month;
   if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
     return [];
   }
@@ -312,12 +377,17 @@ function resolveCell(column, bundleRow, ctx) {
       raw = DERIVATIONS[column.path] ? DERIVATIONS[column.path](bundleRow, ctx) : undefined;
       break;
     case 'daily': {
-      // muster per-day cell: find the Attendance row for ctx.day-of-month.
-      const day = column._day;
+      // muster per-day cell: find the frozen Attendance row for this column's day.
+      // Prefer an exact full-date match (window form — correct on a non-calendar
+      // cycle that spans two months); fall back to day-of-month (legacy form).
       const days = bundleRow.days || [];
+      const wantDate = column._date;
+      const day = column._day;
       const hit = days.find((a) => {
         const dp = toDateParts(a.date);
-        return dp && dp.d === day;
+        if (!dp) return false;
+        if (wantDate) return isoDate(dp.y, dp.m, dp.d) === wantDate;
+        return dp.d === day;
       });
       if (hit) {
         return { text: statusMark(hit.status, hit.lopFraction), raw: hit.status, money: false };
@@ -336,7 +406,16 @@ function resolveCell(column, bundleRow, ctx) {
   }
 
   const fn = tx ? tx.fn : formatText;
-  return { text: fn(raw), raw, money: isMoney };
+  let text = fn(raw);
+
+  // PII redaction (Feature 32 §6): mask the DISPLAY text only (raw is untouched
+  // so control totals never depend on a masked field). Money columns are never
+  // PII and are never in maskFields. The daily grid returns early above.
+  const maskFields = ctx && ctx.maskFields;
+  if (maskFields && maskFields.has && maskFields.has(column.key)) {
+    text = maskValueForColumn(column, text);
+  }
+  return { text, raw, money: isMoney };
 }
 
 // ── controlTotals — column sums for the printed footer (Rupee + days) ─────────
@@ -406,14 +485,17 @@ function buildRegister(definition, sourceBundle, opts = {}) {
   assertColumns(definition.columns);
 
   // Resolve the column layout: expand the single `daily:true` marker into one
-  // column per day-of-month, in place.
+  // column per period day, in place. The day window comes from the FROZEN bundle
+  // (bundle.window = the run periodStart/periodEnd) when present, so a non-calendar
+  // cycle prints the actual run days; else the calendar month (legacy fallback).
   const period = opts.period || bundle.period || null;
+  const dailyWindow = opts.window || bundle.window || period;
   const outColumns = [];
   for (const col of definition.columns) {
     if (col.daily) {
-      const dailyCols = expandDailyColumns(period);
+      const dailyCols = expandDailyColumns(dailyWindow);
       for (const dc of dailyCols) {
-        outColumns.push({ key: dc.key, label: dc.label, align: 'center', daily: true, _day: dc._day });
+        outColumns.push({ key: dc.key, label: dc.label, align: 'center', daily: true, _day: dc._day, _date: dc._date });
       }
     } else {
       const tx = col.transform ? TRANSFORMS[col.transform] : null;
@@ -431,7 +513,12 @@ function buildRegister(definition, sourceBundle, opts = {}) {
   }
 
   const workers = Array.isArray(bundle.workers) ? bundle.workers : [];
-  const ctx = { period, payRun: bundle.payRun };
+  // maskFields: a Set of column keys whose DISPLAY value the actor may not read.
+  // Derived by the controller from the actor's permissions/role (§6 PII contract).
+  const maskFields = opts.maskFields instanceof Set
+    ? opts.maskFields
+    : (Array.isArray(opts.maskFields) ? new Set(opts.maskFields) : null);
+  const ctx = { period, payRun: bundle.payRun, maskFields };
   const rows = [];
   let sl = 0;
   for (const w of workers) {
@@ -490,6 +577,9 @@ module.exports = {
   controlTotals,
   expandDailyColumns,
   assertColumns,
+  maskTail,
+  maskFull,
+  maskValueForColumn,
   // exposed for the seed + exporters + tests
   TRANSFORMS,
   DERIVATIONS,

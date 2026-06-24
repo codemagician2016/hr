@@ -22,10 +22,53 @@ const crypto = require('crypto');
 const prisma = require('../../core/lib/prisma');
 const { writeAudit } = require('../../core/lib/audit');
 const { assertCountry } = require('../tenant/countryContext');
+const { ROLES } = require('../../core/lib/roles');
+const { effectivePermissions } = require('../../core/lib/rbac');
 const projector = require('./projector');
 const seed = require('./india.registers.seed');
 const sources = require('./sources');
 const exporters = require('./exporters');
+
+// ── PII masking (Feature 32 §6) ───────────────────────────────────────────────
+// The register read/export grant is canViewPayrollReports — a broad capability a
+// tenant can hand to a line manager via a custom role. Statutory PII (PAN, UAN,
+// ESIC IP, DOB, home address) must NOT be emitted in the clear to that standard
+// holder; only an actor with the dedicated statutory grant (canManageStatutory —
+// the same key that gates definition management) or an owner/super-admin sees it
+// unmasked. We compute the maskable column keys off the resolved definition (any
+// statutory-identity column + the employee register's DOB/address) and pass the
+// set into the pure projector, which redacts the DISPLAY value only.
+
+// Column keys that always carry statutory/identity PII in the seeded forms; plus
+// any column flagged statutory:true with an identity-style transform is masked.
+const PII_TRANSFORMS = new Set(['uan', 'pan', 'identity']);
+const PII_COLUMN_KEYS = new Set(['uan', 'pan', 'esic', 'dob', 'addr']);
+
+/** True when the actor may see statutory PII unmasked (higher key / owner). */
+function canViewUnmaskedPii(user) {
+  if (!user) return false;
+  if (user.role === ROLES.SUPER_ADMIN || user.role === ROLES.BUSINESS_ADMIN) return true;
+  const perms = effectivePermissions(user) || {};
+  // The dedicated statutory grant is the "higher key" — the same permission that
+  // owns the definitions (so a statutory admin already sees raw identifiers).
+  return !!perms.canManageStatutory;
+}
+
+/**
+ * resolveMaskFields(user, definition) → Set<columnKey> to redact for this actor.
+ * Empty set when the actor holds the higher key. PURE given (user, definition).
+ */
+function resolveMaskFields(user, definition) {
+  if (canViewUnmaskedPii(user)) return new Set();
+  const cols = (definition && definition.columns) || [];
+  const out = new Set();
+  for (const c of cols) {
+    if (!c || !c.key) continue;
+    if (PII_COLUMN_KEYS.has(c.key)) { out.add(c.key); continue; }
+    if (c.statutory && c.transform && PII_TRANSFORMS.has(c.transform)) out.add(c.key);
+  }
+  return out;
+}
 
 // ── error helpers (mirror compliance/reports controllers) ─────────────────────
 
@@ -118,7 +161,11 @@ async function loadRegistrations(businessId, entityId) {
 
 function periodLabelFor(cadence, period) {
   if (cadence === 'ANNUAL' || cadence === 'PAYRUN_ANNUAL') return `FY${period}`;
-  if (cadence === 'HALF_YEARLY') return period;
+  if (cadence === 'HALF_YEARLY') {
+    // Normalise to the canonical half-year label (H1-YYYY / H2-YYYY) so a month
+    // token still prints the statutory 6-month period it belongs to.
+    try { return sources.parseHalfYearPeriod(period).label; } catch (_e) { return String(period || ''); }
+  }
   if (cadence === 'SNAPSHOT') return `as-of ${period || new Date().toISOString().slice(0, 10)}`;
   return period; // PERIOD → "YYYY-MM"
 }
@@ -128,6 +175,11 @@ function periodBoundsFor(definition, period) {
     if (definition.source === 'PAYRUN_ANNUAL' || definition.cadence === 'ANNUAL') {
       const fy = sources.parseFyPeriod(period);
       return { start: fy.start, end: fy.end };
+    }
+    if (definition.cadence === 'HALF_YEARLY') {
+      // The stored RegisterExport bounds span the FULL 6-month window, not a month.
+      const hy = sources.parseHalfYearPeriod(period);
+      return { start: hy.start, end: hy.end };
     }
     if (definition.cadence === 'SNAPSHOT') {
       const d = period ? new Date(period) : new Date();
@@ -230,10 +282,13 @@ async function buildRegisterFor(req, { entityId, kind, formCode, stateCode, peri
   }
   // Resolve the period for SNAPSHOT/ANNUAL cadences (period may be a date/FY).
   const bundle = await sources.loadBundleForSource(definition.source, {
-    businessId, entityId, period, scope: req.scope,
+    businessId, entityId, period, scope: req.scope, cadence: definition.cadence,
   });
   const periodObj = bundle.period || resolvePeriodObj(definition, period);
-  const reg = projector.buildRegister(definition, bundle, { period: periodObj });
+  // Derive the PII mask set from the actor's permissions and redact in the pure
+  // projector (an exporter never emits a field the actor can't read — §6).
+  const maskFields = resolveMaskFields(req.user, definition);
+  const reg = projector.buildRegister(definition, bundle, { period: periodObj, window: bundle.window, maskFields });
   // Attach period label + bounds for the title block + export log.
   const bounds = periodBoundsFor(definition, period);
   if (reg.frozen !== false) {
@@ -589,4 +644,6 @@ module.exports = {
   // exposed for tests
   resolveDefinition,
   loadEntityOrThrow,
+  resolveMaskFields,
+  canViewUnmaskedPii,
 };

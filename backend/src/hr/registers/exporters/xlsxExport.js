@@ -11,7 +11,7 @@
  * { fileName, contentType, content (Buffer) }.
  */
 
-const { buildCsv } = require('./csvExport');
+const { buildCsv, neutralizeFormula } = require('./csvExport');
 
 function tryRequireXlsx() {
   try {
@@ -57,14 +57,16 @@ function buildXlsx(register, opts = {}) {
   const rows = register.rows || [];
   const totals = (register.totals && register.totals.byColumn) || {};
 
-  const aoa = titleAoa(register, opts.header);
-  aoa.push(columns.map((c) => c.label));
+  // Neutralise EVERY cell against formula-injection — the same guard the CSV path
+  // uses (a re-opened .xlsx evaluates a leading =,+,-,@ just like a .csv).
+  const aoa = titleAoa(register, opts.header).map((line) => line.map(neutralizeFormula));
+  aoa.push(columns.map((c) => neutralizeFormula(c.label)));
   for (const r of rows) {
-    aoa.push((r.cells || []).map((cell) => (cell && cell.text != null ? cell.text : '')));
+    aoa.push((r.cells || []).map((cell) => neutralizeFormula(cell && cell.text != null ? cell.text : '')));
   }
   const hasTotals = columns.some((c) => totals[c.key]);
   if (hasTotals) {
-    aoa.push(columns.map((c, i) => (i === 0 ? 'TOTAL' : (totals[c.key] ? totals[c.key].display : ''))));
+    aoa.push(columns.map((c, i) => neutralizeFormula(i === 0 ? 'TOTAL' : (totals[c.key] ? totals[c.key].display : ''))));
   }
 
   const ws = XLSX.utils.aoa_to_sheet(aoa);
