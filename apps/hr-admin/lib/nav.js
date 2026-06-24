@@ -137,7 +137,7 @@ export const NAV_ITEMS = [
   // Settings groups Branding, Roles, Domain and Billing. Show it to anyone who
   // can manage ANY of those — a Finance role (canEditBilling, no canEditBranding)
   // must still reach the Billing tab. Per-tab/per-action gating happens inside.
-  { key: 'settings', label: 'Settings', href: '/settings', anyPermission: ['canEditBranding', 'canEditBilling', 'canEditDomain', 'canManageCompanyProfile', 'canManageExpensePolicy'], group: true, icon: 'settings' },
+  { key: 'settings', label: 'Settings', href: '/settings', anyPermission: ['canEditBranding', 'canEditBilling', 'canEditDomain', 'canManageCompanyProfile', 'canManageExpensePolicy', 'canManageImports', 'canManageAttendance'], group: true, icon: 'settings' },
   // White-label Branding (self-service) — logo/favicon/colours/display-name so a
   // tenant's OWN brand shows on the console, the ESS portal, and both login pages
   // (never the DriftHR vendor mark). Mirrors the backend OR-gate: visible to
