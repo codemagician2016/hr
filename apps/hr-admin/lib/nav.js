@@ -36,6 +36,10 @@ export const NAV_ITEMS = [
   { key: 'travel', label: 'Travel', href: '/travel', feature: 'hr', permission: 'canViewEmployees', icon: 'wallet' },
   { key: 'loans', label: 'Loans', href: '/loans', feature: 'hr', permission: 'canViewEmployees', icon: 'loan' },
   { key: 'documents', label: 'Documents', href: '/documents', feature: 'hr', permission: 'canViewEmployees', icon: 'doc' },
+  // FLAG (Cycle 1 — NEW nav item): HR Helpdesk agent console (ticket queue + thread).
+  // Gated on the new canManageHelpdesk rbac key (seeded true for Owner + HR-Admin).
+  // The server is the real boundary; this just hides the link from operators who lack it.
+  { key: 'helpdesk', label: 'Helpdesk', href: '/helpdesk', feature: 'hr', permission: 'canManageHelpdesk', icon: 'support' },
   // Performance & Goals (Feature 8). Visible to Managers (TEAM band — their reports'
   // goals/reviews, server-scoped) + HR-Admin (cycle config behind
   // canManagePerformanceCycle, hidden via hasPermission on the page). Server is the
@@ -111,7 +115,7 @@ export const NAV_ITEMS = [
 // own native parent/child structure (group:true + parent:'letters') and is
 // emitted as its own expandable section, so it is intentionally omitted here.
 export const NAV_GROUPS = [
-  { key: 'people-org', label: 'People & Org', icon: 'people', items: ['people', 'org', 'profile-changes', 'profile-policy'] },
+  { key: 'people-org', label: 'People & Org', icon: 'people', items: ['people', 'org', 'profile-changes', 'profile-policy', 'helpdesk'] },
   { key: 'talent', label: 'Talent', icon: 'onboarding', items: ['recruitment', 'onboarding', 'separations', 'performance'] },
   { key: 'time', label: 'Time', icon: 'calendar', items: ['leave', 'attendance'] },
   { key: 'pay', label: 'Pay', icon: 'wallet', items: ['compensation', 'ctc-policies', 'payroll', 'expenses', 'travel', 'loans', 'reports'] },
@@ -210,6 +214,8 @@ const PERMISSION_KEYS = [
   'canManageApprovalWorkflows', 'canManageRoles', 'canManageHierarchy',
   // Feature 12 — Recruitment / ATS (FLAG FOR MERGE)
   'canManageHiring', 'canViewHiring', 'canScoreInterview',
+  // Cycle 1 — HR Helpdesk
+  'canManageHelpdesk',
 ];
 const ALL_TRUE = Object.fromEntries(PERMISSION_KEYS.map((k) => [k, true]));
 

@@ -45,6 +45,10 @@ router.use('/documents', require('./documents.routes'));
 router.use('/assets', require('./assets.routes'));
 router.use('/expenses', require('./expenses.routes'));
 router.use('/loans', require('./loans.routes'));
+// FLAG (Cycle 1 — NEW mount): HR Helpdesk operator console. canManageHelpdesk-gated
+// (Owner + HR-Admin); tenant-walled. Ticket queue + categories + assign + reply +
+// status lifecycle. The ESS self-service surface mounts at /me/helpdesk below.
+router.use('/helpdesk', require('./helpdesk.routes'));
 // Feature 18 — Data Migration / Bulk Import (CSV-Excel) + back-dated autogen.
 // FLAG: new router mount. canManageImports-gated; payroll autogen also needs canRunPayroll.
 router.use('/imports', require('../migration/imports.routes'));
@@ -114,6 +118,10 @@ router.use('/me/compensation', require('./meCompensation.routes'));
 // employee server-side, fixing the ESS pages that 401'd against the operator API.
 router.use('/me/attendance', require('./meAttendance.routes'));
 router.use('/me/leave', require('./meLeave.routes'));
+// FLAG (Cycle 1 — NEW mount): ESS HR Helpdesk. Customer session, SELF_ONLY (subject
+// resolved from the session). Raise a ticket / list "My tickets" / view thread / reply
+// / reopen / rate. Internal HR notes are never returned on this surface.
+router.use('/me/helpdesk', require('./meHelpdesk.routes'));
 // FLAG (Feature 14 — shared edit): ESS capability matrix for the signed-in
 // employee's tenant. Customer session; the ESS app gates onboarding statutory /
 // tax / currency surfaces off it.

@@ -37,6 +37,11 @@ const HR_EVENT_TEMPLATES = Object.freeze({
   'approval.pending':  'HR_APPROVAL_PENDING',
   'approval.decided':  'HR_APPROVAL_DECIDED',
   'approval.reminder': 'HR_APPROVAL_REMINDER',
+  // Cycle 1 — HR Helpdesk ticket lifecycle fan-out.
+  'helpdesk.created':  'HR_HELPDESK_CREATED',   // → assignee (or HR) on raise
+  'helpdesk.assigned': 'HR_HELPDESK_ASSIGNED',  // → new assignee on (re)assignment
+  'helpdesk.replied':  'HR_HELPDESK_REPLIED',   // → the OTHER party on a new reply
+  'helpdesk.resolved': 'HR_HELPDESK_RESOLVED',  // → requester on resolve/close
 });
 
 // HR template registry. vertical: 'HR' so listTemplates({vertical:'HR'}) scopes
@@ -113,6 +118,43 @@ const HR_TEMPLATES = Object.freeze([
     vertical: 'HR',
     body: 'Reminder from {BIZ}: a {MODULE} request from {REQUESTER} is still awaiting your approval. Please act: {LINK}',
     variables: ['MODULE', 'REQUESTER', 'BIZ', 'LINK'],
+    channels: { sms: true, whatsapp: true, email: true },
+  },
+  // ─── Cycle 1 — HR Helpdesk ticket lifecycle (India-first copy) ────────────
+  {
+    key: 'HR_HELPDESK_CREATED',
+    displayName: 'Helpdesk ticket created (to HR/assignee)',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'New {PRIORITY} support ticket {CODE} from {REQUESTER} on {BIZ}: "{SUBJECT}". Pick it up: {LINK}',
+    variables: ['PRIORITY', 'CODE', 'REQUESTER', 'BIZ', 'SUBJECT', 'LINK'],
+    channels: { sms: true, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_HELPDESK_ASSIGNED',
+    displayName: 'Helpdesk ticket assigned (to assignee)',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {NAME}, support ticket {CODE} ("{SUBJECT}") was assigned to you on {BIZ}. Open it: {LINK}',
+    variables: ['NAME', 'CODE', 'SUBJECT', 'BIZ', 'LINK'],
+    channels: { sms: true, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_HELPDESK_REPLIED',
+    displayName: 'Helpdesk ticket new reply (to the other party)',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {NAME}, there is a new reply on support ticket {CODE} ("{SUBJECT}") from {BIZ}. Read + respond: {LINK}',
+    variables: ['NAME', 'CODE', 'SUBJECT', 'BIZ', 'LINK'],
+    channels: { sms: true, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_HELPDESK_RESOLVED',
+    displayName: 'Helpdesk ticket resolved/closed (to requester)',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {NAME}, your support ticket {CODE} ("{SUBJECT}") is now {STATUS} on {BIZ}. View + rate: {LINK}',
+    variables: ['NAME', 'CODE', 'SUBJECT', 'STATUS', 'BIZ', 'LINK'],
     channels: { sms: true, whatsapp: true, email: true },
   },
 ]);
