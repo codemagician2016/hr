@@ -1,7 +1,7 @@
 'use client';
 
 // Attendance (ESS) — monthly "Attendance Details" table is the PRIMARY view, with
-// the clock in/out control and corrections/timesheets/schedule folded into tabs
+// the clock in/out control and regularizations/timesheets/schedule folded into tabs
 // (Feature 2). Everything reads the customer-session /api/hr/me/attendance/*
 // surface, which resolves the employee SERVER-SIDE from the session — the page
 // NEVER sends an employeeId (audit #53/#55).
@@ -12,9 +12,11 @@
 //   Timesheets   : GET  /api/hr/me/attendance/timesheets
 //                  GET  /api/hr/me/attendance/timesheets/:id   (per-day entries)
 //                  POST /api/hr/me/attendance/timesheets/:id/submit
-//   Corrections  : GET  /api/hr/me/attendance/regularizations
-//                  POST /api/hr/me/attendance/regularizations
-//                  { date, requestedInAt, requestedOutAt, kind, reason }
+//   Regularizations : GET  /api/hr/me/attendance/regularizations
+//                     POST /api/hr/me/attendance/regularizations
+//                     { date, requestedInAt, requestedOutAt, kind, reason }
+//                     (the ONE endpoint behind both the tab form and the per-day
+//                      "Regularize" button — there is no separate "correction" API)
 //   Schedule     : GET  /api/hr/me/attendance/schedule  → { shift, assignment }
 //   Holidays     : GET  /api/hr/me/attendance/holidays?year=
 //
@@ -83,7 +85,11 @@ const PUNCH_LABELS = {
   BREAK_END: 'Break ended',
 };
 
-const CORRECTION_KINDS = [
+// Regularization reason types — these mirror the backend REGULARIZATION_KINDS
+// (meAttendance.controller.js) one-for-one. A "regularization" (the India-standard
+// term) is how an employee fixes a missed or incorrect punch for a day; "correction"
+// is just a synonym, surfaced only in the one ⓘ tooltip below.
+const REGULARIZATION_KINDS = [
   ['MISSED_PUNCH', 'Missed punch'],
   ['WFH', 'Work from home'],
   ['ON_DUTY', 'On duty'],
@@ -91,11 +97,16 @@ const CORRECTION_KINDS = [
   ['EARLY_OUT_WAIVER', 'Early-out waiver'],
 ];
 
+// One-line plain-language explainer reused by every "Regularize" entry point.
+const REGULARIZE_HELP =
+  'Regularize (also called a correction) = fix a missed or incorrect punch for a day. '
+  + 'It goes to your manager for approval.';
+
 const SECTIONS = [
   { key: 'details', label: 'Attendance details' },
   { key: 'clock', label: 'Clock' },
   { key: 'timesheet', label: 'Timesheets' },
-  { key: 'corrections', label: 'My corrections' },
+  { key: 'regularizations', label: 'Regularizations' },
   { key: 'schedule', label: 'Schedule' },
 ];
 
@@ -174,6 +185,14 @@ function fmtHours(ms) {
   const m = mins % 60;
   return `${h}h ${String(m).padStart(2, '0')}m`;
 }
+// Local HH:MM for an instant — feeds the type="time" prefill on the per-day
+// Regularize modal (so the row's existing punches seed the corrected times).
+function localHM(value) {
+  if (!value) return '';
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
 
 function StatusPill({ status }) {
   const s = String(status || '').toUpperCase();
@@ -192,53 +211,181 @@ function StatusPill({ status }) {
 
 const WEEKDAY_ISO = ['0', '1', '2', '3', '4', '5', '6']; // 0=Sun
 
-function RegRequestModal({ open, onClose, day, canAct, onSubmitted }) {
-  const [inAt, setInAt] = useState('');
-  const [outAt, setOutAt] = useState('');
+// Combine a yyyy-mm-dd date and a hh:mm time into an ISO instant for the API.
+function toInstant(d, t) {
+  if (!d || !t) return undefined;
+  const dt = new Date(`${d}T${t}`);
+  return Number.isNaN(dt.getTime()) ? undefined : dt.toISOString();
+}
+
+// ── RegularizationForm — THE one regularization flow ─────────────────────────
+// A single source of truth: the same field set (date, in-time, out-time, reason
+// type, reason) + the same submit handler + the same backing endpoint
+// (POST /api/hr/me/attendance/regularizations) for BOTH entry points — the
+// standalone tab form and the per-day "Regularize" modal. There is no second
+// "correction" concept and no second endpoint.
+//
+//   variant="page"  → standalone form on the Regularizations tab (date is editable).
+//   variant="modal" → per-day modal; `lockedDate` pins the date and the caller
+//                     prefills in/out from the table row. Renders Cancel + Send.
+function RegularizationForm({
+  variant = 'page',
+  lockedDate = null,        // when set, the date field is fixed (per-day modal)
+  initialDate = todayISO(),
+  initialInAt = '',
+  initialOutAt = '',
+  canAct,
+  onSubmitted,
+  onCancel,
+}) {
+  const [date, setDate] = useState(lockedDate || initialDate);
+  const [inAt, setInAt] = useState(initialInAt);
+  const [outAt, setOutAt] = useState(initialOutAt);
   const [kind, setKind] = useState('MISSED_PUNCH');
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
-  const [done, setDone] = useState(false);
+  const [success, setSuccess] = useState(false);
 
-  function toInstant(d, t) {
-    if (!d || !t) return undefined;
-    const dt = new Date(`${d}T${t}`);
-    return Number.isNaN(dt.getTime()) ? undefined : dt.toISOString();
-  }
+  const effectiveDate = lockedDate || date;
 
   async function submit(e) {
     e.preventDefault();
     setError(null);
-    if (!reason.trim()) { setError('Please give a reason for this request.'); return; }
+    setSuccess(false);
+    if (!effectiveDate) { setError('Please pick the day to regularize.'); return; }
+    if (!reason.trim()) { setError('Please give a reason for this regularization.'); return; }
     setSubmitting(true);
     try {
       await apiPost('/api/hr/me/attendance/regularizations', {
-        date: day.key,
-        requestedInAt: toInstant(day.key, inAt),
-        requestedOutAt: toInstant(day.key, outAt),
+        date: effectiveDate,
+        requestedInAt: toInstant(effectiveDate, inAt),
+        requestedOutAt: toInstant(effectiveDate, outAt),
         kind,
         reason: reason.trim(),
       });
-      setDone(true);
+      setSuccess(true);
+      setReason('');
+      setInAt('');
+      setOutAt('');
       onSubmitted && onSubmitted();
     } catch (err) {
-      setError(err.message || 'Could not submit your request.');
+      setError(err.message || 'Could not submit your regularization.');
     } finally {
       setSubmitting(false);
     }
   }
 
-  function close() {
-    setInAt(''); setOutAt(''); setKind('MISSED_PUNCH'); setReason('');
-    setError(null); setDone(false); setSubmitting(false);
-    onClose();
-  }
-
-  if (!open) return null;
+  const isModal = variant === 'modal';
   const inputCls = 'w-full rounded-lg border px-3 py-2 text-sm outline-none';
   const inputStyle = { borderColor: 'var(--theme-border)' };
 
+  // Modal shows a "done" confirmation that swaps out the form; the page form
+  // keeps the form mounted (so the employee can raise another) with an inline
+  // success note above it.
+  if (isModal && success) {
+    return (
+      <div className="space-y-4">
+        <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+          Regularization sent to your manager for approval.
+        </p>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="w-full rounded-lg py-2.5 text-sm font-semibold"
+          style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}
+        >
+          Done
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-3">
+      {error && <ErrorBanner message={error} />}
+      {!isModal && success && (
+        <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+          Regularization sent to your manager for approval.
+        </p>
+      )}
+
+      {/* Date — editable on the tab, pinned (read-only) in the per-day modal. */}
+      {lockedDate ? null : (
+        <div>
+          <label htmlFor="reg-date" className="mb-1 flex items-center text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Date<InfoTip text="The day whose attendance you want to regularize." /></label>
+          <input id="reg-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} required className={inputCls} style={inputStyle} />
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label htmlFor="reg-in" className="mb-1 flex items-center text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Corrected in-time<InfoTip text="The clock-in time it should have been. Leave blank if only the out-time was wrong." /></label>
+          <input id="reg-in" type="time" value={inAt} onChange={(e) => setInAt(e.target.value)} className={inputCls} style={inputStyle} />
+        </div>
+        <div>
+          <label htmlFor="reg-out" className="mb-1 flex items-center text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Corrected out-time<InfoTip text="The clock-out time it should have been. Leave blank if only the in-time was wrong." /></label>
+          <input id="reg-out" type="time" value={outAt} onChange={(e) => setOutAt(e.target.value)} className={inputCls} style={inputStyle} />
+        </div>
+      </div>
+      <div>
+        <label htmlFor="reg-kind" className="mb-1 flex items-center text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Reason type<InfoTip text="Why the punch needs fixing — e.g. you forgot to clock in, were on a work-from-home day, or were out on official duty." /></label>
+        <select id="reg-kind" value={kind} onChange={(e) => setKind(e.target.value)} className={`${inputCls} bg-white`} style={inputStyle}>
+          {REGULARIZATION_KINDS.map(([v, l]) => (<option key={v} value={v}>{l}</option>))}
+        </select>
+      </div>
+      <div>
+        <label htmlFor="reg-reason" className="mb-1 flex items-center text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Reason<InfoTip text="A short explanation for your manager. Required — this is recorded with the request." /></label>
+        <textarea
+          id="reg-reason"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          rows={isModal ? 3 : 2}
+          required
+          className={inputCls}
+          style={inputStyle}
+          placeholder="Why does this day need regularizing?"
+        />
+      </div>
+
+      {isModal ? (
+        <div className="flex gap-3 pt-1">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex-1 rounded-lg border py-2.5 text-sm font-semibold"
+            style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-text)' }}
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={submitting || !canAct}
+            className="flex-1 rounded-lg py-2.5 text-sm font-semibold transition disabled:opacity-50"
+            style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}
+          >
+            {submitting ? 'Sending…' : 'Send request'}
+          </button>
+        </div>
+      ) : (
+        <button
+          type="submit"
+          disabled={submitting || !canAct}
+          className="rounded-lg px-4 py-2 text-sm font-semibold transition disabled:opacity-50"
+          style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}
+        >
+          {submitting ? 'Sending…' : 'Send request'}
+        </button>
+      )}
+    </form>
+  );
+}
+
+// Per-day "Regularize" modal — a thin chrome wrapper around the ONE
+// RegularizationForm. It pins the day's date and prefills the in/out times from
+// the table row, then defers entirely to the shared form for fields + submit.
+function RegRequestModal({ open, onClose, day, canAct, onSubmitted }) {
+  if (!open || !day) return null;
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -246,21 +393,22 @@ function RegRequestModal({ open, onClose, day, canAct, onSubmitted }) {
       aria-modal="true"
       aria-labelledby="reg-modal-title"
     >
-      <div className="absolute inset-0 bg-black/40" onClick={close} aria-hidden="true" />
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden="true" />
       <div
         className="relative z-10 w-full max-w-md rounded-2xl bg-white p-5 shadow-xl"
         style={{ border: '1px solid var(--theme-border)' }}
       >
         <div className="mb-3 flex items-start justify-between">
           <div>
-            <h3 id="reg-modal-title" className="text-base font-semibold" style={{ color: 'var(--theme-text)' }}>
+            <h3 id="reg-modal-title" className="flex items-center text-base font-semibold" style={{ color: 'var(--theme-text)' }}>
               Regularization request
+              <InfoTip text={REGULARIZE_HELP} />
             </h3>
             <p className="text-xs" style={{ color: 'var(--theme-muted)' }}>{formatDate(day.key)}</p>
           </div>
           <button
             type="button"
-            onClick={close}
+            onClick={onClose}
             aria-label="Close"
             className="rounded-lg px-2 py-1 text-sm"
             style={{ color: 'var(--theme-muted)' }}
@@ -269,72 +417,15 @@ function RegRequestModal({ open, onClose, day, canAct, onSubmitted }) {
           </button>
         </div>
 
-        {done ? (
-          <div className="space-y-4">
-            <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-              Request sent to your manager for approval.
-            </p>
-            <button
-              type="button"
-              onClick={close}
-              className="w-full rounded-lg py-2.5 text-sm font-semibold"
-              style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}
-            >
-              Done
-            </button>
-          </div>
-        ) : (
-          <form onSubmit={submit} className="space-y-3">
-            {error && <ErrorBanner message={error} />}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label htmlFor="reg-in" className="mb-1 flex items-center text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Corrected in-time<InfoTip text="The clock-in time it should have been. Leave blank if only the out-time was wrong." /></label>
-                <input id="reg-in" type="time" value={inAt} onChange={(e) => setInAt(e.target.value)} className={inputCls} style={inputStyle} />
-              </div>
-              <div>
-                <label htmlFor="reg-out" className="mb-1 flex items-center text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Corrected out-time<InfoTip text="The clock-out time it should have been. Leave blank if only the in-time was wrong." /></label>
-                <input id="reg-out" type="time" value={outAt} onChange={(e) => setOutAt(e.target.value)} className={inputCls} style={inputStyle} />
-              </div>
-            </div>
-            <div>
-              <label htmlFor="reg-kind" className="mb-1 flex items-center text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Reason type<InfoTip text="Why the punch needs fixing — e.g. you forgot to clock in, were on a work-from-home day, or were out on official duty." /></label>
-              <select id="reg-kind" value={kind} onChange={(e) => setKind(e.target.value)} className={`${inputCls} bg-white`} style={inputStyle}>
-                {CORRECTION_KINDS.map(([v, l]) => (<option key={v} value={v}>{l}</option>))}
-              </select>
-            </div>
-            <div>
-              <label htmlFor="reg-reason" className="mb-1 flex items-center text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Reason<InfoTip text="A short explanation for your manager. Required — this is recorded with the request." /></label>
-              <textarea
-                id="reg-reason"
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                rows={3}
-                required
-                className={inputCls}
-                style={inputStyle}
-                placeholder="Why is this correction needed?"
-              />
-            </div>
-            <div className="flex gap-3 pt-1">
-              <button
-                type="button"
-                onClick={close}
-                className="flex-1 rounded-lg border py-2.5 text-sm font-semibold"
-                style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-text)' }}
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={submitting || !canAct}
-                className="flex-1 rounded-lg py-2.5 text-sm font-semibold transition disabled:opacity-50"
-                style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}
-              >
-                {submitting ? 'Sending…' : 'Send request'}
-              </button>
-            </div>
-          </form>
-        )}
+        <RegularizationForm
+          variant="modal"
+          lockedDate={day.key}
+          initialInAt={day.prefillInAt || ''}
+          initialOutAt={day.prefillOutAt || ''}
+          canAct={canAct}
+          onSubmitted={onSubmitted}
+          onCancel={onClose}
+        />
       </div>
     </div>
   );
@@ -480,6 +571,9 @@ function AttendanceDetailsSection({ canAct }) {
         pairs,
         workedMs,
         locked: !!rollup?.isLocked,
+        // Seed the per-day Regularize modal with this row's first IN / last OUT.
+        prefillInAt: localHM(pairs[0]?.in),
+        prefillOutAt: localHM(pairs[pairs.length - 1]?.out),
       });
     }
     return out;
@@ -993,137 +1087,53 @@ function TimesheetSection() {
   );
 }
 
-// ─── My corrections (history + free-form request, kept) ───────────────────────
-
-function CorrectionsSection({ canAct }) {
+// ─── Regularizations (ONE place: raise + history) ─────────────────────────────
+// The single regularization surface. The standalone form (RegularizationForm,
+// variant="page") and the per-day "Regularize" button on the Attendance details
+// table share the SAME component, the SAME submit handler, and the SAME endpoint
+// (POST /api/hr/me/attendance/regularizations). The "My regularizations" list
+// below shows EVERY request the employee has raised — whether from this form or
+// from a per-day button — in one history. "Correction" is only a synonym (ⓘ).
+function RegularizationsSection({ canAct }) {
   const { data: requests, loading, error, reload } = useApi(
     '/api/hr/me/attendance/regularizations',
     { select: (b) => (Array.isArray(b) ? b : b?.items || b?.requests || []) }
   );
 
-  const [date, setDate] = useState(todayISO());
-  const [inAt, setInAt] = useState('');
-  const [outAt, setOutAt] = useState('');
-  const [kind, setKind] = useState('MISSED_PUNCH');
-  const [reason, setReason] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [formError, setFormError] = useState(null);
-  const [success, setSuccess] = useState(false);
-
-  // Combine a yyyy-mm-dd date and a hh:mm time into an ISO instant for the API.
-  function toInstant(d, t) {
-    if (!d || !t) return undefined;
-    const dt = new Date(`${d}T${t}`);
-    return Number.isNaN(dt.getTime()) ? undefined : dt.toISOString();
-  }
-
-  async function submit(e) {
-    e.preventDefault();
-    setFormError(null);
-    setSuccess(false);
-    if (!reason.trim()) {
-      setFormError('Please give a reason for your request.');
-      return;
-    }
-    setSubmitting(true);
-    try {
-      await apiPost('/api/hr/me/attendance/regularizations', {
-        date,
-        requestedInAt: toInstant(date, inAt),
-        requestedOutAt: toInstant(date, outAt),
-        kind,
-        reason: reason.trim(),
-      });
-      setSuccess(true);
-      setReason('');
-      setInAt('');
-      setOutAt('');
-      reload();
-    } catch (err) {
-      setFormError(err.message || 'Could not submit your request.');
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
   const list = requests || [];
-  const inputCls = 'w-full rounded-lg border px-3 py-2 text-sm';
-  const inputStyle = { borderColor: 'var(--theme-border)' };
 
   return (
     <div className="space-y-6">
       <section className="rounded-2xl border bg-white p-5 shadow-sm" style={{ borderColor: 'var(--theme-border)' }}>
-        <h2 className="mb-3 text-sm font-semibold" style={{ color: 'var(--theme-text)' }}>Request a correction</h2>
+        <h2 className="mb-1 flex items-center text-sm font-semibold" style={{ color: 'var(--theme-text)' }}>
+          Regularize a day
+          <InfoTip text={REGULARIZE_HELP} />
+        </h2>
         <p className="mb-3 text-xs" style={{ color: 'var(--theme-muted)' }}>
-          Tip: you can also file a regularization for a specific day from the <strong>Attendance details</strong> table.
+          Raise it here for any date, or use the <strong>Regularize</strong> button on a day in the{' '}
+          <strong>Attendance details</strong> table — both land in your list below.
         </p>
-        {formError && <ErrorBanner message={formError} />}
-        {success && (
-          <p className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-            Request sent to your manager for approval.
-          </p>
-        )}
-        <form onSubmit={submit} className="space-y-3">
-          <div>
-            <label htmlFor="corr-date" className="mb-1 flex items-center text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Date<InfoTip text="The day whose attendance you want corrected." /></label>
-            <input id="corr-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} required className={inputCls} style={inputStyle} />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label htmlFor="corr-in" className="mb-1 flex items-center text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Clock-in time<InfoTip text="The time you actually started. Leave blank if only the clock-out was wrong." /></label>
-              <input id="corr-in" type="time" value={inAt} onChange={(e) => setInAt(e.target.value)} className={inputCls} style={inputStyle} />
-            </div>
-            <div>
-              <label htmlFor="corr-out" className="mb-1 flex items-center text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Clock-out time<InfoTip text="The time you actually finished. Leave blank if only the clock-in was wrong." /></label>
-              <input id="corr-out" type="time" value={outAt} onChange={(e) => setOutAt(e.target.value)} className={inputCls} style={inputStyle} />
-            </div>
-          </div>
-          <div>
-            <label htmlFor="corr-kind" className="mb-1 flex items-center text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Kind<InfoTip text="The type of correction — e.g. a missed punch, a work-from-home day, or official duty." /></label>
-            <select id="corr-kind" value={kind} onChange={(e) => setKind(e.target.value)} className={inputCls} style={inputStyle}>
-              {CORRECTION_KINDS.map(([v, l]) => (
-                <option key={v} value={v}>{l}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label htmlFor="corr-reason" className="mb-1 flex items-center text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Reason<InfoTip text="A short explanation for your manager. Required and recorded with the request." /></label>
-            <textarea
-              id="corr-reason"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              rows={2}
-              required
-              className={inputCls}
-              style={inputStyle}
-              placeholder="Why is this correction needed?"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={submitting || !canAct}
-            className="rounded-lg px-4 py-2 text-sm font-semibold transition disabled:opacity-50"
-            style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}
-          >
-            {submitting ? 'Sending…' : 'Send request'}
-          </button>
-        </form>
+        <RegularizationForm
+          variant="page"
+          canAct={canAct}
+          onSubmitted={reload}
+        />
       </section>
 
       <section>
         <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--theme-muted)' }}>
-          My requests
+          My regularizations
         </h2>
         {loading ? (
           <Centered><Spinner small /></Centered>
         ) : error && error.status !== 404 ? (
-          <ErrorBanner message={error.message || 'Could not load your requests.'} />
+          <ErrorBanner message={error.message || 'Could not load your regularizations.'} />
         ) : list.length === 0 ? (
-          <Empty text="You haven't raised any corrections yet." />
+          <Empty text="You haven't raised any regularizations yet." />
         ) : (
           <ul className="overflow-hidden rounded-2xl border bg-white shadow-sm" style={{ borderColor: 'var(--theme-border)' }}>
             {list.map((r, i) => {
-              const kindLabel = CORRECTION_KINDS.find(([v]) => v === r.kind)?.[1] || r.kind || 'Correction';
+              const kindLabel = REGULARIZATION_KINDS.find(([v]) => v === r.kind)?.[1] || r.kind || 'Regularization';
               return (
                 <li key={r.id || r.requestId || i} className="border-b px-4 py-3 last:border-b-0" style={{ borderColor: 'var(--theme-border)' }}>
                   <div className="flex items-center justify-between">
@@ -1304,7 +1314,7 @@ function AttendanceInner() {
       {section === 'details' && <AttendanceDetailsSection canAct={canAct} />}
       {section === 'clock' && <ClockSection canAct={canAct} />}
       {section === 'timesheet' && <TimesheetSection />}
-      {section === 'corrections' && <CorrectionsSection canAct={canAct} />}
+      {section === 'regularizations' && <RegularizationsSection canAct={canAct} />}
       {section === 'schedule' && <ScheduleSection />}
     </div>
   );
