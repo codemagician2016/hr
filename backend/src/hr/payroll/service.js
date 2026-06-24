@@ -28,6 +28,10 @@ const payrun = require('./payrun');
 const variance = require('./variance');
 const registry = require('./complianceRegistry');
 const filing = require('./filing');
+// Cycle-0 wiring: loan/advance recovery in the pay run. The loans module owns the
+// installment selection + Loan running-total bookkeeping (controllers/loanRecovery.js)
+// so payroll never forks the loan math; the engine owns the net-floor cap.
+const loanRecovery = require('../controllers/loanRecovery');
 // Feature 14: a payroll run's entity country MUST equal the tenant country. The
 // engine still routes by the entity's countryCode (the correct per-run design);
 // this is a fail-closed TRIPWIRE at the run boundary so a quarantined / bad
@@ -285,6 +289,29 @@ function buildEmployeePayInput(rows) {
     }
   }
 
+  // Cycle-0 wiring — loan/advance recovery as a POST-TAX deduction that flows THROUGH
+  // the engine (not bypassing it). A single LOAN_REPAYMENT line carries the Σ of the
+  // installments due this period; CALC.BALANCE_RECOVERY makes the engine apply its
+  // net-floor guard (caps to available net, emits RECOVERY_CAPPED_TO_NET) and report
+  // the ACTUAL recovered figure in result.employeeDeductions — which persistComputedRun
+  // reads back to stamp the installments. Not LOP-prorated (a fixed EMI is owed in full
+  // regardless of attendance); the engine does not prorate voluntary deductions.
+  const loanRec = rows.loanRecovery || null;
+  if (loanRec && loanRec.totalDueMinor > 0) {
+    componentsForEngine.push({
+      code: 'LOAN_REPAYMENT',
+      name: 'Loan / advance recovery',
+      category: CATEGORY.DEDUCTION,
+      calcMethod: CALC.BALANCE_RECOVERY,
+      amountMinor: loanRec.totalDueMinor,
+      showOnPayslip: true,
+      _order: order,
+      isTaxable: false,
+      isPayeable: false,
+    });
+    order += 1;
+  }
+
   // ── Inputs (proration / LOP / overtime) from the frozen AttendancePayInput ──
   // M1 — gate on `!= null` (presence), NOT truthiness. A frozen ZERO (e.g.
   // payableDays=0 for a fully-LOP month) is meaningful and MUST reach the engine;
@@ -390,6 +417,9 @@ function buildEmployeePayInput(rows) {
       : (attendance ? toNum(attendance.calendarDays) : 0),
     overtimeHours: attendance ? toNum(attendance.overtimeHours) : 0,
     preAnomalies,
+    // Cycle-0 — the installments this run will stamp once the engine reports how
+    // much LOAN_REPAYMENT it actually recovered (after its net-floor cap).
+    loanRecovery: loanRec || null,
   };
 
   return { componentsForEngine, engineArgs, meta };
@@ -622,6 +652,22 @@ async function loadRunRowBundles(businessId, payRun, db = prisma) {
   const frequency = cal ? cal.frequency : null;
   for (const b of bundles) b.period.frequency = frequency;
 
+  // Cycle-0 wiring — loan/advance recovery: for each employee in the run, select the
+  // PENDING installments DUE in this period (dueDate <= periodEnd) from their active
+  // loans and attach them to the bundle. buildEmployeePayInput turns the total into a
+  // LOAN_REPAYMENT post-tax deduction the ENGINE caps to available net; persistComputedRun
+  // then stamps the installments off the engine's ACTUAL recovered figure. A MIGRATED
+  // (historical-import) run does NOT recover live loans — it pays a past period.
+  if (!isMigrated) {
+    for (const b of bundles) {
+      const recovery = await loanRecovery.selectDuePending(db, {
+        businessId, employeeId: b.employee.id, periodEnd: payRun.periodEnd,
+        currentPayRunId: payRun.id,
+      });
+      if (recovery.totalDueMinor > 0) b.loanRecovery = recovery;
+    }
+  }
+
   return { entity, bundles };
 }
 
@@ -727,6 +773,8 @@ async function computeRun({ businessId, actorId, payRunId, freezeAttendance: doF
         overtimeHours: meta.overtimeHours,
         employeeCode: bundle.employee.code,
         result,
+        // Cycle-0 — the due installments to stamp from the engine's actual recovery.
+        loanRecovery: meta.loanRecovery || null,
         allAnomalies: lineAnoms, // persisted to errorJson so warnings survive re-read
       });
     }
@@ -820,6 +868,13 @@ async function persistComputedRun(tx, { businessId, payRun, actorId, now, inputH
   await tx.payRunLineComponent.deleteMany({ where: { payRunLine: { payRunId: payRun.id } } });
   await tx.payRunLine.deleteMany({ where: { payRunId: payRun.id } });
 
+  // Cycle-0 — UNWIND any loan stamps a PRIOR compute of THIS run wrote (reset the
+  // installments to PENDING + reverse the Loan running totals) BEFORE re-applying.
+  // This is what makes the recovery idempotent: recompute never double-deducts, and
+  // a reopened/cancelled run that re-runs starts from a clean slate. Same tx as the
+  // re-apply below, so the unwind+reapply is atomic.
+  await loanRecovery.unwindForRun(tx, { businessId, payRunId: payRun.id });
+
   let totGross = 0, totDed = 0, totNet = 0, totEr = 0;
   for (const ln of lines) {
     const r = ln.result;
@@ -867,6 +922,27 @@ async function persistComputedRun(tx, { businessId, payRun, actorId, now, inputH
         status: 'GENERATED',
       },
     });
+
+    // Cycle-0 — STAMP the loan recovery off the engine's ACTUAL recovered figure.
+    // The engine has already applied the net-floor cap to the LOAN_REPAYMENT line;
+    // we read what it actually deducted (not what we asked for) so a capped/partial
+    // recovery defers correctly. applyRecovery marks the fully-covered installments
+    // PAID (payRunId + paidAt), increments Loan.amountRepaid / decrements outstanding,
+    // and closes a fully-recovered loan — all in THIS run transaction.
+    if (ln.loanRecovery && ln.loanRecovery.installments && ln.loanRecovery.installments.length) {
+      const recoveredMinor = (r.employeeDeductions || [])
+        .filter((d) => d.code === 'LOAN_REPAYMENT')
+        .reduce((acc, d) => acc + (d.amountMinor || 0), 0);
+      if (recoveredMinor > 0) {
+        await loanRecovery.applyRecovery(tx, {
+          businessId,
+          payRunId: payRun.id,
+          paidAt: now,
+          installments: ln.loanRecovery.installments,
+          recoveredMinor,
+        });
+      }
+    }
 
     totGross += r.grossMinor;
     totDed += r.totalEmployeeDeductionsMinor;
@@ -2083,6 +2159,10 @@ async function cancelRun({ businessId, actorId, payRunId, reason }) {
   const runState = { id: payRun.id, status: from };
   transition(runState, STATE.CANCELLED, { actorId, reason });
   await persistTransition({ prisma, payRunId, from, to: STATE.CANCELLED, ctx: { actorId, reason } });
+  // Cycle-0 — a cancelled run that had already computed must release its loan stamps
+  // (installments → PENDING, Loan running totals reversed) so a later run can recover
+  // them. No-op when the run was cancelled before it ever computed.
+  await loanRecovery.unwindForRun(prisma, { businessId, payRunId });
   await writeAudit({
     businessId, actorId, action: 'payrun.cancel', entityType: 'PayRun', entityId: payRunId,
     meta: { code: payRun.code, reason: reason || null, from: payRun.status },
@@ -2120,6 +2200,10 @@ async function reopenRun({ businessId, actorId, payRunId }) {
     await tx.payslip.deleteMany({ where: { businessId, payRunId } });
     await tx.payRunLineComponent.deleteMany({ where: { payRunLine: { payRunId } } });
     await tx.payRunLine.deleteMany({ where: { payRunId } });
+    // Cycle-0 — unwind any loan stamps this run wrote (installments → PENDING, Loan
+    // running totals reversed) so reopening cleanly undoes the recovery. A later
+    // recompute re-selects the now-PENDING installments.
+    await loanRecovery.unwindForRun(tx, { businessId, payRunId });
     await tx.payRun.update({
       where: { id: payRunId },
       data: { varianceReport: null, totalsHash: null, headcount: 0, totalGross: 0, totalDeductions: 0, totalNet: 0, totalEmployerCost: 0 },
