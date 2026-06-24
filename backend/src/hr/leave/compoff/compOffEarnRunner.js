@@ -13,10 +13,12 @@
  * regularized punches: a WEEKLY_OFF day later flipped to HOLIDAY_WORKED is picked
  * up by the next pass (and a reversal is voided — §6 edge case 3).
  *
- * Idempotency (same trick as accrualRunner): the @@unique(businessId, employeeId,
- * sourceDate, sourceKind) makes a re-run a no-op (a duplicate create throws P2002,
- * which we swallow); finalize is conditional-flip guarded; running twice over the
- * same window mints each credit exactly once (invariant 4).
+ * Idempotency (finding #2): keyed on the IMMUTABLE attendanceId, NOT the runtime-
+ * derived sourceKind. The @@unique(businessId, employeeId, attendanceId) makes a re-run
+ * a no-op (a duplicate create throws P2002, which we swallow), so a holiday/weekly-off
+ * classification FLIP between passes can never mint a second credit for the same worked
+ * day; finalize is conditional-flip guarded; running twice over the same window mints
+ * each credit exactly once (invariant 4).
  *
  * Tenant-isolated: every read/write is businessId-scoped. Per-employee/row failure
  * is logged + skipped — one bad row never aborts the tenant or the sweep.
@@ -79,30 +81,19 @@ async function runCompOffEarn({ businessId = null, asOf = new Date(), lookbackDa
         const qty = creditQuantityForMinutes(row.workedMinutes, config);
         if (qty <= 0) { summary.skipped += 1; continue; } // didn't work enough → no credit
 
-        // Source kind: a Holiday row on that date → HOLIDAY, else WEEKLY_OFF. Honour
-        // the per-tenant earnFrom toggles.
-        const holiday = await prisma.holiday.findFirst({
-          where: { businessId: bId, date: row.date }, select: { id: true },
-        });
-        const sourceKind = holiday ? 'HOLIDAY' : 'WEEKLY_OFF';
-        if (sourceKind === 'HOLIDAY' && config.earnFromHoliday === false) { summary.skipped += 1; continue; }
-        if (sourceKind === 'WEEKLY_OFF' && config.earnFromWeeklyOff === false) { summary.skipped += 1; continue; }
-
-        // Already minted for this (emp, date, kind)? → idempotent no-op.
+        // STABLE-KEY idempotency (finding #2): key on the IMMUTABLE attendance row, NOT
+        // the runtime-derived sourceKind. A worked rest-day maps to exactly one
+        // Attendance row; if its holiday/weekly-off classification flips between passes,
+        // we must STILL mint only once. (The @@unique(businessId, employeeId,
+        // attendanceId) is the belt; this is the early skip.)
         const exists = await prisma.compOffCredit.findFirst({
-          where: { businessId: bId, employeeId: row.employeeId, sourceDate: row.date, sourceKind },
+          where: { businessId: bId, employeeId: row.employeeId, attendanceId: row.id },
           select: { id: true },
         });
         if (exists) { summary.skipped += 1; continue; }
 
-        if (dryRun) { summary.minted += 1; continue; }
-
-        const earnedOn = utcDay(row.date);
-        const expiresOn = addDays(earnedOn, Number(config.expiryDays) || 60);
-        const requireApproval = config.requireApproval !== false;
-
-        // Resolve the employee's tax-year start (for the aggregate balance period) +
-        // email + manager once, only when we actually mint.
+        // Resolve the employee + current employment (entity/location) ONCE — needed both
+        // for the SCOPED holiday lookup (finding #3) and the mint metadata.
         const emp = await prisma.employee.findFirst({
           where: { id: row.employeeId, businessId: bId, deletedAt: null },
           select: { id: true, firstName: true, workEmail: true, personalEmail: true, managerEmployeeId: true },
@@ -110,9 +101,32 @@ async function runCompOffEarn({ businessId = null, asOf = new Date(), lookbackDa
         if (!emp) { summary.skipped += 1; continue; }
         const employment = await prisma.employmentRecord.findFirst({
           where: { businessId: bId, employeeId: row.employeeId, isCurrent: true },
-          select: { entity: { select: { taxYearStartMonth: true } } },
+          select: { entityId: true, locationId: true, entity: { select: { taxYearStartMonth: true } } },
         });
         const taxYearStartMonth = (employment && employment.entity && employment.entity.taxYearStartMonth) || 4;
+        const empEntityId = employment ? employment.entityId : null;
+        const empLocationId = employment ? employment.locationId : null;
+
+        // Source kind: a Holiday on that date that APPLIES TO THIS EMPLOYEE'S scope →
+        // HOLIDAY, else WEEKLY_OFF (finding #3). An out-of-scope holiday (another
+        // location's regional holiday) must NOT flip sourceKind or mis-route the
+        // earnFrom opt-outs. Mirror derive.js scopeMatches: a holiday row matches when
+        // its entity/location are null (tenant-wide) OR equal the employee's.
+        const holidayCandidates = await prisma.holiday.findMany({
+          where: { businessId: bId, date: row.date },
+          select: { id: true, entityId: true, locationId: true },
+        });
+        const scopedHolidays = holidayCandidates.filter((h) =>
+          (!h.entityId || h.entityId === empEntityId) && (!h.locationId || h.locationId === empLocationId));
+        const sourceKind = scopedHolidays.length ? 'HOLIDAY' : 'WEEKLY_OFF';
+        if (sourceKind === 'HOLIDAY' && config.earnFromHoliday === false) { summary.skipped += 1; continue; }
+        if (sourceKind === 'WEEKLY_OFF' && config.earnFromWeeklyOff === false) { summary.skipped += 1; continue; }
+
+        if (dryRun) { summary.minted += 1; continue; }
+
+        const earnedOn = utcDay(row.date);
+        const expiresOn = addDays(earnedOn, Number(config.expiryDays) || 60);
+        const requireApproval = config.requireApproval !== false;
 
         const credit = await prisma.$transaction(async (tx) => {
           // Create the lot PENDING. The @@unique guard makes a concurrent double-mint

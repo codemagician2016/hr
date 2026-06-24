@@ -32,7 +32,7 @@ router.get('/queue', withEmployeeScope('canApproveLeave'), c.listQueue);
 router.post('/credits', requirePermission('canManageOrg'), c.grantCredit);
 router.post('/credits/:id/approve', requirePermission('canApproveLeave'), withEmployeeScope('canApproveLeave'), c.approveCredit);
 router.post('/credits/:id/reject', requirePermission('canApproveLeave'), withEmployeeScope('canApproveLeave'), c.rejectCredit);
-router.post('/credits/:id/void', requirePermission('canManageOrg'), c.voidActiveCredit);
+router.post('/credits/:id/void', requirePermission('canManageOrg'), withEmployeeScope('canManageOrg'), c.voidActiveCredit);
 
 // Ops run triggers.
 router.post('/runs/earn', requirePermission('canManageOrg'), c.runEarn);

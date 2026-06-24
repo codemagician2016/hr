@@ -500,6 +500,7 @@ model Business {
   leaveTransactions            LeaveTransaction[]
   leaveEncashmentRequests      LeaveEncashmentRequest[] // Feature 31 — in-service encashment
   compOffCredits               CompOffCredit[] // Feature 30 — comp-off expiry lots
+  compOffConsumptions          CompOffConsumption[] // Feature 30 — per-application lot allocations
   // Attendance / time
   shiftPatterns                ShiftPattern[]
   shiftAssignments             ShiftAssignment[]
@@ -9128,6 +9129,8 @@ model LeaveTransaction {
   updatedAt         DateTime         @updatedAt
   version           Int              @default(0)
 
+  compOffConsumptions CompOffConsumption[] // Feature 30 — lots this APPLICATION debited (finding #5)
+
   @@index([businessId, employeeId, leaveTypeId])
   @@index([businessId, status])
   @@index([businessId, startDate, endDate])
@@ -9263,9 +9266,40 @@ model CompOffCredit {
   updatedAt         DateTime            @updatedAt
   version           Int                 @default(0)
 
-  @@unique([businessId, employeeId, sourceDate, sourceKind]) // one credit per worked rest-day (idempotent earn)
+  consumptions      CompOffConsumption[]
+
+  // Idempotent earn keyed on the IMMUTABLE attendance row, NOT the runtime-derived
+  // sourceKind (Feature 30 finding #2). A worked rest-day maps to exactly one
+  // Attendance row; keying on attendanceId means a holiday/weekly-off classification
+  // flip between runner passes can never mint a second credit. HR_GRANT has
+  // attendanceId = NULL and is excepted (Postgres treats NULLs as distinct, so HR
+  // can post multiple manual grants on one date).
+  @@unique([businessId, employeeId, attendanceId])
   @@index([businessId, employeeId, status, expiresOn]) // FIFO consume + ESS list
   @@index([businessId, status, expiresOn]) // expiry-runner scan
+}
+
+/// Per-application comp-off lot allocation (Feature 30 finding #5). Records EXACTLY
+/// which lots a COMP_OFF leave APPLICATION debited at approve, so withdraw re-credits
+/// the SAME lots (not arbitrary reverse-FIFO ones) — keeping each credit's expiry
+/// window honest and forfeiting units whose source lot has since expired (finding #1).
+model CompOffConsumption {
+  id                 String           @id @default(uuid())
+  businessId         String
+  business           Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  // The COMP_OFF APPLICATION LeaveTransaction that debited these units.
+  leaveTransactionId String
+  leaveTransaction   LeaveTransaction @relation(fields: [leaveTransactionId], references: [id], onDelete: Cascade)
+  compOffCreditId    String
+  compOffCredit      CompOffCredit    @relation(fields: [compOffCreditId], references: [id], onDelete: Cascade)
+  units              Decimal          @db.Decimal(6, 4) // units this leave drew from THIS lot
+  // Stamped on withdraw when these units were returned (idempotent reversal guard).
+  reversedAt         DateTime?
+  createdAt          DateTime         @default(now())
+
+  @@unique([leaveTransactionId, compOffCreditId]) // one allocation row per (application, lot)
+  @@index([businessId, compOffCreditId])
+  @@index([businessId, leaveTransactionId])
 }
 
 enum CompOffSourceKind {

@@ -16,7 +16,7 @@
  * → flip EXHAUSTED).
  */
 
-const { allocateFromLots, reCreditToLots } = require('./compOffLots');
+const { allocateFromLots, reCreditAllocations } = require('./compOffLots');
 
 /**
  * isCompOffCategory(category) — the single gate. Everything below is a no-op unless
@@ -27,14 +27,18 @@ function isCompOffCategory(category) {
 }
 
 /**
- * debitLotsOnApprove(tx, { businessId, employeeId, units }) — burn `units` from the
- * employee's ACTIVE comp-off lots FIFO. Called on the COMP_OFF onApprove AFTER the
- * standard balance move. Each lot update is version-locked; a lot fully consumed
- * flips EXHAUSTED. Throws INSUFFICIENT_COMP_OFF when lots can't cover (the apply-time
- * validator + aggregate available() gate already prevent this; the throw is the belt).
- * Returns { allocations }.
+ * debitLotsOnApprove(tx, { businessId, employeeId, units, leaveTransactionId }) — burn
+ * `units` from the employee's ACTIVE comp-off lots FIFO. Called on the COMP_OFF
+ * onApprove AFTER the standard balance move. Each lot update is version-locked; a lot
+ * fully consumed flips EXHAUSTED. Throws INSUFFICIENT_COMP_OFF when lots can't cover
+ * (the apply-time validator + aggregate available() gate already prevent this; the
+ * throw is the belt).
+ *
+ * Finding #5: PERSIST which lots this APPLICATION debited as CompOffConsumption rows
+ * (keyed by leaveTransactionId) so withdraw can re-credit EXACTLY these lots — not
+ * arbitrary reverse-FIFO ones. Returns { allocations }.
  */
-async function debitLotsOnApprove(tx, { businessId, employeeId, units }) {
+async function debitLotsOnApprove(tx, { businessId, employeeId, units, leaveTransactionId = null }) {
   const u = Number(units);
   if (!(u > 0)) return { allocations: [] };
   const lots = await tx.compOffCredit.findMany({
@@ -53,41 +57,74 @@ async function debitLotsOnApprove(tx, { businessId, employeeId, units }) {
         version: { increment: 1 },
       },
     });
+    // Persist the per-application allocation (finding #5). Upsert keeps it idempotent
+    // if onApprove is ever re-fired for the same (application, lot).
+    if (leaveTransactionId) {
+      await tx.compOffConsumption.upsert({
+        where: { leaveTransactionId_compOffCreditId: { leaveTransactionId, compOffCreditId: a.lotId } },
+        update: { units: a.take, reversedAt: null },
+        create: { businessId, leaveTransactionId, compOffCreditId: a.lotId, units: a.take },
+      });
+    }
   }
   return { allocations };
 }
 
 /**
- * reCreditLotsOnWithdraw(tx, { businessId, employeeId, units, asOf }) — return
- * `units` to the lots they came from (un-burn) on WITHDRAW of an approved comp-off
- * leave (edge case 8). Only un-expired lots are eligible; a lot flipped back below
- * its quantity returns to ACTIVE (from EXHAUSTED). `forfeited` units (all candidate
- * lots expired) are dropped per the conservative default. Returns { allocations,
- * forfeited }.
+ * reCreditLotsOnWithdraw(tx, { businessId, leaveTransactionId, asOf }) — on WITHDRAW of
+ * an approved comp-off leave (edge case 8), return the units this leave debited to the
+ * EXACT lots it took them from (finding #5), reading the persisted CompOffConsumption
+ * allocation. Only un-expired lots are eligible; a lot flipped back below its quantity
+ * returns to ACTIVE (from EXHAUSTED). Units whose source lot has since expired are
+ * `forfeited` — NOT re-credited to any lot (invariant 6) AND signalled back so the
+ * caller drops them from the aggregate too (finding #1 — closing must never exceed
+ * Σ active-lot remaining). Idempotent: an already-reversed row (reversedAt set) is
+ * skipped, so a double-withdraw can't double-restore.
+ *
+ * Returns { moves, forfeited, applied } where `applied` is the units actually returned
+ * to lots (= debited − forfeited − already-reversed).
  */
-async function reCreditLotsOnWithdraw(tx, { businessId, employeeId, units, asOf = new Date() }) {
-  const u = Number(units);
-  if (!(u > 0)) return { allocations: [], forfeited: 0 };
-  // Candidate lots: ones that were consumed and are still spendable (not EXPIRED/VOIDED).
-  const lots = await tx.compOffCredit.findMany({
-    where: { businessId, employeeId, status: { in: ['ACTIVE', 'EXHAUSTED'] }, consumed: { gt: 0 } },
-    select: { id: true, quantity: true, consumed: true, earnedOn: true, expiresOn: true, version: true },
+async function reCreditLotsOnWithdraw(tx, { businessId, leaveTransactionId, asOf = new Date() }) {
+  if (!leaveTransactionId) return { moves: [], forfeited: 0, applied: 0 };
+  // The lots THIS leave actually debited (and not yet reversed).
+  const rows = await tx.compOffConsumption.findMany({
+    where: { businessId, leaveTransactionId, reversedAt: null },
+    select: { id: true, compOffCreditId: true, units: true },
   });
-  const { allocations, forfeited } = reCreditToLots(lots, u, { asOf });
-  const byId = new Map(lots.map((l) => [l.id, l]));
-  for (const a of allocations) {
-    const lot = byId.get(a.lotId);
+  if (!rows.length) return { moves: [], forfeited: 0, applied: 0 };
+
+  const lotIds = rows.map((r) => r.compOffCreditId);
+  const lots = await tx.compOffCredit.findMany({
+    where: { id: { in: lotIds } },
+    select: { id: true, quantity: true, consumed: true, expiresOn: true, version: true },
+  });
+  const lotsById = new Map(lots.map((l) => [l.id, l]));
+  const allocations = rows.map((r) => ({ lotId: r.compOffCreditId, units: Number(r.units) }));
+
+  const { moves, forfeited } = reCreditAllocations(allocations, lotsById, { asOf });
+  const byMoveLot = new Map(moves.map((m) => [m.lotId, m]));
+  for (const m of moves) {
+    const lot = lotsById.get(m.lotId);
     await tx.compOffCredit.update({
-      where: { id: a.lotId, version: lot.version },
+      where: { id: m.lotId, version: lot.version },
       data: {
-        consumed: a.newConsumed,
-        // re-credited below quantity → it's spendable again → ACTIVE.
-        status: 'ACTIVE',
+        consumed: m.newConsumed,
+        // Dropped below quantity → spendable again → ACTIVE. (A lot that was ACTIVE
+        // and partially consumed stays ACTIVE; this only resurrects an EXHAUSTED one.)
+        ...(m.reactivates ? { status: 'ACTIVE' } : {}),
         version: { increment: 1 },
       },
     });
   }
-  return { allocations, forfeited };
+  // Stamp every consumption row reversed (incl. forfeited/already-full ones) so a
+  // re-withdraw is a no-op. The `give` we actually applied is recorded for the trail.
+  let appliedMilli = 0;
+  for (const r of rows) {
+    const m = byMoveLot.get(r.compOffCreditId);
+    if (m) appliedMilli += Math.round(m.give * 1000);
+    await tx.compOffConsumption.update({ where: { id: r.id }, data: { reversedAt: new Date() } });
+  }
+  return { moves, forfeited, applied: Math.round(appliedMilli) / 1000 };
 }
 
 module.exports = { isCompOffCategory, debitLotsOnApprove, reCreditLotsOnWithdraw };

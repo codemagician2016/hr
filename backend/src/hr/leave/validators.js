@@ -16,7 +16,7 @@
 
 const { available } = require('./ledger');
 // Feature 30 — comp-off FIFO expiry math (pure). Used only by the COMP_OFF gate below.
-const { earliestExpiryForUnits } = require('./compoff/compOffLots');
+const { earliestExpiryForUnits, firstDayPastExpiry } = require('./compoff/compOffLots');
 
 function num(v, dflt = 0) {
   const n = v == null ? dflt : Number(v);
@@ -155,17 +155,35 @@ function validateRequest(input = {}) {
     }
   }
 
-  // 10. COMP_OFF expiry gate (Feature 30 §4.3). For a comp-off avail, the credits
-  // that FIFO-cover these units must not lapse BEFORE the leave is taken — you can't
-  // spend a credit you'll lose first. Reject when the leave START date is after the
-  // expiry of the last lot needed to cover `units`. (Availing on/before that date is
-  // fine; the lot is still live on the leave day.)
+  // 10. COMP_OFF expiry gate (Feature 30 §4.3 + finding #4). For a comp-off avail, the
+  // credits that FIFO-cover these units must not lapse BEFORE the day they're spent —
+  // you can't spend a credit you'll lose first.
+  //
+  // The START-only check (startMs > earliestExpiryForUnits) MISSED a multi-day span
+  // whose start is on/before expiry but whose LATER days fall after a lot lapses
+  // (finding #4). When the caller supplies the per-day breakdown (`compOffDays =
+  // [{ date, fraction }]`), we run the precise per-day FIFO check: each charged day's
+  // covering lot must still be live ON that day. We fall back to the START gate when
+  // no breakdown is supplied (keeps the gate inert/back-compatible).
   if (type.category === 'COMP_OFF' && Array.isArray(input.compOffLots)) {
-    const neededExpiry = earliestExpiryForUnits(input.compOffLots, units);
-    if (neededExpiry != null && startMs > utcDayMs(neededExpiry)) {
-      errors.push(fail('COMP_OFF_WOULD_BE_EXPIRED',
-        'The comp-off credit needed for these days expires before your leave date — apply earlier or for fewer days',
-        { expiresOn: new Date(utcDayMs(neededExpiry)).toISOString().slice(0, 10) }));
+    if (Array.isArray(input.compOffDays) && input.compOffDays.length) {
+      const badDay = firstDayPastExpiry(input.compOffLots, input.compOffDays);
+      if (badDay != null) {
+        const neededExpiry = earliestExpiryForUnits(input.compOffLots, units);
+        errors.push(fail('COMP_OFF_WOULD_BE_EXPIRED',
+          'A comp-off credit needed for these days expires before the day it would be taken — apply earlier or for fewer days',
+          {
+            expiresOn: neededExpiry != null ? new Date(utcDayMs(neededExpiry)).toISOString().slice(0, 10) : null,
+            firstExpiredDay: new Date(utcDayMs(badDay)).toISOString().slice(0, 10),
+          }));
+      }
+    } else {
+      const neededExpiry = earliestExpiryForUnits(input.compOffLots, units);
+      if (neededExpiry != null && startMs > utcDayMs(neededExpiry)) {
+        errors.push(fail('COMP_OFF_WOULD_BE_EXPIRED',
+          'The comp-off credit needed for these days expires before your leave date — apply earlier or for fewer days',
+          { expiresOn: new Date(utcDayMs(neededExpiry)).toISOString().slice(0, 10) }));
+      }
     }
   }
 

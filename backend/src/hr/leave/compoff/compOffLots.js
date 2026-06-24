@@ -126,6 +126,85 @@ function reCreditToLots(lots, units, { asOf = new Date() } = {}) {
 }
 
 /**
+ * reCreditAllocations(allocations, lotsById, { asOf }) — the EXACT-lot reverse of a
+ * persisted per-application allocation, used on WITHDRAW (findings #1 + #5). Unlike
+ * reCreditToLots (which guessed lots reverse-FIFO), this returns units to the SAME
+ * lots the leave debited — passed in as `allocations = [{ lotId, units }]` loaded from
+ * the CompOffConsumption rows. A lot whose `expiresOn` is before `asOf` is FORFEITED:
+ * its residual must never become spendable again (invariant 6), and — critically — the
+ * forfeited units must NOT re-credit the aggregate balance either (finding #1), so the
+ * caller subtracts `forfeited` from the closing/taken credit-back.
+ *
+ * Returns { moves:[{ lotId, give, newConsumed, reactivates }], forfeited } where
+ * `give` is clamped to the lot's current consumed (never un-burns more than is there —
+ * idempotent against a partially-reversed lot) and `reactivates` flags an EXHAUSTED lot
+ * dropping back below quantity → ACTIVE.
+ */
+function reCreditAllocations(allocations, lotsById, { asOf = new Date() } = {}) {
+  const now = utcDayMs(asOf);
+  const moves = [];
+  let forfeitedMilli = 0;
+  for (const a of allocations || []) {
+    const wantMilli = toThousandths(a.units);
+    if (wantMilli <= 0) continue;
+    const lot = lotsById instanceof Map ? lotsById.get(a.lotId) : (lotsById || {})[a.lotId];
+    // Lot gone (deleted) or expired → forfeit these units (no lot re-credit, and the
+    // caller drops them from the aggregate too).
+    if (!lot || utcDayMs(lot.expiresOn) < now) { forfeitedMilli += wantMilli; continue; }
+    const consumedMilli = toThousandths(lot.consumed);
+    const giveMilli = Math.min(wantMilli, consumedMilli);
+    if (giveMilli <= 0) { continue; } // already reversed on this lot → nothing to return
+    const newConsumedMilli = consumedMilli - giveMilli;
+    moves.push({
+      lotId: lot.id,
+      give: fromThousandths(giveMilli),
+      newConsumed: fromThousandths(newConsumedMilli),
+      // It dropped below quantity → spendable again. (It was EXHAUSTED iff it was full.)
+      reactivates: newConsumedMilli < toThousandths(lot.quantity),
+    });
+  }
+  return { moves, forfeited: fromThousandths(forfeitedMilli) };
+}
+
+/**
+ * firstDayPastExpiry(activeLots, chargedDays) — per-day FIFO expiry check for the
+ * COMP_OFF_WOULD_BE_EXPIRED gate (finding #4). `chargedDays = [{ date, fraction }]`
+ * are the WORKING days this comp-off debits (fraction > 0), in any order. Walking the
+ * days oldest-first and the lots FIFO (soonest-expiry first), it assigns each day's
+ * fraction to lots and returns the FIRST day that lands AFTER the `expiresOn` of the
+ * lot covering it (i.e. that day would spend a credit that has already lapsed). Returns
+ * null when every charged day is on/before its covering lot's expiry. This catches a
+ * multi-day span whose START is fine but whose LATER days fall past a lot's expiry —
+ * which the START-only gate missed.
+ */
+function firstDayPastExpiry(activeLots, chargedDays) {
+  const days = [...(chargedDays || [])]
+    .filter((d) => d && Number(d.fraction) > 0)
+    .sort((a, b) => utcDayMs(a.date) - utcDayMs(b.date));
+  if (!days.length) return null;
+  const lots = sortByExpiryAsc(activeLots).map((l) => ({
+    expMs: utcDayMs(l.expiresOn),
+    remMilli: Math.max(0, toThousandths(l.quantity) - toThousandths(l.consumed)),
+  }));
+  let li = 0;
+  for (const day of days) {
+    let needMilli = toThousandths(day.fraction);
+    const dayMs = utcDayMs(day.date);
+    while (needMilli > 0) {
+      while (li < lots.length && lots[li].remMilli <= 0) li += 1;
+      if (li >= lots.length) return null; // lots can't cover — the balance gate handles it
+      const lot = lots[li];
+      // The lot covering (part of) this day must not have expired before the day.
+      if (lot.expMs < dayMs) return day.date;
+      const takeMilli = Math.min(needMilli, lot.remMilli);
+      lot.remMilli -= takeMilli;
+      needMilli -= takeMilli;
+    }
+  }
+  return null;
+}
+
+/**
  * isExpired(lot, asOf) — a lot whose `expiresOn` is strictly before the asOf civil
  * day. (A credit is usable through the END of its `expiresOn` day.)
  */
@@ -189,6 +268,8 @@ function earliestExpiryForUnits(activeLots, units) {
 module.exports = {
   allocateFromLots,
   reCreditToLots,
+  reCreditAllocations,
+  firstDayPastExpiry,
   lapseLots,
   sumActiveRemaining,
   earliestExpiryForUnits,
