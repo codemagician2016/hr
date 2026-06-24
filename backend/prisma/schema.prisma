@@ -8125,6 +8125,13 @@ model StatutoryRemittance {
   updatedAt    DateTime         @updatedAt
   version      Int              @default(0)
 
+  // Natural-key uniqueness for the per-period INSTANCE row shared by fileRun() and
+  // the compliance generator (calendarRunner upsertStub). Without it the P2002
+  // guard in upsertStub was dead code → concurrent generate could insert duplicate
+  // obligations. NOTE: the MIGRATION installs the stricter COALESCE(stateCode,'')
+  // expression index (Postgres treats NULL as DISTINCT in a plain unique, which
+  // would let dup entity-wide NULL rows in) — same pattern as ComplianceObligation.
+  @@unique([businessId, entityId, kind, taxPeriod, stateCode])
   @@index([businessId, entityId, kind, taxPeriod])
   @@index([businessId, status, dueDate])
   @@index([businessId, obligationId])

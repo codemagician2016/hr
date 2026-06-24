@@ -219,7 +219,14 @@ async function main() {
       const filed = await service.fileRun({ businessId, actorId: CHECKER, payRunId: approvedRun.id });
       ok(filed.country === 'IN', 'G4 file → IN filing plan');
       const kinds = filed.remittances.map((r) => r.kind).sort();
-      ok(kinds.includes('IN_PF') && kinds.includes('IN_ESI') && kinds.includes('IN_FORM24Q'), `G5 IN remittance rows written (${kinds.join(',')})`);
+      // The May-2026 run period ENDS 2026-05-31 (≥ 2026-04-01 Income Tax Act 2025
+      // boundary), so the TDS-salary quarterly return resolves to IN_FORM138 — the
+      // SAME kind the compliance generator emits (no 24Q-vs-138 duplicate). fileRun
+      // also writes the monthly IN_TDS deposit so the generator's monthly stub is
+      // reconciled rather than left perpetually OVERDUE.
+      ok(kinds.includes('IN_PF') && kinds.includes('IN_ESI') && kinds.includes('IN_TDS') && kinds.includes('IN_FORM138'),
+        `G5 IN remittance rows written w/ resolved 24Q→138 + monthly TDS (${kinds.join(',')})`);
+      ok(!kinds.includes('IN_FORM24Q'), 'G5b post-2026 run does NOT write a stale IN_FORM24Q (succession applied — no dup vs generator)');
       const rem = await prisma.statutoryRemittance.findMany({ where: { businessId, payRunId: approvedRun.id } });
       ok(rem.every((r) => r.taxPeriod && r.dueDate), 'G6 remittances carry taxPeriod + dueDate');
 

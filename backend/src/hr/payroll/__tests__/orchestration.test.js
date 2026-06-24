@@ -264,7 +264,10 @@ function amt(arr, code) {
 // ---------------------------------------------------------------------------
 {
   const { resolveFilingPlan } = service._internal;
-  check('IN filing plan resolves (4 obligations)', 4, resolveFilingPlan('IN').length);
+  // IN plan: IN_TDS (monthly deposit) + IN_PF + IN_ESI + IN_PT + IN_LWF + IN_FORM24Q.
+  // The monthly IN_TDS entry was added so fileRun reconciles the generator's monthly
+  // TDS stub (no perpetual false-overdue) — see remittanceKind/remittanceStateCode.
+  check('IN filing plan resolves (6 obligations)', 6, resolveFilingPlan('IN').length);
   check('NZ filing plan resolves (2 obligations)', 2, resolveFilingPlan('NZ').length);
   let usCode = null;
   try { resolveFilingPlan('US'); } catch (e) { usCode = e.code; }

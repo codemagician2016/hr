@@ -184,8 +184,23 @@ async function upsertStub(ob, period, dryRun) {
     return 'created';
   } catch (e) {
     // A concurrent generator/fileRun may have created the same key between our
-    // findFirst and create — treat a unique/duplicate race as "exists" (idempotent).
-    if (/unique|duplicate|P2002/i.test(e.message || e.code || '')) return 'exists';
+    // findFirst and create — the StatutoryRemittance natural-key UNIQUE now makes
+    // this race lose with a P2002 (previously, with no DB unique, this guard was
+    // DEAD CODE and BOTH inserts succeeded → a duplicate obligation). Treat the
+    // race as idempotent "exists" and best-effort enrich the winner's back-link.
+    const isDup = e && (e.code === 'P2002' || /unique|duplicate|P2002/i.test(e.message || e.code || ''));
+    if (isDup) {
+      try {
+        const won = await prisma.statutoryRemittance.findFirst({ where });
+        if (won && !won.obligationId) {
+          await prisma.statutoryRemittance.updateMany({
+            where: { id: won.id, version: won.version },
+            data: { obligationId: ob.id, version: { increment: 1 } },
+          });
+        }
+      } catch (_e) { /* best-effort reconcile; the row exists either way */ }
+      return 'exists';
+    }
     throw e;
   }
 }
