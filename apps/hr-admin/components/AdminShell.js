@@ -73,7 +73,22 @@ export default function AdminShell({ children }) {
       }
       try {
         const resolved = await get('/api/tenant/resolve');
-        if (alive) setBrand(resolved?.brand || resolved?.subscription?.brand || resolved);
+        if (alive) {
+          // Keep the whole resolve payload: `brand` carries the white-label
+          // logo/name/colour, while subscription.themeStyle / themeColors carry
+          // the style. Merge into one object the Sidebar + theme memo both read.
+          const b = resolved?.brand || {};
+          const sub = resolved?.subscription || {};
+          setBrand({
+            ...b,
+            // Theme inputs (style + colour) for resolveTenantTheme below.
+            themeStyle: sub.themeStyle,
+            themeColors: sub.themeColors,
+            // Tenant identity for the sidebar wordmark fallback.
+            business: { name: b.name || resolved?.business?.name || null, logoUrl: b.logoUrl || null },
+            features: resolved?.features,
+          });
+        }
       } catch {
         // brand is optional — fall back to default tokens.
       }
@@ -87,10 +102,19 @@ export default function AdminShell({ children }) {
 
   const theme = useMemo(() => {
     if (!brand) return null;
+    // themeColors is a JSON string on the subscription; the white-label brand
+    // exposes primaryColor directly (it wins so saving on the Branding page
+    // re-themes the console). Tolerate either source.
+    let subPrimary;
+    if (typeof brand.themeColors === 'string') {
+      try { subPrimary = JSON.parse(brand.themeColors)?.primary; } catch { subPrimary = undefined; }
+    } else if (brand.themeColors && typeof brand.themeColors === 'object') {
+      subPrimary = brand.themeColors.primary;
+    }
     return resolveTenantTheme({
-      styleKey: brand.styleKey || brand.theme,
+      styleKey: brand.styleKey || brand.themeStyle || brand.theme,
       colorKey: brand.colorKey,
-      primary: brand.themeColors?.primary || brand.primary,
+      primary: brand.primaryColor || subPrimary || brand.primary,
       logoUrl: brand.logoUrl,
     });
   }, [brand]);
@@ -98,6 +122,24 @@ export default function AdminShell({ children }) {
   useEffect(() => {
     if (theme) applyThemeVars(theme);
   }, [theme]);
+
+  // White-label the browser chrome from the tenant brand: document title = the
+  // business name; favicon = the tenant favicon when set. NEVER "DriftHR".
+  useEffect(() => {
+    if (typeof document === 'undefined' || !brand) return;
+    const name = brand.name || brand.business?.name || null;
+    if (name) document.title = name;
+    const faviconUrl = brand.faviconUrl || null;
+    if (faviconUrl) {
+      let link = document.querySelector('link[rel="icon"]');
+      if (!link) {
+        link = document.createElement('link');
+        link.rel = 'icon';
+        document.head.appendChild(link);
+      }
+      link.href = faviconUrl;
+    }
+  }, [brand]);
 
   // Close the mobile drawer on Escape.
   useEffect(() => {

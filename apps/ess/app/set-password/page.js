@@ -56,9 +56,12 @@ function SetPasswordInner() {
   const params = useSearchParams();
   const { tenant, theme } = useTenant();
   const business = tenant?.business || {};
-  const logoUrl = theme?.logoUrl || business.logoUrl || null;
-  const tenantName = business.name || business.displayName || null;
-  const name = tenantName || 'DriftHR';
+  // White-label brand: logo if set, else the business NAME wordmark — NEVER the
+  // DriftHR vendor mark.
+  const brand = tenant?.brand || {};
+  const logoUrl = brand.logoUrl || theme?.logoUrl || business.logoUrl || null;
+  const tenantName = brand.name || business.name || business.displayName || null;
+  const name = tenantName || 'Set password';
 
   const token = params.get('token') || '';
 
@@ -105,16 +108,15 @@ function SetPasswordInner() {
           {logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={logoUrl} alt={name} className="h-12 w-auto max-w-[180px] object-contain" />
-          ) : tenantName ? (
+          ) : (
+            // No logo — the business NAME (or a neutral label) as a styled
+            // wordmark in the brand colour. NEVER the DriftHR vendor mark.
             <div
-              className="flex h-12 w-12 items-center justify-center rounded-xl text-lg font-bold"
+              className="flex h-12 items-center justify-center rounded-xl px-4 text-lg font-bold"
               style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}
             >
-              {tenantName.charAt(0).toUpperCase()}
+              {tenantName || 'Welcome'}
             </div>
-          ) : (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src="/drifthr-logo.svg" alt="DriftHR" className="h-10 w-auto" />
           )}
           <div>
             <h1 className="text-lg font-semibold" style={{ color: 'var(--theme-text)' }}>

@@ -64,7 +64,9 @@ export default function Sidebar({ navTree = [], session, brand, theme, badges = 
     (session?.role ? String(session.role).replace(/_/g, ' ') : null) ||
     null;
 
-  // Tenant brand (logo / business name) — falls back to the DriftHR product mark.
+  // Tenant brand (logo / business name). White-label rule: render the tenant's
+  // logo if set, ELSE the tenant's business NAME as a styled wordmark — NEVER the
+  // DriftHR vendor mark on a tenant surface.
   const logoUrl = theme?.logoUrl || brand?.logoUrl || brand?.business?.logoUrl || null;
   const businessName = brand?.business?.name || brand?.name || null;
 
@@ -87,17 +89,22 @@ export default function Sidebar({ navTree = [], session, brand, theme, badges = 
 
   return (
     <div className="dh-sidebar dh-scroll">
-      {/* Tenant identity (logo / business name) */}
+      {/* Tenant identity — logo if set, else the business NAME as a styled
+          wordmark (var(--theme-primary)). NEVER the DriftHR vendor mark. */}
       <div className="dh-sidebar-brand">
         {logoUrl ? (
           <>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={logoUrl} alt={businessName ? `${businessName} logo` : 'DriftHR'} className="dh-sidebar-logo" />
+            <img src={logoUrl} alt={businessName ? `${businessName} logo` : 'Logo'} className="dh-sidebar-logo" />
             {businessName && <span className="dh-sidebar-brandname truncate">{businessName}</span>}
           </>
         ) : (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src="/drifthr-logo.svg" alt="DriftHR" className="dh-sidebar-logo" />
+          <span
+            className="dh-sidebar-brandname truncate"
+            style={{ color: 'var(--theme-primary)', fontWeight: 700, fontSize: '1.05rem' }}
+          >
+            {businessName || 'HR'}
+          </span>
         )}
       </div>
 

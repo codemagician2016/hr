@@ -16,9 +16,13 @@ function LoginInner() {
   const params = useSearchParams();
   const { tenant, theme } = useTenant();
   const business = tenant?.business || {};
-  const logoUrl = theme?.logoUrl || business.logoUrl || null;
-  const tenantName = business.name || business.displayName || null;
-  const name = tenantName || 'DriftHR';
+  // White-label brand: prefer the resolved tenant-wide brand object, then the
+  // theme/business fallbacks. Render the logo if set, else the business NAME as a
+  // styled wordmark — NEVER the DriftHR vendor mark.
+  const brand = tenant?.brand || {};
+  const logoUrl = brand.logoUrl || theme?.logoUrl || business.logoUrl || null;
+  const tenantName = brand.name || business.name || business.displayName || null;
+  const name = tenantName || 'Sign in';
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -48,23 +52,29 @@ function LoginInner() {
             // eslint-disable-next-line @next/next/no-img-element
             <img src={logoUrl} alt={name} className="h-12 w-auto max-w-[180px] object-contain" />
           ) : tenantName ? (
+            // No logo — the business NAME as a styled wordmark in the brand colour.
             <div
-              className="flex h-12 w-12 items-center justify-center rounded-xl text-lg font-bold"
+              className="flex h-12 items-center justify-center rounded-xl px-4 text-lg font-bold"
               style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}
             >
-              {tenantName.charAt(0).toUpperCase()}
+              {tenantName}
             </div>
           ) : (
-            // No tenant brand — show the DriftHR product logo.
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src="/drifthr-logo.svg" alt="DriftHR" className="h-10 w-auto" />
+            // Tenant not yet resolved (host not matched) — a neutral wordmark,
+            // NOT the DriftHR vendor mark.
+            <div
+              className="flex h-12 items-center justify-center rounded-xl px-4 text-lg font-bold"
+              style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}
+            >
+              Sign in
+            </div>
           )}
           <div>
             {tenantName && (
               <h1 className="text-lg font-semibold" style={{ color: 'var(--theme-text)' }}>{tenantName}</h1>
             )}
             <p className="text-sm" style={{ color: 'var(--theme-muted)' }}>
-              {tenantName ? 'Sign in to your account' : 'Effortless HR & payroll.'}
+              Sign in to your account
             </p>
           </div>
         </div>

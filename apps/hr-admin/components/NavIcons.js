@@ -38,6 +38,10 @@ export const ICONS = {
   hierarchy: 'M9 3h6v4H9zM3 17h6v4H3zM15 17h6v4h-6zM12 7v4M6 17v-2a1 1 0 011-1h10a1 1 0 011 1v2',
   // Cycle 1 — HR Helpdesk (lifebuoy: ring + spokes for a "support" feel).
   support: 'M12 3a9 9 0 100 18 9 9 0 000-18zM12 8a4 4 0 100 8 4 4 0 000-8zM5.6 5.6l3.2 3.2M15.2 15.2l3.2 3.2M18.4 5.6l-3.2 3.2M8.8 15.2l-3.2 3.2',
+  // White-label Branding — an artist's palette (brand colours).
+  palette: 'M12 3a9 9 0 100 18c1.1 0 2-.9 2-2 0-.5-.2-1-.5-1.3-.3-.4-.5-.8-.5-1.2a2 2 0 012-2h2.3A3.9 3.9 0 0021 11a9 9 0 00-9-8zM7.5 12a1 1 0 110-2 1 1 0 010 2zM10.5 8a1 1 0 110-2 1 1 0 010 2zM15 8a1 1 0 110-2 1 1 0 010 2z',
+  // Domain — a globe (web address).
+  globe: 'M12 3a9 9 0 100 18 9 9 0 000-18zM3 12h18M12 3c2.5 2.5 3.5 5.8 3.5 9s-1 6.5-3.5 9c-2.5-2.5-3.5-5.8-3.5-9s1-6.5 3.5-9z',
 };
 
 export function Icon({ name, size = 18, className, strokeWidth = 1.7 }) {

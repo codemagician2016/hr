@@ -175,6 +175,10 @@ async function resolve(req, res) {
         subscription: { include: { tier: { select: { name: true, slug: true } } } },
         content: true,
         seoSettings: true,
+        // White-label: the tenant-wide brand (entityId NULL) drives logo/colour/
+        // name on the portal + login. Pull the active tenant-wide rows; we pick
+        // the default below.
+        tenantBrands: { where: { entityId: null, isActive: true, deletedAt: null } },
       },
     });
   } else if (host === PLATFORM_DOMAIN) {
@@ -194,6 +198,7 @@ async function resolve(req, res) {
         subscription: { include: { tier: { select: { name: true, slug: true } } } },
         content: true,
         seoSettings: true,
+        tenantBrands: { where: { entityId: null, isActive: true, deletedAt: null } },
       },
     });
   } else {
@@ -210,6 +215,7 @@ async function resolve(req, res) {
         subscription: { include: { tier: { select: { name: true, slug: true } } } },
         content: true,
         seoSettings: true,
+        tenantBrands: { where: { entityId: null, isActive: true, deletedAt: null } },
       },
     });
   }
@@ -296,18 +302,39 @@ async function resolve(req, res) {
   if (sub?.themeColors) {
     try { storedPrimary = JSON.parse(sub.themeColors)?.primary; } catch { storedPrimary = undefined; }
   }
+  // White-label brand (self-service Branding page). The tenant-wide TenantBrand
+  // (entityId NULL) is the authoritative brand source: its primaryColor + logoUrl
+  // win over the legacy Subscription.themeColors / BusinessContent fallbacks, so
+  // saving on the Branding page re-themes the portal on the next resolve. The
+  // PUT mirrors these onto Subscription/BusinessContent too, but reading the row
+  // directly keeps the surface correct even if a mirror is ever skipped.
+  const tenantBrand = Array.isArray(business.tenantBrands)
+    ? (business.tenantBrands.find((b) => b.isDefault) || business.tenantBrands[0] || null)
+    : null;
+  const brandPrimary = tenantBrand?.primaryColor || storedPrimary;
+  const brandLogoUrl = tenantBrand?.logoUrl || business.content?.logoUrl || null;
   // resolveTenantTheme maps the stored brand → { styleKey, colorKey, primary,
   // logoUrl } onto a composed HR theme object. styleKey falls back to the
   // engine default for unknown/legacy keys, so stale profession themes resolve
   // cleanly instead of throwing.
   const hrTheme = resolveTenantTheme({
     styleKey: sub?.themeStyle || theme,
-    primary: storedPrimary,
-    // Logo lives on BusinessContent (loaded via the `content` include). The
-    // old `sub?.logoUrl || business.logoUrl` read two fields that don't exist
-    // on Subscription/Business, so logoUrl was always null.
-    logoUrl: business.content?.logoUrl || null,
+    primary: brandPrimary,
+    logoUrl: brandLogoUrl,
   });
+  // The flat brand object the apps read (TenantProvider / AdminShell / login /
+  // sidebar). Display name falls back to the legal business name so a tenant
+  // never renders an empty wordmark; the vendor "DriftHR" is NEVER substituted.
+  const brand = {
+    logoUrl: brandLogoUrl,
+    faviconUrl: tenantBrand?.faviconUrl || business.content?.faviconUrl || null,
+    name: tenantBrand?.name || business.name || null,
+    primaryColor: brandPrimary || null,
+    secondaryColor: tenantBrand?.secondaryColor || null,
+    accentColor: tenantBrand?.accentColor || null,
+    supportEmail: tenantBrand?.supportEmail || null,
+    emailFromName: tenantBrand?.emailFromName || null,
+  };
   // Backward-compat payload keys retained for existing storefront/admin
   // readers. HR is a single GENERIC theme, so both surface the same resolved
   // object; non-matching verticals see null exactly as before.
@@ -539,6 +566,11 @@ async function resolve(req, res) {
         }
       : { features },
     theme,
+    // White-label brand for the portal chrome + login (logo / favicon / display
+    // name / colours). Resolved from the tenant-wide TenantBrand (entityId NULL)
+    // with BusinessContent + Subscription fallbacks; the apps render the tenant's
+    // OWN brand from this, never the DriftHR vendor mark.
+    brand,
     bookingTheme,
     ecomTheme,
     themeVocab,

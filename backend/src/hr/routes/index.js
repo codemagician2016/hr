@@ -25,6 +25,13 @@ router.use('/employees', require('./employee.routes'));
 // certificates), and the auto employee-number scheme. Gated on
 // canManageCompanyProfile (Owner + HR-Admin); tenant-scoped + audited.
 router.use('/company-profile', require('./companyProfile.routes'));
+// White-label Branding (self-service) — the tenant-wide logo/favicon/colours/
+// display-name brand. Read/write the TenantBrand (entityId NULL) + mirror to
+// BusinessContent (logo/favicon) + Subscription.themeColors (primary), so the
+// console, ESS portal and both login pages render the tenant's OWN brand — never
+// the DriftHR vendor mark. Gated on canEditDomain OR canManageCompanyProfile OR
+// canEditBranding (Owner bypass). Tenant-scoped from the session.
+router.use('/branding', require('./branding.routes'));
 router.use('/org', require('./org.routes'));
 router.use('/leave', require('./leave.routes'));
 // FLAG (Feature 30 — NEW mount): operator comp-off admin (earn grant/queue/ledger/

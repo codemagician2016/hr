@@ -138,6 +138,16 @@ export const NAV_ITEMS = [
   // can manage ANY of those — a Finance role (canEditBilling, no canEditBranding)
   // must still reach the Billing tab. Per-tab/per-action gating happens inside.
   { key: 'settings', label: 'Settings', href: '/settings', anyPermission: ['canEditBranding', 'canEditBilling', 'canEditDomain', 'canManageCompanyProfile', 'canManageExpensePolicy'], group: true, icon: 'settings' },
+  // White-label Branding (self-service) — logo/favicon/colours/display-name so a
+  // tenant's OWN brand shows on the console, the ESS portal, and both login pages
+  // (never the DriftHR vendor mark). Mirrors the backend OR-gate: visible to
+  // anyone who can edit branding OR the domain OR the company profile. The server
+  // is the real boundary; the page shows read-only when the operator lacks the keys.
+  { key: 'settings-branding', label: 'Branding', href: '/settings/branding', anyPermission: ['canEditBranding', 'canEditDomain', 'canManageCompanyProfile'], parent: 'settings', icon: 'palette' },
+  // Domain — the custom-domain / subdomain console (Feature 3). It already exists
+  // at /settings/domain but was never wired into the nav. Gated on canEditDomain
+  // (Owner/Finance-scoped). The page itself shows a read-only banner for others.
+  { key: 'settings-domain', label: 'Domain', href: '/settings/domain', permission: 'canEditDomain', parent: 'settings', icon: 'globe' },
   // FLAG FOR MERGE: two NEW Settings sub-pages, gated on the new
   // canManageCompanyProfile rbac key (seeded true for Owner + HR-Admin). The
   // server is the real boundary; this just hides the links from operators who
