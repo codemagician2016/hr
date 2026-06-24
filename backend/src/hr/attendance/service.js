@@ -29,6 +29,7 @@ const {
   isWeeklyOff,
 } = require('./derive');
 const { resolveTimezone, civilDateInTz, zonedWallTimeToUtc } = require('./tz');
+const { tenantCountry } = require('../tenant/countryContext');
 
 // A @db.Date column is stored at UTC midnight. Build the civil-day key the same
 // way everywhere so the unique (businessId, employeeId, date) lines up. The civil
@@ -224,6 +225,14 @@ async function recompute(businessId, employeeId, fromDate, toDate, tx) {
     business: business || null,
   });
 
+  // F14 — pin the holiday read to the TENANT country (fail-closed). The holiday
+  // calendar feeds isHoliday → derive → attendance status / overtimeMinutes /
+  // lopFraction and persists holidayId; an off-country row (bad backfill / legacy
+  // / import-guard regression) must NOT mark an India working day as a holiday.
+  // Mirror leaveContext.js:106. tenantCountry throws fail-closed on a missing /
+  // ambiguous tenant rather than widening the read.
+  const holidayCountry = await tenantCountry(businessId);
+
   // Window-load once for the whole range (cheaper than per-day round-trips), with a
   // small pad so a cross-midnight night shift on the final day still pairs.
   const winStart = from;
@@ -265,7 +274,7 @@ async function recompute(businessId, employeeId, fromDate, toDate, tx) {
       },
     }),
     db.holiday.findMany({
-      where: { businessId, date: { gte: winStart, lt: winEnd } },
+      where: { businessId, countryCode: holidayCountry, date: { gte: winStart, lt: winEnd } },
     }),
     db.overtimeRule.findMany({ where: { businessId, isActive: true } }),
     db.attendance.findMany({

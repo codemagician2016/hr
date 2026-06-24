@@ -27,6 +27,7 @@ const payrollService = require('../payroll/service');
 const { recompute } = require('../attendance/service');
 const { resolveTimezone, civilDateInTz } = require('../attendance/tz');
 const { resolveApprover } = require('../lib/approvalRouting');
+const { tenantCountry } = require('../tenant/countryContext');
 
 const PUNCH_TYPES = ['IN', 'OUT', 'BREAK_START', 'BREAK_END'];
 // Mirror the RegularizationKind enum in prisma/schema.prisma exactly — writing a
@@ -355,30 +356,27 @@ async function getSchedule(req, res, next) {
 }
 
 // ── GET /me/attendance/holidays?year= — own market's holiday calendar ─────────
-// countryCode is RESOLVED server-side from the employee (never client-supplied).
+// countryCode is RESOLVED server-side from the TENANT (never client-supplied,
+// never widened by a null per-row employee/entity countryCode).
 async function listHolidays(req, res, next) {
   try {
     const emp = await resolveActiveSelf(req);
     if (!emp) return res.json({ items: [], countryCode: null });
     const { businessId } = req.customer;
     const year = parseInt(req.query.year, 10) || new Date().getFullYear();
-    // Resolve the employee's operating country (employee row → current entity).
-    let countryCode = (emp.countryCode || '').toUpperCase() || null;
-    if (!countryCode) {
-      const rec = await prisma.employmentRecord.findFirst({
-        where: { businessId, employeeId: emp.id, isCurrent: true },
-        select: { entity: { select: { countryCode: true } } },
-      });
-      countryCode = rec && rec.entity && rec.entity.countryCode ? rec.entity.countryCode.toUpperCase() : null;
-    }
     const yearStart = new Date(Date.UTC(year, 0, 1));
     const yearEnd = new Date(Date.UTC(year, 11, 31));
-    const where = { businessId, date: { gte: yearStart, lte: yearEnd } };
-    if (countryCode) where.countryCode = countryCode;
+    // F14 — fail-CLOSED on the TENANT country. The per-row employee/entity
+    // countryCode is NOT consulted: the query is ALWAYS pinned to the tenant's HR
+    // country so a null employee/entity countryCode can never widen the list to
+    // off-country rows. tenantCountry throws fail-closed on a missing/ambiguous
+    // tenant rather than returning every row.
+    const holidayCountry = await tenantCountry(businessId);
+    const where = { businessId, countryCode: holidayCountry, date: { gte: yearStart, lte: yearEnd } };
     const rows = await prisma.holiday.findMany({ where, orderBy: { date: 'asc' } });
     // Normalize to the shape the ESS schedule page expects (observedDate alias).
     const items = rows.map((h) => ({ ...h, observedDate: h.date }));
-    res.json({ items, countryCode });
+    res.json({ items, countryCode: holidayCountry });
   } catch (e) { next(e); }
 }
 
