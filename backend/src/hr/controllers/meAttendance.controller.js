@@ -85,8 +85,8 @@ async function resolveEmployeeTz(businessId, employeeId, employee) {
 function civilDayInTz(instant, tz) {
   return civilKeyToDate(civilDateInTz(instant, tz));
 }
-async function isDayLocked(businessId, employeeId, day) {
-  const row = await prisma.attendance.findFirst({
+async function isDayLocked(businessId, employeeId, day, db = prisma) {
+  const row = await db.attendance.findFirst({
     where: { businessId, employeeId, date: utcDay(day), isLocked: true },
     select: { id: true },
   });
@@ -451,8 +451,8 @@ async function listMySwaps(req, res, next) {
 }
 
 // A published, unlocked WORK/OFF cell must exist for (employee, day) to swap it.
-async function publishedCell(businessId, employeeId, date) {
-  return prisma.rosterDay.findFirst({ where: { businessId, employeeId, date: utcDay(date), status: 'PUBLISHED' } });
+async function publishedCell(businessId, employeeId, date, db = prisma) {
+  return db.rosterDay.findFirst({ where: { businessId, employeeId, date: utcDay(date), status: 'PUBLISHED' } });
 }
 
 // POST /me/shifts/swaps { counterpartyEmployeeId, requesterDate, counterpartyDate, reason }
@@ -514,6 +514,30 @@ async function consentMySwap(req, res, next) {
 
     // ACCEPT: mark consent + open the F10 SHIFT_SWAP manager chain (same as leave).
     const updated = await prisma.$transaction(async (tx) => {
+      // Re-validate the file-time invariant IN-TX before opening the chain: both cells
+      // must STILL be PUBLISHED and neither day locked. createMySwap checked this at
+      // FILE time, but an admin may have reverted a cell to DRAFT or the period may have
+      // locked since; applySwap re-checks again at APPROVE, but opening a doomed chain
+      // here would only burn manager-queue time. Reading under the tx keeps the consent
+      // decision and the cell/lock state consistent (no stale-read window). 409 if stale.
+      const [cellA, cellB] = await Promise.all([
+        publishedCell(businessId, swap.requesterEmployeeId, swap.requesterDate, tx),
+        publishedCell(businessId, swap.counterpartyEmployeeId, swap.counterpartyDate, tx),
+      ]);
+      if (!cellA || !cellB) {
+        const e = new Error('Both days must have a published roster shift to swap');
+        e.code = 'SWAP_NOT_PUBLISHED';
+        throw e;
+      }
+      const [lockA, lockB] = await Promise.all([
+        isDayLocked(businessId, swap.requesterEmployeeId, swap.requesterDate, tx),
+        isDayLocked(businessId, swap.counterpartyEmployeeId, swap.counterpartyDate, tx),
+      ]);
+      if (lockA || lockB) {
+        const e = new Error('A day is in a locked attendance period');
+        e.code = 'SWAP_LOCKED_DAY';
+        throw e;
+      }
       const u = await tx.shiftSwapRequest.update({ where: { id: swap.id }, data: { counterpartyConsent: 'ACCEPTED' } });
       const opened = await engine.openRequest({
         businessId,
@@ -532,6 +556,9 @@ async function consentMySwap(req, res, next) {
   } catch (e) {
     if (e && (e.code === 'DECISION_RACE' || e.code === 'P2025')) {
       return res.status(409).json({ message: 'Swap changed concurrently; please retry', reason: 'DECISION_RACE' });
+    }
+    if (e && e.code && String(e.code).startsWith('SWAP_')) {
+      return res.status(409).json({ message: e.message, reason: e.code });
     }
     next(e);
   }
