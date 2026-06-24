@@ -227,6 +227,13 @@ async function createInvite({ businessId, employeeId, createdByUserId = null, al
   if (state === 'ACTIVE' && !allowReset) {
     return { ok: false, reason: 'ALREADY_ACTIVE', alreadyActive: true, loginEmail };
   }
+  // Mark a token as a RESET only when it is the EXPLICIT path that re-mints over an
+  // ALREADY-active login. That is the ONLY token acceptInvite() will let overwrite a
+  // claimed login's password — a first-claim (non-reset) token can never take over an
+  // account that has since been activated. A plain invite of a not-yet-active login is
+  // NOT a reset (isReset stays false) so it still can't clobber if the login races to
+  // active before the token is used.
+  const isReset = state === 'ACTIVE' && allowReset === true;
 
   const rawToken = generateRawToken();
   const tokenHash = hashToken(rawToken);
@@ -241,7 +248,7 @@ async function createInvite({ businessId, employeeId, createdByUserId = null, al
       data: { status: 'REVOKED' },
     });
     return tx.employeeInvite.create({
-      data: { businessId, employeeId, email: loginEmail, tokenHash, expiresAt, status: 'PENDING', createdByUserId },
+      data: { businessId, employeeId, email: loginEmail, tokenHash, expiresAt, status: 'PENDING', isReset, createdByUserId },
     });
   });
 
@@ -317,7 +324,7 @@ async function acceptInvite({ token, passwordHash }) {
   // Resolve the invite by hash — tenant + employee come FROM the row.
   const invite = await prisma.employeeInvite.findUnique({
     where: { tokenHash },
-    select: { id: true, businessId: true, employeeId: true, email: true, status: true, expiresAt: true, usedAt: true },
+    select: { id: true, businessId: true, employeeId: true, email: true, status: true, expiresAt: true, usedAt: true, isReset: true },
   });
   // Generic reject for unknown / used / revoked / expired — same message to the
   // client so a token can't be probed for validity.
@@ -326,7 +333,7 @@ async function acceptInvite({ token, passwordHash }) {
   if (invite.usedAt) return { ok: false, reason: 'INVALID' };
   if (!invite.expiresAt || new Date(invite.expiresAt) <= new Date()) return { ok: false, reason: 'INVALID' };
 
-  const { businessId, employeeId, email } = invite;
+  const { businessId, employeeId, email, isReset } = invite;
 
   // Atomically: re-check the token is still PENDING (guards a double-submit /
   // race), set the Customer password + verify + activate, and mark the invite
@@ -344,8 +351,31 @@ async function acceptInvite({ token, passwordHash }) {
 
       const existing = await tx.customer.findUnique({
         where: { businessId_email: { businessId, email } },
-        select: { id: true, anonymisedAt: true },
+        select: {
+          id: true,
+          anonymisedAt: true,
+          isActive: true,
+          emailVerified: true,
+          passwordChangedAt: true,
+        },
       });
+
+      // ACCOUNT-TAKEOVER GUARD. The token is bound to exactly this (businessId, email)
+      // — it resolves the Customer FROM the invite row, never from caller context, so
+      // it can only ever touch the tenant + login that minted it. On top of that
+      // binding: a token must NOT overwrite the password of an ALREADY-CLAIMED login
+      // (active + emailVerified OR a prior passwordChangedAt) UNLESS it was explicitly
+      // minted as a RESET (isReset). This closes the replay where a stale first-claim
+      // PENDING token is presented after the login was activated through another path
+      // — without it that token would silently reset the live account's password.
+      // Generic throw → the controller maps every failure to one non-revealing message
+      // (no enumeration / account-existence oracle).
+      const alreadyClaimed =
+        !!existing &&
+        !existing.anonymisedAt &&
+        existing.isActive === true &&
+        (existing.emailVerified === true || existing.passwordChangedAt != null);
+      if (alreadyClaimed && !isReset) throw new Error('ALREADY_CLAIMED');
 
       let customer;
       if (!existing) {

@@ -6798,6 +6798,12 @@ model EmployeeInvite {
   expiresAt       DateTime
   usedAt          DateTime? // stamped when the new hire claims the password
   status          EmployeeInviteStatus @default(PENDING)
+  // True only when this token was minted as an EXPLICIT password RESET for an
+  // already-claimed login (createInvite allowReset). A non-reset (first-claim)
+  // token must NEVER overwrite an already-active login — that's the account-
+  // takeover guard in acceptInvite(). Defaults false so every pre-existing /
+  // first-claim invite is treated as non-reset (fail-closed).
+  isReset         Boolean              @default(false)
   // Audit — the operator who sent it (User.id). Nullable for system-issued.
   createdByUserId String?
   createdAt       DateTime             @default(now())
