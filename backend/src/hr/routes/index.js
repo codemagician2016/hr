@@ -116,6 +116,10 @@ router.use('/me/leave', require('./meLeave.routes'));
 // tax / currency surfaces off it.
 router.use('/me/country-context', require('./meCountryContext.routes'));
 router.use('/me/tax-declaration', require('./meTax.routes'));
+// FLAG (Feature 15 — new mount): ESS India income-tax PROJECTION (the IT-computation
+// statement + monthly TDS projection + PDF). Customer session, SELF_ONLY (subject
+// resolved from the session). India-only — the assembler 422s for non-IN tenants.
+router.use('/me/tax-projection', require('./meTaxProjection.routes'));
 router.use('/me/tasks', require('./meTasks.routes'));
 // FLAG (Feature 11 — shared edit): ESS reimbursement/claims + travel. Customer session,
 // SELF_ONLY (subject resolved from the session). Apply for reimbursement / outdoor duty,

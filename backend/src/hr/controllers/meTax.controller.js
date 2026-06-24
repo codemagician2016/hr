@@ -21,10 +21,10 @@
 
 const prisma = require('../../core/lib/prisma');
 const payrollService = require('../payroll/service');
-// Feature 14: the tenant HR country is the single source of truth. The SP→Emp→
-// Entity chain is kept as a per-row read, but asserted against the tenant country
-// (tripwire) and falls back to it when the row carries no country.
-const { tenantCountry, assertCountry } = require('../tenant/countryContext');
+// Feature 15 §8 — the SP→Emp→Entity country chain is hoisted to one shared helper
+// (it is needed by the tax-projection assembler too). meTax imports it instead of
+// re-implementing; behaviour is unchanged.
+const { resolveStatutoryCountry } = require('../lib/resolveStatutoryCountry');
 
 const NZ_TAX_CODES = new Set(['M', 'ME', 'SB', 'S', 'SH', 'ST', 'SA', 'M SL', 'ME SL', 'SB SL', 'S SL', 'SH SL', 'ST SL', 'SA SL', 'WT', 'ND', 'STC', 'CAE', 'EDW', 'NSW']);
 const KIWISAVER_RATES = new Set([0, 3, 4, 6, 8, 10]);
@@ -48,30 +48,9 @@ async function resolveActiveSelf(req) {
   return emp;
 }
 
-// Resolve the employee's statutory country: StatutoryProfile → Employee → current
-// entity. Returns 'IN' | 'NZ' | null (fail-closed — never assume a market).
-async function resolveCountry(businessId, emp) {
-  // Feature 14 — the tenant country is authoritative. The per-row chain is kept as
-  // a TRIPWIRE: if a row carries a country it MUST equal the tenant country (else a
-  // bad backfill / quarantined tenant → throw, never serve the wrong market). When
-  // no row carries a country we fall through to the tenant country (single source).
-  const tCountry = await tenantCountry(businessId);
-  const sp = await prisma.statutoryProfile.findFirst({
-    where: { businessId, employeeId: emp.id },
-    select: { countryCode: true },
-  });
-  let cc = sp && normCc(sp.countryCode);
-  if (!cc) cc = normCc(emp.countryCode);
-  if (!cc) {
-    const rec = await prisma.employmentRecord.findFirst({
-      where: { businessId, employeeId: emp.id, isCurrent: true },
-      select: { entity: { select: { countryCode: true } } },
-    });
-    cc = rec && rec.entity ? normCc(rec.entity.countryCode) : null;
-  }
-  if (cc) { await assertCountry(businessId, cc); return cc; }
-  return tCountry;
-}
+// Resolve the employee's statutory country (hoisted to lib/resolveStatutoryCountry).
+// Thin alias kept for call-site stability; behaviour unchanged (fail-closed).
+const resolveCountry = (businessId, emp) => resolveStatutoryCountry(businessId, emp);
 
 const noEmployee = (res) => res.status(404).json({ message: 'No active employee record for this account' });
 
@@ -98,9 +77,21 @@ async function getDeclaration(req, res, next) {
         regime: sp && sp.taxRegime ? sp.taxRegime : 'NEW',
         investments: {
           sec80c: sp && sp.section80CDeclared != null ? toNum(sp.section80CDeclared) : 0,
+          // Feature 15 — the additional declared OLD-regime inputs (prefill).
+          sec80d: sp && sp.sec80DDeclared != null ? toNum(sp.sec80DDeclared) : 0,
+          sec80ccd1b: sp && sp.sec80CCD1BDeclared != null ? toNum(sp.sec80CCD1BDeclared) : 0,
+          sec80tta: sp && sp.sec80TTADeclared != null ? toNum(sp.sec80TTADeclared) : 0,
+          sec24b: sp && sp.sec24BHomeLoanInterest != null ? toNum(sp.sec24BHomeLoanInterest) : 0,
           hra: sp && sp.hraExemptionClaimed ? null : 0, // amount not stored; flag only
         },
         hraExemptionClaimed: !!(sp && sp.hraExemptionClaimed),
+        hraAnnualRentPaid: sp && sp.hraAnnualRentPaid != null ? toNum(sp.hraAnnualRentPaid) : 0,
+        hraMetroCity: !!(sp && sp.hraMetroCity),
+        previousEmployer: {
+          taxableIncome: sp && sp.prevEmployerTaxableIncome != null ? toNum(sp.prevEmployerTaxableIncome) : 0,
+          tdsDeducted: sp && sp.prevEmployerTdsDeducted != null ? toNum(sp.prevEmployerTdsDeducted) : 0,
+          fy: sp && sp.prevEmployerFY ? sp.prevEmployerFY : null,
+        },
       };
     } else if (countryCode === 'NZ') {
       declaration = {
@@ -153,9 +144,34 @@ async function saveDeclaration(req, res, next) {
       }
       const inv = (body.investments && typeof body.investments === 'object') ? body.investments : {};
       // 80C is the headline old-regime declaration; deductions don't apply under NEW.
-      const sec80c = regime === 'OLD' ? Math.max(0, toNum(inv.sec80c)) : 0;
+      const isOld = regime === 'OLD';
+      const sec80c = isOld ? Math.max(0, toNum(inv.sec80c)) : 0;
       update.section80CDeclared = sec80c;
-      update.hraExemptionClaimed = regime === 'OLD' && toNum(inv.hra) > 0;
+
+      // Feature 15 — the additional OLD-regime declared inputs. Under NEW every
+      // exemption/deduction is structurally zeroed (a stray declared 80C can't
+      // leak a NEW-regime deduction — the projection engine also skips them).
+      update.sec80DDeclared = isOld ? Math.max(0, toNum(inv.sec80d)) : 0;
+      update.sec80CCD1BDeclared = isOld ? Math.max(0, toNum(inv.sec80ccd1b)) : 0;
+      update.sec80TTADeclared = isOld ? Math.max(0, toNum(inv.sec80tta)) : 0;
+      update.sec24BHomeLoanInterest = isOld ? Math.max(0, toNum(inv.sec24b)) : 0;
+      const rentPaid = isOld ? Math.max(0, toNum(body.hraAnnualRentPaid)) : 0;
+      update.hraAnnualRentPaid = rentPaid;
+      update.hraMetroCity = isOld && !!body.hraMetroCity;
+      // HRA is claimed when the employee declares rent OR an explicit HRA amount.
+      update.hraExemptionClaimed = isOld && (rentPaid > 0 || toNum(inv.hra) > 0);
+
+      // Previous-employer income/TDS (Form 12B). Counted by the assembler ONLY
+      // when prevEmployerFY === the current FY (a stale prior-year decl can't
+      // inflate this year's relief). FY format guard: "YYYY-YY".
+      const pe = (body.previousEmployer && typeof body.previousEmployer === 'object') ? body.previousEmployer : {};
+      const peFY = typeof pe.fy === 'string' && /^\d{4}-\d{2}$/.test(pe.fy.trim()) ? pe.fy.trim() : null;
+      update.prevEmployerTaxableIncome = Math.max(0, toNum(pe.taxableIncome));
+      update.prevEmployerTdsDeducted = Math.max(0, toNum(pe.tdsDeducted));
+      update.prevEmployerFY = peFY;
+      if (existing && (existing.prevEmployerFY || null) !== peFY) {
+        elections.push({ field: 'prevEmployerFY', oldValue: existing.prevEmployerFY || null, newValue: peFY || 'null' });
+      }
     } else if (countryCode === 'NZ') {
       const taxCode = String(body.taxCode || '').trim().toUpperCase();
       if (!NZ_TAX_CODES.has(taxCode)) {

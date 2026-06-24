@@ -650,6 +650,233 @@ function amt(arr, code) {
 }
 
 // ===========================================================================
+// SECTION F — FEATURE 15: ANNUAL IT PROJECTION (OLD regime + HRA + Chapter VI-A
+//   + perquisites + §192 parity). Every expected derived BY HAND from the
+//   Income-tax Act slabs/caps and the engine's PUBLIC contract only.
+// ===========================================================================
+
+const {
+  annualTaxOldRegime,
+  hraExemption,
+  chapterVIADeductions,
+  perquisiteValue,
+  projectAnnualIncomeTax,
+  monthlyTaxRecoverable,
+} = IN._internals;
+
+// --- F1: annualTaxOldRegime slab walk (taxable ₹5,35,000).
+//   0–2.5L nil; 2.5–5L @5% = 12,500; 5–5.35L @20% = 35,000×20% = 7,000.
+//   slab tax = 19,500. taxable > 5L => no §87A. surcharge 0. cess 4% × 19,500 = 780.
+//   total = 20,280.
+{
+  const t = annualTaxOldRegime(535000);
+  check('F1 OLD slab tax (taxable 5.35L) -> ₹19,500', R(19500), t.taxAfterReliefMinor);
+  check('F1 OLD cess 4% -> ₹780', R(780), t.cessMinor);
+  check('F1 OLD total tax -> ₹20,280', R(20280), t.totalAnnualTaxMinor);
+}
+
+// --- F2: §87A OLD-regime rebate (taxable ₹4,50,000 <= ₹5L ceiling).
+//   2.5–4.5L @5% = 2,00,000×5% = 10,000. rebate min(10,000, 12,500) = 10,000 -> 0.
+{
+  const t = annualTaxOldRegime(450000);
+  check('F2 OLD §87A rebate (taxable 4.5L) -> NIL', 0, t.totalAnnualTaxMinor);
+}
+
+// --- F3: OLD slabs at ₹10,00,000 and ₹15,00,000 (top slab walk).
+//   10L: 2.5–5@5%=12,500; 5–10@20%=1,00,000 => 1,12,500; cess 4,500 -> 1,17,000.
+//   15L: + 10–15@30%=1,50,000 => 2,62,500; cess 10,500 -> 2,73,000.
+{
+  check('F3 OLD taxable 10L -> ₹1,17,000', R(117000), annualTaxOldRegime(1000000).totalAnnualTaxMinor);
+  check('F3 OLD taxable 15L -> ₹2,73,000', R(273000), annualTaxOldRegime(1500000).totalAnnualTaxMinor);
+}
+
+// --- F4: HRA exemption least-of-three (§10(13A)).
+//   Basic+DA 6L, received 2.4L, rent 3L, metro.
+//   legs: received 2.4L; rent-10%(6L)=3L-60k=2.4L; 50%×6L=3L. least=2.4L (received/rentMinus10 tie).
+{
+  const hra = hraExemption({ basicDaAnnualMinor: R(600000), hraReceivedAnnualMinor: R(240000), rentPaidAnnualMinor: R(300000), metro: true });
+  check('F4 HRA exempt least-of-three -> ₹2,40,000', R(240000), hra.exemptMinor);
+  check('F4 HRA rentMinus10 leg -> ₹2,40,000', R(240000), hra.legs.rentMinus10);
+  check('F4 HRA pctOfSalary leg (50% metro) -> ₹3,00,000', R(300000), hra.legs.pctOfSalary);
+}
+
+// --- F4b: HRA rent-minus-10% binds (low rent ₹1,00,000).
+//   rent-10%(6L)=1L-60k=40k; received 2.4L; 50%=3L. least=40k.
+{
+  const hra = hraExemption({ basicDaAnnualMinor: R(600000), hraReceivedAnnualMinor: R(240000), rentPaidAnnualMinor: R(100000), metro: true });
+  check('F4b HRA exempt (rent binds) -> ₹40,000', R(40000), hra.exemptMinor);
+  check('F4b HRA leastLeg = rentMinus10', 'rentMinus10', hra.leastLeg);
+}
+
+// --- F5: Chapter VI-A caps. 80C gross 1.8L -> cap 1.5L; 80CCD(1B) separate 50k;
+//   80D gross 28k -> cap 25k. total deductible = 1.5L + 50k + 25k = 2.25L.
+{
+  const chap = chapterVIADeductions({ sec80cGrossMinor: R(180000), sec80ccd1bGrossMinor: R(50000), sec80dGrossMinor: R(28000) });
+  const c80c = chap.lines.find((l) => l.section === '80C');
+  check('F5 80C gross -> ₹1,80,000', R(180000), c80c.grossMinor);
+  check('F5 80C capped deductible -> ₹1,50,000', R(150000), c80c.deductibleMinor);
+  const c1b = chap.lines.find((l) => l.section === '80CCD(1B)');
+  check('F5 80CCD(1B) separate ₹50,000 (does not eat 80C cap)', R(50000), c1b.deductibleMinor);
+  const c80d = chap.lines.find((l) => l.section === '80D');
+  check('F5 80D capped -> ₹25,000', R(25000), c80d.deductibleMinor);
+  check('F5 total deductible -> ₹2,25,000', R(225000), chap.totalDeductibleMinor);
+}
+
+// --- F6: perquisites. Rent-free employer-OWNED accommodation in a >40L city,
+//   salary (Basic+DA) 6L -> 10% = ₹60,000.
+{
+  const perq = perquisiteValue({ accom: { provided: true, leased: false, cityPopBand: '>40L' }, salaryAnnualMinor: R(600000) });
+  check('F6 owned-accom perq (10% of 6L) -> ₹60,000', R(60000), perq.totalMinor);
+}
+
+// --- F6b: concessional loan perq. avg outstanding 5L, charged 2%, SBI benchmark
+//   8.5% -> spread 6.5% × 5L = ₹32,500.
+{
+  const perq = perquisiteValue({ loan: { avgOutstandingAnnualMinor: R(500000), rateChargedPct: 2 } });
+  check('F6b concessional-loan perq (6.5% × 5L) -> ₹32,500', R(32500), perq.totalMinor);
+}
+
+// --- F7: projectAnnualIncomeTax OLD-regime end-to-end (the Figma statement spine).
+//   Basic+DA 6L, HRA 2.4L, other 1.2L, residual 90k -> gross 10.5L.
+//   HRA exempt 2.4L -> 8.1L; std 50k; Chapter VI-A 2.25L -> taxable 5.35L.
+//   tax 19,500 + cess 780 = ₹20,280.
+{
+  const out = projectAnnualIncomeTax({
+    regime: 'OLD',
+    annualEarnings: { basicDaMinor: R(600000), hraReceivedMinor: R(240000), otherAllowancesMinor: R(120000), residualChoicePayMinor: R(90000) },
+    hraInput: { hraReceivedAnnualMinor: R(240000), rentPaidAnnualMinor: R(300000), metro: true },
+    chapterVIAInput: { sec80cGrossMinor: R(180000), sec80ccd1bGrossMinor: R(50000), sec80dGrossMinor: R(28000) },
+    hasPan: true,
+  });
+  check('F7 OLD gross salary -> ₹10,50,000', R(1050000), out.grossSalaryMinor);
+  check('F7 OLD HRA exemption -> ₹2,40,000', R(240000), out.hraExemptionMinor);
+  check('F7 OLD gross after exemption -> ₹8,10,000', R(810000), out.grossAfterExemptMinor);
+  check('F7 OLD total taxable -> ₹5,35,000', R(535000), out.taxableIncomeMinor);
+  check('F7 OLD tax payable -> ₹19,500', R(19500), out.taxPayableMinor);
+  check('F7 OLD cess -> ₹780', R(780), out.cessMinor);
+  check('F7 OLD total tax -> ₹20,280', R(20280), out.totalAnnualTaxMinor);
+}
+
+// --- F8: projectAnnualIncomeTax NEW-regime parity with the doc T1 (gross 18L).
+//   std ded 75k -> taxable 17.25L -> annual tax ₹1,50,800 (docs/05 §2.6).
+{
+  const out = projectAnnualIncomeTax({
+    regime: 'NEW',
+    annualEarnings: { basicDaMinor: R(900000), hraReceivedMinor: 0, otherAllowancesMinor: R(900000), residualChoicePayMinor: 0 },
+    hasPan: true,
+  });
+  check('F8 NEW taxable (18L − 75k std) -> ₹17,25,000', R(1725000), out.taxableIncomeMinor);
+  check('F8 NEW total tax -> ₹1,50,800', R(150800), out.totalAnnualTaxMinor);
+}
+
+// --- F9: §192 PARITY — the statement's monthly recoverable MUST equal the live
+//   run's computeTds() monthly TDS line, to the paise, for the SAME annual gross.
+//   gross 18L, no YTD, 12 months remaining -> monthly ₹12,567 (docs/05 §2.6).
+{
+  const annualGross = R(1800000);
+  const projected = projectAnnualIncomeTax({
+    regime: 'NEW',
+    annualEarnings: { basicDaMinor: R(900000), hraReceivedMinor: 0, otherAllowancesMinor: R(900000), residualChoicePayMinor: 0 },
+    hasPan: true,
+  });
+  const tds = computeTds({
+    periodGrossMinor: R(150000),
+    ytd: { taxableGrossMinor: 0, tdsDeductedMinor: 0, monthsElapsed: 0 },
+    period: { end: '2025-04-30', year: 2025, month: 4 },
+    employee: { hasPan: true },
+    annualProjectionOverrideMinor: annualGross,
+  });
+  const sched = monthlyTaxRecoverable({
+    totalAnnualTaxMinor: projected.totalAnnualTaxMinor,
+    tdsDeductedThisFYMinor: 0,
+    prevEmployerTdsMinor: 0,
+    monthsRemaining: 12,
+    startMonth: '2025-04',
+  });
+  check('F9 computeTds monthly TDS -> ₹12,567', R(12567), tds.monthlyTdsMinor);
+  check('F9 PARITY: statement monthlyRecoverable === run TDS', tds.monthlyTdsMinor, sched.monthlyRecoverableMinor);
+  check('F9 schedule length = 12', 12, sched.schedule.length);
+  check('F9 schedule Σ === remainingTax (residual absorbed)', sched.remainingTaxMinor, sched.schedule.reduce((a, s) => a + s.amountMinor, 0));
+  check('F9 schedule first month', '2025-04', sched.schedule[0].month);
+  check('F9 schedule last month', '2026-03', sched.schedule[11].month);
+}
+
+// --- F10: §192 PARITY mid-year (YTD deducted) — joiner with 3 months paid.
+//   annual gross 18L, monthsElapsed 3, ytd TDS already 3×₹12,567 = ₹37,701.
+//   computeTds: remaining = 150800 − 37701 = 113099 over 9 months -> ₹12,567/mo.
+//   statement: same remaining over 9 months -> ₹12,567; residual on last month.
+{
+  const projected = projectAnnualIncomeTax({
+    regime: 'NEW',
+    annualEarnings: { basicDaMinor: R(900000), hraReceivedMinor: 0, otherAllowancesMinor: R(900000), residualChoicePayMinor: 0 },
+    hasPan: true,
+  });
+  const ytdTds = R(12567) * 3;
+  const tds = computeTds({
+    periodGrossMinor: R(150000),
+    ytd: { taxableGrossMinor: R(450000), tdsDeductedMinor: ytdTds, monthsElapsed: 3 },
+    period: { end: '2025-07-31', year: 2025, month: 7 },
+    employee: { hasPan: true },
+    annualProjectionOverrideMinor: R(1800000),
+  });
+  const sched = monthlyTaxRecoverable({
+    totalAnnualTaxMinor: projected.totalAnnualTaxMinor,
+    tdsDeductedThisFYMinor: ytdTds,
+    prevEmployerTdsMinor: 0,
+    monthsRemaining: 9,
+    startMonth: '2025-07',
+  });
+  check('F10 mid-year PARITY: statement === run TDS', tds.monthlyTdsMinor, sched.monthlyRecoverableMinor);
+  check('F10 mid-year schedule length = 9', 9, sched.schedule.length);
+  check('F10 mid-year schedule Σ === remaining', sched.remainingTaxMinor, sched.schedule.reduce((a, s) => a + s.amountMinor, 0));
+}
+
+// --- F11: NEW-regime structurally skips HRA/Chapter-VI-A — a stray declared 80C
+//   cannot leak a NEW-regime deduction. Same gross, declared 80C/HRA ignored.
+{
+  const withDecls = projectAnnualIncomeTax({
+    regime: 'NEW',
+    annualEarnings: { basicDaMinor: R(900000), hraReceivedMinor: 0, otherAllowancesMinor: R(900000), residualChoicePayMinor: 0 },
+    hraInput: { hraReceivedAnnualMinor: R(240000), rentPaidAnnualMinor: R(300000), metro: true },
+    chapterVIAInput: { sec80cGrossMinor: R(150000) },
+    hasPan: true,
+  });
+  check('F11 NEW ignores HRA exemption -> 0', 0, withDecls.hraExemptionMinor);
+  check('F11 NEW ignores Chapter VI-A -> null', null, withDecls.chapterVIA);
+  check('F11 NEW total tax unchanged by stray decls -> ₹1,50,800', R(150800), withDecls.totalAnnualTaxMinor);
+}
+
+// --- F12: §206AA no-PAN 20% flat under projection (tax otherwise due).
+//   OLD taxable 5.35L: normal tax 20,280 > 0, so 20% × 5.35L = ₹1,07,000 flat.
+{
+  const out = projectAnnualIncomeTax({
+    regime: 'OLD',
+    annualEarnings: { basicDaMinor: R(600000), hraReceivedMinor: R(240000), otherAllowancesMinor: R(120000), residualChoicePayMinor: R(90000) },
+    hraInput: { hraReceivedAnnualMinor: R(240000), rentPaidAnnualMinor: R(300000), metro: true },
+    chapterVIAInput: { sec80cGrossMinor: R(180000), sec80ccd1bGrossMinor: R(50000), sec80dGrossMinor: R(28000) },
+    hasPan: false,
+  });
+  check('F12 no-PAN §206AA 20% flat on taxable -> ₹1,07,000', R(107000), out.totalAnnualTaxMinor);
+  check('F12 no-PAN flag set', true, out.noPanApplied);
+}
+
+// --- F13: previous-employer income adds to taxable (guard handled by assembler).
+//   OLD taxable would be 5.35L; prev-employer taxable +2L -> 7.35L.
+//   tax: 2.5–5@5%=12,500; 5–7.35@20%=2,35,000×20%=47,000 => 59,500; cess 2,380 -> 61,880.
+{
+  const out = projectAnnualIncomeTax({
+    regime: 'OLD',
+    annualEarnings: { basicDaMinor: R(600000), hraReceivedMinor: R(240000), otherAllowancesMinor: R(120000), residualChoicePayMinor: R(90000) },
+    hraInput: { hraReceivedAnnualMinor: R(240000), rentPaidAnnualMinor: R(300000), metro: true },
+    chapterVIAInput: { sec80cGrossMinor: R(180000), sec80ccd1bGrossMinor: R(50000), sec80dGrossMinor: R(28000) },
+    prevEmployer: { taxableIncomeMinor: R(200000) },
+    hasPan: true,
+  });
+  check('F13 prev-employer taxable folded -> ₹7,35,000', R(735000), out.taxableIncomeMinor);
+  check('F13 total tax with prev-employer -> ₹61,880', R(61880), out.totalAnnualTaxMinor);
+}
+
+// ===========================================================================
 console.log('');
 console.log(`India golden test: ${passed} passed, ${failed} failed of ${passed + failed} assertions.`);
 if (failed > 0) {

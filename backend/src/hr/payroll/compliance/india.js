@@ -142,6 +142,64 @@ const rules = {
   // §16.2 / §8.5: no PAN -> TDS u/s 206AA at 20% flat.
   noPanFlatRate: { num: 20, den: 100 },
 
+  // ═══════════════════════════════════════════════════════════════════════
+  //  FEATURE 15 — OLD-regime / HRA / Chapter-VI-A / perquisites constants.
+  //  Additive only. The NEW-regime path above is UNCHANGED. All amounts in
+  //  RUPEES; effective-dated and resolved as-of the projection date. These feed
+  //  the pure projectAnnualIncomeTax() orchestrator and never touch compute()'s
+  //  run-time monthly TDS (which stays NEW-regime, §192 annualised, as before).
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // §2.1 OLD-regime income-tax slabs (below 60y). Effective FY2025-26.
+  incomeTaxOldRegime: {
+    effectiveFrom: '2025-04-01',
+    slabs: [
+      { upTo: 250000, num: 0, den: 100 },
+      { upTo: 500000, num: 5, den: 100 },
+      { upTo: 1000000, num: 20, den: 100 },
+      { upTo: null, num: 30, den: 100 },
+    ],
+    // §87A (old regime): rebate up to ₹12,500 where taxable <= ₹5,00,000.
+    rebate87A: { maxRebateRupees: 12500, taxableCeilingRupees: 500000 },
+    stdDeductionRupees: 50000, // old-regime salaried standard deduction
+  },
+
+  // §80 Chapter VI-A caps (OLD regime only).
+  chapterVIA: {
+    effectiveFrom: '2025-04-01',
+    sec80C_capRupees: 150000, // 80C + 80CCC + 80CCD(1) combined ceiling
+    sec80CCD1B_capRupees: 50000, // additional NPS, over and above the 80C cap
+    sec80D_capSelfRupees: 25000, // medical insurance (senior-citizen variants roadmap)
+    sec80TTA_capRupees: 10000, // savings-account interest (80TTB ₹50k roadmap)
+    sec24B_capRupees: 200000, // self-occupied home-loan interest
+  },
+
+  // §10(13A) HRA exemption (least-of-three) — % of (Basic+DA).
+  hra: {
+    effectiveFrom: '2000-01-01',
+    metroPctNum: 50,
+    nonMetroPctNum: 40,
+    pctDen: 100,
+    rentMinusPctOfSalaryNum: 10, // rent − 10% of salary leg
+    rentMinusPctOfSalaryDen: 100,
+  },
+
+  // Rule 3 perquisites (accommodation, concessional/interest-free loan).
+  perquisites: {
+    effectiveFrom: '2025-04-01',
+    // Employer-owned accommodation: % of salary by city-population band.
+    accomOwnedPct: {
+      '>40L': { num: 10, den: 100 }, // 10% of salary
+      '15-40L': { num: 75, den: 1000 }, // 7.5%
+      '<15L': { num: 5, den: 100 }, // 5%
+    },
+    // Employer-leased: least of (lease rent, 10% of salary), less rent recovered.
+    accomLeasedPctOfSalaryNum: 10,
+    accomLeasedPctOfSalaryDen: 100,
+    // Concessional loan: perq = (SBI benchmark − rate charged) × avg outstanding.
+    sbiBenchmarkRatePct: 8.5,
+  },
+
   // §4 EPF / EPS / EDLI / admin. Wage ceiling ₹15,000. Caps are HARD figures.
   epf: {
     effectiveFrom: '2020-01-01',
@@ -984,6 +1042,390 @@ function computeTds({
 }
 
 // ===========================================================================
+// 5b. FEATURE 15 — ANNUAL IT PROJECTION (OLD regime + HRA + Chapter VI-A +
+//     perquisites). PURE, paise, effective-dated. The assembler (backend/src/
+//     hr/tax/projectionAssembler.js) loads rows and passes everything in here;
+//     this file does no DB / no Date.now. The NEW-regime path reuses the
+//     existing annualTaxNewRegime() unchanged.
+// ===========================================================================
+
+/**
+ * annualTaxOldRegime(taxableRupees) — mirrors annualTaxNewRegime exactly (slab
+ * walk → §87A rebate → surcharge → 4% cess) but with the OLD-regime slabs and the
+ * old §87A (₹12,500 / ₹5,00,000). Surcharge bands are regime-independent — we
+ * reuse rules.surchargeNewRegime. RUPEES in, paise out; identical return shape.
+ */
+function annualTaxOldRegime(taxableRupees) {
+  const cfg = rules.incomeTaxOldRegime;
+
+  // slab tax (paise, exact integer math).
+  let taxMinor = 0;
+  let prevCap = 0;
+  for (const slab of cfg.slabs) {
+    const cap = slab.upTo == null ? Infinity : slab.upTo;
+    if (taxableRupees > prevCap) {
+      const bandRupees = Math.min(taxableRupees, cap) - prevCap;
+      taxMinor += pctExact(rupees(bandRupees), slab.num, slab.den);
+    }
+    prevCap = cap;
+    if (taxableRupees <= cap) break;
+  }
+  taxMinor = roundHalfUpPaise(taxMinor);
+
+  const taxBeforeRebateMinor = taxMinor;
+
+  // §87A (old regime): rebate up to ₹12,500 where taxable <= ₹5,00,000.
+  const r87 = cfg.rebate87A;
+  if (taxableRupees <= r87.taxableCeilingRupees) {
+    const rebate = Math.min(taxBeforeRebateMinor, rupees(r87.maxRebateRupees));
+    taxMinor = taxBeforeRebateMinor - rebate;
+  }
+
+  // surcharge (regime-independent bands) on income-tax, pre-cess.
+  let surchargeMinor = 0;
+  for (const band of rules.surchargeNewRegime) {
+    if (
+      taxableRupees > band.aboveRupees &&
+      (band.upToRupees == null || taxableRupees <= band.upToRupees)
+    ) {
+      surchargeMinor = roundHalfUpPaise(pctExact(taxMinor, band.num, band.den));
+      break;
+    }
+  }
+
+  const taxPlusSurchargeMinor = taxMinor + surchargeMinor;
+
+  // Health & Education cess 4% on (tax + surcharge).
+  const cessMinor = roundHalfUpPaise(
+    pctExact(taxPlusSurchargeMinor, rules.cess.num, rules.cess.den),
+  );
+
+  return {
+    slabTaxMinor: taxBeforeRebateMinor,
+    taxAfterReliefMinor: taxMinor,
+    surchargeMinor,
+    cessMinor,
+    totalAnnualTaxMinor: taxPlusSurchargeMinor + cessMinor,
+  };
+}
+
+/**
+ * hraExemption — §10(13A) least-of-three. PURE. All amounts annual paise.
+ *   1. HRA actually received,
+ *   2. rent paid − 10% of (Basic+DA),
+ *   3. 50% (metro) / 40% (non-metro) of (Basic+DA).
+ * Floors at 0. Under NEW regime the assembler simply does not call this (HRA
+ * exemption is 0 under the new regime).
+ */
+function hraExemption({
+  basicDaAnnualMinor = 0,
+  hraReceivedAnnualMinor = 0,
+  rentPaidAnnualMinor = 0,
+  metro = false,
+}) {
+  const h = rules.hra;
+  const received = Math.max(0, hraReceivedAnnualMinor);
+  const tenPct = Math.round(
+    pctExact(basicDaAnnualMinor, h.rentMinusPctOfSalaryNum, h.rentMinusPctOfSalaryDen),
+  );
+  const rentMinus10 = Math.max(0, rentPaidAnnualMinor - tenPct);
+  const pctNum = metro ? h.metroPctNum : h.nonMetroPctNum;
+  const pctOfSalary = Math.round(pctExact(basicDaAnnualMinor, pctNum, h.pctDen));
+
+  let exemptMinor = Math.min(received, rentMinus10, pctOfSalary);
+  if (!(exemptMinor > 0)) exemptMinor = 0;
+
+  // Which leg bound (for the "how this is computed" tooltip).
+  let leastLeg = 'received';
+  if (exemptMinor === rentMinus10 && rentMinus10 <= received && rentMinus10 <= pctOfSalary) {
+    leastLeg = 'rentMinus10';
+  } else if (exemptMinor === pctOfSalary && pctOfSalary <= received && pctOfSalary <= rentMinus10) {
+    leastLeg = 'pctOfSalary';
+  }
+
+  return {
+    exemptMinor,
+    leastLeg,
+    legs: { received, rentMinus10, pctOfSalary },
+  };
+}
+
+/**
+ * chapterVIADeductions — Chapter VI-A aggregator (OLD regime only). PURE.
+ * For each section returns { section, label, grossMinor, qualifyingMinor,
+ * deductibleMinor } where deductible = min(qualifying, cap). 80C is capped at
+ * ₹1,50,000; 80CCD(1B) is a SEPARATE ₹50,000 (does not eat the 80C cap); 24(b)
+ * (home-loan interest) is modelled as a deduction line. Aggregates to
+ * { lines[], totalDeductibleMinor, maxQualifyingMinor }.
+ */
+function chapterVIADeductions({
+  sec80cGrossMinor = 0,
+  sec80dGrossMinor = 0,
+  sec80ccd1bGrossMinor = 0,
+  sec80ttaGrossMinor = 0,
+  sec24bGrossMinor = 0,
+  others = [],
+} = {}) {
+  const caps = rules.chapterVIA;
+  const lines = [];
+
+  const addLine = (section, label, grossMinor, capRupees) => {
+    const gross = Math.max(0, Math.round(grossMinor || 0));
+    if (gross <= 0 && section !== '80C') return; // always show 80C (Figma anchor); skip empty others
+    const capMinor = capRupees == null ? Infinity : rupees(capRupees);
+    const qualifying = gross; // pre-cap eligible (Figma "qualifying" column)
+    const deductible = Math.min(qualifying, capMinor);
+    lines.push({
+      section,
+      label,
+      grossMinor: gross,
+      qualifyingMinor: qualifying,
+      deductibleMinor: deductible === Infinity ? gross : deductible,
+    });
+  };
+
+  addLine('80C', 'PF/VPF, Insurance, ELSS, ELSS, principal…', sec80cGrossMinor, caps.sec80C_capRupees);
+  addLine('80CCD(1B)', 'NPS additional (₹50k)', sec80ccd1bGrossMinor, caps.sec80CCD1B_capRupees);
+  addLine('80D', 'Medical insurance premium', sec80dGrossMinor, caps.sec80D_capSelfRupees);
+  addLine('80TTA', 'Savings-account interest', sec80ttaGrossMinor, caps.sec80TTA_capRupees);
+  addLine('24(b)', 'Home-loan interest (self-occupied)', sec24bGrossMinor, caps.sec24B_capRupees);
+
+  // Extensible "other" sections: [{ section, label, grossAmountMinor, capRupees }].
+  for (const o of others || []) {
+    if (!o || o.grossAmountMinor == null) continue;
+    addLine(o.section || 'OTHER', o.label || 'Other Chapter VI-A', o.grossAmountMinor, o.capRupees ?? null);
+  }
+
+  const totalDeductibleMinor = lines.reduce((a, l) => a + l.deductibleMinor, 0);
+  const maxQualifyingMinor = lines.reduce((a, l) => a + l.qualifyingMinor, 0);
+
+  return { lines, totalDeductibleMinor, maxQualifyingMinor };
+}
+
+/**
+ * perquisiteValue — Rule 3 valuation (accommodation, concessional loan). PURE.
+ * Accommodation:
+ *   - employer-owned   → % of salary by city-population band (accomOwnedPct),
+ *   - employer-leased  → least of (lease rent, 10% of salary), less rent recovered.
+ * Concessional loan: (sbiBenchmark − rateCharged) × avgOutstanding, floored at 0.
+ * Perquisites are INCOME (added to gross) under BOTH regimes — never a deduction.
+ * `salaryAnnualMinor` is the perquisite "salary" base the assembler passes (the
+ * grossed earnings used for the % legs).
+ */
+function perquisiteValue({ accom = null, loan = null, salaryAnnualMinor = 0 } = {}) {
+  const p = rules.perquisites;
+  const lines = [];
+
+  if (accom && accom.provided) {
+    if (accom.leased) {
+      const leaseRent = Math.max(0, Math.round(accom.leaseRentAnnualMinor || 0));
+      const tenPctSalary = Math.round(
+        pctExact(salaryAnnualMinor, p.accomLeasedPctOfSalaryNum, p.accomLeasedPctOfSalaryDen),
+      );
+      const least = Math.min(leaseRent, tenPctSalary);
+      const recovered = Math.max(0, Math.round(accom.rentRecoveredAnnualMinor || 0));
+      const amt = Math.max(0, least - recovered);
+      lines.push({
+        kind: 'ACCOMMODATION',
+        label: 'Employer-leased accommodation',
+        amountMinor: amt,
+        explain: 'Least of lease rent and 10% of salary, less rent recovered',
+      });
+    } else {
+      const band = accom.cityPopBand && p.accomOwnedPct[accom.cityPopBand]
+        ? accom.cityPopBand
+        : '>40L';
+      const pct = p.accomOwnedPct[band];
+      const value = Math.round(pctExact(salaryAnnualMinor, pct.num, pct.den));
+      const recovered = Math.max(0, Math.round(accom.rentRecoveredAnnualMinor || 0));
+      const amt = Math.max(0, value - recovered);
+      const pctLabel = (pct.num / pct.den) * 100;
+      lines.push({
+        kind: 'ACCOMMODATION',
+        label: 'Rent-free accommodation (employer-owned)',
+        amountMinor: amt,
+        explain: `${pctLabel}% of salary (${band} city), less rent recovered`,
+      });
+    }
+  }
+
+  if (loan && loan.avgOutstandingAnnualMinor > 0) {
+    const benchmarkPct = p.sbiBenchmarkRatePct;
+    const chargedPct = Math.max(0, Number(loan.rateChargedPct || 0));
+    const spreadPct = Math.max(0, benchmarkPct - chargedPct);
+    // perq = avgOutstanding × spread% ; spread% carried as num/den (×100 for the
+    // pct point precision) to stay in integer math.
+    const amt = Math.max(
+      0,
+      Math.round(pctExact(loan.avgOutstandingAnnualMinor, Math.round(spreadPct * 100), 10000)),
+    );
+    if (amt > 0) {
+      lines.push({
+        kind: 'CONCESSIONAL_LOAN',
+        label: 'Interest-free / concessional loan',
+        amountMinor: amt,
+        explain: `(${benchmarkPct}% SBI benchmark − ${chargedPct}% charged) on average outstanding`,
+      });
+    }
+  }
+
+  const totalMinor = lines.reduce((a, l) => a + l.amountMinor, 0);
+  return { totalMinor, lines };
+}
+
+/**
+ * projectAnnualIncomeTax — the regime-aware orchestrator the assembler calls.
+ * PURE. All inputs in annual paise. Computes the full annual IT under either
+ * regime. NEW: only standard deduction (₹75k) + perquisites; OLD: HRA exemption,
+ * standard deduction (₹50k), Chapter VI-A. §206AA 20% flat path when no PAN.
+ *
+ * Returns the full statement primitives (still paise) the assembler converts to
+ * rupees at the edge.
+ */
+function projectAnnualIncomeTax({
+  regime = 'NEW',
+  annualEarnings = {},
+  perquisitesInput = null,
+  hraInput = null,
+  chapterVIAInput = null,
+  prevEmployer = {},
+  hasPan = true,
+} = {}) {
+  const reg = String(regime || 'NEW').toUpperCase() === 'OLD' ? 'OLD' : 'NEW';
+
+  const basicDaMinor = Math.max(0, Math.round(annualEarnings.basicDaMinor || 0));
+  const hraReceivedMinor = Math.max(0, Math.round(annualEarnings.hraReceivedMinor || 0));
+  const otherAllowancesMinor = Math.max(0, Math.round(annualEarnings.otherAllowancesMinor || 0));
+  const residualChoicePayMinor = Math.max(0, Math.round(annualEarnings.residualChoicePayMinor || 0));
+
+  // 1. gross salary = Σ annual earnings.
+  const grossSalaryMinor =
+    basicDaMinor + hraReceivedMinor + otherAllowancesMinor + residualChoicePayMinor;
+
+  // 2. perquisites (income; added to gross under both regimes).
+  const perq = perquisiteValue({
+    ...(perquisitesInput || {}),
+    salaryAnnualMinor: basicDaMinor, // Rule-3 "salary" base = Basic+DA (perq % legs)
+  });
+  const grossAfterPerqMinor = grossSalaryMinor + perq.totalMinor;
+
+  const prevTaxableMinor = Math.max(0, Math.round(prevEmployer.taxableIncomeMinor || 0));
+
+  let hraResult = null;
+  let chap = null;
+  let standardDeductionMinor;
+  let taxableMinor;
+  let taxBreakdown;
+
+  if (reg === 'OLD') {
+    hraResult = hraInput ? hraExemption({ ...hraInput, basicDaAnnualMinor: basicDaMinor }) : { exemptMinor: 0, leastLeg: null, legs: { received: 0, rentMinus10: 0, pctOfSalary: 0 } };
+    chap = chapterVIADeductions(chapterVIAInput || {});
+    standardDeductionMinor = rupees(rules.incomeTaxOldRegime.stdDeductionRupees);
+    const grossAfterExemptMinor = Math.max(0, grossAfterPerqMinor - hraResult.exemptMinor);
+    taxableMinor =
+      Math.max(0, grossAfterExemptMinor - standardDeductionMinor - chap.totalDeductibleMinor) +
+      prevTaxableMinor;
+    taxBreakdown = annualTaxOldRegime(Math.round(taxableMinor / PAISE));
+  } else {
+    standardDeductionMinor = rupees(rules.stdDeductionRupees);
+    taxableMinor = Math.max(0, grossAfterPerqMinor - standardDeductionMinor) + prevTaxableMinor;
+    taxBreakdown = annualTaxNewRegime(Math.round(taxableMinor / PAISE));
+  }
+
+  // §206AA: no PAN and tax otherwise due → 20% flat on taxable income.
+  let totalAnnualTaxMinor = taxBreakdown.totalAnnualTaxMinor;
+  let taxPayableMinor = taxBreakdown.taxAfterReliefMinor;
+  let surchargeMinor = taxBreakdown.surchargeMinor;
+  let cessMinor = taxBreakdown.cessMinor;
+  let noPanApplied = false;
+  if (hasPan === false && totalAnnualTaxMinor > 0) {
+    const flat = roundHalfUpPaise(
+      pctExact(taxableMinor, rules.noPanFlatRate.num, rules.noPanFlatRate.den),
+    );
+    totalAnnualTaxMinor = flat;
+    taxPayableMinor = flat;
+    surchargeMinor = 0;
+    cessMinor = 0;
+    noPanApplied = true;
+  }
+
+  const grossAfterExemptMinor =
+    reg === 'OLD'
+      ? Math.max(0, grossAfterPerqMinor - (hraResult ? hraResult.exemptMinor : 0))
+      : grossAfterPerqMinor;
+
+  return {
+    regime: reg,
+    grossSalaryMinor,
+    perquisites: perq,
+    grossAfterPerqMinor,
+    hraExemptionMinor: hraResult ? hraResult.exemptMinor : 0,
+    hra: hraResult,
+    grossAfterExemptMinor,
+    standardDeductionMinor,
+    chapterVIA: chap,
+    taxableIncomeMinor: taxableMinor,
+    taxPayableMinor,
+    surchargeMinor,
+    cessMinor,
+    totalAnnualTaxMinor,
+    noPanApplied,
+  };
+}
+
+/**
+ * monthlyTaxRecoverable — spread the remaining annual tax over the remaining
+ * months. PURE. Returns the per-month schedule; the LAST month absorbs the
+ * rounding residual so Σschedule === remainingTaxMinor exactly (same residual
+ * -absorption discipline as deriveBreakup's balancing line).
+ *
+ * @param totalAnnualTaxMinor    full annual tax (paise)
+ * @param tdsDeductedThisFYMinor Σ TDS lines on published payslips this FY
+ * @param prevEmployerTdsMinor   previous-employer TDS (this FY only)
+ * @param monthsRemaining        12 − months already paid (floored at 1)
+ * @param startMonth             'YYYY-MM' of the first remaining month (optional)
+ */
+function monthlyTaxRecoverable({
+  totalAnnualTaxMinor = 0,
+  tdsDeductedThisFYMinor = 0,
+  prevEmployerTdsMinor = 0,
+  monthsRemaining = 12,
+  startMonth = null,
+}) {
+  const months = Math.max(1, Math.round(monthsRemaining));
+  const remainingTaxMinor = Math.max(
+    0,
+    totalAnnualTaxMinor - tdsDeductedThisFYMinor - prevEmployerTdsMinor,
+  );
+  const perMonthMinor = roundToRupeeNearest(remainingTaxMinor / months);
+
+  const schedule = [];
+  let acc = 0;
+  for (let i = 0; i < months; i += 1) {
+    let amt;
+    if (i === months - 1) {
+      amt = remainingTaxMinor - acc; // last month absorbs the residual
+    } else {
+      amt = perMonthMinor;
+      acc += amt;
+    }
+    const monthLabel = startMonth ? addMonths(startMonth, i) : null;
+    schedule.push({ month: monthLabel, amountMinor: amt });
+  }
+
+  return { remainingTaxMinor, monthlyRecoverableMinor: perMonthMinor, monthsRemaining: months, schedule };
+}
+
+/** Add n months to a 'YYYY-MM' label (pure string math). */
+function addMonths(yyyymm, n) {
+  const [y, m] = String(yyyymm).split('-').map(Number);
+  const total = (y * 12 + (m - 1)) + n;
+  const ny = Math.floor(total / 12);
+  const nm = (total % 12) + 1;
+  return `${ny}-${String(nm).padStart(2, '0')}`;
+}
+
+// ===========================================================================
 // 6. GRATUITY — docs/05 §8 (informational; payable at FnF)
 // ===========================================================================
 
@@ -1236,6 +1678,13 @@ module.exports = {
     computeTds,
     annualTaxNewRegime,
     computeGratuity,
+    // Feature 15 — annual IT projection (OLD regime + HRA + Chapter VI-A + perquisites).
+    annualTaxOldRegime,
+    hraExemption,
+    chapterVIADeductions,
+    perquisiteValue,
+    projectAnnualIncomeTax,
+    monthlyTaxRecoverable,
     rupees,
     roundToRupeeNearest,
     roundToRupeeUp,

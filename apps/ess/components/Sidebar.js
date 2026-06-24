@@ -22,6 +22,7 @@ import { useSession } from '@/components/AppShell';
 import { useTenant } from '@/components/TenantProvider';
 import { useProfile } from '@/lib/useProfile';
 import { useApi } from '@/lib/useApi';
+import { useCountry } from '@/lib/useCountry';
 
 // ── icon set (single-path line icons, 24x24 viewBox) ─────────────────────────
 const ICONS = {
@@ -136,6 +137,12 @@ export default function Sidebar({ onNavigate }) {
     select: (b) => (Array.isArray(b) ? b : b?.items || []),
   });
   const hasTeam = Array.isArray(teamRoster) && teamRoster.length > 0;
+  // FLAG (Feature 15): the India income-tax PROJECTION nav item is country-gated —
+  // it only appears for IN employees (the surface 422s for non-IN, and NZ
+  // projection is roadmap). Fail-closed: country is null while loading / when
+  // unresolved, so the item stays hidden until India is confirmed.
+  const { country } = useCountry();
+  const showTaxProjection = country === 'IN';
 
   const fullName = profile?.name || nameFromSession(me);
   const emp = me?.employee || me?.customer || me || {};
@@ -153,6 +160,21 @@ export default function Sidebar({ onNavigate }) {
   // so the chrome never advertises a flow the employee has already finished.
   const navItems = (() => {
     let items = NAV;
+    // FLAG (Feature 15): inject the India-only "Tax projection" item into the
+    // payroll group, right after "Tax". Clone the group so NAV stays immutable.
+    if (showTaxProjection) {
+      items = items.map((n) => {
+        if (n.type !== 'group' || n.key !== 'payroll-reimbursement') return n;
+        const at = n.children.findIndex((c) => c.href === '/tax');
+        const insertAt = at >= 0 ? at + 1 : n.children.length;
+        const children = [
+          ...n.children.slice(0, insertAt),
+          { href: '/tax/projection', label: 'Tax projection', icon: 'chart' },
+          ...n.children.slice(insertAt),
+        ];
+        return { ...n, children };
+      });
+    }
     if (hasOnboarding) {
       items = [NAV[0], { type: 'item', href: '/onboarding', label: 'Onboarding', icon: 'onboarding' }, ...NAV.slice(1)];
     }

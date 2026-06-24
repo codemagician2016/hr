@@ -7316,6 +7316,29 @@ model StatutoryProfile {
   section80CDeclared  Decimal? @db.Decimal(15, 2) // old-regime declarations
   hraExemptionClaimed Boolean? @default(false)
   abryEligible        Boolean? @default(false)
+
+  // ── Feature 15: declared IT-projection inputs (OLD-regime; ignored under NEW) ──
+  // All amounts are ANNUAL rupees as DECLARED by the employee (proofs are roadmap).
+  hraAnnualRentPaid       Decimal? @db.Decimal(15, 2) // rent paid p.a. (HRA exemption leg 3)
+  hraMetroCity            Boolean? @default(false)     // 50% vs 40% of salary leg
+  sec80DDeclared          Decimal? @db.Decimal(15, 2) // medical insurance premium
+  sec80CCD1BDeclared      Decimal? @db.Decimal(15, 2) // NPS additional ₹50k (80CCD(1B))
+  sec80TTADeclared        Decimal? @db.Decimal(15, 2) // savings interest (TTA/TTB)
+  sec24BHomeLoanInterest  Decimal? @db.Decimal(15, 2) // self-occupied home-loan interest (cap ₹2L)
+  otherChapterVIADeclared Json?                        // [{ section, label, grossAmount }] extensible
+  // Perquisites (Figma "Value of perquisites"). Set by HR, stored here so the
+  // projection reads one record. Nullable.
+  perqRentFreeAccom       Boolean? @default(false)     // employer-provided accommodation
+  perqAccomCityPopBand    String?  @db.VarChar(8)      // ">40L" | "15-40L" | "<15L"
+  perqAccomIsLeased       Boolean? @default(false)     // employer-leased (actual-rent leg)
+  perqAccomLeaseRentPaid  Decimal? @db.Decimal(15, 2)  // employer's annual lease rent
+  perqConcessionalLoanBal Decimal? @db.Decimal(15, 2)  // avg outstanding employer loan
+  perqLoanRateChargedPct  Decimal? @db.Decimal(5, 2)   // rate actually charged (vs SBI rate)
+  // ── Previous-employer income + TDS (Figma "Tax deducted by previous employer") ──
+  // Declared on joining mid-FY (Form 12B). ANNUAL/cumulative rupees for THIS FY.
+  prevEmployerTaxableIncome Decimal? @db.Decimal(15, 2)
+  prevEmployerTdsDeducted   Decimal? @db.Decimal(15, 2)
+  prevEmployerFY            String?  @db.VarChar(7)     // "2026-27" guard: only count when == current FY
   // ── NEW ZEALAND ──
   irdNumber                  String?  @db.VarChar(11)
   taxCode                    String?  @db.VarChar(8) // "M","ME","M SL","S","WT","ND"...
