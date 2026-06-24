@@ -1205,6 +1205,33 @@ function initScheduler() {
       attendanceSweepRunning = false;
     }
   });
+
+  // HR Statutory Compliance (Feature 23) — daily 07:00 UTC (≈12:30 IST). One block,
+  // three steps: (1) generate upcoming obligation stubs from each tenant's active
+  // ComplianceObligation × StatutoryRegistration, (2) advance PENDING→DUE / →OVERDUE,
+  // (3) fan out T-7/T-3/T-1/due/overdue reminders to canManageStatutory users via
+  // notifyHrEvent. Tenant-safe, idempotent, version-guarded; the in-process flag
+  // prevents a slow sweep from overlapping the next tick (copied verbatim from the
+  // escalation/attendance sweeps above). NO collision with payroll fileRun()'s
+  // remittance writer — both key on (businessId, entityId, kind, taxPeriod[,state]).
+  let complianceSweepRunning = false;
+  cron.schedule('0 7 * * *', async () => {
+    if (complianceSweepRunning) { console.log('[Scheduler] compliance sweep still running — skipping tick'); return; }
+    complianceSweepRunning = true;
+    try {
+      const r = require('../../hr/payroll/compliance/calendarRunner');
+      const g = await r.generateUpcomingObligations({ asOf: new Date() });
+      const s = await r.sweepComplianceStatus({ asOf: new Date() });
+      const n = await r.sendComplianceReminders({ asOf: new Date() });
+      if (g.created || s.overdue || s.due || n.sent || g.errors || s.errors || n.errors) {
+        console.log(`[Scheduler] compliance: gen=${JSON.stringify(g)} sweep=${JSON.stringify(s)} remind=${JSON.stringify(n)}`);
+      }
+    } catch (err) {
+      console.error('[Scheduler] compliance sweep failed:', err.message);
+    } finally {
+      complianceSweepRunning = false;
+    }
+  });
 }
 
 // Find PENDING orders older than `maxAgeMinutes` (default 30) and cancel

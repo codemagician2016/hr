@@ -58,6 +58,10 @@ export const NAV_ITEMS = [
   // Labour Welfare Fund read panel (tab inside the page). Gated on canRunPayroll; the
   // server is the real boundary (India-only, RBAC per route).
   { key: 'bonus', label: 'Statutory Bonus', href: '/payroll/bonus', feature: 'payroll', permission: 'canRunPayroll', icon: 'coin' },
+  // Feature 23 — Statutory Compliance Calendar (PF/ESI/PT/TDS/24Q/Form16/LWF due
+  // dates + reminders + mark-filed). Read = canViewPayrollReports (finance/HR can
+  // see); mutations require canManageStatutory (server is the real boundary).
+  { key: 'compliance', label: 'Compliance Calendar', href: '/payroll/compliance', feature: 'payroll', permission: 'canViewPayrollReports', icon: 'report' },
   { key: 'reports', label: 'Reports', href: '/reports', feature: 'payroll', permission: 'canViewPayrollReports', icon: 'report' },
   // FLAG (Feature 20 — NEW nav items): Investment-proof workflow (India year-end §192(2D)/
   // Rule 26C/Form 12BB). Two flat items in the Pay group. The window admin actions are
