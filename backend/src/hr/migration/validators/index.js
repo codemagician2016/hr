@@ -210,6 +210,7 @@ function validateReimbursement(row, ctx) {
     expenseDate: row.expenseDate || null, claimedMinor, approvedMinor, status,
     description: row.description || null, paymentRef: row.paymentRef || null,
     reimbursedAt: row.reimbursedAt || null,
+    approvedBy: row.approvedBy ? String(row.approvedBy).trim() : null, // prior system's approver (provenance)
   };
   return done(f, normalized, naturalKey);
 }

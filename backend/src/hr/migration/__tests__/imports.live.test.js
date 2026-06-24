@@ -171,7 +171,9 @@ async function main() {
   ok(!!migRun && migRun.type === 'MIGRATED', `D2 MIGRATED run created (type=${migRun && migRun.type})`);
   ok(migRun.code.endsWith('-MIG'), `D3 MIGRATED run uses the -MIG code suffix (code=${migRun && migRun.code})`);
   ok(migRun.status === 'COMPUTED' && migRun.payslips.length >= 1, `D4 run COMPUTED with payslips through the engine (status=${migRun.status}, payslips=${migRun.payslips.length})`);
-  // Isolate OUR imported employee's line (the run computes the whole entity headcount).
+  // SCOPE: the MIGRATED run is pruned to ONLY the imported subset (1 employee
+  // here), NOT the whole active entity workforce — see autogen.pruneRunToEmployees.
+  ok(migRun.payslips.length === 1 && migRun.lines.length === 1, `D4b migrated run is scoped to the imported subset only (lines=${migRun.lines.length}, payslips=${migRun.payslips.length})`);
   const migLine = migRun.lines.find((l) => l.employeeId === createdEmp.id);
   ok(!!migLine, 'D4a migrated run produced a line for the imported employee');
   const autoNet = migLine ? Number(migLine.netPay) : 0;
