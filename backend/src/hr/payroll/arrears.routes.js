@@ -27,6 +27,7 @@ router.get('/cycles/:id', requirePermission('canViewPayrollReports'), c.getCycle
 router.patch('/cycles/:id', requirePermission('canRunPayroll'), c.updateCycle);
 router.post('/cycles/:id/compute', payrollMutationLimiter, requirePermission('canRunPayroll'), c.computeCycle);
 router.post('/cycles/:id/approve', payrollMutationLimiter, requirePermission('canApprovePayroll'), c.approveCycle);
+router.post('/cycles/:id/cancel', payrollMutationLimiter, requirePermission('canApprovePayroll'), c.cancelCycle);
 router.post('/cycles/:id/publish', payrollMutationLimiter, requirePermission('canApprovePayroll'), c.publishCycle);
 
 module.exports = router;

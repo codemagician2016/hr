@@ -8358,6 +8358,7 @@ model ArrearCycle {
   // Lifecycle.
   payRunId               String? // the minted/target run that pays the arrear
   payRunInputItemId      String? // the INJECTed PayRunInputItem (INJECT mode stamp)
+  createdBy              String? // the actor who created the cycle (SoD: approver ≠ creator)
   computedAt             DateTime?
   computedBy             String?
   approvedAt             DateTime?
@@ -8370,7 +8371,13 @@ model ArrearCycle {
 
   months ArrearMonth[]
 
-  @@unique([businessId, compensationRevisionId]) // exactly-once per revision
+  // Exactly-once per revision is enforced by a PARTIAL unique index (created in the
+  // migration) that applies ONLY to LIVE rows (deletedAt IS NULL) — see review finding
+  // #2: a full @@unique([businessId, compensationRevisionId]) permanently stranded a
+  // CANCELLED/soft-deleted cycle (no new cycle could ever be created for that revision,
+  // even though detectArrearCycles already excludes deleted cycles). The partial index
+  // keeps exactly-once for ACTIVE cycles while letting a cancelled one be regenerated.
+  @@index([businessId, compensationRevisionId])
   @@index([businessId, employeeId, status])
   @@index([businessId, entityId, detectedInPeriod])
 }

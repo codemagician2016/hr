@@ -155,8 +155,56 @@ function check(scenario, expected, actual) {
   const months = [{ sourcePeriod: '2026-04', deltaGrossMinor: R(-2000), oldPfWageMinor: R(14000), newPfWageMinor: R(12000) }];
   const agg = A.aggregateArrear({ months, esiOnArrears: false, india });
   check('I1 negative gross arrear surfaced', R(-2000), agg.grossArrearMinor);
-  // PF is floored at 0 (we never auto-claw PF on a downward revision; recovery is gated).
-  check('I2 downward PF not negative (floored 0)', 0, agg.pfArrearEeMinor);
+  // The AGGREGATE PF floors at 0 (we never auto-claw PF on a purely-downward cycle; the
+  // negative GROSS is gated as a recovery at approve). Review fix #4: the floor is now on
+  // the AGGREGATE, not per-month — a single down-month nets to −₹240 then floors to 0, so
+  // this single-month case still reads 0, while the per-month audit row keeps the signed
+  // figure and a MIXED cycle nets correctly (J) instead of over-billing PF to EPFO.
+  check('I2 purely-downward PF floors aggregate at 0', 0, agg.pfArrearEeMinor);
+  check('I3 per-month audit row keeps signed down-PF (−₹240)', R(-240), agg.perMonth[0].pfEeMinor);
+}
+
+// ── J. review fix #4 — MIXED up/down cycle nets PF/ESI correctly (no over-bill) ──
+{
+  // Month1 +₹4,000 (PF 10k→14k = +₹480 EE), month2 −₹2,000 (14k→12k = −₹240 EE).
+  // Aggregate EE PF = 480 − 240 = ₹240 — the down-month REDUCES the up-month's PF. The
+  // OLD per-month-floored code kept 480 and dropped −240, over-remitting ₹240 to EPFO.
+  const months = [
+    { sourcePeriod: '2026-04', deltaGrossMinor: R(4000), oldPfWageMinor: R(10000), newPfWageMinor: R(14000), oldEsiWageMinor: R(18000), newEsiWageMinor: R(20000), esiLatchedCovered: true },
+    { sourcePeriod: '2026-05', deltaGrossMinor: R(-2000), oldPfWageMinor: R(14000), newPfWageMinor: R(12000), oldEsiWageMinor: R(20000), newEsiWageMinor: R(18000), esiLatchedCovered: true },
+  ];
+  const agg = A.aggregateArrear({ months, esiOnArrears: true, india });
+  check('J1 mixed gross nets = ₹2,000', R(2000), agg.grossArrearMinor);
+  check('J2 mixed PF EE nets = ₹240 (480 − 240, not 480)', R(240), agg.pfArrearEeMinor);
+  check('J3 mixed ESI EE nets = ₹0 (+15 then −15)', 0, agg.esiArrearEeMinor);
+  check('J4 per-month signed PF (up = +₹480)', R(480), agg.perMonth[0].pfEeMinor);
+  check('J5 per-month signed PF (down = −₹240)', R(-240), agg.perMonth[1].pfEeMinor);
+}
+
+// ── K. review fix #3 — ESI coverage from the FROZEN slip verdict, not wage-base > 0 ──
+{
+  const { frozenEsiCovered } = require('../arrears.service')._internal;
+  // A >₹21k (never-covered) employee: ESI-flagged wage base is non-zero but NO ESI
+  // deduction/contribution exists in the frozen slip → NOT covered (fail-closed). The OLD
+  // code inferred coverage from this non-zero esiWagesMinor and wrongly charged ESI.
+  const neverCovered = {
+    earnings: [{ code: 'BASIC', amount: '40000.00' }],
+    bases: { esiWagesMinor: R(40000) }, // non-zero wage base — the OLD buggy signal
+    employeeDeductions: [{ code: 'EPF', amount: '1800.00', statutory: true }],
+    employerContributions: [{ code: 'EPF_ER', amount: '1800.00' }],
+  };
+  check('K1 never-covered (>₹21k) frozen slip → NOT covered', false, frozenEsiCovered(neverCovered));
+  // A covered employee: the frozen slip carries an ESI EE deduction → covered.
+  const covered = {
+    employeeDeductions: [{ code: 'ESI', amount: '150.00', statutory: true }],
+    employerContributions: [{ code: 'ESI_ER', amount: '650.00' }],
+  };
+  check('K2 ESI-deduction in frozen slip → covered', true, frozenEsiCovered(covered));
+  // Coverage detectable from the EMPLOYER contribution alone (EE share may be exempt).
+  const erOnly = { employerContributions: [{ code: 'ESI_ER', amount: '650.00' }] };
+  check('K3 ESI_ER contribution alone → covered', true, frozenEsiCovered(erOnly));
+  // No ESI lines at all → not covered (fail-closed).
+  check('K4 no ESI lines → NOT covered (fail-closed)', false, frozenEsiCovered({ earnings: [] }));
 }
 
 console.log('');

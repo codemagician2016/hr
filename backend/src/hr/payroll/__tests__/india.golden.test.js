@@ -23,6 +23,7 @@
 
 const assert = require('assert');
 const IN = require('../compliance/india.js');
+const A = require('../arrears'); // Feature 27 arrear math seam (aggregateArrear PF/ESI)
 
 const P = 100; // paise per rupee
 const R = (rupees) => rupees * P; // rupees -> paise
@@ -1361,6 +1362,70 @@ const {
 
   // N6 — ESI employer 3.25% delta (₹18k→₹20k): ₹585 → ₹650 → delta ₹65.
   check('N6 ESI ER delta (₹18k→₹20k, latched) = ₹65', R(65), newEsi.esiErMinor - oldEsi.esiErMinor);
+
+  // ── Feature 27 review fix #4 — SIGNED per-month PF/ESI netting at the aggregate seam ──
+  // The per-month delta must be SIGNED (down-months negative) and floored only on the
+  // AGGREGATE, so a MIXED up/down cycle nets to the PF/ESI on the true net gross delta —
+  // not the asymmetric "drop the down-months, keep the up-months" over-bill that remitted
+  // excess EPF/ESI to EPFO/ESIC.
+  const india = IN._internals;
+
+  // N7 — pfArrearForMonth returns a NEGATIVE EE delta for a DOWN-revision month (₹14k→₹12k):
+  //   12% of −₹2,000 = −₹240 (signed, not floored at the per-month seam).
+  const pfDown = A.pfArrearForMonth({ india, oldPfWageMinor: R(14000), newPfWageMinor: R(12000) });
+  check('N7 down-month PF EE delta is SIGNED negative (−₹240)', R(-240), pfDown.eeMinor);
+
+  // N8 — MIXED cycle: month1 +₹4,000 (PF 10k→14k = +₹480), month2 −₹2,000 (14k→12k = −₹240).
+  //   Aggregate EE PF = +480 − 240 = ₹240 (the down-month REDUCES the up-month's PF).
+  //   OLD (per-month floored) buggy behaviour kept 480 and dropped the −240 → over-bill ₹240.
+  const mixed = A.aggregateArrear({
+    esiOnArrears: false, india,
+    months: [
+      { sourcePeriod: '2026-04', deltaGrossMinor: R(4000), oldPfWageMinor: R(10000), newPfWageMinor: R(14000) },
+      { sourcePeriod: '2026-05', deltaGrossMinor: R(-2000), oldPfWageMinor: R(14000), newPfWageMinor: R(12000) },
+    ],
+  });
+  check('N8 mixed up/down PF nets correctly = ₹240 (not ₹480)', R(240), mixed.pfArrearEeMinor);
+  check('N8b mixed gross arrear nets = ₹2,000', R(2000), mixed.grossArrearMinor);
+
+  // N9 — a NET-NEGATIVE statutory cycle floors the AGGREGATE at 0 (never auto-claws PF):
+  //   month1 +₹240 PF, month2 −₹480 PF → signed −₹240 → aggregate floored to ₹0.
+  const netNeg = A.aggregateArrear({
+    esiOnArrears: false, india,
+    months: [
+      { sourcePeriod: '2026-04', deltaGrossMinor: R(2000), oldPfWageMinor: R(10000), newPfWageMinor: R(12000) },
+      { sourcePeriod: '2026-05', deltaGrossMinor: R(-4000), oldPfWageMinor: R(14000), newPfWageMinor: R(10000) },
+    ],
+  });
+  check('N9 net-negative statutory cycle floors aggregate PF at ₹0', 0, netNeg.pfArrearEeMinor);
+
+  // N10 — the per-month audit row keeps the SIGNED figure even when the aggregate floors:
+  //   the down-month perMonth.pfEeMinor is the true −₹480 (audit trail must not lie).
+  const downRow = netNeg.perMonth.find((m) => m.sourcePeriod === '2026-05');
+  check('N10 per-month audit row keeps the signed down-PF (−₹480)', R(-480), downRow.pfEeMinor);
+
+  // N11 — ESI signed netting (esiOnArrears on): month1 +₹15 EE (18k→20k), month2 −₹15
+  //   (20k→18k) → aggregate ₹0 (nets), not +₹15 over-bill.
+  const esiMixed = A.aggregateArrear({
+    esiOnArrears: true, india,
+    months: [
+      { sourcePeriod: '2026-04', deltaGrossMinor: R(2000), oldEsiWageMinor: R(18000), newEsiWageMinor: R(20000), esiLatchedCovered: true },
+      { sourcePeriod: '2026-05', deltaGrossMinor: R(-2000), oldEsiWageMinor: R(20000), newEsiWageMinor: R(18000), esiLatchedCovered: true },
+    ],
+  });
+  check('N11 ESI EE nets across up/down months = ₹0', 0, esiMixed.esiArrearEeMinor);
+
+  // N12 — a not-covered month (esiLatchedCovered:false) charges ZERO ESI regardless of wage
+  //   (fail-closed coverage, review fix #3 at the aggregate seam): only the covered up-month
+  //   contributes. month1 covered +₹15; month2 NOT covered → 0. Aggregate = ₹15.
+  const esiCov = A.aggregateArrear({
+    esiOnArrears: true, india,
+    months: [
+      { sourcePeriod: '2026-04', deltaGrossMinor: R(2000), oldEsiWageMinor: R(18000), newEsiWageMinor: R(20000), esiLatchedCovered: true },
+      { sourcePeriod: '2026-05', deltaGrossMinor: R(2000), oldEsiWageMinor: R(40000), newEsiWageMinor: R(42000), esiLatchedCovered: false },
+    ],
+  });
+  check('N12 ESI charged only for the covered month (₹15)', R(15), esiCov.esiArrearEeMinor);
 }
 
 // ===========================================================================

@@ -54,15 +54,39 @@ async function unwindArrearStampsForRun(tx, { businessId, payRunId }) {
 }
 
 /**
+ * stampArrearMintCyclesPaidForRun(tx, { businessId, payRunId })
+ *   APPROVED + MINT cycles bound to THIS run → PAID. The MINT lifecycle completes here:
+ *   approveMint binds the cycle APPROVED to the standalone ARREAR PayRun it minted; that
+ *   run is then driven COMPUTED→APPROVED→PAID through the normal lifecycle, and disburseRun
+ *   calls this so the minted arrear actually reaches PAID (finding #2 — the OLD code had NO
+ *   step advancing a MINT cycle past APPROVED, so a successfully-paid arrear never showed
+ *   PAID, corrupting reconciliation/audit). Idempotent: conditional updateMany on
+ *   {status:'APPROVED', targetMode:'MINT', payRunId}.
+ */
+async function stampArrearMintCyclesPaidForRun(tx, { businessId, payRunId, paidAt }) {
+  const res = await tx.arrearCycle.updateMany({
+    where: { businessId, payRunId, status: 'APPROVED', targetMode: 'MINT', deletedAt: null },
+    data: { status: 'PAID', version: { increment: 1 } },
+  });
+  return { stamped: res.count, paidAt: paidAt || null };
+}
+
+/**
  * releaseArrearCyclesForRun(tx, { businessId, payRunId })
- *   FULL release for a CANCELLED run: any cycle bound to this run (PAID or APPROVED,
- *   INJECT mode) → COMPUTED + un-bound (payRunId=null, targetMode=null), so a LATER run
- *   can re-approve + pay the arrear. Mirrors loanRecovery/reimbursement releasing their
+ *   FULL release for a CANCELLED run: any cycle bound to this run (PAID or APPROVED, in
+ *   EITHER targetMode) → COMPUTED + un-bound (payRunId=null, targetMode=null), so a LATER
+ *   run can re-approve + pay the arrear. Mirrors loanRecovery/reimbursement releasing their
  *   stamps on cancel so the obligation isn't stranded on a dead run.
+ *
+ *   FIX (finding #2): the targetMode filter was INJECT-only, so cancelling a MINTed ARREAR
+ *   run skipped the bound MINT cycle, leaving it APPROVED + bound to the dead payRunId.
+ *   Because of @@unique([businessId, compensationRevisionId]) no new cycle could be created
+ *   for that revision and the existing one was permanently stranded (computeArrearCycle
+ *   rejects APPROVED). Releasing BOTH modes frees it.
  */
 async function releaseArrearCyclesForRun(tx, { businessId, payRunId }) {
   const res = await tx.arrearCycle.updateMany({
-    where: { businessId, payRunId, targetMode: 'INJECT', status: { in: ['APPROVED', 'PAID'] }, deletedAt: null },
+    where: { businessId, payRunId, status: { in: ['APPROVED', 'PAID'] }, deletedAt: null },
     data: { status: 'COMPUTED', payRunId: null, payRunInputItemId: null, targetMode: null, approvedAt: null, approvedBy: null, version: { increment: 1 } },
   });
   return { released: res.count };
@@ -70,6 +94,7 @@ async function releaseArrearCyclesForRun(tx, { businessId, payRunId }) {
 
 module.exports = {
   stampArrearCyclesPaidForRun,
+  stampArrearMintCyclesPaidForRun,
   unwindArrearStampsForRun,
   releaseArrearCyclesForRun,
 };
