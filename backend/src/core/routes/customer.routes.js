@@ -1,11 +1,11 @@
 const express = require('express');
 const router = express.Router();
-const { register, login, me, logout, updateMe, changePassword, deleteAccount, undoDeleteAccount, verifyOtp, resendOtp, forgotPassword, resetPassword } = require('../controllers/customer.controller');
+const { register, login, me, logout, updateMe, changePassword, deleteAccount, undoDeleteAccount, verifyOtp, resendOtp, forgotPassword, resetPassword, acceptInvite } = require('../controllers/customer.controller');
 const { socialStart, socialExchange, googleAuth, googleAuthCode, exchangeCode } = require('../controllers/social.controller');
 const { requireCustomer } = require('../../core/middleware/auth.middleware');
 const { authLimiter } = require('../../core/middleware/abuse.middleware');
 const { validateBody } = require('../../core/lib/validate');
-const { signupSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } = require('../../core/lib/schemas/signup.schema');
+const { signupSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema, acceptInviteSchema } = require('../../core/lib/schemas/signup.schema');
 const { verifyOtpSchema, resendOtpSchema, changePasswordSchema } = require('../../core/lib/schemas/customer.schema');
 
 // Customer-facing auth — same abuse limit as business auth so a bot can't
@@ -16,6 +16,11 @@ router.post('/verify-otp',       authLimiter, validateBody(verifyOtpSchema),    
 router.post('/resend-otp',       authLimiter, validateBody(resendOtpSchema),         resendOtp);
 router.post('/forgot-password',  authLimiter, validateBody(forgotPasswordSchema),   forgotPassword);
 router.post('/reset-password',   authLimiter, validateBody(resetPasswordSchema),    resetPassword);
+// Feature 4 — employee portal-invite claim (PUBLIC, token-driven). Same
+// authLimiter as the rest of customer auth so the token can't be brute-forced;
+// errors are generic (no enumeration). The token carries the tenant, so no
+// X-Tenant-Host is required.
+router.post('/accept-invite',    authLimiter, validateBody(acceptInviteSchema),     acceptInvite);
 router.post('/login',            authLimiter, validateBody(loginSchema),            login);
 router.get('/me',                requireCustomer, me);
 router.put('/me',                requireCustomer, updateMe);

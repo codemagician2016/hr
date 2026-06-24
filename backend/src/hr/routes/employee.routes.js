@@ -14,9 +14,16 @@ router.use(protect);
 router.use(attachSelfEmployee); // Feature 1: hierarchy anchor (req.user.employeeId)
 
 router.get('/', requirePermission('canViewEmployees'), withEmployeeScope('canViewEmployees'), c.list);
+// Feature 4 — bulk portal invite. Registered BEFORE '/:id/*' so the literal
+// '/invite/bulk' path is not captured by the ':id' param. Scope is applied as a
+// non-row guard (req.scope) so the controller intersects the requested IDs.
+router.post('/invite/bulk', requirePermission('canManageEmployees'), withEmployeeScope('canManageEmployees'), c.inviteBulk);
 router.get('/:id', requirePermission('canViewEmployees'), withEmployeeScope('canViewEmployees', { idParam: 'id' }), c.get);
 router.post('/', requirePermission('canManageEmployees'), assertTenantCountryWrite('body.countryCode', { stampWhenAbsent: false }), c.create);
 router.patch('/:id', requirePermission('canManageEmployees'), withEmployeeScope('canManageEmployees', { idParam: 'id' }), c.update);
 router.post('/:id/terminate', requirePermission('canManageEmployees'), withEmployeeScope('canManageEmployees', { idParam: 'id' }), c.terminate);
+// Feature 4 — single portal invite / resend (resend re-mints, invalidating the
+// prior token). Row-scoped: a manager can only invite within their sub-tree.
+router.post('/:id/invite', requirePermission('canManageEmployees'), withEmployeeScope('canManageEmployees', { idParam: 'id' }), c.invite);
 
 module.exports = router;

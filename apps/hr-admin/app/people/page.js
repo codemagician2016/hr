@@ -9,9 +9,10 @@
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Spinner, ErrorBanner, Empty, formatAdminDate } from '@hr/ui';
-import { get } from '@/lib/api';
+import { Spinner, ErrorBanner, Empty, Modal, ModalActions, PrimaryButton } from '@hr/ui';
+import { get, post } from '@/lib/api';
 import { ServerPagination } from '@/lib/ui';
+import { InfoTip } from '@/lib/widgets';
 
 const STATUSES = [
   { value: '', label: 'All statuses' },
@@ -52,6 +53,27 @@ function statusLabel(status) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+// ── Feature 4 — portal-access status pill (NOT_INVITED / INVITED / ACTIVE /
+// EXPIRED / REVOKED) returned per employee by GET /api/hr/employees. ──
+const PORTAL_META = {
+  ACTIVE: { label: 'Active', cls: 'bg-green-50 text-green-700 border-green-200' },
+  INVITED: { label: 'Invited', cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+  EXPIRED: { label: 'Invite expired', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+  REVOKED: { label: 'Invite revoked', cls: 'bg-gray-100 text-gray-600 border-gray-200' },
+  NOT_INVITED: { label: 'Not invited', cls: 'bg-gray-50 text-gray-500 border-gray-200' },
+};
+function portalMeta(state) {
+  return PORTAL_META[String(state || 'NOT_INVITED').toUpperCase()] || PORTAL_META.NOT_INVITED;
+}
+// What action does this portal state offer? INVITED/EXPIRED/REVOKED/NOT_INVITED →
+// "send/resend"; ACTIVE → only an explicit reset (handled separately).
+function portalActionLabel(state) {
+  const s = String(state || 'NOT_INVITED').toUpperCase();
+  if (s === 'NOT_INVITED') return 'Send invite';
+  if (s === 'ACTIVE') return 'Reset password';
+  return 'Resend invite';
+}
+
 function PeopleInner() {
   const router = useRouter();
   const params = useSearchParams();
@@ -68,9 +90,103 @@ function PeopleInner() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
+  // Feature 4 — portal invite UI state.
+  const [selected, setSelected] = useState(() => new Set()); // checkbox bulk-select
+  const [inviteTarget, setInviteTarget] = useState(null); // single-row invite confirm { emp, isReset }
+  const [bulkOpen, setBulkOpen] = useState(false); // bulk invite confirm
+  const [sending, setSending] = useState(false);
+  const [toast, setToast] = useState(null); // { msg, link? }
+  const [copiedId, setCopiedId] = useState(null);
+  // Per-employee fresh link + status overrides after an action (so the row
+  // updates without a full refetch).
+  const [linkById, setLinkById] = useState({}); // employeeId → copyable link
+  const [statusOverride, setStatusOverride] = useState({}); // employeeId → portalStatus
+
   useEffect(() => {
     setSearch(q);
   }, [q]);
+
+  // Reset transient selection/overrides whenever the page/filter changes.
+  useEffect(() => {
+    setSelected(new Set());
+    setLinkById({});
+    setStatusOverride({});
+  }, [q, status, page, pageSize]);
+
+  async function copyLink(employeeId, link) {
+    if (!link) return;
+    try {
+      if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(link);
+      else {
+        const ta = document.createElement('textarea');
+        ta.value = link; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+      }
+      setCopiedId(employeeId);
+      setTimeout(() => setCopiedId((c) => (c === employeeId ? null : c)), 1800);
+    } catch {
+      setToast({ msg: 'Could not copy — select and copy the link manually.', link });
+    }
+  }
+
+  async function sendSingleInvite(emp, isReset) {
+    setSending(true);
+    setError('');
+    try {
+      const res = await post(`/api/hr/employees/${emp.id}/invite`, isReset ? { reset: true } : {});
+      setStatusOverride((m) => ({ ...m, [emp.id]: res.portalStatus || 'INVITED' }));
+      if (res.link) setLinkById((m) => ({ ...m, [emp.id]: res.link }));
+      const channelOk = res.notified && res.notified.ok;
+      setToast({
+        msg: channelOk
+          ? `Invite sent to ${res.loginEmail || emp.workEmail}.`
+          : `Invite created for ${res.loginEmail || emp.workEmail}. We couldn't send the email/WhatsApp — copy the link below and share it.`,
+        link: res.link || null,
+        employeeId: emp.id,
+      });
+      setInviteTarget(null);
+    } catch (err) {
+      setError(err.message || 'Could not send the invite.');
+      setInviteTarget(null);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function sendBulkInvites() {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    setSending(true);
+    setError('');
+    try {
+      const res = await post('/api/hr/employees/invite/bulk', { employeeIds: ids });
+      const overrides = {};
+      const links = {};
+      for (const r of res.results || []) {
+        if (r.ok) { overrides[r.employeeId] = 'INVITED'; if (r.link) links[r.employeeId] = r.link; }
+      }
+      setStatusOverride((m) => ({ ...m, ...overrides }));
+      setLinkById((m) => ({ ...m, ...links }));
+      const failed = (res.results || []).filter((r) => !r.ok).length;
+      setToast({
+        msg: `Sent ${res.sent} invite${res.sent === 1 ? '' : 's'}${failed ? `, ${failed} skipped (no work email / already active / out of scope)` : ''}.`,
+      });
+      setBulkOpen(false);
+      setSelected(new Set());
+    } catch (err) {
+      setError(err.message || 'Could not send invites.');
+      setBulkOpen(false);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  function toggleSelect(id) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
 
   useEffect(() => {
     let alive = true;
@@ -178,6 +294,62 @@ function PeopleInner() {
 
       {error && <ErrorBanner message={error} />}
 
+      {/* Feature 4 — bulk portal invite bar (shown when rows are selected). */}
+      {selected.size > 0 && (
+        <div
+          className="mb-3 flex items-center justify-between rounded-xl border px-4 py-2.5"
+          style={{ borderColor: 'var(--theme-primary)', background: 'rgba(0,0,0,0.02)' }}
+        >
+          <span className="text-sm text-gray-700">
+            {selected.size} selected
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSelected(new Set())}
+              className="rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100"
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              onClick={() => setBulkOpen(true)}
+              className="rounded-lg px-3 py-1.5 text-sm font-semibold text-white"
+              style={{ backgroundColor: 'var(--theme-primary)' }}
+            >
+              Send portal invites
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Toast — invite result + the copyable link as a fallback for a failed send. */}
+      {toast && (
+        <div className="mb-3 rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+          <div className="flex items-start justify-between gap-3">
+            <p className="text-sm text-gray-800">{toast.msg}</p>
+            <button type="button" onClick={() => setToast(null)} className="text-gray-400 hover:text-gray-600" aria-label="Dismiss">×</button>
+          </div>
+          {toast.link && (
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                readOnly
+                value={toast.link}
+                onFocus={(e) => e.target.select()}
+                className="flex-1 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-600"
+              />
+              <button
+                type="button"
+                onClick={() => copyLink(toast.employeeId || 'toast', toast.link)}
+                className="rounded-lg border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              >
+                {copiedId === (toast.employeeId || 'toast') ? 'Copied!' : 'Copy'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden">
         {loading ? (
           <div className="py-12 flex justify-center">
@@ -190,51 +362,106 @@ function PeopleInner() {
             <caption className="sr-only">Employees</caption>
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-gray-500 border-b border-gray-100">
+                <th scope="col" className="px-3 py-3 font-medium">
+                  <span className="sr-only">Select</span>
+                  <input
+                    type="checkbox"
+                    aria-label="Select all on this page"
+                    checked={items.length > 0 && items.every((e) => selected.has(e.id))}
+                    onChange={(e) => {
+                      if (e.target.checked) setSelected(new Set(items.map((i) => i.id)));
+                      else setSelected(new Set());
+                    }}
+                  />
+                </th>
                 <th scope="col" className="px-4 py-3 font-medium">Code</th>
                 <th scope="col" className="px-4 py-3 font-medium">Name</th>
                 <th scope="col" className="px-4 py-3 font-medium">Department</th>
-                <th scope="col" className="px-4 py-3 font-medium">Designation</th>
                 <th scope="col" className="px-4 py-3 font-medium">Email</th>
                 <th scope="col" className="px-4 py-3 font-medium">Status</th>
-                <th scope="col" className="px-4 py-3 font-medium">Joined</th>
+                <th scope="col" className="px-4 py-3 font-medium">
+                  <span className="inline-flex items-center">
+                    Portal
+                    <InfoTip text="Whether this person can sign in to their employee self-service portal. Not invited = no welcome link sent yet. Invited = link sent, awaiting them to set a password. Active = they've claimed their login." />
+                  </span>
+                </th>
+                <th scope="col" className="px-4 py-3 font-medium text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {items.map((emp) => (
-                <tr key={emp.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50">
-                  <td className="px-4 py-3 text-gray-500">{emp.code}</td>
-                  <td className="px-4 py-3">
-                    <Link href={`/people/${emp.id}`} className="font-medium text-gray-900 hover:underline">
-                      {[emp.firstName, emp.lastName].filter(Boolean).join(' ') || '—'}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3 text-gray-700">
-                    {emp.department?.name || <span className="text-gray-400">Unassigned</span>}
-                  </td>
-                  <td className="px-4 py-3 text-gray-700">
-                    {emp.designation?.name || <span className="text-gray-400">Unassigned</span>}
-                  </td>
-                  <td className="px-4 py-3 text-gray-700">
-                    {emp.workEmail ? (
-                      <a href={`mailto:${emp.workEmail}`} className="hover:underline">{emp.workEmail}</a>
-                    ) : (
-                      <span className="text-gray-400">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${statusBadgeClass(
-                        emp.status
-                      )}`}
-                    >
-                      {statusLabel(emp.status)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-gray-500">
-                    {emp.hireDate ? formatAdminDate(emp.hireDate) : <span className="text-gray-400">—</span>}
-                  </td>
-                </tr>
-              ))}
+              {items.map((emp) => {
+                const portalState = statusOverride[emp.id] || emp.portalStatus || (emp.portal && emp.portal.state) || 'NOT_INVITED';
+                const meta = portalMeta(portalState);
+                const freshLink = linkById[emp.id] || null;
+                const isActive = portalState === 'ACTIVE';
+                const hasEmail = !!emp.workEmail;
+                return (
+                  <tr key={emp.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50">
+                    <td className="px-3 py-3">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${[emp.firstName, emp.lastName].filter(Boolean).join(' ')}`}
+                        checked={selected.has(emp.id)}
+                        onChange={() => toggleSelect(emp.id)}
+                      />
+                    </td>
+                    <td className="px-4 py-3 text-gray-500">{emp.code}</td>
+                    <td className="px-4 py-3">
+                      <Link href={`/people/${emp.id}`} className="font-medium text-gray-900 hover:underline">
+                        {[emp.firstName, emp.lastName].filter(Boolean).join(' ') || '—'}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-3 text-gray-700">
+                      {emp.department?.name || <span className="text-gray-400">Unassigned</span>}
+                    </td>
+                    <td className="px-4 py-3 text-gray-700">
+                      {emp.workEmail ? (
+                        <a href={`mailto:${emp.workEmail}`} className="hover:underline">{emp.workEmail}</a>
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${statusBadgeClass(
+                          emp.status
+                        )}`}
+                      >
+                        {statusLabel(emp.status)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${meta.cls}`}>
+                        {meta.label}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-2">
+                        {hasEmail ? (
+                          <button
+                            type="button"
+                            onClick={() => setInviteTarget({ emp, isReset: isActive })}
+                            className="rounded-lg border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                          >
+                            {portalActionLabel(portalState)}
+                          </button>
+                        ) : (
+                          <span className="text-xs text-gray-400" title="Add a work email before inviting">No work email</span>
+                        )}
+                        {freshLink && (
+                          <button
+                            type="button"
+                            onClick={() => copyLink(emp.id, freshLink)}
+                            className="rounded-lg border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                          >
+                            {copiedId === emp.id ? 'Copied!' : 'Copy link'}
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
@@ -249,6 +476,66 @@ function PeopleInner() {
         onPageChange={(p) => pushQuery({ page: p })}
         onPageSizeChange={(ps) => pushQuery({ pageSize: ps, page: 1 })}
       />
+
+      {/* Single-row invite / resend / reset confirm. */}
+      {inviteTarget && (
+        <Modal
+          title={inviteTarget.isReset ? 'Reset portal password' : portalActionLabel(statusOverride[inviteTarget.emp.id] || inviteTarget.emp.portalStatus)}
+          onClose={() => (sending ? null : setInviteTarget(null))}
+        >
+          <p className="text-sm text-gray-600">
+            {inviteTarget.isReset ? (
+              <>
+                Send a fresh set-password link to{' '}
+                <strong>{inviteTarget.emp.workEmail}</strong>. This <strong>does not change</strong> their current
+                password until they set a new one, and it invalidates any pending invite.
+              </>
+            ) : (
+              <>
+                Send a welcome email + WhatsApp to <strong>{inviteTarget.emp.workEmail}</strong> with a link to set
+                their portal password. Their login is their work email. Resending invalidates any earlier link.
+              </>
+            )}
+          </p>
+          <ModalActions>
+            <button
+              type="button"
+              onClick={() => setInviteTarget(null)}
+              disabled={sending}
+              className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <PrimaryButton onClick={() => sendSingleInvite(inviteTarget.emp, inviteTarget.isReset)} loading={sending}>
+              {inviteTarget.isReset ? 'Send reset link' : 'Send invite'}
+            </PrimaryButton>
+          </ModalActions>
+        </Modal>
+      )}
+
+      {/* Bulk invite confirm. */}
+      {bulkOpen && (
+        <Modal title="Send portal invites" onClose={() => (sending ? null : setBulkOpen(false))}>
+          <p className="text-sm text-gray-600">
+            Send a portal welcome + set-password link to the <strong>{selected.size}</strong> selected employee
+            {selected.size === 1 ? '' : 's'}. People with no work email, an already-active login, or outside your
+            access are skipped automatically.
+          </p>
+          <ModalActions>
+            <button
+              type="button"
+              onClick={() => setBulkOpen(false)}
+              disabled={sending}
+              className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <PrimaryButton onClick={sendBulkInvites} loading={sending}>
+              Send {selected.size} invite{selected.size === 1 ? '' : 's'}
+            </PrimaryButton>
+          </ModalActions>
+        </Modal>
+      )}
     </div>
   );
 }
