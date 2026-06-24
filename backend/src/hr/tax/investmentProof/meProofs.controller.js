@@ -191,6 +191,20 @@ async function uploadProof(req, res, next) {
     if (!window) {
       return res.status(409).json({ message: 'The declaration window for this year is not configured yet.', code: 'NO_WINDOW' });
     }
+    // §201 DATE GUARD (authoritative): the proofDeadline is the date the assembler
+    // freezes TDS on VERIFIED figures. Past it, no new proof may enter — even if the
+    // lifecycle cron was missed and the window is still flagged OPEN. The DATE wins;
+    // the status flag is advisory. Without this, a late upload + accept would CUT the
+    // already-frozen VERIFIED TDS (the §201 freeze defeated). shouldUseVerified is the
+    // SAME primitive the assembler uses to flip DECLARED→VERIFIED, so the gate and the
+    // math can never diverge.
+    const asOf = new Date().toISOString().slice(0, 10);
+    if (shouldUseVerified(window, asOf)) {
+      return res.status(409).json({
+        message: `The proof deadline (${String(window.proofDeadline).slice(0, 10)}) has passed; uploads are closed and verified TDS is frozen.`,
+        code: 'PROOF_DEADLINE_PASSED',
+      });
+    }
     if (window.status !== 'OPEN') {
       return res.status(409).json({ message: `Uploads are only accepted while the window is OPEN (currently ${window.status}).`, code: 'WINDOW_NOT_OPEN' });
     }
