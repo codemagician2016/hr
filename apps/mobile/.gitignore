@@ -1,0 +1,29 @@
+# Flutter / Dart
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+pubspec.lock
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.log
+
+# Generated native folders (run `flutter create .` to (re)generate them)
+# Kept ignored because this repo ships only the Dart/lib source — the SDK
+# scaffolds android/ ios/ etc. on the build machine.
+/android/
+/ios/
+/linux/
+/macos/
+/windows/
+/web/
+
+# Local env / secrets
+*.env
+.env.*

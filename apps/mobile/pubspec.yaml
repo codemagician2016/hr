@@ -1,0 +1,42 @@
+name: drifthr_mobile
+description: DriftHR — Employee Self-Service (ESS) mobile app. Effortless HR & payroll.
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  # Flutter 3.27+ / Dart 3.6+ — uses the modern theme + Color.withValues APIs.
+  sdk: ">=3.6.0 <4.0.0"
+  flutter: ">=3.27.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State management
+  flutter_riverpod: ^2.5.1
+
+  # Routing (auth-guarded redirect)
+  go_router: ^14.2.7
+
+  # HTTP client (+ cookie/Bearer interceptor + base options)
+  dio: ^5.7.0
+
+  # Secure persistence for the session cookie/token (survives app restart)
+  flutter_secure_storage: ^9.2.2
+
+  # Geolocation for the attendance punch (lat/long + permission handling)
+  geolocator: ^12.0.0
+
+  # Open / download payslip + letter PDFs (authenticated byte fetch → temp file
+  # → OS viewer). open_filex opens the saved PDF in the platform viewer.
+  open_filex: ^4.5.0
+  path_provider: ^2.1.4
+
+  # Locale-aware currency / date / number formatting
+  intl: ^0.19.0
+
+dev_dependencies:
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
