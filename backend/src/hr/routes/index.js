@@ -141,6 +141,12 @@ router.use('/me/approvals', require('./meApprovals.routes'));
 // the merged leave+reimbursement approval inbox + decide, all scoped to the manager's
 // reporting sub-tree (self excluded for approvals, SoD). A non-manager gets [].
 router.use('/me/team', require('../profile/meTeam.routes'));
+// FLAG (Cycle 1 — new mount): ESS Company Directory. Customer session; a tenant-wide,
+// searchable, paginated colleague directory exposing ONLY safe work/professional fields
+// (the Prisma select is the privacy boundary — no personal email/phone, address, DOB,
+// salary, or any @pii:sensitive field). Honours F13 field governance + a per-employee
+// work-phone opt-out. READ-only across colleagues; the only write is the SELF opt-out.
+router.use('/me/directory', require('../profile/meDirectory.routes'));
 
 // Reports / analytics — read-only payroll register, statutory summary,
 // headcount & attrition, leave liability. RBAC: canViewPayrollReports.

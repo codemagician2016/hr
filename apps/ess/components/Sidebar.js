@@ -44,6 +44,8 @@ const ICONS = {
   approvals: 'M4 6h10M4 12h7M4 18h10M16 14l2 2 4-4',
   // Feature 13 — My Team (Manager Self-Service): two figures
   team: 'M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75',
+  // Cycle 1 — Company Directory: an open address-book / contact card
+  directory: 'M4 19.5A2.5 2.5 0 016.5 17H20M4 4.5A2.5 2.5 0 016.5 2H20v15H6.5A2.5 2.5 0 004 19.5zM12 7a2 2 0 110 4 2 2 0 010-4zM8.5 14a3.5 3.5 0 017 0',
 };
 
 function Icon({ name, className }) {
@@ -60,6 +62,9 @@ function Icon({ name, className }) {
 const NAV = [
   { type: 'item', href: '/', label: 'Dashboard', icon: 'dashboard' },
   { type: 'item', href: '/profile', label: 'Personal Information', icon: 'user' },
+  // Cycle 1 — Company Directory (available to every employee; a tenant-wide,
+  // privacy-safe colleague directory).
+  { type: 'item', href: '/directory', label: 'Directory', icon: 'directory' },
   {
     type: 'group',
     key: 'attendance-leaves',
