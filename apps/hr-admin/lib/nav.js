@@ -92,6 +92,11 @@ export const NAV_ITEMS = [
   // Feature 11 — the Travel & Expense Policy builder (per-diem / hotel matrix /
   // transport rules / city tiers). Gated on the new canManageExpensePolicy key.
   { key: 'settings-travel-policy', label: 'Travel & Expense policy', href: '/settings/travel-policy', permission: 'canManageExpensePolicy', parent: 'settings', icon: 'shield' },
+  // FLAG FOR MERGE (Feature 18 — NEW nav item): the Data Migration / Import Center.
+  // Gated on the new canManageImports rbac key (seeded true for Owner + HR-Admin).
+  // The server is the real boundary; this just hides the link. It lives under
+  // Settings because migration is a one-time setup/onboarding task, not daily work.
+  { key: 'settings-import', label: 'Import / Migrate', href: '/settings/import', permission: 'canManageImports', parent: 'settings', icon: 'upload' },
 ];
 
 // ── Sidebar grouping ─────────────────────────────────────────────────────────

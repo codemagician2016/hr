@@ -7,6 +7,8 @@
 
 export const ICONS = {
   dashboard: 'M3 11l9-8 9 8M5 10v10h6v-6h2v6h6V10',
+  // Feature 18 — Data Migration / Import Center (cloud-upload arrow).
+  upload: 'M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12',
   people: 'M16 21v-1a4 4 0 00-4-4H6a4 4 0 00-4 4v1M9 11a4 4 0 100-8 4 4 0 000 8M22 21v-1a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75',
   user: 'M12 12a4 4 0 100-8 4 4 0 000 8zM4 21a8 8 0 0116 0',
   org: 'M9 3h6v4H9zM3 17h6v4H3zM15 17h6v4h-6zM12 7v4M6 17v-2a1 1 0 011-1h10a1 1 0 011 1v2',
