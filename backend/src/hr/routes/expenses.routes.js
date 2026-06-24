@@ -67,6 +67,10 @@ router.post('/claims/:id/approve', requirePermission('canApproveExpense'), claim
 router.post('/claims/:id/reject', requirePermission('canApproveExpense'), claims.reject);
 router.post('/claims/:id/return', requirePermission('canApproveExpense'), claims.returnForChanges);
 router.post('/claims/:id/reimburse', requirePermission('canApproveExpense'), claims.reimburse);
+// Feature 26 — set/flip the per-claim reimbursement payout channel (PAY_VIA_PAYROLL ↔
+// PAY_SEPARATELY). Finance decides the channel (canApproveExpense); 409 once a run has
+// stamped the claim or it is in a terminal state (controller guards).
+router.patch('/claims/:id/payout-channel', requirePermission('canApproveExpense'), legacy.setPayoutChannel);
 
 // ── Trips / travel requests (scoped reads + pre-trip approval) ────────────────────
 router.get('/trips', requirePermission('canViewEmployees'), trips.list);
