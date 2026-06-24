@@ -9130,6 +9130,14 @@ model LoanInstallment {
   interestComponent  Decimal           @default(0) @db.Decimal(15, 2)
   amount             Decimal           @db.Decimal(15, 2) // principal + interest for this installment
   status             InstallmentStatus @default(PENDING)
+  // recoveredAmount — the paise ACTUALLY credited to the loan for this installment by
+  // its owning pay run (`payRunId`). For a fully-recovered installment it equals
+  // `amount` (status PAID); for a NET-CAPPED partial it is < amount and the row stays
+  // PENDING so the remainder (amount − recoveredAmount) carries to a future run. It is
+  // the single reconciliation figure: the LOAN_REPAYMENT debit, this credit and the
+  // Loan.amountRepaid increment are all the SAME number, and unwind reverses exactly it
+  // (never the nominal `amount`). Null = never touched by a run.
+  recoveredAmount    Decimal?          @db.Decimal(15, 2)
   paidAt             DateTime?
   payRunId           String? // when recovered through payroll
   createdAt          DateTime          @default(now())
@@ -9138,6 +9146,7 @@ model LoanInstallment {
   @@unique([loanId, seq])
   @@index([businessId, loanId])
   @@index([businessId, status])
+  @@index([businessId, payRunId])
 }
 
 enum LoanType {
