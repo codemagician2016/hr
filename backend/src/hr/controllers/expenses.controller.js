@@ -266,6 +266,17 @@ async function findOpenApprovalRequest(businessId, claimId) {
   });
 }
 
+// Feature 26 — resolve the tenant/entity DEFAULT reimbursement payout channel for an
+// employee (from their CURRENT employment's Entity). Returns null when no current
+// employment / entity is found, so the caller leaves the schema default in place.
+async function resolveDefaultPayoutChannel(businessId, employeeId) {
+  const emp = await prisma.employmentRecord.findFirst({
+    where: { businessId, employeeId, isCurrent: true },
+    select: { entity: { select: { reimbursementDefaultChannel: true } } },
+  });
+  return emp && emp.entity ? emp.entity.reimbursementDefaultChannel : null;
+}
+
 // Requester submits a DRAFT claim for approval. Flips DRAFT→SUBMITTED AND opens the
 // approval-engine request in the SAME tx — replacing the bare `canManageEmployees`
 // flip with a real, configurable chain. ctx carries the routing dimensions
@@ -283,10 +294,23 @@ async function submit(req, res, next) {
       return res.status(409).json({ message: `Cannot move claim from ${claim.status} to SUBMITTED` });
     }
 
+    // Feature 26 — seed the payout channel from the tenant/entity default at submit, but
+    // ONLY when the claim still carries the schema default (PAY_SEPARATELY) and the
+    // requester didn't already set one. A per-claim choice always wins; the channel stays
+    // editable while APPROVED + un-stamped via PATCH /payout-channel below.
+    let defaultChannel = null;
+    if (claim.payoutChannel === 'PAY_SEPARATELY') {
+      defaultChannel = await resolveDefaultPayoutChannel(businessId, claim.employeeId);
+    }
+
     const updated = await prisma.$transaction(async (tx) => {
       const flip = await tx.expenseClaim.updateMany({
         where: { id: claim.id, status: claim.status },
-        data: { status: 'SUBMITTED', submittedAt: new Date() },
+        data: {
+          status: 'SUBMITTED',
+          submittedAt: new Date(),
+          ...(defaultChannel && defaultChannel !== 'PAY_SEPARATELY' ? { payoutChannel: defaultChannel } : {}),
+        },
       });
       if (flip.count === 0) {
         const err = new Error('Claim changed concurrently'); err.code = 'DECISION_RACE'; throw err;
@@ -396,10 +420,42 @@ function cancel(req, res, next) {
   return driveClaimDecision(req, res, next, { decision: 'CANCELLED', target: 'CANCELLED', stampFn: () => ({}) });
 }
 
+// Feature 26 — set/flip the per-claim payout channel (PAY_VIA_PAYROLL ↔ PAY_SEPARATELY).
+// Editable only while the claim is un-paid AND in an editable state (DRAFT/SUBMITTED/
+// APPROVED): 409 once a run has stamped it (payRunId set) so the channel can't change
+// out from under a computed run, and 409 in a terminal state (REIMBURSED/REJECTED/
+// CANCELLED). A claim already settled out-of-band keeps PAY_SEPARATELY frozen.
+async function setPayoutChannel(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const channel = req.body && req.body.payoutChannel;
+    if (channel !== 'PAY_VIA_PAYROLL' && channel !== 'PAY_SEPARATELY') {
+      return res.status(400).json({ message: 'payoutChannel must be PAY_VIA_PAYROLL or PAY_SEPARATELY' });
+    }
+    const claim = await prisma.expenseClaim.findFirst({ where: { id: req.params.id, businessId, deletedAt: null } });
+    if (!claim) return res.status(404).json({ message: 'Expense claim not found' });
+    // Once a pay run has picked the claim up (or it was settled), the channel is frozen.
+    if (claim.payRunId) {
+      return res.status(409).json({ message: 'Channel is frozen: this claim is already scheduled/paid through a pay run' });
+    }
+    if (!['DRAFT', 'SUBMITTED', 'APPROVED'].includes(claim.status)) {
+      return res.status(409).json({ message: `Cannot change payout channel of a ${claim.status} claim` });
+    }
+    const flip = await prisma.expenseClaim.updateMany({
+      where: { id: claim.id, version: claim.version, payRunId: null },
+      data: { payoutChannel: channel, version: { increment: 1 } },
+    });
+    if (flip.count === 0) return res.status(409).json({ message: 'Claim changed concurrently; please retry' });
+    res.json(await prisma.expenseClaim.findUnique({ where: { id: claim.id } }));
+  } catch (e) { next(e); }
+}
+
 module.exports = {
   // categories
   listCategories, createCategory, updateCategory, removeCategory,
   // claims
   list, get, create, update,
   submit, approve, reject, reimburse, cancel,
+  // Feature 26
+  setPayoutChannel, resolveDefaultPayoutChannel,
 };

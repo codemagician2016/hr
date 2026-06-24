@@ -6456,6 +6456,12 @@ model Entity {
   // the denominator is immutable + auditable (part of inputHash). NULL = engine
   // default (CALENDAR_DAYS).
   prorationBasis    ProrationMethod?
+  // Feature 26 — the tenant/entity DEFAULT reimbursement payout channel, applied to
+  // a new claim at submit when no per-claim override is set. PAY_SEPARATELY (today's
+  // out-of-band manual reimburse) keeps existing behaviour; an employer that always
+  // settles via payroll flips this to PAY_VIA_PAYROLL so every approved claim rides
+  // the next run. A per-claim override always wins over this default.
+  reimbursementDefaultChannel ReimbursementPayoutChannel @default(PAY_SEPARATELY)
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
   deletedAt         DateTime?
@@ -8845,6 +8851,20 @@ model ExpenseClaim {
   policyId           String? // active TravelPolicy snapshot ref applied at submit
   policySnapshotJson Json? // immutable copy of the rules applied at submit (audit)
   importJobId        String? // Feature 18 — set when this claim was bulk-imported (back-dated history); NULL for live claims
+  // Feature 26 — reimbursement paid via payroll (additive, all nullable/defaulted).
+  // The per-claim channel choice: settle out-of-band (today's manual Finance
+  // reimburse) or ride the next pay run's payslip as a non-taxable post-tax line.
+  // Defaulted from Entity.reimbursementDefaultChannel at submit; editable only while
+  // APPROVED + un-stamped (payRunId NULL). Once a run stamps it, the channel freezes.
+  payoutChannel        ReimbursementPayoutChannel @default(PAY_SEPARATELY)
+  // The paise ACTUALLY paid through a pay run for this claim — the single
+  // reconciliation figure (mirrors LoanInstallment.recoveredAmount). Set by
+  // reimbursementPayout.applyPayout off the engine's reported EXPENSE_REIMBURSEMENT
+  // amount; reversed exactly by unwindForRun on recompute/reopen/cancel. NULL = never
+  // paid via payroll. A claim is paid whole (== amount) or deferred untouched — never
+  // split — so this is sufficient (the net-floor guard blocks, never partial-pays).
+  paidViaPayrollAmount Decimal?                   @db.Decimal(15, 2)
+  // payRunId (above) doubles as the owning-run stamp for the payroll payout pass.
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
   deletedAt          DateTime?
@@ -8861,6 +8881,14 @@ model ExpenseClaim {
   @@index([businessId, status])
   @@index([businessId, categoryId])
   @@index([businessId, travelRequestId])
+  // Feature 26 — the selection scan for the pay pass (APPROVED + PAY_VIA_PAYROLL).
+  @@index([businessId, payoutChannel, status])
+}
+
+// Feature 26 — the per-claim payout-channel choice (tenant default lives on Entity).
+enum ReimbursementPayoutChannel {
+  PAY_SEPARATELY // out-of-band (today's manual Finance reimburse) — DEFAULT
+  PAY_VIA_PAYROLL // settle through the next pay run's payslip (non-taxable line)
 }
 
 model ExpenseClaimLine {

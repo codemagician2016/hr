@@ -32,6 +32,13 @@ const filing = require('./filing');
 // installment selection + Loan running-total bookkeeping (controllers/loanRecovery.js)
 // so payroll never forks the loan math; the engine owns the net-floor cap.
 const loanRecovery = require('../controllers/loanRecovery');
+// SHARED-FILE EDIT (Feature 26 — FLAGGED): reimbursement paid via payroll. MIRRORS
+// loanRecovery but as a POSITIVE payment — the expense module owns the ExpenseClaim
+// bookkeeping (controllers/reimbursementPayout.js) so payroll never forks the claim
+// math; the engine's existing CATEGORY.REIMBURSEMENT seam adds the line to net AFTER
+// statutory deductions (no engine fork). Wired at the SAME three points loan recovery
+// uses (loadRunRowBundles / buildEmployeePayInput / persistComputedRun + reopen/cancel).
+const reimbursementPayout = require('../controllers/reimbursementPayout');
 // Feature 14: a payroll run's entity country MUST equal the tenant country. The
 // engine still routes by the entity's countryCode (the correct per-run design);
 // this is a fail-closed TRIPWIRE at the run boundary so a quarantined / bad
@@ -238,6 +245,55 @@ function resolveBalancingTarget(compensation, _period) {
   return 0;
 }
 
+// Feature 26 — net-floor sanity guard tuning. A reimbursement ADDS to net, so it can
+// never push net negative on its own; this guard is a fail-CLOSED-with-review rail
+// (the analogue of loan recovery's RECOVERY_CAPPED_TO_NET, but DEFER not silent-cap)
+// against a payslip whose deductions already exceed earnings (heavy-LOP + loan month)
+// or a mis-configured/fraudulent claim that dwarfs salary. Default 10× pre-reimbursement
+// net; a deferred employee's WHOLE claim set carries untouched to the next run.
+const REIMBURSEMENT_NET_RATIO_CAP = 10;
+
+/**
+ * evaluateReimbursementGuard(result) — the orchestrator net-floor sanity guard
+ * (spec §6). Runs AFTER the engine result is in, on the engine's reported figures
+ * (never forks engine math). Returns { defer, anomaly } where `defer` means "do NOT
+ * pay the reimbursement this run — strip the line, leave the claims APPROVED, carry
+ * them to the next run". `net_before_reimb = netMinor − reimbursementsMinor` (the
+ * engine added the reimbursement to net unconditionally; we measure the pre-add net).
+ *
+ *   §6.1 Negative pre-reimbursement net → defer (the payslip is already broken; a big
+ *        reimbursement would mask it). Anomaly REIMBURSEMENT_DEFERRED_NEGATIVE_NET.
+ *   §6.2 Reimbursement-to-net ratio breach → defer for review. WARNING anomaly
+ *        REIMBURSEMENT_EXCEEDS_NET_SANITY so a reviewer eyeballs it before approving.
+ *   §6.3 Never partial-pay: the guard defers the WHOLE employee's reimbursement set.
+ */
+function evaluateReimbursementGuard(result) {
+  const reimbMinor = result.reimbursementsMinor || 0;
+  if (reimbMinor <= 0) return { defer: false, anomaly: null };
+  const netBeforeReimb = (result.netMinor || 0) - reimbMinor;
+  if (netBeforeReimb < 0) {
+    return {
+      defer: true,
+      anomaly: {
+        code: 'REIMBURSEMENT_DEFERRED_NEGATIVE_NET',
+        severity: 'WARNING',
+        message: `Reimbursement deferred: pre-reimbursement net is negative (${money.fromMinor(netBeforeReimb)}); deductions exceed earnings. The approved claim(s) stay APPROVED and ride the next run.`,
+      },
+    };
+  }
+  if (reimbMinor > REIMBURSEMENT_NET_RATIO_CAP * Math.max(netBeforeReimb, 0)) {
+    return {
+      defer: true,
+      anomaly: {
+        code: 'REIMBURSEMENT_EXCEEDS_NET_SANITY',
+        severity: 'WARNING',
+        message: `Reimbursement (${money.fromMinor(reimbMinor)}) exceeds ${REIMBURSEMENT_NET_RATIO_CAP}× net pay (${money.fromMinor(netBeforeReimb)}); deferred for review. Verify the claim amount, then re-run.`,
+      },
+    };
+  }
+  return { defer: false, anomaly: null };
+}
+
 /**
  * buildEmployeePayInput(rows) — PURE mapping.
  *
@@ -311,6 +367,32 @@ function buildEmployeePayInput(rows) {
       showOnPayslip: true,
       _order: order,
       isTaxable: false,
+      isPayeable: false,
+    });
+    order += 1;
+  }
+
+  // SHARED-FILE EDIT (Feature 26 — FLAGGED): reimbursement paid via payroll. The mirror
+  // of the LOAN_REPAYMENT block above, but as a POSITIVE payment that flows THROUGH the
+  // engine's existing CATEGORY.REIMBURSEMENT seam (engine.js §2/§7/§8): partitioned OUT
+  // before statutory bases (NOT in pfWages/esiWages/ptWages/taxable/gratuity), evaluated
+  // POST-tax, and ADDED to net AFTER all deductions. A single aggregated
+  // EXPENSE_REIMBURSEMENT line carries Σ of the period's payable claims (the per-claim
+  // breakdown lives on the claims, each stamped payRunId). Claim-bounded — the amount is
+  // the approved claim total, never engine-fabricated; CALC.FIXED so the engine passes it
+  // straight through (no proration, no cap — a reimbursement of an actual cost is owed in
+  // full). persistComputedRun reads result.reimbursements back to stamp the claims.
+  const reimb = rows.reimbursementPayout || null;
+  if (reimb && reimb.totalPayableMinor > 0) {
+    componentsForEngine.push({
+      code: 'EXPENSE_REIMBURSEMENT',
+      name: 'Expense reimbursement',
+      category: CATEGORY.REIMBURSEMENT, // the existing engine seam (non-taxable, post-tax, add-to-net)
+      calcMethod: CALC.FIXED,
+      amountMinor: reimb.totalPayableMinor,
+      showOnPayslip: true,
+      _order: order,
+      isTaxable: false, // belt-and-braces; REIMBURSEMENT is never in any statutory base anyway
       isPayeable: false,
     });
     order += 1;
@@ -433,6 +515,10 @@ function buildEmployeePayInput(rows) {
     // Cycle-0 — the installments this run will stamp once the engine reports how
     // much LOAN_REPAYMENT it actually recovered (after its net-floor cap).
     loanRecovery: loanRec || null,
+    // Feature 26 (FLAGGED) — the claims this run will stamp REIMBURSED once the engine
+    // reports the EXPENSE_REIMBURSEMENT it added to net. Net-floor sanity guard +
+    // applyPayout run in persistComputedRun off result.reimbursements.
+    reimbursementPayout: reimb || null,
   };
 
   return { componentsForEngine, engineArgs, meta };
@@ -686,6 +772,24 @@ async function loadRunRowBundles(businessId, payRun, db = prisma) {
     }
   }
 
+  // SHARED-FILE EDIT (Feature 26 — FLAGGED): reimbursement paid via payroll. For each
+  // employee, select their APPROVED + PAY_VIA_PAYROLL claims due in this period and
+  // attach them; buildEmployeePayInput emits one EXPENSE_REIMBURSEMENT line the engine
+  // adds to net (non-taxable), and persistComputedRun stamps the claims REIMBURSED.
+  // V1 pays only the REGULAR monthly run — a reimbursement should not surprise an
+  // OFF_CYCLE/BONUS/ARREAR/FNF/CORRECTION/SUPPLEMENTARY run (mirrors the LWF once-per-
+  // period gate; spec §10 case 5; make it a setting in V2). MIGRATED selects nothing
+  // (a back-dated history run never auto-pays live claims, like loan recovery).
+  if (!isMigrated && payRun.type === 'REGULAR') {
+    for (const b of bundles) {
+      const payout = await reimbursementPayout.selectPayableClaims(db, {
+        businessId, employeeId: b.employee.id, periodEnd: payRun.periodEnd,
+        currentPayRunId: payRun.id, runCurrency: payRun.currencyCode || null,
+      });
+      if (payout.totalPayableMinor > 0) b.reimbursementPayout = payout;
+    }
+  }
+
   return { entity, bundles };
 }
 
@@ -755,7 +859,7 @@ async function computeRun({ businessId, actorId, payRunId, freezeAttendance: doF
     blockingCount = 0;
     for (const bundle of loaded.bundles) {
       const { engineArgs, meta } = buildEmployeePayInput(bundle);
-      const result = computePayslip(engineArgs);
+      let result = computePayslip(engineArgs);
       // Collect anomalies twice: the run-level list carries employeeId; the per-line
       // list keeps the engine shape (no employeeId) so it round-trips through
       // PayRunLine.errorJson the way getRun/approveRun expect.
@@ -765,6 +869,25 @@ async function computeRun({ businessId, actorId, payRunId, freezeAttendance: doF
         lineAnoms.push(raw);
         if (raw.severity === 'BLOCKER' || raw.severity === 'BLOCK') blockingCount += 1;
       };
+      // Feature 26 (FLAGGED) — net-floor SANITY GUARD (spec §6). If a reimbursement would
+      // ride a broken/over-deducted payslip or dwarfs salary (typo/fraud), DEFER the WHOLE
+      // employee's reimbursement set: strip the EXPENSE_REIMBURSEMENT component, recompute
+      // (so net + inputHash exclude it), and clear meta.reimbursementPayout so the claims
+      // are NOT stamped — they stay APPROVED and the next regular run picks them up
+      // automatically. Never silently partial-pays. Evaluated on the engine's reported
+      // figures (no engine fork), exactly as loan recovery's cap lives in the engine.
+      if (meta.reimbursementPayout && (result.reimbursementsMinor || 0) > 0) {
+        const guard = evaluateReimbursementGuard(result);
+        if (guard.defer) {
+          const strippedArgs = {
+            ...engineArgs,
+            components: engineArgs.components.filter((c) => c.code !== 'EXPENSE_REIMBURSEMENT'),
+          };
+          result = computePayslip(strippedArgs);
+          meta.reimbursementPayout = null; // do not stamp the deferred claims
+          if (guard.anomaly) pushAnom(guard.anomaly);
+        }
+      }
       for (const a of meta.preAnomalies || []) pushAnom(a); // M2 OT_HOURS_UNCONSUMED
       for (const a of (freezeResult ? freezeResult.anomalies : []) || []) {
         if (a.employeeId === meta.employeeId) { const { employeeId: _e, ...rest } = a; pushAnom(rest); } // H3
@@ -793,6 +916,9 @@ async function computeRun({ businessId, actorId, payRunId, freezeAttendance: doF
         result,
         // Cycle-0 — the due installments to stamp from the engine's actual recovery.
         loanRecovery: meta.loanRecovery || null,
+        // Feature 26 (FLAGGED) — the claims to stamp REIMBURSED from the engine's actual
+        // EXPENSE_REIMBURSEMENT line (persistComputedRun applies the net-floor guard first).
+        reimbursementPayout: meta.reimbursementPayout || null,
         allAnomalies: lineAnoms, // persisted to errorJson so warnings survive re-read
       });
     }
@@ -893,6 +1019,14 @@ async function persistComputedRun(tx, { businessId, payRun, actorId, now, inputH
   // re-apply below, so the unwind+reapply is atomic.
   await loanRecovery.unwindForRun(tx, { businessId, payRunId: payRun.id });
 
+  // Feature 26 (FLAGGED) — UNWIND any reimbursement stamps a PRIOR compute of THIS run
+  // wrote (reset the claims to APPROVED + clear payRunId/paidViaPayrollAmount) BEFORE
+  // re-applying. Same idempotency model as loan recovery: recompute never double-pays,
+  // and a reopened/cancelled run that re-runs starts from a clean slate. Same tx as the
+  // re-apply below, so unwind+reapply is atomic. Only releases claims THIS pass stamped
+  // (paidViaPayrollAmount set) — never a manually-reimbursed PAY_SEPARATELY claim.
+  await reimbursementPayout.unwindForRun(tx, { businessId, payRunId: payRun.id });
+
   let totGross = 0, totDed = 0, totNet = 0, totEr = 0;
   for (const ln of lines) {
     const r = ln.result;
@@ -980,6 +1114,44 @@ async function persistComputedRun(tx, { businessId, payRun, actorId, now, inputH
             paidAt: now,
             installments: locked.installments,
             recoveredMinor: creditable,
+          });
+        }
+      }
+    }
+
+    // Feature 26 (FLAGGED) — STAMP the reimbursement payout off the engine's ACTUAL
+    // EXPENSE_REIMBURSEMENT figure (the line ADDED to net; the net-floor guard already
+    // deferred any employee whose set was unsafe, clearing ln.reimbursementPayout so we
+    // never reach here for them). Mirror of the loan-stamp block as a POSITIVE payment:
+    // re-select the claims UNDER LOCK inside this persist tx (the default compute path
+    // selected them earlier on the non-tx client, lock not held, so a racing run could
+    // otherwise grab the same APPROVED claim) and stamp each REIMBURSED + payRunId +
+    // paidViaPayrollAmount. The unwind above already released THIS run's own prior
+    // stamps, so the lock re-select reproduces the original set on a clean recompute.
+    // paidMinor (the credit) == Σ claim amounts in the normal, race-free case.
+    if (ln.reimbursementPayout && ln.reimbursementPayout.claims && ln.reimbursementPayout.claims.length) {
+      const paidMinor = (r.reimbursements || [])
+        .filter((rb) => rb.code === 'EXPENSE_REIMBURSEMENT')
+        .reduce((acc, rb) => acc + (rb.amountMinor || 0), 0);
+      if (paidMinor > 0) {
+        const locked = await reimbursementPayout.selectPayableClaims(tx, {
+          businessId,
+          employeeId: ln.employeeId,
+          periodEnd: payRun.periodEnd,
+          currentPayRunId: payRun.id,
+          runCurrency: payRun.currencyCode || null,
+        });
+        // Pay the engine-reported figure across the LOCKED set, never beyond what is
+        // actually payable under the lock (a concurrent run may have taken some claims).
+        const payable = Math.min(paidMinor, locked.totalPayableMinor);
+        if (payable > 0) {
+          await reimbursementPayout.applyPayout(tx, {
+            businessId,
+            payRunId: payRun.id,
+            paidAt: now,
+            actorId,
+            claims: locked.claims,
+            paidMinor: payable,
           });
         }
       }
@@ -2335,6 +2507,10 @@ async function cancelRun({ businessId, actorId, payRunId, reason }) {
   // (installments → PENDING, Loan running totals reversed) so a later run can recover
   // them. No-op when the run was cancelled before it ever computed.
   await loanRecovery.unwindForRun(prisma, { businessId, payRunId });
+  // Feature 26 (FLAGGED) — likewise release any reimbursement claims this run stamped
+  // (REIMBURSED → APPROVED, payRunId/paidViaPayrollAmount cleared) so the next regular
+  // run pays them. No-op when the run never computed / paid no reimbursements.
+  await reimbursementPayout.unwindForRun(prisma, { businessId, payRunId });
   await writeAudit({
     businessId, actorId, action: 'payrun.cancel', entityType: 'PayRun', entityId: payRunId,
     meta: { code: payRun.code, reason: reason || null, from: payRun.status },
@@ -2376,6 +2552,10 @@ async function reopenRun({ businessId, actorId, payRunId }) {
     // running totals reversed) so reopening cleanly undoes the recovery. A later
     // recompute re-selects the now-PENDING installments.
     await loanRecovery.unwindForRun(tx, { businessId, payRunId });
+    // Feature 26 (FLAGGED) — release any reimbursement claims this run stamped
+    // (REIMBURSED → APPROVED, payRunId/paidViaPayrollAmount cleared) so reopening
+    // cleanly undoes the payout; a later recompute re-selects the now-APPROVED claims.
+    await reimbursementPayout.unwindForRun(tx, { businessId, payRunId });
     await tx.payRun.update({
       where: { id: payRunId },
       data: { varianceReport: null, totalsHash: null, headcount: 0, totalGross: 0, totalDeductions: 0, totalNet: 0, totalEmployerCost: 0 },
