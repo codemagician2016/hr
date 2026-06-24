@@ -22,8 +22,15 @@
 
 const prisma = require('../../core/lib/prisma');
 const { writeAudit } = require('../../core/lib/audit');
+const { assertCountry } = require('../tenant/countryContext');
 const money = require('../payroll/money');
 const payrollService = require('../payroll/service');
+
+// Sentinel stamped into a dry-run preview MIGRATED run's notes. A run carrying it
+// is a NON-AUTHORITATIVE preview artefact: the real-commit path must never adopt
+// it (it would silently materialise an approvable run from a crashed dry-run), and
+// the dry-run unwind / a later pipeline action sweeps it.
+const PREVIEW_TAG = '[DRY_RUN_PREVIEW]';
 
 function monthRange(periodMonth) {
   const y = Number(periodMonth.slice(0, 4));
@@ -33,9 +40,15 @@ function monthRange(periodMonth) {
   return { start, end, startIso: start.toISOString().slice(0, 10), endIso: end.toISOString().slice(0, 10) };
 }
 
-/** Distinct MIGRATED run code so it never collides with a live PR-YYYY-MM-IN. */
+/**
+ * Distinct MIGRATED run code so it never collides with a live PR-YYYY-MM-IN.
+ * Keyed on entity.code (NOT countryCode): two same-country entities (e.g. IN-HQ
+ * and IN-BLR) importing the same period must get DISTINCT runs — keying on the
+ * country would collapse them onto one run and silently drop the second entity's
+ * employees (the live buildRunCode bug, fixed here for the MIG path).
+ */
 function migratedRunCode(entity, periodMonth) {
-  return `PR-${periodMonth}-${entity.countryCode}-MIG`;
+  return `PR-${periodMonth}-${entity.code}-MIG`;
 }
 
 /**
@@ -46,21 +59,51 @@ function migratedRunCode(entity, periodMonth) {
  * live path uses (the engine is what we must not bypass; createRun is a thin
  * insert).
  */
-async function ensureMigratedRun(tx, { businessId, entity, cal, periodMonth, importJobId, actorId }) {
+async function ensureMigratedRun(tx, { businessId, entity, cal, periodMonth, importJobId, actorId, preview = false }) {
   const { start, end } = monthRange(periodMonth);
+  // Feature 14 tripwire — fail-closed: the migrated run's entity MUST be the
+  // tenant country. ensureMigratedRun bypasses payrollService.createRun (it needs
+  // the -MIG code + type:MIGRATED), so we replicate createRun's assertCountry
+  // guard here. A quarantined / off-country tenant cannot mint a migrated run.
+  if (entity.countryCode) await assertCountry(businessId, entity.countryCode);
   const code = migratedRunCode(entity, periodMonth);
-  const existing = await tx.payRun.findFirst({ where: { businessId, code } });
-  if (existing) return existing;
+  // Scope the idempotency lookup by entityId too (defence-in-depth alongside the
+  // entity-unique code) so a same-country sibling entity never reuses this run.
+  const existing = await tx.payRun.findFirst({ where: { businessId, entityId: entity.id, code } });
+  if (existing) {
+    const isPreviewOrphan = (existing.notes || '').includes(PREVIEW_TAG);
+    // The REAL commit path must NOT adopt a leftover dry-run preview run (a crash
+    // between dry-run compute and unwind could orphan one). Tear it down + recreate
+    // a fresh authoritative run. A preview path re-uses its own preview run.
+    if (isPreviewOrphan && !preview) {
+      await deleteRunCascade(tx, [existing.id]);
+    } else {
+      return existing;
+    }
+  }
   const taxYear = taxYearFor(end, entity.taxYearStartMonth || 4);
+  const note = preview
+    ? `${PREVIEW_TAG} Migrated-run dry-run preview (import ${importJobId})`
+    : `Migrated run (import ${importJobId})${actorId ? ` by ${actorId}` : ''}`;
   return tx.payRun.create({
     data: {
       businessId, entityId: entity.id, payCalendarId: cal.id, code,
       periodStart: start, periodEnd: end, payDate: end,
       sequenceInYear: end.getUTCMonth() + 1, taxYear, type: 'MIGRATED',
       currencyCode: entity.payCurrency, status: 'DRAFT', importJobId,
-      notes: `Migrated run (import ${importJobId})${actorId ? ` by ${actorId}` : ''}`,
+      notes: note,
     },
   });
+}
+
+/** Hard-delete a set of MIGRATED runs + all their compute artefacts (tx-bound). */
+async function deleteRunCascade(tx, runIds) {
+  if (!runIds || !runIds.length) return;
+  await tx.payslip.deleteMany({ where: { payRunId: { in: runIds } } });
+  await tx.payRunLineComponent.deleteMany({ where: { payRunLine: { payRunId: { in: runIds } } } });
+  await tx.payRunLine.deleteMany({ where: { payRunId: { in: runIds } } });
+  await tx.attendancePayInput.deleteMany({ where: { payRunId: { in: runIds } } });
+  await tx.payRun.deleteMany({ where: { id: { in: runIds } } });
 }
 
 function taxYearFor(periodEnd, startMonth = 4) {
@@ -128,7 +171,7 @@ async function runPayrollAutogen({ businessId, actorId, jobId, _dryRun = false }
   const result = { periods: [], findings: [] };
   for (const [periodMonth, requests] of byPeriod) {
     try {
-      const periodResult = await generatePayrollForPeriod({ businessId, actorId, job, periodMonth, requests, summaryByKey });
+      const periodResult = await generatePayrollForPeriod({ businessId, actorId, job, periodMonth, requests, summaryByKey, preview: _dryRun });
       result.periods.push(periodResult);
     } catch (e) {
       result.findings.push({ code: 'PERIOD_FAILED', periodMonth, message: e.message });
@@ -160,30 +203,39 @@ async function loadStagedSummaries(businessId) {
  * When `dryRunTx` is passed the whole thing runs inside the caller's rolled-back
  * transaction (the dry-run preview path); otherwise it opens its own tx.
  */
-async function generatePayrollForPeriod({ businessId, actorId, job, periodMonth, requests, summaryByKey, dryRunTx = null }) {
-  const { end } = monthRange(periodMonth);
+async function generatePayrollForPeriod({ businessId, actorId, job, periodMonth, requests, summaryByKey, dryRunTx = null, preview = false }) {
+  const { start, end } = monthRange(periodMonth);
+  const db = dryRunTx || prisma;
   // Resolve the entity (pinned on the job, else the first request employee's entity).
-  const firstEmp = await prisma.employee.findFirst({ where: { businessId, code: requests[0].n.employeeCode } });
+  const firstEmp = await db.employee.findFirst({ where: { businessId, code: requests[0].n.employeeCode } });
   if (!firstEmp) throw new Error(`employee "${requests[0].n.employeeCode}" not found`);
-  const empRec = await prisma.employmentRecord.findFirst({ where: { businessId, employeeId: firstEmp.id, isCurrent: true } });
+  const empRec = await db.employmentRecord.findFirst({ where: { businessId, employeeId: firstEmp.id, isCurrent: true } });
   const entityId = job.entityId || (empRec && empRec.entityId);
-  const entity = await prisma.entity.findFirst({ where: { businessId, id: entityId } });
+  const entity = await db.entity.findFirst({ where: { businessId, id: entityId } });
   if (!entity) throw new Error('entity not resolvable for the period');
-  const cal = await prisma.payCalendar.findFirst({ where: { businessId, entityId: entity.id } });
+  const cal = await db.payCalendar.findFirst({ where: { businessId, entityId: entity.id } });
   if (!cal) throw new Error(`no pay calendar for entity ${entity.code}`);
 
   const findings = [];
+  // The IMPORTED subset → the ONLY employees this MIGRATED run may pay. computeRun
+  // pays the whole active entity workforce (loadRunRowBundles selects by isCurrent
+  // with no awareness of the import set); we capture the allow-list of REQUESTED
+  // employee ids here and prune the over-generated run down to exactly this set
+  // after compute. Without this, a 3-row back-dated import would mint a payslip +
+  // filing rows for EVERY active employee in the entity (HIGH finding).
+  const allowedEmployeeIds = new Set();
   // Pre-condition check per requested employee (NO_CTC / NO_ATTENDANCE are findings,
   // not silent skips). The run still computes for the eligible set.
   for (const { n } of requests) {
-    const emp = await prisma.employee.findFirst({ where: { businessId, code: n.employeeCode } });
+    const emp = await db.employee.findFirst({ where: { businessId, code: n.employeeCode } });
     if (!emp) { findings.push({ code: 'NO_EMPLOYEE', employeeCode: n.employeeCode, periodMonth }); continue; }
-    const comp = await prisma.compensationRevision.findFirst({ where: { businessId, employeeId: emp.id, effectiveFrom: { lte: end }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: end } }] } });
+    allowedEmployeeIds.add(emp.id);
+    const comp = await db.compensationRevision.findFirst({ where: { businessId, employeeId: emp.id, effectiveFrom: { lte: end }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: end } }] } });
     if (!comp) findings.push({ code: 'NO_CTC', employeeCode: n.employeeCode, periodMonth, severity: 'ERROR', message: `no CTC effective on ${end.toISOString().slice(0, 10)} for ${n.employeeCode}` });
   }
 
   const runTx = async (tx) => {
-    const run = await ensureMigratedRun(tx, { businessId, entity, cal, periodMonth, importJobId: job.id, actorId });
+    const run = await ensureMigratedRun(tx, { businessId, entity, cal, periodMonth, importJobId: job.id, actorId, preview });
     if (['COMPUTED', 'APPROVED', 'PAID', 'FILED'].includes(run.status)) {
       // Idempotent: already generated. Return the existing detail.
       return { run, recomputed: false };
@@ -209,13 +261,27 @@ async function generatePayrollForPeriod({ businessId, actorId, job, periodMonth,
   // for SUMMARY, the pre-staged AttendancePayInput is what freeze upserts over (it
   // re-rolls from Attendance rows — which are empty for SUMMARY — so we keep the
   // staged figures by NOT freezing when summaries were staged).
-  const hasStaged = await (dryRunTx || prisma).attendancePayInput.count({ where: { payRunId: run.id, importJobId: job.id } });
-  const detail = await payrollService.computeRun({ businessId, actorId, payRunId: run.id, freezeAttendance: hasStaged === 0 });
+  const hasStaged = await db.attendancePayInput.count({ where: { payRunId: run.id, importJobId: job.id } });
+  let detail = await payrollService.computeRun({ businessId, actorId, payRunId: run.id, freezeAttendance: hasStaged === 0 });
+
+  // SCOPE GUARD (HIGH) — computeRun paid the WHOLE active entity workforce, but a
+  // migration must only ever produce payslips/filings for the IMPORTED subset.
+  // Prune every PayRunLine/component/Payslip/AttendancePayInput for employees NOT
+  // in the imported allow-list, then recompute the run totals/headcount so the run
+  // (and any later approval) carries exactly the imported employees. Idempotent:
+  // pruning a run that already holds only allowed employees is a no-op. Runs in
+  // the dry-run tx when previewing, else its own tx. NEVER touch a terminal run
+  // (APPROVED/PAID/FILED) — those are authoritative + already correctly scoped.
+  const fresh = await db.payRun.findFirst({ where: { businessId, id: run.id }, select: { status: true } });
+  if (fresh && !['APPROVED', 'PAID', 'FILED'].includes(fresh.status)) {
+    await pruneRunToEmployees(db, { businessId, payRunId: run.id, allowedEmployeeIds });
+  }
+  detail = await payrollService.getRun({ businessId, payRunId: run.id });
 
   // RECONCILE: compare engine output to the prior provider's figures (WARN only).
   const employees = [];
   for (const { n } of requests) {
-    const emp = await (dryRunTx || prisma).employee.findFirst({ where: { businessId, code: n.employeeCode } });
+    const emp = await db.employee.findFirst({ where: { businessId, code: n.employeeCode } });
     if (!emp) continue;
     const line = (detail.lines || []).find((l) => l.employeeId === emp.id);
     const netPay = line ? Number(line.netPay) : null;
@@ -240,12 +306,90 @@ async function generatePayrollForPeriod({ businessId, actorId, job, periodMonth,
     }
   }
 
+  // `detail` is now a getRun() result (post-prune): headcount lives on totals.
   return {
     periodMonth, payRunId: run.id, code: run.code,
-    headcount: detail.headcount != null ? detail.headcount : (detail.lines || []).length,
+    headcount: detail.totals && detail.totals.headcount != null ? detail.totals.headcount : (detail.lines || []).length,
     totalNet: detail.totals ? Number(detail.totals.totalNet) : null,
     employees, findings,
   };
 }
 
-module.exports = { runPayrollAutogen, generatePayrollForPeriod, ensureMigratedRun, migratedRunCode, monthRange };
+/**
+ * pruneRunToEmployees — scope a freshly-computed MIGRATED run down to ONLY the
+ * imported employee allow-list. computeRun (the live engine) pays the whole
+ * active entity workforce; for a subset migration we must NOT mint payslips /
+ * filing rows for employees that were never in the file. We delete the
+ * PayRunLine + components + Payslip + AttendancePayInput rows for every employee
+ * NOT in `allowedEmployeeIds`, then recompute the run totals/headcount from the
+ * surviving lines so the run (and any later approval) is exactly the import set.
+ *
+ * Idempotent: a run that already holds only allowed employees is left untouched.
+ * Accepts an external tx client (`db`) so it can run inside the dry-run rollback.
+ */
+async function pruneRunToEmployees(db, { businessId, payRunId, allowedEmployeeIds }) {
+  const allow = allowedEmployeeIds instanceof Set ? allowedEmployeeIds : new Set(allowedEmployeeIds || []);
+  const lines = await db.payRunLine.findMany({ where: { businessId, payRunId }, select: { id: true, employeeId: true } });
+  const stale = lines.filter((l) => !allow.has(l.employeeId));
+  if (stale.length) {
+    const staleLineIds = stale.map((l) => l.id);
+    const staleEmpIds = [...new Set(stale.map((l) => l.employeeId))];
+    await db.payslip.deleteMany({ where: { businessId, payRunId, employeeId: { in: staleEmpIds } } });
+    await db.payRunLineComponent.deleteMany({ where: { payRunLineId: { in: staleLineIds } } });
+    await db.payRunLine.deleteMany({ where: { id: { in: staleLineIds } } });
+    // The whole-entity freeze also wrote AttendancePayInput for the non-imported
+    // employees — drop those too so the run carries no orphan inputs.
+    await db.attendancePayInput.deleteMany({ where: { businessId, payRunId, employeeId: { in: staleEmpIds } } });
+  }
+
+  // Recompute the run totals + headcount from the SURVIVING (imported) lines so
+  // the persisted run reflects exactly the import set (no stale whole-entity sums).
+  const survivors = await db.payRunLine.findMany({
+    where: { businessId, payRunId },
+    select: { grossEarnings: true, totalDeductions: true, netPay: true, employerCost: true },
+  });
+  let g = 0; let d = 0; let net = 0; let er = 0;
+  for (const s of survivors) {
+    g += money.toMinor(String(s.grossEarnings || 0), 2);
+    d += money.toMinor(String(s.totalDeductions || 0), 2);
+    net += money.toMinor(String(s.netPay || 0), 2);
+    er += money.toMinor(String(s.employerCost || 0), 2);
+  }
+  await db.payRun.update({
+    where: { id: payRunId },
+    data: {
+      headcount: survivors.length,
+      totalGross: money.fromMinor(g, 2),
+      totalDeductions: money.fromMinor(d, 2),
+      totalNet: money.fromMinor(net, 2),
+      totalEmployerCost: money.fromMinor(er, 2),
+    },
+  });
+  return { pruned: stale.length, headcount: survivors.length };
+}
+
+/**
+ * sweepPreviewRuns — delete any leftover dry-run PREVIEW MIGRATED runs for a job
+ * (orphaned by a crash between dry-run compute and unwind). Called at the start of
+ * the real commit so a preview artefact can never be adopted/approved. Only ever
+ * touches NOT-yet-approved preview-tagged runs; authoritative runs are untouched.
+ */
+async function sweepPreviewRuns(businessId, jobId) {
+  const runs = await prisma.payRun.findMany({
+    where: {
+      businessId, importJobId: jobId, type: 'MIGRATED',
+      status: { in: ['DRAFT', 'INPUTS_LOCKED', 'COMPUTED', 'REVIEW'] },
+      notes: { contains: PREVIEW_TAG },
+    },
+    select: { id: true },
+  });
+  const ids = runs.map((r) => r.id);
+  if (!ids.length) return 0;
+  await prisma.$transaction((tx) => deleteRunCascade(tx, ids), { timeout: 60000 });
+  return ids.length;
+}
+
+module.exports = {
+  runPayrollAutogen, generatePayrollForPeriod, ensureMigratedRun, migratedRunCode,
+  monthRange, pruneRunToEmployees, sweepPreviewRuns, deleteRunCascade, PREVIEW_TAG,
+};

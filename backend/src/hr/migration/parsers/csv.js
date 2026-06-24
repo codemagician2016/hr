@@ -14,10 +14,14 @@
  *   - BOM tolerated (UTF-8 + BOM stripped).
  *   - CRLF / LF / CR line endings all handled.
  *   - RFC-4180 quoting: "a,b" stays one field; "" escapes a literal quote.
- *   - FORMULA-INJECTION GUARD (§11 file safety): on READ, a cell whose first
- *     char is one of = + - @ (tab/CR) is NEUTRALISED by prefixing a single
- *     quote, so a malicious "=cmd()" never reaches a spreadsheet that re-opens
- *     an annotated/report file. On WRITE the same neutralisation is applied.
+ *   - FORMULA-INJECTION GUARD (§11 file safety): neutralisation is applied ONLY
+ *     on WRITE (toCsv — the one place a value can reach a spreadsheet). On READ
+ *     the cell is kept VERBATIM (trimmed): the DB is not a spreadsheet, so
+ *     prefixing a quote on read would corrupt legitimate data — e.g. an E.164
+ *     phone "+919876543210" or a negative figure "-500" would be mangled and
+ *     persisted/rejected. Type validity is enforced by the per-kind validators,
+ *     not by mutating the raw cell. The export side (toCsv) still escapes a
+ *     formula-leading cell so a re-opened annotated/report file is safe.
  *   - Row/byte caps are enforced by the caller (imports.service), not here.
  */
 
@@ -33,6 +37,10 @@ function stripBom(s) {
  * Neutralise a cell value against CSV formula injection. Returns the value
  * unchanged when safe; prefixes a single quote when the leading char could be
  * interpreted as a formula by Excel/Sheets.
+ *
+ * WRITE-SIDE ONLY: applied by toCsv (export/report — the only place a value can
+ * reach a spreadsheet). NEVER applied on read; mutating raw input corrupts
+ * legitimate data (E.164 phones, negative money) — see the module doc-comment.
  */
 function neutralizeCell(value) {
   if (value == null) return value;
@@ -47,7 +55,8 @@ function neutralizeCell(value) {
  *
  * - headers come from the first non-empty record.
  * - each data row maps header→cell; blank cells normalise to null; values are
- *   trimmed; formula-injection-neutralised.
+ *   trimmed and kept VERBATIM (NOT formula-neutralised — that would corrupt
+ *   legitimate input like "+91…" phones / "-500"; neutralisation is write-only).
  * - rawRows is the unmapped cell matrix (used for the per-row rawJson audit).
  */
 function parseCsv(text) {
@@ -66,8 +75,10 @@ function parseCsv(text) {
     for (let c = 0; c < headers.length; c += 1) {
       const key = headers[c];
       let v = cells[c];
+      // VERBATIM (trimmed) — do NOT neutralise on read. The DB is not a
+      // spreadsheet; prefixing a quote here would mangle "+91…" phones and break
+      // negative money. Formula-injection is neutralised on WRITE (toCsv) only.
       v = v == null ? '' : String(v).trim();
-      v = neutralizeCell(v);
       raw.push(v);
       obj[key] = v === '' ? null : v;
     }

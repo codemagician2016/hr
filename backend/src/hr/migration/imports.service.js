@@ -24,6 +24,7 @@
 const crypto = require('crypto');
 const prisma = require('../../core/lib/prisma');
 const { writeAudit } = require('../../core/lib/audit');
+const { tenantCountry, assertCountry } = require('../tenant/countryContext');
 const money = require('../payroll/money');
 const { allocateCode } = require('../lifecycle/lib/codes');
 const { materializeRevisionLines } = require('../compensation/deriveBreakup');
@@ -39,6 +40,13 @@ const ALLOWED_MIME = new Set(['text/csv', 'application/csv', 'text/plain', 'appl
 
 // Sentinel used to roll back a dry-run transaction after running the real path.
 const DRY_RUN_ROLLBACK = Symbol('DRY_RUN_ROLLBACK');
+
+// Distinct, non-human migration actor recorded as the checker on imported
+// historical claims. Using a dedicated system actor (NEVER the importing operator
+// and NEVER the claimant employee) preserves the maker≠checker SoD invariant: a
+// bulk import can record a back-dated decision without letting the operator
+// holding canManageImports act as both submitter and approver.
+const MIGRATION_ACTOR = 'SYSTEM:MIGRATION';
 
 class ImportError extends Error {
   constructor(code, message, statusCode = 400) { super(message || code); this.name = 'ImportError'; this.code = code; this.statusCode = statusCode; }
@@ -76,6 +84,19 @@ async function createJob({ businessId, actorId, kind, entityId = null, fileName,
   if (!businessId) throw badRequest('NO_TENANT', 'businessId required');
   if (!templates.KINDS.includes(kind)) throw badRequest('BAD_KIND', `unknown import kind "${kind}"`);
   if (!contentBase64) throw badRequest('NO_FILE', 'file content required');
+
+  // Feature 14 tripwire — fail-closed at pipeline entry: a quarantined
+  // (hrCountryAmbiguous) or pre-setup tenant cannot start an import. Throws 409.
+  await tenantCountry(businessId);
+
+  // Validate a provided entityId belongs to THIS tenant + matches the tenant
+  // country — never persist a foreign id that downstream readers would silently
+  // null/fall-back from (masking operator error + weakening provenance).
+  if (entityId) {
+    const ent = await prisma.entity.findFirst({ where: { id: entityId, businessId, deletedAt: null }, select: { id: true, countryCode: true } });
+    if (!ent) throw badRequest('UNKNOWN_ENTITY', `entityId "${entityId}" not found in this tenant`);
+    if (ent.countryCode) await assertCountry(businessId, ent.countryCode);
+  }
 
   // Decode + cap (size from base64 length without allocating, then the buffer).
   const b64 = String(contentBase64).replace(/^data:[^;,]+;base64,/, '');
@@ -181,15 +202,25 @@ async function updateMapping({ businessId, actorId, jobId, mapping }) {
 /** Pre-load the lookup ctx the PURE validators need (the only DB the validate step does). */
 async function loadValidationCtx(job) {
   const { businessId } = job;
+  // Feature 14 — the AUTHORITATIVE tenant country (fail-closed). No `|| 'IN'`
+  // fallback: a quarantined / pre-setup tenant throws here (409) rather than
+  // silently validating against India rules.
+  const countryCode = await tenantCountry(businessId);
   const entities = await prisma.entity.findMany({ where: { businessId, deletedAt: null }, select: { id: true, code: true, countryCode: true } });
-  const entityCodes = new Set(entities.map((e) => e.code));
+  // Validators only ever scope to entities that match the tenant country — a
+  // multi-country tenant (e.g. a leftover NZ-AKL on an IN tenant) must not let an
+  // off-country entity's code validate as known. Restrict the entity-code set to
+  // the tenant country so an import targeting the wrong market is rejected.
+  const entityCodes = new Set(entities.filter((e) => e.countryCode === countryCode).map((e) => e.code));
   const employees = await prisma.employee.findMany({ where: { businessId, deletedAt: null }, select: { id: true, code: true } });
   const employeeCodes = new Set(employees.map((e) => e.code));
   const employeeByCode = new Map(employees.map((e) => [e.code, { id: e.id }]));
-  // Country: the pinned entity's, else the tenant's first IN entity, else 'IN'.
-  let countryCode = 'IN';
-  if (job.entityId) { const e = entities.find((x) => x.id === job.entityId); if (e) countryCode = e.countryCode; }
-  else if (entities.length) countryCode = entities[0].countryCode;
+  // A pinned entity must match the tenant country (the createJob guard already
+  // asserts this; re-assert defensively in case the job predates the guard).
+  if (job.entityId) {
+    const e = entities.find((x) => x.id === job.entityId);
+    if (e && e.countryCode) await assertCountry(businessId, e.countryCode);
+  }
   return { countryCode, entityCodes, employeeCodes, employeeByCode, today: today(), mode: job.optionsJson || {} };
 }
 
@@ -213,10 +244,21 @@ async function validate({ businessId, actorId, jobId }) {
       const res = validateRow(job.kind, r.parsedJson, ctx);
       const findings = res.findings.slice();
       // Duplicate natural key WITHIN the file → second occurrence is an ERROR.
-      let nk = res.naturalKey || `__row_${r.rowNumber}`;
-      if (res.naturalKey) {
-        if (keysSeen.has(res.naturalKey)) findings.push({ code: 'DUPLICATE_IN_FILE', severity: 'ERROR', message: `duplicate natural key "${res.naturalKey}" (first seen at row ${keysSeen.get(res.naturalKey)})` });
-        else keysSeen.set(res.naturalKey, r.rowNumber);
+      // CRITICAL: a colliding row must NOT be written with the SAME naturalKey or
+      // tx.importRow.update violates @@unique([importJobId, naturalKey]) → P2002 →
+      // the whole $transaction rolls back and the request 500s (the duplicate is
+      // never surfaced as a row finding). Keep the colliding row's key as the
+      // row-unique sentinel __row_N so the unique holds AND we still report it.
+      let nk;
+      if (res.naturalKey && !keysSeen.has(res.naturalKey)) {
+        nk = res.naturalKey;
+        keysSeen.set(res.naturalKey, r.rowNumber);
+      } else if (res.naturalKey) {
+        // Duplicate within the file — report it, keep a unique sentinel key.
+        findings.push({ code: 'DUPLICATE_IN_FILE', severity: 'ERROR', message: `duplicate natural key "${res.naturalKey}" (first seen at row ${keysSeen.get(res.naturalKey)})` });
+        nk = `__row_${r.rowNumber}`;
+      } else {
+        nk = `__row_${r.rowNumber}`;
       }
       const status = findings.some((f) => f.severity === 'ERROR') ? 'ERROR' : findings.some((f) => f.severity === 'WARN') ? 'WARN' : 'PASS';
       if (status === 'ERROR') error += 1; else if (status === 'WARN') warn += 1; else pass += 1;
@@ -329,6 +371,9 @@ async function commit({ businessId, actorId, jobId, autoGenerate = true }) {
   let autogen = null;
   if (autoGenerate && job.kind === 'PAYROLL_HISTORY') {
     const driver = require('./autogen.service');
+    // Sweep any leftover dry-run PREVIEW migrated run for this job before the real
+    // autogen (an orphan from a crashed dry-run must never be adopted/approved).
+    await driver.sweepPreviewRuns(businessId, jobId);
     autogen = await driver.runPayrollAutogen({ businessId, actorId, jobId });
   }
   return { ...(await getJob({ businessId, jobId })), commitSummary: { committed, skipped, failed }, autogen };
@@ -567,11 +612,18 @@ async function commitReimbursement(tx, job, n, actorId, _opts) {
   const claimNumber = n.claimNumber || await mintClaimNumber(tx, businessId);
   const expenseDate = new Date(`${n.expenseDate}T00:00:00Z`);
 
+  // Resolve the employee's entity country (NOT a hardcoded 'IN') so the policy
+  // engine evaluates against the right market's TravelPolicy. Fail-closed to the
+  // tenant country if the employment entity is unresolvable.
+  const empRec = await tx.employmentRecord.findFirst({ where: { businessId, employeeId: emp.id, isCurrent: true }, select: { entityId: true } });
+  const entity = await tx.entity.findFirst({ where: { businessId, id: empRec ? empRec.entityId : job.entityId }, select: { countryCode: true } });
+  const claimCountry = (entity && entity.countryCode) || await tenantCountry(businessId);
+
   // Run the PURE policy engine for a verdict (recorded, NOT blocking for migrated
   // history per §6.5 — a cap breach is a WARN, the claim still imports).
   let policyVerdict = 'NO_POLICY'; let policyReason = null; let policySnapshot = null;
   try {
-    const policy = await loadActivePolicy(businessId, { entityId: null, countryCode: 'IN' });
+    const policy = await loadActivePolicy(businessId, { entityId: null, countryCode: claimCountry });
     if (policy) {
       const line = { amount: money.fromMinor(n.claimedMinor), categoryId: category ? category.id : null, description: n.description };
       const v = await evaluateOneLine(businessId, emp.id, line, { policy });
@@ -579,6 +631,23 @@ async function commitReimbursement(tx, job, n, actorId, _opts) {
       policySnapshot = buildPolicySnapshot(policy, [{ ...line, ...v }]);
     }
   } catch (e) { /* policy is advisory for migrated history; never block */ }
+
+  // MAKER-CHECKER SoD — an imported historical claim records a back-dated decision
+  // from the PRIOR system. The checker must NEVER be the importing operator
+  // (canManageImports holder) and NEVER the claimant employee. Use the prior
+  // system's approver from the file when it isn't the employee, else a dedicated
+  // SYSTEM:MIGRATION actor. This preserves maker≠checker (the import door cannot be
+  // used to self-approve) while keeping the owner's intent (claims land as their
+  // historical APPROVED/REIMBURSED state). Provenance is recorded for audit.
+  const empActorIds = new Set([emp.code, emp.userId, emp.id].filter(Boolean));
+  const priorApprover = (n.approvedBy && !empActorIds.has(n.approvedBy)) ? n.approvedBy : null;
+  const checker = priorApprover || MIGRATION_ACTOR;
+  const provenance = {
+    migrated: true, importJobId: job.id, importedBy: actorId || 'system',
+    priorApprover: n.approvedBy || null, checker,
+    note: 'Bulk-imported historical claim; checker is a non-human migration actor (SoD preserved).',
+  };
+  const snapshotWithProvenance = { ...(policySnapshot || {}), __migration: provenance };
 
   const reimbursed = n.status === 'REIMBURSED';
   const claim = await tx.expenseClaim.create({
@@ -588,11 +657,13 @@ async function commitReimbursement(tx, job, n, actorId, _opts) {
       description: n.description || null, expenseDate,
       status: reimbursed ? 'REIMBURSED' : 'APPROVED',
       submittedAt: expenseDate,
-      decidedAt: expenseDate, decidedBy: actorId || 'import',
+      // Checker is the migration/prior-system actor — NEVER the importing operator
+      // and NEVER the claimant (maker≠checker SoD invariant).
+      decidedAt: expenseDate, decidedBy: checker,
       reimbursedAt: reimbursed && n.reimbursedAt ? new Date(`${n.reimbursedAt}T00:00:00Z`) : (reimbursed ? expenseDate : null),
-      reimbursedBy: reimbursed ? (actorId || 'import') : null,
+      reimbursedBy: reimbursed ? checker : null,
       paymentRef: reimbursed ? (n.paymentRef || null) : null,
-      policyVerdict, policySnapshotJson: policySnapshot || undefined,
+      policyVerdict, policySnapshotJson: snapshotWithProvenance,
       importJobId: job.id,
       // approved amount lands on the line (claimed) + the claim total (= approved).
       lines: { create: [{ businessId, description: n.description || 'Imported claim', amount: money.fromMinor(n.approvedMinor != null ? n.approvedMinor : n.claimedMinor), expenseDate, categoryId: category ? category.id : null, policyStatus: policyVerdict, policyReason }] },

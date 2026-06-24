@@ -31,15 +31,25 @@ describe('CSV codec', () => {
     expect(rows[0].b).toBe('z');
   });
 
-  test('formula-injection cells are neutralised on read', () => {
+  test('formula-leading cells are kept VERBATIM on read (NOT neutralised — DB is not a spreadsheet)', () => {
     const { rows } = csv.parseCsv('a\n=SUM(A1)\n');
-    expect(rows[0].a).toBe("'=SUM(A1)");
+    expect(rows[0].a).toBe('=SUM(A1)'); // no leading apostrophe persisted
   });
 
-  test('toCsv quotes + neutralises on write', () => {
+  test('read preserves +91 E.164 phones and negative money verbatim (no corruption)', () => {
+    const { rows } = csv.parseCsv('phone,claimedAmount\n+919876543210,-500\n');
+    expect(rows[0].phone).toBe('+919876543210'); // NOT "'+919876543210"
+    expect(rows[0].claimedAmount).toBe('-500');   // NOT "'-500" → still parses as money
+  });
+
+  test('toCsv quotes + neutralises on write (export-only formula-injection guard)', () => {
     const out = csv.toCsv(['a', 'b'], [{ a: '=cmd', b: 'x,y' }]);
-    expect(out).toContain("'=cmd");
+    expect(out).toContain("'=cmd"); // escaped on the EXPORT side
     expect(out).toContain('"x,y"');
+    // round-trip: a +91 phone exported then re-read stays clean
+    const wrote = csv.toCsv(['phone'], [{ phone: '+919876543210' }]);
+    expect(wrote).toContain("'+919876543210"); // export escapes the leading +
+    expect(csv.parseCsv(wrote).rows[0].phone).toBe("'+919876543210"); // read is verbatim
   });
 
   test('CRLF and LF line endings both parse', () => {

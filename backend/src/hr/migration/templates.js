@@ -99,6 +99,7 @@ const TEMPLATES = Object.freeze({
       { name: 'claimedAmount', required: true, type: 'money', rule: 'Employee-claimed figure (₹).', example: '4200' },
       { name: 'approvedAmount', required: false, type: 'money', rule: 'Back-dated approved figure (₹); blank = claimedAmount.', example: '4200' },
       { name: 'status', required: false, type: 'enum', rule: 'APPROVED (default) | REIMBURSED.', example: 'APPROVED' },
+      { name: 'approvedBy', required: false, type: 'string', rule: 'Prior system’s approver (provenance); never the employee. Blank → SYSTEM:MIGRATION.', example: '' },
       { name: 'description', required: false, type: 'string', rule: 'Free text.', example: 'Client lunch' },
       { name: 'paymentRef', required: false, type: 'string', rule: 'Legacy payout reference (for REIMBURSED).', example: '' },
       { name: 'reimbursedAt', required: false, type: 'date', rule: 'Settlement date (for REIMBURSED).', example: '' },
