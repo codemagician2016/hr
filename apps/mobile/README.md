@@ -55,20 +55,32 @@ won't add them for you:
 <uses-permission android:name="android.permission.INTERNET"/>
 <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
 <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+<!-- Feature 2 — selfie capture for FACE attendance capture + face enrolment -->
+<uses-permission android:name="android.permission.CAMERA"/>
 ```
 
 `geolocator` needs `compileSdk`/`targetSdk` 34+; set `minSdkVersion 23` in
-`android/app/build.gradle` (required by `flutter_secure_storage`).
+`android/app/build.gradle` (required by `flutter_secure_storage`). `image_picker`
+(camera source) needs no extra Android manifest entry beyond `CAMERA`; it returns a
+file the app reads + base64-encodes (no gallery read permission required).
 
 **iOS** — `ios/Runner/Info.plist`:
 
 ```xml
 <key>NSLocationWhenInUseUsageDescription</key>
 <string>DriftHR records your location when you clock in or out.</string>
+<!-- Feature 2 — selfie capture for FACE attendance capture + face enrolment -->
+<key>NSCameraUsageDescription</key>
+<string>DriftHR uses your camera to take a selfie that verifies your attendance punch.</string>
 ```
 
 For the secure keychain on iOS, ensure the **Keychain Sharing** capability is on
 in Xcode (used by `flutter_secure_storage`).
+
+> **Build note:** the Flutter SDK is not installed in this environment, so the Dart
+> sources here are authored to compile but were not `flutter build`-verified. Run
+> `flutter pub get` (pulls `image_picker`) then `flutter create .` + `flutter run`
+> on a machine with the SDK.
 
 ---
 

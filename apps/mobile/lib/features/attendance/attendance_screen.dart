@@ -7,6 +7,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:go_router/go_router.dart';
+
 import '../../core/api_client.dart';
 import '../../core/endpoints.dart';
 import '../../core/format.dart';
@@ -17,6 +19,7 @@ import '../../widgets/state_views.dart';
 import 'attendance_providers.dart';
 import 'geo.dart';
 import 'punch_logic.dart';
+import 'selfie.dart';
 
 const _correctionKinds = [
   ('MISSED_PUNCH', 'Missed punch'),
@@ -39,20 +42,73 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
   Future<void> _refresh() => ref.refresh(punchesProvider.future);
 
   Future<void> _punch(String type) async {
+    // Resolve the capture policy first so we know whether to prompt for a selfie.
+    final policy = ref.read(capturePolicyProvider).asData?.value ?? const {};
+    final requireFace = policy['requireFace'] == true;
+    final faceEnrolled = policy['faceEnrolled'] == true;
+
+    // FACE required but not enrolled → route the user to enrol before punching.
+    if (requireFace && !faceEnrolled) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Set up face recognition before punching.')),
+        );
+        context.push('/face-enrollment');
+      }
+      return;
+    }
+
     setState(() => _busy = true);
     final geo = await Geo.currentPosition();
+
+    // Capture a selfie when FACE is required (front camera → base64 data URL).
+    String? selfieDataUrl;
+    if (requireFace) {
+      final shot = await Selfie.capture();
+      if (!shot.ok) {
+        // No selfie captured. When FACE is enforced the server will reject; surface
+        // the camera error and abort rather than silently punch.
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(shot.error ?? 'A selfie is required to punch.')),
+          );
+          setState(() => _busy = false);
+        }
+        return;
+      }
+      selfieDataUrl = shot.dataUrl;
+    }
+
     try {
-      await ref.read(apiClientProvider).post(Api.punch, {
+      final body = <String, dynamic>{
         'type': type,
-        ...geo.coords, // best-effort lat/long; server tolerates extras
-      });
+        // Backend reads geoLat/geoLng (the geofence + IP_RESTRICTED policy keys off
+        // the server-side req.ip, so no IP is sent from the app).
+        if (geo.position != null) 'geoLat': geo.position!.latitude,
+        if (geo.position != null) 'geoLng': geo.position!.longitude,
+        if (selfieDataUrl != null) 'selfieDataUrl': selfieDataUrl,
+      };
+      final res = await ref.read(apiClientProvider).post(Api.punch, body);
       ref.invalidate(punchesProvider);
-      if (mounted && geo.error != null) {
+      if (!mounted) return;
+      // A flagged-but-accepted punch (warn mode) → tell the user it's pending review.
+      final flagged = res is Map && res['captureFlagged'] == true;
+      if (flagged) {
+        final reasons = (res['captureFlagReasons'] as List?)?.join(', ') ?? '';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Punch recorded but flagged for review${reasons.isNotEmpty ? ' ($reasons)' : ''}.')),
+        );
+      } else if (geo.error != null) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(geo.error!)));
       }
     } on ApiException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+        // A 403 CAPTURE_POLICY rejection (enforce mode) carries a clear message.
+        final reason = e.body?['reason'];
+        final msg = reason == 'CAPTURE_POLICY'
+            ? 'Punch blocked: ${e.message}'
+            : e.message;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -62,6 +118,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
   @override
   Widget build(BuildContext context) {
     final async = ref.watch(punchesProvider);
+    final policy = ref.watch(capturePolicyProvider).asData?.value ?? const {};
     return Scaffold(
       appBar: AppBar(
         title: const Text('Attendance'),
@@ -102,6 +159,11 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
                 todayWorked: todayWorked,
                 busy: _busy,
                 onPunch: _punch,
+                requireGeo: policy['requireGeo'] == true,
+                requireIp: policy['requireIp'] == true,
+                requireFace: policy['requireFace'] == true,
+                faceEnrolled: policy['faceEnrolled'] == true,
+                onSetupFace: () => context.push('/face-enrollment'),
               ),
               const SizedBox(height: 12),
               Row(
@@ -178,6 +240,11 @@ class _ClockCard extends StatelessWidget {
     required this.todayWorked,
     required this.busy,
     required this.onPunch,
+    required this.requireGeo,
+    required this.requireIp,
+    required this.requireFace,
+    required this.faceEnrolled,
+    required this.onSetupFace,
   });
 
   final bool clockedIn;
@@ -185,12 +252,64 @@ class _ClockCard extends StatelessWidget {
   final String todayWorked;
   final bool busy;
   final Future<void> Function(String) onPunch;
+  final bool requireGeo;
+  final bool requireIp;
+  final bool requireFace;
+  final bool faceEnrolled;
+  final VoidCallback onSetupFace;
 
   @override
   Widget build(BuildContext context) {
+    final methods = <String>[
+      if (requireGeo) 'Geo-fence',
+      if (requireIp) 'Office network',
+      if (requireFace) 'Face match',
+    ];
     return SectionCard(
       child: Column(
         children: [
+          if (methods.isNotEmpty) ...[
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              alignment: WrapAlignment.center,
+              children: methods
+                  .map((m) => Chip(
+                        label: Text(m, style: const TextStyle(fontSize: 11)),
+                        visualDensity: VisualDensity.compact,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        backgroundColor: BrandColors.tealSoft,
+                        side: BorderSide.none,
+                      ))
+                  .toList(),
+            ),
+            const SizedBox(height: 4),
+            const Text('Required to punch', style: TextStyle(color: BrandColors.muted, fontSize: 10)),
+            const SizedBox(height: 10),
+          ],
+          if (requireFace && !faceEnrolled) ...[
+            InkWell(
+              onTap: onSetupFace,
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: BrandColors.warning.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(BrandRadii.md),
+                  border: Border.all(color: BrandColors.warning.withValues(alpha: 0.3)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.face_retouching_natural, size: 18, color: BrandColors.warning),
+                    SizedBox(width: 8),
+                    Expanded(child: Text('Set up face recognition to punch', style: TextStyle(fontSize: 12, color: BrandColors.text))),
+                    Icon(Icons.chevron_right, size: 18, color: BrandColors.muted),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
           Text(
             clockedIn ? 'You are clocked in' : 'You are clocked out',
             style: const TextStyle(color: BrandColors.muted, fontSize: 12, letterSpacing: 0.5),
@@ -237,13 +356,17 @@ class _ClockCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 4),
-          const Row(
+          Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.location_on_outlined, size: 13, color: BrandColors.muted),
-              SizedBox(width: 4),
-              Text('Your location is captured with each punch.',
-                  style: TextStyle(color: BrandColors.muted, fontSize: 11)),
+              const Icon(Icons.location_on_outlined, size: 13, color: BrandColors.muted),
+              const SizedBox(width: 4),
+              Text(
+                requireFace
+                    ? 'Location + a selfie are captured with each punch.'
+                    : 'Your location is captured with each punch.',
+                style: const TextStyle(color: BrandColors.muted, fontSize: 11),
+              ),
             ],
           ),
         ],

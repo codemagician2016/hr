@@ -160,6 +160,9 @@ export const NAV_ITEMS = [
   // Attendance: register devices, map enroll-no→employee, watch ingest activity,
   // triage parked rows. The push/poll ingest doors are device-secret/cron, not here.
   { key: 'settings-biometric', label: 'Biometric devices', href: '/settings/attendance/biometric', permission: 'canManageAttendance', parent: 'settings', icon: 'clock' },
+  // Feature 2 — multi-mode attendance capture policy (geo-fence / IP / face) + the
+  // office-CIDR allow-list + the flagged-punch review queue. canManageAttendance.
+  { key: 'settings-attendance-capture', label: 'Attendance capture', href: '/settings/attendance/capture', permission: 'canManageAttendance', parent: 'settings', icon: 'clock' },
 ];
 
 // ── Sidebar grouping ─────────────────────────────────────────────────────────

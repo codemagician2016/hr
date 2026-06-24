@@ -15,6 +15,7 @@ import 'package:go_router/go_router.dart';
 import '../core/providers.dart';
 import '../features/approvals/approvals_screen.dart';
 import '../features/attendance/attendance_screen.dart';
+import '../features/attendance/face_enrollment_screen.dart';
 import '../features/auth/login_screen.dart';
 import '../features/auth/splash_screen.dart';
 import '../features/home/home_screen.dart';
@@ -115,6 +116,12 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/tax',
         parentNavigatorKey: _rootKey,
         builder: (_, __) => const TaxProjectionScreen(),
+      ),
+      // Feature 2 — face enrolment for the FACE attendance-capture mode.
+      GoRoute(
+        path: '/face-enrollment',
+        parentNavigatorKey: _rootKey,
+        builder: (_, __) => const FaceEnrollmentScreen(),
       ),
     ],
   );

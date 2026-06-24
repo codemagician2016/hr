@@ -22,6 +22,12 @@ router.use(requireCustomer);
 router.post('/punch', c.createPunch);
 router.get('/punches', c.listPunches);
 
+// Feature 2 — multi-mode capture: the policy that applies to ME (which methods are
+// required), plus self face-enrolment for the FACE mode. SELF_ONLY (session subject).
+router.get('/policy', c.getCapturePolicy);
+router.get('/face', c.getFaceEnrollment);
+router.post('/face/enroll', c.enrollFace);
+
 // Dashboard rollup (own daily summary buckets)
 router.get('/summary', c.summary);
 

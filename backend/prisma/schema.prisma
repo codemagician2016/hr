@@ -9543,10 +9543,47 @@ model AttendancePunch {
   // back to the muster-roll evidence layer). Both null for web/mobile/manual punches.
   punchDeviceId           String?
   rawPunchEventId         String?
+  // Feature 2 (multi-mode capture) — additive, nullable → existing rows unaffected.
+  // captureMethods: the ordered list of capture modes the policy evaluated at punch
+  // time (e.g. ["GEO_FENCE","IP_RESTRICTED","FACE"]) — audit of what was enforced.
+  // ipAllowed: null = not evaluated (no IP policy); true = punch IP fell inside a
+  // configured office CIDR; false = off-network. Mirrors outOfGeofence's tri-state.
+  // faceMatchScore/faceMatched/faceMatchStatus: the pluggable matcher's verdict.
+  // reviewStatus drives the HR review queue: PENDING when a flagged (not hard-blocked)
+  // punch needs a human; CLEARED/REJECTED once an HR admin acts. captureFlagged =
+  // "this punch tripped a capture rule" (off-network / low face score / missing selfie
+  // when the policy is warn-not-block).
+  captureMethods          String[]    @default([])
+  ipAllowed               Boolean?
+  faceMatchScore          Float?
+  faceMatched             Boolean?
+  faceMatchStatus         FaceMatchStatus?
+  captureFlagged          Boolean     @default(false)
+  captureFlagReasons      String[]    @default([]) // e.g. ["OFF_NETWORK","FACE_LOW_SCORE"]
+  reviewStatus            PunchReviewStatus?
+  reviewedBy              String? // operator userId who cleared/rejected
+  reviewedAt              DateTime?
+  reviewNote              String?     @db.Text
   createdAt               DateTime    @default(now())
 
   @@index([businessId, employeeId, punchAt])
   @@index([businessId, locationId, punchAt])
+  // Feature 2 — review queue: list flagged-and-pending punches for a tenant fast.
+  @@index([businessId, captureFlagged, reviewStatus])
+}
+
+enum FaceMatchStatus {
+  MATCHED // score >= threshold
+  NO_MATCH // score < threshold (a real comparison ran)
+  NEEDS_REVIEW // stub/low-confidence matcher → defer to a human
+  NO_REFERENCE // FACE required but the employee never enrolled
+  SKIPPED // FACE not required by policy (or no selfie supplied where optional)
+}
+
+enum PunchReviewStatus {
+  PENDING // flagged, awaiting HR action
+  CLEARED // HR accepted the punch as legitimate
+  REJECTED // HR rejected (out-of-policy)
 }
 
 enum PunchType {
@@ -9565,6 +9602,104 @@ enum PunchSource {
   API
   IMPORT
   MANUAL
+}
+
+// ===========================================================================
+// Feature 2 (multi-mode attendance capture) — HR-admin "Attendance Capture
+// Policy". A per-tenant policy, OVERRIDABLE per entity / location / employee-group,
+// selecting which punch methods are allowed/required: GEO_FENCE (reuses the Cycle-0
+// Location geofence + geo.js Haversine), IP_RESTRICTED (punch only from configured
+// office CIDRs), FACE (selfie enrolment + match). These models are relation-LESS
+// (keyed by plain String businessId/scope ids + @@index, exactly like
+// AttendancePunch.regularizationRequestId / rawPunchEventId) so they add NO edits to
+// the shared Business / Employee / Location / Entity relation blocks. The punch path
+// resolves the most-specific matching policy and enforces it; the existing recompute
+// (service.js/derive.js) is reused untouched for geofence.
+// ===========================================================================
+
+/// One Attendance Capture Policy row. The resolver picks the MOST SPECIFIC active
+/// row for a punch by scope precedence: EMPLOYEE_GROUP > LOCATION > ENTITY > TENANT.
+/// `scopeId` is null for TENANT scope, else the entity/location/group (department) id.
+model AttendanceCapturePolicy {
+  id         String             @id @default(uuid())
+  businessId String
+  scope      CapturePolicyScope @default(TENANT)
+  scopeId    String? // null for TENANT; entityId / locationId / departmentId otherwise
+  name       String? // optional human label
+
+  // Mode toggles. requireX = the punch is REJECTED/FLAGGED when the mode fails; a
+  // mode left false is simply not evaluated. GEO_FENCE reuses the per-Location
+  // geofence config (geoLat/geoLng/geofenceM) — there is no radius column here.
+  requireGeo  Boolean @default(false)
+  requireIp   Boolean @default(false)
+  requireFace Boolean @default(false)
+
+  // Enforcement levers (per mode). false = WARN (flag + queue for HR review, never
+  // block the punch); true = ENFORCE (reject the punch with 4xx). Default WARN so a
+  // freshly-configured policy never locks people out on day one (mirrors geofence).
+  geoEnforce  Boolean @default(false)
+  ipEnforce   Boolean @default(false)
+  faceEnforce Boolean @default(false)
+
+  // FACE matcher threshold ∈ [0,1]: a match score below this flags the punch (and,
+  // if faceEnforce, rejects it). The default stub matcher returns NEEDS_REVIEW, so
+  // this only bites once a real embedding matcher is installed.
+  faceThreshold Float @default(0.7)
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String? // operator userId
+  version   Int      @default(0)
+
+  // One active policy per (tenant, scope, scopeId). The resolver picks the newest
+  // active row within a scope.
+  @@unique([businessId, scope, scopeId])
+  @@index([businessId, isActive])
+}
+
+enum CapturePolicyScope {
+  TENANT
+  ENTITY
+  LOCATION
+  EMPLOYEE_GROUP // scopeId holds the department id (the natural employee grouping)
+}
+
+/// An allowed office IP range for IP_RESTRICTED capture. CIDR (v4 or v6) scoped to a
+/// LOCATION (the natural office unit). A punch's trusted req.ip is tested against the
+/// union of a location's active CIDRs. Relation-less (locationId is a plain id).
+model LocationOfficeIp {
+  id         String   @id @default(uuid())
+  businessId String
+  locationId String
+  cidr       String // "203.0.113.0/24" or "2001:db8::/48" or a single "203.0.113.7"
+  label      String? // "HQ wifi", "VPN egress", …
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  createdBy  String?
+
+  @@index([businessId, locationId, isActive])
+}
+
+/// The employee's enrolled reference face. ONE active row per (tenant, employee).
+/// imageUrl = object-storage key of the reference selfie (audit). embedding = the
+/// matcher's reference vector (JSON array) when a real embedding matcher produced one
+/// at enrol time; null for the stub matcher (which compares NOTHING and defers to HR).
+/// DPDP/PII note: the selfie is @pii:sensitive; liveness is OUT OF SCOPE v1.
+model FaceEnrollment {
+  id         String   @id @default(uuid())
+  businessId String
+  employeeId String
+  imageUrl   String   @db.Text // @pii:sensitive — object-storage key of the reference selfie
+  embedding  Json? // reference embedding vector (real matcher) or null (stub)
+  matcher    String? // which matcher impl produced the embedding ("stub" | "face-api" | …)
+  isActive   Boolean  @default(true)
+  enrolledAt DateTime @default(now())
+  enrolledBy String? // self (the employee's userId) or an HR operator
+  version    Int      @default(0)
+
+  @@unique([businessId, employeeId])
+  @@index([businessId, employeeId, isActive])
 }
 
 // ===========================================================================

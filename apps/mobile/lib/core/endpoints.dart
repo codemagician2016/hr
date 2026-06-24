@@ -17,13 +17,19 @@ class Api {
   static const meTasks = '/api/hr/me/tasks'; // pending self-service tasks
 
   // Attendance
-  static const punch = '/api/hr/me/attendance/punch'; // POST { type, [punchAt] }
+  static const punch = '/api/hr/me/attendance/punch'; // POST { type, [punchAt], geoLat, geoLng, selfieDataUrl? }
   static const punches = '/api/hr/me/attendance/punches'; // ?from=&to=&pageSize=
   static const attendanceSummary = '/api/hr/me/attendance/summary'; // ?from=&to=
   static const attendanceDays = '/api/hr/me/attendance/days'; // ?from=&to=
   static const schedule = '/api/hr/me/attendance/schedule'; // { shift, assignment }
   static const holidays = '/api/hr/me/attendance/holidays'; // ?year=
   static const regularizations = '/api/hr/me/attendance/regularizations'; // GET + POST
+
+  // Feature 2 — multi-mode capture: the policy that applies to me (which methods are
+  // required) + self face-enrolment for the FACE mode.
+  static const capturePolicy = '/api/hr/me/attendance/policy'; // GET { requireGeo/Ip/Face, faceEnrolled, … }
+  static const faceEnrollment = '/api/hr/me/attendance/face'; // GET { enrolled, enrolledAt }
+  static const faceEnroll = '/api/hr/me/attendance/face/enroll'; // POST { selfieDataUrl }
 
   // Leave
   static const leaveTypes = '/api/hr/me/leave/types';

@@ -339,6 +339,15 @@ async function materialiseEmployeeDay(db, { businessId, employeeId, device, civi
           isManual: false, // counts in recompute immediately
           // geoLat/geoLng left null — a gate device has no per-punch GPS; the geofence
           // check no-ops gracefully (evaluatePunchGeofence → evaluated:false).
+          // Feature 2 (multi-mode capture) note: the Attendance Capture Policy
+          // (geo/IP/face enforce + flag) is DELIBERATELY NOT applied to BIOMETRIC
+          // device punches. A registered terminal IS the trust anchor (PunchDevice
+          // + the immutable RawPunchEvent provenance) — it has no per-punch GPS,
+          // no browser client IP, and no selfie, so running the IP/FACE/geo enforce
+          // here would wrongly flag/reject every legitimate gate punch. Capture
+          // enforcement is a property of the SELF-SERVICE (web/mobile) punch door
+          // only (meAttendance.controller#createPunch); device trust is the
+          // biometric door's equivalent guarantee.
         },
       });
       await db.rawPunchEvent.update({ where: { id: ev.id }, data: { status: 'MATERIALISED', resolvedType: r.punchType, attendancePunchId: punch.id } });
