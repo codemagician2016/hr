@@ -10,9 +10,12 @@ import { useTenant } from '@/components/TenantProvider';
 export default function BrandHeader() {
   const { tenant, theme } = useTenant();
   const business = tenant?.business || {};
-  const logoUrl = theme?.logoUrl || business.logoUrl || null;
-  const tenantName = business.name || business.displayName || null;
-  const name = tenantName || 'DriftHR';
+  // White-label brand: logo if set, else the business NAME wordmark — NEVER the
+  // DriftHR vendor mark.
+  const brand = tenant?.brand || {};
+  const logoUrl = brand.logoUrl || theme?.logoUrl || business.logoUrl || null;
+  const tenantName = brand.name || business.name || business.displayName || null;
+  const name = tenantName || 'Portal';
 
   return (
     <header
@@ -32,12 +35,10 @@ export default function BrandHeader() {
               alt={`${name} logo`}
               className="h-8 w-auto max-w-[140px] rounded bg-white/10 object-contain"
             />
-          ) : tenantName ? (
-            <span className="text-base font-semibold tracking-tight truncate">{tenantName}</span>
           ) : (
-            // No tenant brand — show the DriftHR white logo (header sits on the brand color).
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src="/drifthr-logo-white.svg" alt="DriftHR" className="h-7 w-auto" />
+            // No logo — the business NAME wordmark (header sits on the brand
+            // color, so text inherits --theme-on-primary). NEVER the DriftHR mark.
+            <span className="text-base font-semibold tracking-tight truncate">{name}</span>
           )}
         </Link>
         <span className="ml-auto text-xs/5 opacity-80 hidden sm:inline">

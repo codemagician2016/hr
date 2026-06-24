@@ -176,8 +176,11 @@ export default function Sidebar({ onNavigate }) {
     emp.designation?.name || emp.designation || emp.designationName ||
     emp.employeeCode || emp.code || null;
   const business = tenant?.business || {};
-  const businessName = business.name || business.displayName || null;
-  const logoUrl = theme?.logoUrl || business.logoUrl || null;
+  // White-label brand: prefer the resolved tenant-wide brand object. Render the
+  // logo if set, else the business NAME wordmark — NEVER the DriftHR vendor mark.
+  const brand = tenant?.brand || {};
+  const businessName = brand.name || business.name || business.displayName || null;
+  const logoUrl = brand.logoUrl || theme?.logoUrl || business.logoUrl || null;
   const avatarUrl = profile?.photoUrl || emp.avatarUrl || emp.photoUrl || emp.photo || null;
 
   // Inject a conditional "Onboarding" item (top of the rail) only while an
@@ -245,16 +248,19 @@ export default function Sidebar({ onNavigate }) {
 
   return (
     <div className="ess-sidebar ess-scroll">
-      {/* Tenant identity (logo / business name) */}
+      {/* Tenant identity — logo if set, else the business NAME wordmark in the
+          brand colour. NEVER the DriftHR vendor mark. */}
       <div className="ess-sidebar-brand">
         {logoUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={logoUrl} alt={businessName ? `${businessName} logo` : 'Logo'} className="ess-sidebar-logo" />
-        ) : businessName ? (
-          <span className="ess-sidebar-brandname truncate">{businessName}</span>
         ) : (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src="/drifthr-logo.svg" alt="DriftHR" className="ess-sidebar-logo" />
+          <span
+            className="ess-sidebar-brandname truncate"
+            style={{ color: 'var(--theme-primary)', fontWeight: 700 }}
+          >
+            {businessName || 'My Portal'}
+          </span>
         )}
       </div>
 

@@ -32,11 +32,20 @@ const TenantContext = createContext({
 // field names so the white-label surface never renders unstyled.
 function brandInputFromResolve(data) {
   const sub = data?.subscription || {};
-  const brand = sub.brand || sub || {};
+  const legacy = sub.brand || sub || {};
+  // The white-label brand object (resolve top-level `brand`) is authoritative for
+  // logo + primary colour — it carries what the Branding page saved. Fall back to
+  // the legacy subscription style/colour fields so older tenants still resolve.
+  const wl = data?.brand || {};
+  let subPrimary;
+  if (typeof legacy.themeColors === 'string') {
+    try { subPrimary = JSON.parse(legacy.themeColors)?.primary; } catch { subPrimary = undefined; }
+  }
   return {
-    styleKey: brand.styleKey || brand.theme || brand.themeStyle,
-    colorKey: brand.colorKey || brand.themeColors || brand.color,
-    logoUrl: brand.logoUrl || brand.logo || data?.business?.logoUrl,
+    styleKey: legacy.styleKey || legacy.theme || legacy.themeStyle,
+    colorKey: legacy.colorKey || legacy.color,
+    primary: wl.primaryColor || subPrimary,
+    logoUrl: wl.logoUrl || legacy.logoUrl || legacy.logo || data?.business?.logoUrl,
   };
 }
 
@@ -50,6 +59,27 @@ function applyThemeVars(theme) {
   // [data-theme] convention).
   if (theme.styleKey) {
     document.documentElement.setAttribute('data-theme', theme.styleKey);
+  }
+}
+
+// White-label the browser chrome: the document title + favicon come from the
+// tenant brand (NEVER "DriftHR"). title = the business name; favicon = the tenant
+// favicon when set (else we leave the default <link> untouched).
+function applyBrandChrome(data) {
+  if (typeof document === 'undefined') return;
+  const brand = data?.brand || {};
+  const business = data?.business || {};
+  const name = brand.name || business.name || business.displayName || null;
+  if (name) document.title = name;
+  const faviconUrl = brand.faviconUrl || null;
+  if (faviconUrl) {
+    let link = document.querySelector('link[rel="icon"]');
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = 'icon';
+      document.head.appendChild(link);
+    }
+    link.href = faviconUrl;
   }
 }
 
@@ -71,6 +101,7 @@ export default function TenantProvider({ children }) {
       setTenant(data);
       setTheme(resolved);
       applyThemeVars(resolved);
+      applyBrandChrome(data);
       setError(null);
     } catch (e) {
       if (myTick !== tickRef.current) return;
