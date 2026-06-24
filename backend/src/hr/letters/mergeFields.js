@@ -104,6 +104,15 @@ const CATALOG = {
   // authority namespace (pre-signature line)
   'authority.name': { type: 'string', ns: 'authority' },
   'authority.designation': { type: 'string', ns: 'authority' },
+
+  // course namespace (Feature 37 — LMS completion certificate). Additive; only the
+  // LMS_CERTIFICATE template references these tokens, fed via issueLetter overrides.course.
+  'course.title': { type: 'string', ns: 'course' },
+  'course.code': { type: 'string', ns: 'course' },
+  'course.category': { type: 'string', ns: 'course' },
+  'course.completedOn': { type: 'date', ns: 'course' },
+  'course.scorePct': { type: 'number', ns: 'course' },
+  'course.cycle': { type: 'string', ns: 'course' },
 };
 
 // ── formatters ───────────────────────────────────────────────────────────────
@@ -184,11 +193,12 @@ function str(v) {
 }
 
 /** Build the RAW (pre-format, pre-mask) source map for every catalog key. */
-function buildRawSources({ employee, business, comp, entity, now, refNo, authority }) {
+function buildRawSources({ employee, business, comp, entity, now, refNo, authority, course }) {
   const e = employee || {};
   const b = business || {};
   const c = comp || {};
   const en = entity || {};
+  const crs = course || {};
   const brand = b.brand || en.brand || {};
   const nm =
     [e.firstName, e.middleName, e.lastName].filter(Boolean).join(' ').trim() ||
@@ -270,6 +280,14 @@ function buildRawSources({ employee, business, comp, entity, now, refNo, authori
     // authority (pre-signature)
     'authority.name': str(authority && (authority.name)),
     'authority.designation': str(authority && (authority.designation)),
+
+    // course (Feature 37 — LMS certificate facts)
+    'course.title': str(crs.title),
+    'course.code': str(crs.code),
+    'course.category': str(crs.category),
+    'course.completedOn': crs.completedOn || null,
+    'course.scorePct': (crs.scorePct == null || crs.scorePct === '') ? '' : crs.scorePct,
+    'course.cycle': str(crs.cycle),
   };
 }
 
@@ -298,11 +316,11 @@ function maskAccount(v) {
  * @returns {{ values: Object, missingRequired: string[], masked: string[] }}
  */
 function resolveMergeData({
-  employee, business, comp, entity, locale, now, refNo, authority, perms, required,
+  employee, business, comp, entity, locale, now, refNo, authority, perms, required, course,
 } = {}) {
   const loc = LOCALES[locale] ? locale : DEFAULT_LOCALE;
   const canViewComp = !!(perms && perms.canViewCompensation);
-  const raw = buildRawSources({ employee, business, comp, entity, now, refNo, authority });
+  const raw = buildRawSources({ employee, business, comp, entity, now, refNo, authority, course });
 
   const values = {};
   const masked = [];

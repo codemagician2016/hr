@@ -101,6 +101,9 @@ const NAV = [
     ],
   },
   { type: 'item', href: '/performance', label: 'Performance', icon: 'chart' },
+  // FLAG (Feature 37 — NEW nav item): My Learning. Required + optional training, the
+  // course player, and the completion certificate (also under Documents). Self-service.
+  { type: 'item', href: '/learning', label: 'My Learning', icon: 'chart' },
   // Cycle 1 — HR Helpdesk: raise + track support tickets (self-service).
   { type: 'item', href: '/helpdesk', label: 'Help & Support', icon: 'support' },
   { type: 'item', href: '/separation', label: 'Separation', icon: 'exit' },

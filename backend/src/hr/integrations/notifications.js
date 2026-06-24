@@ -73,6 +73,12 @@ const HR_EVENT_TEMPLATES = Object.freeze({
   // Feature 28 — Biometric ingestion watchdog fan-out (→ canManageAttendance ops).
   'biometric.device_silent': 'HR_BIOMETRIC_DEVICE_SILENT', // a registered device went quiet past expectedSilenceMin
   'biometric.high_unmapped': 'HR_BIOMETRIC_HIGH_UNMAPPED', // a batch parked >X% UNMAPPED (likely re-numbering / new joiner)
+  // Feature 37 — LMS (Learning) lifecycle fan-out (assignment → completion → cert).
+  'learning.assigned':   'HR_LEARNING_ASSIGNED',   // → learner when a course is assigned (mandatory + due date)
+  'learning.due-soon':   'HR_LEARNING_DUE_SOON',   // → learner at T-7/T-1 before a mandatory course is due
+  'learning.overdue':    'HR_LEARNING_OVERDUE',    // → learner when a mandatory course is past its due date
+  'learning.completed':  'HR_LEARNING_COMPLETED',  // → learner when a course reaches COMPLETED
+  'learning.cert-ready': 'HR_LEARNING_CERT_READY', // → learner when the completion certificate is minted to the vault
 });
 
 // HR template registry. vertical: 'HR' so listTemplates({vertical:'HR'}) scopes
@@ -404,6 +410,52 @@ const HR_TEMPLATES = Object.freeze([
     vertical: 'HR',
     body: '{BIZ}: {PCT}% of a punch batch from {DEVICE} ({COUNT} rows) had no employee mapping. Map the codes + reprocess: {LINK}',
     variables: ['BIZ', 'DEVICE', 'PCT', 'COUNT', 'LINK'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  // Feature 37 — LMS (Learning) lifecycle templates.
+  {
+    key: 'HR_LEARNING_ASSIGNED',
+    displayName: 'Training assigned',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {NAME}, you have been assigned the training "{COURSE}". Due by {DUE}. Start now: {LINK} - {BIZ}',
+    variables: ['NAME', 'COURSE', 'DUE', 'LINK', 'BIZ'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_LEARNING_DUE_SOON',
+    displayName: 'Training due soon',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Reminder {NAME}: your training "{COURSE}" is due on {DUE}. Please complete it: {LINK} - {BIZ}',
+    variables: ['NAME', 'COURSE', 'DUE', 'LINK', 'BIZ'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_LEARNING_OVERDUE',
+    displayName: 'Training overdue',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Action needed {NAME}: your mandatory training "{COURSE}" was due on {DUE} and is now overdue. Complete it: {LINK} - {BIZ}',
+    variables: ['NAME', 'COURSE', 'DUE', 'LINK', 'BIZ'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_LEARNING_COMPLETED',
+    displayName: 'Training completed',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Well done {NAME}! You have completed the training "{COURSE}". - {BIZ}',
+    variables: ['NAME', 'COURSE', 'BIZ'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_LEARNING_CERT_READY',
+    displayName: 'Training certificate ready',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {NAME}, your certificate for "{COURSE}" (Ref {REF}) is ready in your document vault. Download: {LINK} - {BIZ}',
+    variables: ['NAME', 'COURSE', 'REF', 'LINK', 'BIZ'],
     channels: { sms: false, whatsapp: true, email: true },
   },
 ]);

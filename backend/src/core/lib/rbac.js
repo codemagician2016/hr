@@ -96,6 +96,14 @@ const PERMISSIONS = Object.freeze({
   // in-audience feed via the customer session); this gates only the operator authoring
   // surface. Seeded true for Owner (all) + HR-Admin below.
   canManageAnnouncements:   'Create, publish, pin + archive company announcements (news feed)',
+  // Learning / LMS (Feature 37) — additive; no migration. canManageLearning is the
+  // L&D / HR-Admin author+assign key (courses, lessons, quizzes, assignments,
+  // certificate issue/revoke); canViewTeamLearning is the Manager TEAM-band read key
+  // for training compliance (who's done/overdue). The ESS LEARNER surface needs NO
+  // key — it is self-only by construction (customer session, no :employeeId), exactly
+  // like ESS performance/leave. Seeded for Owner (all), HR-Admin (both), Manager (view).
+  canManageLearning:    'Author courses/lessons/quizzes, assign training, issue/revoke certificates',
+  canViewTeamLearning:  "View reports' training compliance + completions (TEAM band)",
 });
 
 const PERMISSION_KEYS = Object.freeze(Object.keys(PERMISSIONS));
@@ -137,6 +145,8 @@ const SYSTEM_ROLES = Object.freeze({
     canManageHelpdesk: true,
     // Engagement (Cycle 1) — HR-Admin authors + publishes company announcements.
     canManageAnnouncements: true,
+    // Feature 37 — HR-Admin owns the LMS: author courses + assign + view all compliance.
+    canManageLearning: true, canViewTeamLearning: true,
     // No canEditBilling / canEditDomain / canApprovePayroll — Owner/Finance only
   },
   // Finance — payroll + compensation + statutory + billing.
@@ -170,6 +180,10 @@ const SYSTEM_ROLES = Object.freeze({
     // Feature 11 — a Manager approves their TEAM's claims/trips. The F1 TEAM band +
     // the APPROVAL_ACTIONS self-drop (scopeResolver) enforce "team only, never own".
     canApproveExpense: true,
+    // Feature 37 — a Manager sees their reports' training compliance (TEAM band carries
+    // the sub-tree scope); authoring/assigning stays HR-only. The learner surface (their
+    // OWN training) is the ESS customer session, which needs no operator key.
+    canViewTeamLearning: true,
   },
   // Recruiter — Feature 12 preset. Owns the recruitment/ATS surface (jobs,
   // screening, scorecards, scheduling, offers) and the read keys, but nothing
@@ -179,6 +193,13 @@ const SYSTEM_ROLES = Object.freeze({
     canManageHiring: true,
     canViewHiring: true,
     canScoreInterview: true,
+  },
+  // Trainer / L&D — Feature 37 preset. Owns the LMS authoring + assignment surface and
+  // the team-compliance read, but nothing else (no comp/payroll/org). Mirrors Recruiter.
+  Trainer: {
+    canViewEmployees: true,
+    canManageLearning: true,
+    canViewTeamLearning: true,
   },
 });
 
@@ -221,6 +242,8 @@ const SYSTEM_ROLE_SCOPES = Object.freeze({
   'HR-Admin': 'ALL',
   Finance: 'ALL',
   Manager: 'TEAM',
+  // Feature 37 — L&D operates tenant-wide (author + assign + view all compliance).
+  Trainer: 'ALL',
 });
 
 // Legacy User.role → scope when no custom BusinessRole.defaultScope is present.

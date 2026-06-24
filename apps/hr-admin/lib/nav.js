@@ -60,6 +60,11 @@ export const NAV_ITEMS = [
   // canManagePerformanceCycle, hidden via hasPermission on the page). Server is the
   // real boundary; this just shows the tab to anyone with team-performance read.
   { key: 'performance', label: 'Performance', href: '/performance', feature: 'hr', permission: 'canViewTeamPerformance', icon: 'chart' },
+  // FLAG (Feature 37 — NEW nav item): LMS / Learning. Visible to L&D + HR-Admin
+  // (canManageLearning — author/assign + full compliance) OR Managers (canViewTeamLearning
+  // — TEAM-band training compliance for their reports). The server is the real boundary;
+  // this just shows the link to anyone with either learning key.
+  { key: 'learning', label: 'Learning', href: '/learning', feature: 'hr', anyPermission: ['canManageLearning', 'canViewTeamLearning'], icon: 'chart' },
   // Recruitment / ATS (Feature 12). Visible to anyone with the new canViewHiring
   // read key OR canManageHiring (recruiters/HR) OR the legacy canManageEmployees
   // super-set. The server is the real boundary; this just hides the nav link.

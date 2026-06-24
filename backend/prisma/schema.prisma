@@ -613,6 +613,17 @@ model Business {
   // Feature 25 — FBP / Flexi Basket.
   fbpPlans                     FbpPlan[]
   fbpAllocations               FbpAllocation[]
+  // Feature 37 — LMS (Learning Management System): courses, assignments, learner records.
+  courses                      Course[]
+  courseModules                CourseModule[]
+  lessons                      Lesson[]
+  quizzes                      Quiz[]
+  quizQuestions                QuizQuestion[]
+  courseAssignments            CourseAssignment[]
+  enrollments                  Enrollment[]
+  lessonProgress               LessonProgress[]
+  quizAttempts                 QuizAttempt[]
+  learningCertificates         LearningCertificate[]
 }
 
 // BusinessPage — multi-page CMS. Each row is a single sub-page under one
@@ -6800,6 +6811,8 @@ model Employee {
   form16Certificates     Form16Certificate[]
   // Feature 25 — FBP / Flexi Basket allocations.
   fbpAllocations         FbpAllocation[]
+  // Feature 37 — LMS: the employee's training enrollments (per-employee learner records).
+  enrollments            Enrollment[]
 
   @@unique([businessId, code])
   // FLAG (Feature 17 — review HIGH fix): a PARTIAL unique index backs the
@@ -10652,6 +10665,7 @@ enum DocumentCategory {
   BANK_PROOF
   MEDICAL
   POLICY_ACK
+  TRAINING_CERTIFICATE // Feature 37 — LMS course-completion certificate in the ESS vault
   OTHER
 }
 
@@ -10721,6 +10735,7 @@ enum LetterCategory {
   BANK // bank-account / salary-routing confirmation
   CONTRACT // appointment / employment agreement (e-sign route)
   CUSTOM // free-form / tenant-defined
+  LMS_CERTIFICATE // Feature 37 — LMS course-completion certificate (training proof of record)
 }
 
 enum IssuedLetterStatus {
@@ -12525,4 +12540,335 @@ model AnnouncementRead {
 
   @@unique([announcementId, employeeId])
   @@index([businessId, employeeId])
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Feature 37 — LMS (Learning Management System)
+// India-first compliance training (POSH annual + new-joiner-30-day, safety, ISMS,
+// code-of-conduct). Content tree (Course → Module → Lesson → Quiz → Question);
+// assignment (audience rule, reuses engagement/audience.js targeting + a ROLE
+// scope); learner records (Enrollment → LessonProgress + QuizAttempt). The
+// completion CERTIFICATE is the existing F9 IssuedLetter (no new PDF path); a thin
+// LearningCertificate index row points at it for fast lookups.
+//
+// Conventions mirror schema.prisma house style: businessId FK Cascade, version Int,
+// timestamps. CONFIG models (Course/Module/Lesson/Quiz/Question/Assignment) carry
+// deletedAt (soft-delete + versioned). LEARNER records (Enrollment/LessonProgress/
+// QuizAttempt) are append-mostly "records of fact" (never hard-deleted), mirroring
+// the IssuedLetter legal-record stance.
+// ════════════════════════════════════════════════════════════════════════════
+
+// ───────────────────────────────  CONTENT (config)  ──────────────────────────
+model Course {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId      String? // null = tenant-wide catalog item
+  code          String // "POSH-2026", "ISMS-101" (human; per-tenant unique)
+  title         String
+  description   String?  @db.Text
+  category      LearningCategory @default(GENERAL)
+  thumbnailUrl  String?  @db.Text
+  estMinutes    Int? // est. duration for the calendar/UX
+  passThreshold Int?     @default(70) // % across graded quizzes (course-level default)
+  completionRule CompletionRule @default(ALL_LESSONS) // ALL_LESSONS | QUIZ_PASS | BOTH
+  certificateEnabled    Boolean @default(true)
+  certificateTemplateId String? // -> LetterTemplate (LMS_CERTIFICATE); null = tenant default
+  status        CourseStatus @default(DRAFT)
+  publishedAt   DateTime?
+  publishedBy   String?
+  version       Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+
+  modules     CourseModule[]
+  assignments CourseAssignment[]
+  enrollments Enrollment[]
+
+  @@unique([businessId, code])
+  @@index([businessId, status, category])
+}
+
+enum LearningCategory {
+  POSH
+  SAFETY
+  COMPLIANCE
+  ONBOARDING
+  SKILL
+  CODE_OF_CONDUCT
+  GENERAL
+}
+
+enum CourseStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum CompletionRule {
+  ALL_LESSONS
+  QUIZ_PASS
+  BOTH
+}
+
+model CourseModule {
+  id         String   @id @default(uuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  courseId   String
+  course     Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  title      String
+  orderIndex Int      @default(0)
+  version    Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  deletedAt  DateTime?
+
+  lessons Lesson[]
+
+  @@index([businessId, courseId, orderIndex])
+}
+
+model Lesson {
+  id          String       @id @default(uuid())
+  businessId  String
+  business    Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  moduleId    String
+  module      CourseModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  courseId    String // denormalised for cheap course-level progress queries
+  title       String
+  kind        LessonKind // VIDEO | DOCUMENT | LINK | QUIZ | SCORM
+  orderIndex  Int          @default(0)
+  isRequired  Boolean      @default(true) // optional lessons don't gate completion
+  contentUrl  String?      @db.Text // VIDEO/DOCUMENT file (S3) or LINK/SCORM external URL
+  contentText String?      @db.Text // inline DOCUMENT (markdown) alternative
+  durationSec Int? // VIDEO length (for minWatchPct)
+  minWatchPct Int?         @default(90) // VIDEO completion gate
+  estMinutes  Int?
+  version     Int          @default(0)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  deletedAt   DateTime?
+
+  quiz     Quiz?
+  progress LessonProgress[]
+
+  @@index([businessId, courseId, orderIndex])
+  @@index([businessId, moduleId, orderIndex])
+}
+
+enum LessonKind {
+  VIDEO
+  DOCUMENT
+  LINK
+  QUIZ
+  SCORM
+}
+
+model Quiz {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  lessonId      String   @unique
+  lesson        Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  passThreshold Int      @default(70) // % to pass this quiz
+  maxAttempts   Int?     @default(3) // null = unlimited
+  shuffle       Boolean  @default(true)
+  version       Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+
+  questions QuizQuestion[]
+  attempts  QuizAttempt[]
+
+  @@index([businessId, lessonId])
+}
+
+model QuizQuestion {
+  id         String   @id @default(uuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  quizId     String
+  quiz       Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  orderIndex Int      @default(0)
+  prompt     String   @db.Text
+  kind       QuestionKind @default(SINGLE) // SINGLE | MULTI | TRUE_FALSE
+  // options as JSON: [{ id, text }]; correctOptionIds = string[] of option ids.
+  // correctOptionIds is NEVER serialized to the ESS learner runtime (answer-key leak guard).
+  optionsJson      Json
+  correctOptionIds String[]
+  points     Int      @default(1)
+  version    Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  deletedAt  DateTime?
+
+  @@index([businessId, quizId, orderIndex])
+}
+
+enum QuestionKind {
+  SINGLE
+  MULTI
+  TRUE_FALSE
+}
+
+// ──────────────────────────  ASSIGNMENT (audience rule)  ──────────────────────
+model CourseAssignment {
+  id         String   @id @default(uuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  courseId   String
+  course     Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  // audience — mirrors engagement Announcement (audience.js SCOPE), + ROLE.
+  audienceScope       LearningAudienceScope @default(ALL) // ALL | ENTITY | DEPARTMENT | ROLE | SPECIFIC
+  audienceEntityIds   String[] @default([])
+  audienceDeptIds     String[] @default([])
+  audienceRoleIds     String[] @default([]) // BusinessRole ids
+  audienceEmployeeIds String[] @default([])
+  isMandatory         Boolean  @default(true)
+  dueInDays           Int? // due = assignedAt + dueInDays (relative; good for new-joiner)
+  dueOn               DateTime? @db.Date // OR an absolute due date (campaign style)
+  recurrence          RecurrenceRule @default(NONE) // NONE | ANNUAL | HALF_YEARLY | QUARTERLY
+  newJoinerRule       Boolean  @default(false) // auto-assign to anyone who joins after this assignment
+  newJoinerWithinDays Int?     @default(30) // POSH: 30-day onboarding window
+  active              Boolean  @default(true)
+  createdBy           String
+  version             Int      @default(0)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  deletedAt           DateTime?
+
+  enrollments Enrollment[]
+
+  @@index([businessId, courseId, active])
+  @@index([businessId, newJoinerRule, active])
+}
+
+enum LearningAudienceScope {
+  ALL
+  ENTITY
+  DEPARTMENT
+  ROLE
+  SPECIFIC
+}
+
+enum RecurrenceRule {
+  NONE
+  ANNUAL
+  HALF_YEARLY
+  QUARTERLY
+}
+
+// ──────────────────────────  LEARNER RECORDS (per employee)  ──────────────────
+model Enrollment {
+  id           String   @id @default(uuid())
+  businessId   String
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  courseId     String
+  course       Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  assignmentId String? // null = self-enrolled (optional catalog course)
+  assignment   CourseAssignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
+  employeeId   String
+  employee     Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  isMandatory  Boolean  @default(false)
+  status       EnrollmentStatus @default(ASSIGNED)
+  assignedAt   DateTime @default(now())
+  startedAt    DateTime?
+  completedAt  DateTime?
+  dueAt        DateTime? // resolved from assignment.dueInDays/dueOn at fan-out
+  cycleKey     String // recurrence cycle, e.g. "2026" (annual) | "once" (self/one-off) — uniqueness axis
+  progressPct  Int      @default(0) // denormalised 0..100 for cheap dashboards
+  certificateLetterId String? // -> IssuedLetter (F9). Set on completion when certificateEnabled
+  waivedReason String? // HR exemption/waiver audit
+  waivedBy     String?
+  // reminder dedup cursor (mirrors proof-window/compliance last-sent guard) — avoids a storm.
+  lastReminderStage String? // null | DUE_T7 | DUE_T1 | OVERDUE
+  lastReminderAt    DateTime?
+  version      Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  lessonProgress LessonProgress[]
+  quizAttempts   QuizAttempt[]
+  certificate    LearningCertificate?
+
+  // one live enrollment per (employee, course, recurrence cycle) — re-assign next year mints a new cycleKey.
+  @@unique([businessId, employeeId, courseId, cycleKey])
+  @@index([businessId, employeeId, status])
+  @@index([businessId, courseId, status])
+  @@index([businessId, status, dueAt]) // overdue/due-soon sweeps
+}
+
+enum EnrollmentStatus {
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+  WAIVED
+  EXPIRED
+}
+
+model LessonProgress {
+  id           String     @id @default(uuid())
+  businessId   String
+  business     Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  enrollmentId String
+  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  lessonId     String
+  lesson       Lesson     @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  status       LessonProgressStatus @default(NOT_STARTED)
+  lastPositionSec Int     @default(0) // VIDEO resume point
+  watchedPct   Int        @default(0)
+  completedAt  DateTime?
+  version      Int        @default(0)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@unique([businessId, enrollmentId, lessonId])
+  @@index([businessId, enrollmentId, status])
+}
+
+enum LessonProgressStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+}
+
+model QuizAttempt {
+  id           String     @id @default(uuid())
+  businessId   String
+  business     Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  enrollmentId String
+  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  quizId       String
+  quiz         Quiz       @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  attemptNo    Int        @default(1)
+  answersJson  Json // { [questionId]: string[] (chosen option ids) }
+  scorePct     Int        @default(0)
+  passed       Boolean    @default(false)
+  submittedAt  DateTime   @default(now())
+  createdAt    DateTime   @default(now())
+
+  @@unique([businessId, enrollmentId, quizId, attemptNo])
+  @@index([businessId, enrollmentId, quizId])
+}
+
+// Thin index row for fast cert lookups (the source of truth is IssuedLetter/F9).
+model LearningCertificate {
+  id                 String   @id @default(uuid())
+  businessId         String
+  business           Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  enrollmentId       String   @unique
+  enrollment         Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  employeeId         String
+  courseId           String
+  issuedLetterId     String // -> IssuedLetter (the real artifact + register)
+  employeeDocumentId String? // -> EmployeeDocument (vault copy)
+  referenceNo        String
+  cycleKey           String?
+  issuedAt           DateTime @default(now())
+
+  @@index([businessId, employeeId])
+  @@index([businessId, courseId])
 }

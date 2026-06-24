@@ -100,6 +100,10 @@ router.use('/recruitment', talent.recruitment);
 router.use('/performance', talent.performance);
 // Feature 8 ESS — employee self-service performance (customer session, self-only).
 router.use('/ess/performance', talent.essPerformance);
+// Feature 37 — LMS (Learning). Operator course-builder + assignment + compliance
+// (canManageLearning / canViewTeamLearning); ESS learner runtime (customer session).
+router.use('/learning', talent.learning);
+router.use('/ess/learning', talent.essLearning);
 
 // Approval-Workflow engine + RBAC/hierarchy admin (Feature 10). Operator session.
 //   /api/hr/approvals  → workflow CRUD/publish/preview (canManageApprovalWorkflows)
