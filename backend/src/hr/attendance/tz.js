@@ -111,8 +111,13 @@ function tzOffsetMs(utcMs, tz) {
 }
 
 /**
- * zonedWallTimeToUtc(dateStr, 'HH:MM', tz) → Date (the UTC instant of that LOCAL
- * wall-clock time on that LOCAL civil date in `tz`).
+ * zonedWallTimeToUtc(dateStr, 'HH:MM[:SS]', tz) → Date (the UTC instant of that
+ * LOCAL wall-clock time on that LOCAL civil date in `tz`).
+ *
+ * Accepts an optional :SS suffix so callers that carry full timestamp precision
+ * (e.g. biometric device punches) resolve to the exact second — two distinct
+ * same-minute events no longer collapse to one instant. Seconds default to 0 when
+ * absent, preserving the prior 'HH:MM' behaviour byte-for-byte.
  *
  * Strategy: guess the UTC ms as if the wall time were UTC, subtract the zone's
  * offset at that guess, then REFINE once (the offset can shift across the guess
@@ -120,16 +125,17 @@ function tzOffsetMs(utcMs, tz) {
  */
 function zonedWallTimeToUtc(dateStr, hhmm, tz) {
   const dm = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateStr));
-  const tmRaw = /^(\d{1,2}):(\d{2})/.exec(String(hhmm == null ? '' : hhmm));
+  const tmRaw = /^(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(String(hhmm == null ? '' : hhmm));
   if (!dm) return null;
   const y = Number(dm[1]);
   const mo = Number(dm[2]) - 1;
   const da = Number(dm[3]);
   const hh = tmRaw ? Number(tmRaw[1]) : 0;
   const mi = tmRaw ? Number(tmRaw[2]) : 0;
-  if (!tz || tz === 'UTC') return new Date(Date.UTC(y, mo, da, hh, mi));
+  const se = tmRaw && tmRaw[3] ? Number(tmRaw[3]) : 0;
+  if (!tz || tz === 'UTC') return new Date(Date.UTC(y, mo, da, hh, mi, se));
 
-  const guess = Date.UTC(y, mo, da, hh, mi);
+  const guess = Date.UTC(y, mo, da, hh, mi, se);
   let utcMs = guess - tzOffsetMs(guess, tz);
   // Refine: re-read the offset at the candidate instant and correct once.
   const off2 = tzOffsetMs(utcMs, tz);

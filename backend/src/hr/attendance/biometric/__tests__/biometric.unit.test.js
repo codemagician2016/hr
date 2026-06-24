@@ -22,6 +22,7 @@ const genericCsv = require('../adapters/genericCsv');
 const { normalizeLocalTime } = require('../adapters/normalizeTime');
 const { resolveDayDirections, mapTrustToken } = require('../direction');
 const { computeDedupKey } = require('../ingest.service');
+const { zonedWallTimeToUtc } = require('../../tz');
 
 let passed = 0; let failed = 0; const fails = [];
 function check(name, cond) { if (cond) { passed += 1; } else { failed += 1; fails.push(name); console.error(`  FAIL  ${name}`); } }
@@ -177,6 +178,64 @@ check('mapTrustToken 4 (OT-in) → IN', mapTrustToken('4') === 'IN');
   check('dedupKey stable for same input', k1 === k2);
   check('dedupKey differs on rawDirection', k1 !== k3);
   check('dedupKey is sha256 hex', /^[0-9a-f]{64}$/.test(k1));
+}
+
+// ── FIX 1 (HIGH): SECONDS threaded into punchAt + dedupKey ───────────────────
+// Two genuine same-minute punches (09:01:10 vs 09:01:55) must resolve to two
+// DISTINCT instants and two DISTINCT dedupKeys — never collapse into one row.
+{
+  // zonedWallTimeToUtc now honours :SS (was HH:MM-only → both rounded to :00).
+  const a = zonedWallTimeToUtc('2026-06-24', '09:01:10', 'Asia/Kolkata');
+  const b = zonedWallTimeToUtc('2026-06-24', '09:01:55', 'Asia/Kolkata');
+  check('punchAt keeps seconds (10s ≠ 55s)', a.getTime() !== b.getTime());
+  check('punchAt :10 → 03:31:10Z (IST)', a.toISOString() === '2026-06-24T03:31:10.000Z');
+  check('punchAt :55 → 03:31:55Z (IST)', b.toISOString() === '2026-06-24T03:31:55.000Z');
+  // HH:MM (no seconds) still resolves to :00 — back-compat byte-for-byte.
+  check('punchAt HH:MM defaults :00', zonedWallTimeToUtc('2026-06-24', '09:01', 'Asia/Kolkata').toISOString() === '2026-06-24T03:31:00.000Z');
+
+  // dedupKey: same minute, different seconds → DIFFERENT keys (no silent collapse).
+  // Even if punchAt were minute-rounded, localTimeRaw alone keeps them distinct.
+  const base = { businessId: 'biz', deviceId: 'dev', deviceCode: '1042', rawDirection: null };
+  const kA = computeDedupKey({ ...base, punchAt: a, localTimeRaw: '2026-06-24 09:01:10' });
+  const kB = computeDedupKey({ ...base, punchAt: b, localTimeRaw: '2026-06-24 09:01:55' });
+  check('dedupKey distinct for same-minute punches', kA !== kB);
+  // localTimeRaw is part of the key: same instant + different raw line ⇒ different key.
+  const kC = computeDedupKey({ ...base, punchAt: a, localTimeRaw: '2026-06-24 09:01:10' });
+  const kD = computeDedupKey({ ...base, punchAt: a, localTimeRaw: '2026-06-24 09:01:11' });
+  check('dedupKey includes localTimeRaw (distinct raw ⇒ distinct key)', kC !== kD);
+  // Omitting localTimeRaw preserves the prior key shape (back-compat).
+  const kLegacy = computeDedupKey({ ...base, punchAt: a, rawDirection: '0' });
+  const kLegacy2 = computeDedupKey({ businessId: 'biz', deviceId: 'dev', deviceCode: '1042', punchAt: a, rawDirection: '0' });
+  check('dedupKey back-compat without localTimeRaw', kLegacy === kLegacy2);
+}
+
+// ── FIX 4a (LOW): date-only localTime is REJECTED (not landed at 00:00) ───────
+{
+  check('norm date-only → null (no 00:00)', normalizeLocalTime('2026-06-24') === null);
+  check('norm date-only DD-MM → null', normalizeLocalTime('24-06-2026') === null);
+  // a real time still normalises (regression guard for the date-only change).
+  check('norm with time still works', normalizeLocalTime('2026-06-24 09:01') === '2026-06-24 09:01:00');
+}
+
+// ── FIX 2/3 (MED): per-event direction mode (multi-device day) ───────────────
+// A TRUST_DEVICE punch keeps its device token even when other events in the day
+// carry a DERIVE device — the resolver no longer applies one device's mode to all.
+{
+  const evs = [
+    { id: 'derive1', punchAtMs: 1000 * 60 * 60 * 9, rawDirection: null, mode: 'DERIVE', dedupWindowSec: 60 },     // 09:00 DERIVE gate
+    { id: 'trustOut', punchAtMs: 1000 * 60 * 60 * 13, rawDirection: '1', mode: 'TRUST_DEVICE', dedupWindowSec: 0 }, // 13:00 TRUST gate, ZK status 1=OUT
+    { id: 'derive2', punchAtMs: 1000 * 60 * 60 * 18, rawDirection: null, mode: 'DERIVE', dedupWindowSec: 60 },     // 18:00 DERIVE gate
+  ];
+  // opts-level mode is DERIVE; the TRUST event must still honour its own token.
+  const r = resolveDayDirections(evs, { mode: 'DERIVE', dedupWindowSec: 60 });
+  const byId = Object.fromEntries(r.map((x) => [x.id, x.punchType]));
+  check('per-event TRUST token honoured in DERIVE day', byId.trustOut === 'OUT');
+  // Back-compat: events with NO per-event mode use the opts mode (existing tests).
+  const r2 = resolveDayDirections(
+    [{ id: 'a', punchAtMs: 100, rawDirection: '1' }, { id: 'b', punchAtMs: 200, rawDirection: '0' }],
+    { mode: 'DERIVE', dedupWindowSec: 0 },
+  );
+  check('opts mode used when event omits mode', r2.map((x) => x.punchType).join(',') === 'IN,OUT');
 }
 
 console.log(`\nbiometric.unit: ${passed} passed, ${failed} failed`);

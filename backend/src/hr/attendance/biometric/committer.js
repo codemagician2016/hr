@@ -59,12 +59,13 @@ async function commitBiometricPunch(tx, job, n, opts) {
   const lt = normalizeLocalTime(n.localTimeRaw) || n.localTimeRaw || '';
   const dm = /^(\d{4})-(\d{2})-(\d{2})/.exec(lt);
   const tmIdx = lt.indexOf(' ');
-  const hhmm = tmIdx >= 0 ? lt.slice(tmIdx + 1).slice(0, 5) : '';
-  let punchAt = dm && hhmm ? zonedWallTimeToUtc(lt.slice(0, 10), hhmm, tz) : null;
+  // FULL precision (HH:MM:SS) so two genuine same-minute punches stay distinct.
+  const hhmmss = tmIdx >= 0 ? lt.slice(tmIdx + 1).slice(0, 8) : '';
+  let punchAt = dm && hhmmss ? zonedWallTimeToUtc(lt.slice(0, 10), hhmmss, tz) : null;
   if (punchAt && device.clockOffsetSec) punchAt = new Date(punchAt.getTime() + device.clockOffsetSec * 1000);
   if (!punchAt || Number.isNaN(punchAt.getTime())) throw new Error(`unparseable timestamp "${n.localTimeRaw}"`);
 
-  const dedupKey = computeDedupKey({ businessId, deviceId: device.id, deviceCode: n.deviceCode, punchAt, rawDirection: n.rawDirection });
+  const dedupKey = computeDedupKey({ businessId, deviceId: device.id, deviceCode: n.deviceCode, punchAt, rawDirection: n.rawDirection, localTimeRaw: lt });
   const employeeId = await resolveEmployeeId(tx, businessId, device, n.deviceCode);
 
   // Locked-day pre-check (parked LOCKED, never written) — only when we can resolve
