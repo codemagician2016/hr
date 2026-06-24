@@ -37,6 +37,7 @@ const {
   computeGratuity,
   // Feature 21 — Labour Welfare Fund
   computeLwf,
+  periodIsPrimaryRun,
   resolveLwf,
   // Feature 22 — Payment of Bonus Act rule resolver
   resolveBonusRule,
@@ -1223,6 +1224,80 @@ const {
   check('L11 resolveLwf MH frequency', 'HALF_YEARLY', r.frequency);
   const up = resolveLwf('UP', '2026-06-30');
   check('L11 resolveLwf UP configured:false', false, up.configured);
+}
+
+// ===========================================================================
+// SECTION L2 — FEATURE 21 LWF RUN-GATING (CONFIRMED FIX): the flat, income-
+//   independent LWF is owed ONCE per deduction period and must ride ONLY the
+//   primary/regular monthly run. An OFF_CYCLE/ARREAR/SUPPLEMENTARY/BONUS/FNF/
+//   CORRECTION run in the SAME month must NOT re-charge the flat EE+ER fee.
+//   Plumbed through compliance compute() via period.runType. Maharashtra HALF_YEARLY
+//   fires Jun/Dec at ₹25 EE / ₹75 ER (docs/features/21 §1.3, pinned in L1 above).
+// ===========================================================================
+
+// --- L12: periodIsPrimaryRun — the pure run-gate predicate.
+{
+  check('L12 REGULAR is primary (LWF-bearing)', true, periodIsPrimaryRun({ runType: 'REGULAR' }));
+  check('L12 MIGRATED is primary (historical regular)', true, periodIsPrimaryRun({ runType: 'MIGRATED' }));
+  check('L12 OFF_CYCLE is NOT primary', false, periodIsPrimaryRun({ runType: 'OFF_CYCLE' }));
+  check('L12 ARREAR is NOT primary', false, periodIsPrimaryRun({ runType: 'ARREAR' }));
+  check('L12 SUPPLEMENTARY is NOT primary', false, periodIsPrimaryRun({ runType: 'SUPPLEMENTARY' }));
+  check('L12 BONUS is NOT primary', false, periodIsPrimaryRun({ runType: 'BONUS' }));
+  check('L12 FNF is NOT primary', false, periodIsPrimaryRun({ runType: 'FNF' }));
+  check('L12 CORRECTION is NOT primary', false, periodIsPrimaryRun({ runType: 'CORRECTION' }));
+  // Back-compat: an UNTAGGED run (no runType) FAILS OPEN to primary so the pure
+  // unit-test path and any legacy caller keep their single-run LWF behaviour.
+  check('L12 untagged run fails open to primary', true, periodIsPrimaryRun({}));
+  check('L12 null period fails open to primary', true, periodIsPrimaryRun(null));
+  check('L12 case-insensitive (off_cycle)', false, periodIsPrimaryRun({ runType: 'off_cycle' }));
+}
+
+// --- L13: full compute() — REGULAR run in a deduction month CHARGES LWF once.
+//   MH, gross ₹19,000 (>15k so EPF caps; ESI latched covered), June (LWF fires).
+{
+  const out = IN.compute({
+    periodGrossMinor: R(19000),
+    basicMinor: R(12000),
+    components: [],
+    ytd: { taxableGrossMinor: 0, tdsDeductedMinor: 0, monthsElapsed: 0, esiLatchedCovered: true },
+    period: { end: '2025-06-30', year: 2025, month: 6, runType: 'REGULAR' },
+    employee: { hasPan: true, gender: 'male' },
+    entity: { stateCode: 'MH', pfApplicable: true, esiApplicable: true },
+  });
+  check('L13 REGULAR June MH charges LWF-EE ₹25', R(25), amt(out.employeeDeductions, 'LWF'));
+  check('L13 REGULAR June MH charges LWF-ER ₹75', R(75), amt(out.employerContributions, 'LWF_ER'));
+}
+
+// --- L14: SAME month, but an OFF_CYCLE run — LWF must NOT fire (no double-charge).
+{
+  for (const rt of ['OFF_CYCLE', 'ARREAR', 'SUPPLEMENTARY', 'BONUS', 'FNF', 'CORRECTION']) {
+    const out = IN.compute({
+      periodGrossMinor: R(19000),
+      basicMinor: R(12000),
+      components: [],
+      ytd: { taxableGrossMinor: 0, tdsDeductedMinor: 0, monthsElapsed: 0, esiLatchedCovered: true },
+      period: { end: '2025-06-30', year: 2025, month: 6, runType: rt },
+      employee: { hasPan: true, gender: 'male' },
+      entity: { stateCode: 'MH', pfApplicable: true, esiApplicable: true },
+    });
+    check(`L14 ${rt} June MH does NOT charge LWF-EE`, null, amt(out.employeeDeductions, 'LWF'));
+    check(`L14 ${rt} June MH does NOT charge LWF-ER`, null, amt(out.employerContributions, 'LWF_ER'));
+  }
+}
+
+// --- L15: untagged run (no runType) STILL charges LWF (fail-open back-compat),
+//   matching every pre-existing E2E compute() assertion that never set runType.
+{
+  const out = IN.compute({
+    periodGrossMinor: R(19000),
+    basicMinor: R(12000),
+    components: [],
+    ytd: { taxableGrossMinor: 0, tdsDeductedMinor: 0, monthsElapsed: 0, esiLatchedCovered: true },
+    period: { end: '2025-06-30', year: 2025, month: 6 }, // NO runType
+    employee: { hasPan: true, gender: 'male' },
+    entity: { stateCode: 'MH', pfApplicable: true, esiApplicable: true },
+  });
+  check('L15 untagged June MH still charges LWF-EE ₹25 (fail-open)', R(25), amt(out.employeeDeductions, 'LWF'));
 }
 
 // ===========================================================================

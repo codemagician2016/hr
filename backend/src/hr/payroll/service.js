@@ -341,6 +341,9 @@ function buildEmployeePayInput(rows) {
     paymentDate: isoDate(period.payDate), // NZ module keys ACC/rates off payment date
     frequency: period.frequency || null,
     fiscalYear: period.taxYear || null,
+    // Feature 21 — PayRun type → compliance LWF once-per-period run-gate (passthrough;
+    // null when untagged → the module fails open and treats the run as primary).
+    runType: period.runType || null,
   };
 
   // ── employee statutory context (flags only; never raw identity numbers) ──
@@ -648,6 +651,11 @@ async function loadRunRowBundles(businessId, payRun, db = prisma) {
         payDate: isoDate(payRun.payDate),
         frequency: null, // filled below from calendar if needed
         taxYear: payRun.taxYear,
+        // Feature 21 — the PayRun type drives the once-per-period LWF run-gate in the
+        // compliance module: the flat LWF rides only the primary/regular monthly run,
+        // never an OFF_CYCLE/ARREAR/SUPPLEMENTARY/BONUS/FNF/CORRECTION run in the same
+        // month (which would double-charge the flat welfare fee).
+        runType: payRun.type,
       },
       ytd: null,
     });
