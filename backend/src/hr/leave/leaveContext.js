@@ -139,6 +139,18 @@ async function loadApplyContext({ businessId, employeeId, leaveTypeId, startDate
     ? await resolvePolicy(employee, leaveTypeId, asOf || new Date(), { tx: db })
     : null;
 
+  // Feature 30 — when availing a COMP_OFF leave, load the employee's ACTIVE comp-off
+  // lots so the validator can enforce the COMP_OFF_WOULD_BE_EXPIRED gate (you can't
+  // avail a credit that lapses before the leave date). Cheap conditional read; null
+  // for every other leave type so the leave engine is untouched.
+  let compOffLots = null;
+  if (leaveType && leaveType.category === 'COMP_OFF') {
+    compOffLots = await db.compOffCredit.findMany({
+      where: { businessId, employeeId, status: 'ACTIVE' },
+      select: { id: true, quantity: true, consumed: true, earnedOn: true, expiresOn: true },
+    });
+  }
+
   return {
     employee,
     leaveType,
@@ -150,6 +162,7 @@ async function loadApplyContext({ businessId, employeeId, leaveTypeId, startDate
     balance,
     periodCode,
     overlapping,
+    compOffLots,
   };
 }
 

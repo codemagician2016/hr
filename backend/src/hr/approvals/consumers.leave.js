@@ -34,6 +34,11 @@ const consumers = require('./consumers');
 // day even if the nightly derive never runs). Lives behind a single guard in the
 // SHARED decision core so BOTH the engine path and the legacy direct path bridge.
 const { stampLeaveAttendanceOnApproval } = require('../leave/leaveToAttendance');
+// Feature 30 — comp-off lot debit. The ONE category-gated seam: on the APPROVED
+// transition of a COMP_OFF leave APPLICATION, after the standard balance move, burn
+// the FIFO comp-off lots so per-credit expiry stays honest. Inert for every other
+// leave type (isCompOffCategory gate). The lot math is pure (compOffLots.js).
+const { isCompOffCategory, debitLotsOnApprove } = require('../leave/compoff/compOffSeam');
 // Cycle 0 — notify the REQUESTER of the decision on a real channel (email/WhatsApp/
 // push) with a deep-link. Fire-and-forget + OUTSIDE the engine tx (the helper uses the
 // default prisma client), so a notify failure can never roll back the balance move.
@@ -102,10 +107,12 @@ async function applyLeaveDecision(tx, { txn, toStatus, fromStatuses, decidedBy, 
 }
 
 // Load the LeaveTransaction APPLICATION row this ApprovalRequest is gating. Tolerant
-// of an already-terminal row (a re-fired/duplicate hook is then a no-op).
+// of an already-terminal row (a re-fired/duplicate hook is then a no-op). Includes the
+// leaveType category so the comp-off seam can gate on it without a second read.
 async function loadTxn(tx, approvalRequest) {
   return tx.leaveTransaction.findFirst({
     where: { id: approvalRequest.entityId, businessId: approvalRequest.businessId, txnType: 'APPLICATION' },
+    include: { leaveType: { select: { category: true } } },
   });
 }
 
@@ -126,6 +133,13 @@ async function onApprove(approvalRequest, tx) {
       };
     },
   });
+  // Feature 30 — the ONE category-gated seam. For a COMP_OFF leave only, after the
+  // standard balance move, debit the FIFO comp-off LOTS (oldest-expiry-first) so the
+  // per-credit expiry ledger stays consistent with the aggregate balance. No-op for
+  // every other leave type.
+  if (txn.leaveType && isCompOffCategory(txn.leaveType.category)) {
+    await debitLotsOnApprove(tx, { businessId: approvalRequest.businessId, employeeId: txn.employeeId, units: heldQty });
+  }
   notify.fanOutApprovalDecided({ businessId: approvalRequest.businessId, request: approvalRequest, outcome: 'APPROVED' }).catch(() => {});
 }
 

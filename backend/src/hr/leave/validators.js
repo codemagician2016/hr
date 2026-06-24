@@ -15,6 +15,8 @@
  */
 
 const { available } = require('./ledger');
+// Feature 30 — comp-off FIFO expiry math (pure). Used only by the COMP_OFF gate below.
+const { earliestExpiryForUnits } = require('./compoff/compOffLots');
 
 function num(v, dflt = 0) {
   const n = v == null ? dflt : Number(v);
@@ -150,6 +152,20 @@ function validateRequest(input = {}) {
     if (startMs <= oe && endMs >= os) {
       errors.push(fail('OVERLAPPING_LEAVE', 'Overlaps an existing leave request', { from: o.startDate, to: o.endDate }));
       break;
+    }
+  }
+
+  // 10. COMP_OFF expiry gate (Feature 30 §4.3). For a comp-off avail, the credits
+  // that FIFO-cover these units must not lapse BEFORE the leave is taken — you can't
+  // spend a credit you'll lose first. Reject when the leave START date is after the
+  // expiry of the last lot needed to cover `units`. (Availing on/before that date is
+  // fine; the lot is still live on the leave day.)
+  if (type.category === 'COMP_OFF' && Array.isArray(input.compOffLots)) {
+    const neededExpiry = earliestExpiryForUnits(input.compOffLots, units);
+    if (neededExpiry != null && startMs > utcDayMs(neededExpiry)) {
+      errors.push(fail('COMP_OFF_WOULD_BE_EXPIRED',
+        'The comp-off credit needed for these days expires before your leave date — apply earlier or for fewer days',
+        { expiresOn: new Date(utcDayMs(neededExpiry)).toISOString().slice(0, 10) }));
     }
   }
 

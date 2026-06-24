@@ -80,6 +80,7 @@ const NAV = [
     children: [
       { href: '/attendance', label: 'Attendance', icon: 'clock' },
       { href: '/leave', label: 'Leave', icon: 'leaf' },
+      { href: '/comp-off', label: 'Comp-off', icon: 'calendar' },
     ],
   },
   {

@@ -153,7 +153,12 @@ async function runCarryForward({ businessId, periodCode, leaveTypeId = null, dry
   const asOf = new Date();
 
   // Only roll balances that have NOT already been carried forward (idempotent set).
-  const where = { businessId, periodCode, carriedForwardAt: null };
+  // Feature 30 — COMP_OFF is EXCLUDED from the period roll: its expiry is PER-CREDIT
+  // (each lot carries its own `expiresOn`, driven by compOffExpiryRunner), not
+  // period-based. Folding a comp-off closing into the next period's opening would
+  // double-count credits against their lots (the §7 reconcile invariant). The lots
+  // survive a period roll on their own clock.
+  const where = { businessId, periodCode, carriedForwardAt: null, leaveType: { is: { category: { not: 'COMP_OFF' } } } };
   if (leaveTypeId) where.leaveTypeId = leaveTypeId;
   const balances = await prisma.leaveBalance.findMany({
     where,
@@ -164,7 +169,7 @@ async function runCarryForward({ businessId, periodCode, leaveTypeId = null, dry
           employmentRecords: { where: { isCurrent: true }, take: 1, select: { entityId: true, departmentId: true, gradeId: true, employmentType: true } },
         },
       },
-      leaveType: { select: { id: true, unit: true } },
+      leaveType: { select: { id: true, unit: true, category: true } },
     },
     take: 10000,
   });

@@ -21,6 +21,10 @@ const { registerProfileChangeConsumer } = require('./consumers.profileChange');
 // TravelRequest.status). Self-registers on load like the others; wired here too so
 // the explicit boot path stays the single source of truth.
 const { registerTravelConsumer } = require('./consumers.travel');
+// FLAG (Feature 30 — shared edit): the COMP_OFF consumer (comp-off EARN approval →
+// finalizeCredit / void). Self-registers on load like the others; wired here too so
+// the explicit boot path stays the single source of truth.
+const { registerCompOffConsumer } = require('./consumers.compOff');
 
 let done = false;
 
@@ -30,6 +34,7 @@ function registerConsumers() {
   registerExpenseConsumer();
   registerProfileChangeConsumer();
   registerTravelConsumer();
+  registerCompOffConsumer();
   done = true;
 }
 
