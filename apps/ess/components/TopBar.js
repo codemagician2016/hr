@@ -30,7 +30,7 @@ const PAGES = [
   { href: '/leave', label: 'Leave', keywords: 'holiday time off balance apply' },
   { href: '/payslips', label: 'Payslips', keywords: 'salary pay slip download' },
   { href: '/compensation', label: 'Compensation', keywords: 'ctc breakup salary' },
-  { href: '/tax', label: 'Tax', keywords: 'declaration regime kiwisaver 80c' },
+  { href: '/tax', label: 'Tax', keywords: 'declaration regime 80c' },
   { href: '/documents', label: 'Documents', keywords: 'files upload' },
   { href: '/letters', label: 'My Letters', keywords: 'letter request hr' },
   { href: '/performance', label: 'Performance', keywords: 'goals review okr' },

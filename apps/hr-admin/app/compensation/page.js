@@ -205,9 +205,9 @@ function StructuresTab({ canManage }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  // countryCode/currencyCode are DERIVED from the chosen entity — never typed and
-  // never hardcoded to India. An NZ entity yields NZ + NZD, so the India 50% wage
-  // rule is gated off for NZ structures (the engine keys the rule on countryCode).
+  // countryCode/currencyCode are DERIVED from the chosen entity — never typed.
+  // An India entity yields IN + INR, so the India Code-on-Wages 50% rule applies
+  // (the engine keys the rule on countryCode).
   const [draft, setDraft] = useState({ name: '', code: '', entityId: '', countryCode: '', currencyCode: '', basis: 'CTC' });
   // Live preview: a target CTC + the structure's lines → /structures/preview.
   const [previewCtc, setPreviewCtc] = useState('1200000');
@@ -361,7 +361,7 @@ function StructuresTab({ canManage }) {
         <TextInput label={<>Name <InfoTip text="A salary structure is a reusable template of pay components (Basic, HRA…) that you apply to employees. This is its name." /></>} value={draft.name} onChange={(v) => setDraft((d) => ({ ...d, name: v }))} required />
         <TextInput label={<>Code <InfoTip text="A short unique key for this structure, used when assigning it to employees." /></>} value={draft.code} onChange={(v) => setDraft((d) => ({ ...d, code: v }))} required />
         {/* Entity drives the market: countryCode + currency are derived from it,
-            not typed, so an NZ entity can never be saved as an India structure. */}
+            not typed — an India entity yields an India (INR) structure. */}
         <label className="block text-sm">
           <span className="flex items-center text-gray-700 font-medium">Entity<InfoTip text="The legal entity this structure belongs to. The country and pay currency are taken from the entity automatically — you don't pick them." /></span>
           <select

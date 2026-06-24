@@ -130,7 +130,6 @@ function RichProfileSection({ employeeId }) {
                   <Field label="Account name" value={data.bank.accountName} />
                   <Field label="Account number" value={data.bank.accountNumber} />
                   <Field label="IFSC" value={data.bank.ifsc} />
-                  <Field label="NZ account" value={data.bank.nzBankAccount} />
                   <Field label="Bank" value={data.bank.bankName} />
                 </dl>
               </div>
@@ -142,7 +141,6 @@ function RichProfileSection({ employeeId }) {
                 <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
                   <Field label="PAN" value={data.statutory.pan} />
                   <Field label="UAN" value={data.statutory.uan} />
-                  <Field label="IRD number" value={data.statutory.irdNumber} />
                   <Field label="Aadhaar verified" value={data.statutory.aadhaarVerified ? 'Yes' : 'No'} />
                 </dl>
               </div>
