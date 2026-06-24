@@ -91,8 +91,12 @@ async function resolveTenantCountry(req, res, next) {
         offendingEntities: offCountry,
       });
     }
-    const updated = await prisma.business.update({
-      where: { id },
+    // Atomic break-glass: gate the write on hrCountryAmbiguous=true in the WHERE
+    // so two concurrent resolves can't both pass the read-side check above and
+    // double-stamp. Exactly one racer's update affects a row; the loser sees
+    // count 0 → 409 (already resolved / no longer ambiguous).
+    const { count } = await prisma.business.updateMany({
+      where: { id, hrCountryAmbiguous: true },
       data: {
         hrCountry: country,
         hrCurrency: payCurrencyFor(country),
@@ -100,6 +104,12 @@ async function resolveTenantCountry(req, res, next) {
         hrCountryAmbiguous: false,
         region: country,
       },
+    });
+    if (count === 0) {
+      return res.status(409).json({ message: 'Tenant is not ambiguous; country is immutable', code: 'NOT_AMBIGUOUS' });
+    }
+    const updated = await prisma.business.findUnique({
+      where: { id },
       select: { id: true, hrCountry: true, hrCurrency: true, hrCountrySetAt: true, hrCountryAmbiguous: true },
     });
     return res.json({ resolved: true, ...updated });

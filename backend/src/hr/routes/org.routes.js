@@ -52,7 +52,10 @@ mountResource('entities', org.entities, [
 mountResource('locations', org.locations, [assertTenantCountryWrite('body.countryCode')]);
 mountResource('departments', org.departments);
 mountResource('designations', org.designations);
-mountResource('grades', org.grades);
+// Grade carries a salary-band currencyCode → must equal the tenant currency
+// (absent → stamped; off-currency → 422), mirroring entities/structures. Without
+// this an IN tenant could persist an NZD-denominated band (F14 MED finding).
+mountResource('grades', org.grades, [assertTenantCurrencyWrite('body.currencyCode')]);
 mountResource('bands', org.bands);
 
 module.exports = router;

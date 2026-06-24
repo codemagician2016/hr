@@ -283,25 +283,39 @@ async function main() {
 
     /* ──────────────────────────────────────────────────────────────────────
        §7.4 — holiday import (NZ mondayisation + idempotency)
+       FLAG (F14 single-country shared-test edit): importHolidays now pins the
+       statutory set to the TENANT country, so the NZ set can no longer be
+       imported under the IN demo tenant. To keep exercising NZ mondayisation +
+       idempotency we drive the import against a throwaway NZ-STAMPED tenant
+       (hrCountry='NZ'). NZ isn't registrable at setup, but a stamped row reads
+       straight through loadHrCountry, which is what the import resolves off.
        ────────────────────────────────────────────────────────────────────── */
     log('§7.4 — NZ holiday import (mondayisation + idempotency):');
     {
-      const impReq = { user: opAdmin, body: { countryCode: 'NZ', year: 2027 } };
-      const impRes = await callController(holidays.importHolidays, impReq);
-      assert(impRes.statusCode === 201 && impRes.body.created > 0, 'NZ import → 201 with created rows');
-
-      // ANZAC Day 2027 is Sunday Apr 25 → observed Monday Apr 26 row must exist.
-      const observed = await prisma.holiday.findFirst({
-        where: { businessId, name: 'ANZAC Day (observed)', date: day('2027-04-26') },
+      const nzBiz = await prisma.business.create({
+        data: { name: 'F2 NZ import', slug: `${PREFIX}-NZ-${Date.now()}`, hrCountry: 'NZ', hrCurrency: 'NZD', hrCountrySetAt: new Date() },
       });
-      assert(!!observed, 'NZ mondayisation: ANZAC Day (observed) lands on Mon 2027-04-26');
+      try {
+        const nzAdmin = { ...opAdmin, businessId: nzBiz.id };
+        const impReq = { user: nzAdmin, body: { countryCode: 'NZ', year: 2027 } };
+        const impRes = await callController(holidays.importHolidays, impReq);
+        assert(impRes.statusCode === 201 && impRes.body.created > 0, 'NZ import (NZ tenant) → 201 with created rows');
 
-      // Re-import is idempotent: no new rows created the second time.
-      const before = await prisma.holiday.count({ where: { businessId, countryCode: 'NZ', date: { gte: day('2027-01-01'), lt: day('2028-01-01') } } });
-      const imp2 = await callController(holidays.importHolidays, { user: opAdmin, body: { countryCode: 'NZ', year: 2027 } });
-      const after = await prisma.holiday.count({ where: { businessId, countryCode: 'NZ', date: { gte: day('2027-01-01'), lt: day('2028-01-01') } } });
-      assert(imp2.body.created === 0 && before === after, 'NZ re-import idempotent (0 new rows)');
-      // (Imported rows are cleared by the broad NZ/IN cleanup at teardown.)
+        // ANZAC Day 2027 is Sunday Apr 25 → observed Monday Apr 26 row must exist.
+        const observed = await prisma.holiday.findFirst({
+          where: { businessId: nzBiz.id, name: 'ANZAC Day (observed)', date: day('2027-04-26') },
+        });
+        assert(!!observed, 'NZ mondayisation: ANZAC Day (observed) lands on Mon 2027-04-26');
+
+        // Re-import is idempotent: no new rows created the second time.
+        const before = await prisma.holiday.count({ where: { businessId: nzBiz.id, countryCode: 'NZ', date: { gte: day('2027-01-01'), lt: day('2028-01-01') } } });
+        const imp2 = await callController(holidays.importHolidays, { user: nzAdmin, body: { countryCode: 'NZ', year: 2027 } });
+        const after = await prisma.holiday.count({ where: { businessId: nzBiz.id, countryCode: 'NZ', date: { gte: day('2027-01-01'), lt: day('2028-01-01') } } });
+        assert(imp2.body.created === 0 && before === after, 'NZ re-import idempotent (0 new rows)');
+      } finally {
+        await prisma.holiday.deleteMany({ where: { businessId: nzBiz.id } });
+        await prisma.business.delete({ where: { id: nzBiz.id } });
+      }
     }
 
     /* ──────────────────────────────────────────────────────────────────────

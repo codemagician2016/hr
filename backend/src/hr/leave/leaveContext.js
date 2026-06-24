@@ -14,6 +14,11 @@ const prisma = require('../../core/lib/prisma');
 const { resolveSchedule } = require('../attendance/derive');
 const { resolvePolicy } = require('./policyResolver');
 const { fyPeriodCode } = require('./periodCode');
+// Feature 14 — single-country: the leave proration engine must consume ONLY the
+// tenant-country holiday calendar. Without this an off-country Holiday row would
+// feed leave debit/credit and downstream pay (invariant 1 + 6). Fail-closed:
+// a tenant with no/ambiguous hrCountry throws (propagates to the caller's 409).
+const { tenantCountry } = require('../tenant/countryContext');
 
 function utcDay(d) {
   const x = d instanceof Date ? d : new Date(d);
@@ -79,6 +84,11 @@ async function loadApplyContext({ businessId, employeeId, leaveTypeId, startDate
     where: { id: leaveTypeId, businessId, deletedAt: null },
   });
 
+  // F14 tripwire: pin the holiday read to the tenant country so the proration
+  // engine can never consume an off-country row (import hole / bad backfill /
+  // legacy data). Resolved once; fail-closed if the tenant country is unset.
+  const holidayCountry = await tenantCountry(businessId);
+
   // Effective shift for the window's first day → its weeklyOffDays drive netting.
   const defaultPatternWhere = employee.entityId
     ? { OR: [{ entityId: employee.entityId }, { entityId: null }] }
@@ -93,7 +103,7 @@ async function loadApplyContext({ businessId, employeeId, leaveTypeId, startDate
       where: { businessId, deletedAt: null, isActive: true, ...defaultPatternWhere },
       orderBy: { createdAt: 'asc' },
     }),
-    db.holiday.findMany({ where: { businessId, date: { gte: winStart, lte: winEnd } } }),
+    db.holiday.findMany({ where: { businessId, countryCode: holidayCountry, date: { gte: winStart, lte: winEnd } } }),
     // Period-scoped balance for the request's period (finding #2).
     db.leaveBalance.findFirst({
       where: { businessId, employeeId, leaveTypeId, periodCode },

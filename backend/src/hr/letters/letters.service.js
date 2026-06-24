@@ -476,18 +476,27 @@ async function issueLetter(client, args = {}) {
   // Feature 14 — the letter locale follows the TENANT country's capabilities (the
   // single source of truth), so an IN tenant never renders an en-NZ letter. When
   // the tenant country IS set the entity's countryCode is asserted to match it
-  // (tripwire). The locale is presentation-only, so a pre-setup tenant (hrCountry
-  // not yet set) falls back to the entity country / en-IN rather than blocking
-  // issuance (fail-SOFT here — letters are not a country security boundary).
+  // (tripwire). The locale is presentation-only, so a PRE-SETUP tenant (hrCountry
+  // not yet set — legitimately mid-onboarding) falls back to the entity country /
+  // en-IN rather than blocking issuance (fail-SOFT — letters are not a country
+  // security boundary).
+  //
+  // An AMBIGUOUS (hrCountryAmbiguous=true) tenant is DIFFERENT: it is quarantined
+  // pending super-admin review, and loadHrCountry blocks every other HR surface
+  // for it. Falling back to a per-row entity countryCode would let a quarantined
+  // tenant issue a letter in the OTHER country's locale — the exact fail-open
+  // F14 set out to delete. So we fail-CLOSED for ambiguous (rethrow → 409),
+  // keeping the soft fallback only for the pre-setup case.
   let tCountry = null;
   try {
     tCountry = await tenantCountry(businessId);
     if (ctx.entity && ctx.entity.countryCode) await assertCountry(businessId, ctx.entity.countryCode);
   } catch (e) {
-    if (e && (e.code === 'HR_NOT_SET_UP' || e.code === 'HR_COUNTRY_AMBIGUOUS')) {
+    if (e && e.code === 'HR_NOT_SET_UP') {
       tCountry = (ctx.entity && ctx.entity.countryCode) || 'IN';
     } else {
-      throw e; // a real COUNTRY_MISMATCH (off-country entity under a set-up tenant) still fails closed
+      // HR_COUNTRY_AMBIGUOUS (quarantined) and a real COUNTRY_MISMATCH both fail closed.
+      throw e;
     }
   }
   const caps = countryCapabilities(tCountry);
