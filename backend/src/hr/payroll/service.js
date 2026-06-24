@@ -554,16 +554,37 @@ async function loadRunRowBundles(businessId, payRun, db = prisma) {
 
   const periodEnd = isoDate(payRun.periodEnd);
 
-  // Active employees with a CURRENT employment record in this entity.
-  const employments = await db.employmentRecord.findMany({
-    where: { businessId, entityId: payRun.entityId, isCurrent: true },
-    select: { employeeId: true },
-  });
+  // SHARED-FILE EDIT (F18 #3 — flagged): a MIGRATED run pays an imported HISTORICAL
+  // period, so it must scope by the EMPLOYMENT WINDOW (an employment record whose
+  // [effectiveFrom, effectiveTo] overlaps periodStart..periodEnd), NOT the live
+  // `isCurrent:true` + `isActive:true` filter. Otherwise a back-dated payslip for an
+  // employee SINCE terminated (isActive=false) silently yields NO PayRunLine — the
+  // imported worker loses their own historical payslip with no error. A LIVE run keeps
+  // the unchanged current-active scoping. (Hard-deleted employees stay excluded.)
+  const isMigrated = payRun.type === 'MIGRATED';
+  const employments = isMigrated
+    ? await db.employmentRecord.findMany({
+      where: {
+        businessId,
+        entityId: payRun.entityId,
+        effectiveFrom: { lte: payRun.periodEnd },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gte: payRun.periodStart } }],
+      },
+      select: { employeeId: true },
+    })
+    : await db.employmentRecord.findMany({
+      where: { businessId, entityId: payRun.entityId, isCurrent: true },
+      select: { employeeId: true },
+    });
   const employeeIds = [...new Set(employments.map((e) => e.employeeId))];
   if (employeeIds.length === 0) return { entity, bundles: [] };
 
   const employees = await db.employee.findMany({
-    where: { id: { in: employeeIds }, businessId, isActive: true, deletedAt: null },
+    // MIGRATED runs do NOT require isActive (a since-terminated employee still owns
+    // their historical payslip); LIVE runs keep the active-only filter.
+    where: isMigrated
+      ? { id: { in: employeeIds }, businessId, deletedAt: null }
+      : { id: { in: employeeIds }, businessId, isActive: true, deletedAt: null },
     include: { statutoryProfile: true },
   });
 

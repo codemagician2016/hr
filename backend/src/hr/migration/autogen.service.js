@@ -286,6 +286,23 @@ async function generatePayrollForPeriod({ businessId, actorId, job, periodMonth,
     const line = (detail.lines || []).find((l) => l.employeeId === emp.id);
     const netPay = line ? Number(line.netPay) : null;
     const mismatches = [];
+
+    // SURFACE GUARD (F18 #3 — defense-in-depth) — an allowed/imported employee that
+    // produced NO PayRunLine must NEVER be silently dropped (netPay:null with no
+    // finding). The employment-window MIGRATED compute (payroll/service.js
+    // loadRunRowBundles) now pays since-terminated employees, but a line can still be
+    // absent for other reasons (no compensation effective in-period, etc.). Emit an
+    // explicit row-level finding so the absence is always visible, unless an earlier
+    // pre-condition finding (NO_CTC / NO_EMPLOYEE) already explains it for this code.
+    if (!line) {
+      const alreadyFlagged = findings.some((f) => f.employeeCode === n.employeeCode
+        && (f.code === 'NO_CTC' || f.code === 'NO_EMPLOYEE'));
+      if (!alreadyFlagged) {
+        const noLine = { code: 'NO_LINE_GENERATED', employeeCode: n.employeeCode, periodMonth, severity: 'ERROR', message: `no payslip line was generated for ${n.employeeCode} on ${periodMonth} (imported employee produced no PayRunLine — not silently skipped)` };
+        findings.push(noLine);
+        mismatches.push(noLine);
+      }
+    }
     if (n.mode === 'RECONCILE' && n.prior && line) {
       const tol = (job.optionsJson && job.optionsJson.tolerance) != null ? Number(job.optionsJson.tolerance) : 1;
       const cmp = [['net', n.prior.net, line.netPay], ['gross', n.prior.gross, line.grossEarnings], ['pf', n.prior.pf, line.pfEmployee], ['pt', n.prior.pt, line.pt], ['tds', n.prior.tds, line.tds]];
@@ -299,7 +316,11 @@ async function generatePayrollForPeriod({ businessId, actorId, job, periodMonth,
     }
     employees.push({ code: n.employeeCode, netPay, ...(mismatches.length ? { mismatches } : {}) });
     // Persist mismatch findings to the import row (so the report shows them).
-    if (mismatches.length && !dryRunTx) {
+    // PREVIEW-AWARE: a dry-run passes `preview:true` (NOT dryRunTx) and must persist
+    // NOTHING — this importRow.update is a REAL write that survives the unwind (which
+    // only deletes PayRun/Payslip/Line/AttendancePayInput). Guard on !preview so
+    // reconcile findings land ONLY on the real commit pass.
+    if (mismatches.length && !dryRunTx && !preview) {
       const existing = (await prisma.importRow.findUnique({ where: { id: requests.find((q) => q.n.employeeCode === n.employeeCode).row.id } }));
       const merged = (existing.findingsJson || []).concat(mismatches);
       await prisma.importRow.update({ where: { id: existing.id }, data: { findingsJson: merged } });
