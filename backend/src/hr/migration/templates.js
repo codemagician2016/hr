@@ -20,7 +20,12 @@
 
 const { toCsv } = require('./parsers/csv');
 
-const KINDS = ['EMPLOYEE', 'COMPENSATION', 'ATTENDANCE', 'PAYROLL_HISTORY', 'REIMBURSEMENT'];
+// FLAG (Feature 28 — shared edit): add the BIOMETRIC import kind. It reuses the F18
+// machinery end-to-end (upload→map→validate→dry-run→commit→report); a BIOMETRIC job
+// requires options.deviceId (the device pins vendor/adapter/TZ/location). Its
+// committer (commitBiometricPunch) lands raw device punches + a post-commit pass
+// recomputes — see backend/src/hr/attendance/biometric/committer.js.
+const KINDS = ['EMPLOYEE', 'COMPENSATION', 'ATTENDANCE', 'PAYROLL_HISTORY', 'REIMBURSEMENT', 'BIOMETRIC'];
 
 const TEMPLATES = Object.freeze({
   EMPLOYEE: {
@@ -103,6 +108,18 @@ const TEMPLATES = Object.freeze({
       { name: 'description', required: false, type: 'string', rule: 'Free text.', example: 'Client lunch' },
       { name: 'paymentRef', required: false, type: 'string', rule: 'Legacy payout reference (for REIMBURSED).', example: '' },
       { name: 'reimbursedAt', required: false, type: 'date', rule: 'Settlement date (for REIMBURSED).', example: '' },
+    ],
+  },
+  // Feature 28 — device punch import (eSSL/ZKTeco/Matrix/... export → AttendancePunch).
+  // The operator picks a DEVICE (options.deviceId) first, so vendor/TZ/location resolve;
+  // the file is the device's export. Direction is OPTIONAL — most India devices don't
+  // record it reliably, so the device's directionMode (default DERIVE) decides IN/OUT.
+  BIOMETRIC: {
+    naturalKeyHint: 'deviceCode + localTime (+ direction) — the dedupKey spine',
+    fields: [
+      { name: 'deviceCode', required: true, type: 'string', rule: 'Enroll-no / PIN as the device reports it. Maps to an employee via DeviceEmployeeMap (or Employee.code fallback).', example: '1042' },
+      { name: 'localTime', required: true, type: 'datetime', rule: 'Device LOCAL wall-clock (YYYY-MM-DD HH:MM:SS). Resolved to UTC in the device location TZ — never the server TZ.', example: '2026-06-24 09:01:33' },
+      { name: 'direction', required: false, type: 'string', rule: 'Optional device IN/OUT token (IN|OUT|0|1|C/In…). Honoured only when the device is in TRUST_DEVICE mode; otherwise ignored (DERIVE by punch order).', example: '' },
     ],
   },
 });

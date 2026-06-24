@@ -1250,6 +1250,43 @@ function initScheduler() {
     }
   });
 
+  // FLAG (Feature 28 — shared edit): Biometric ingestion. Two ticks, both with the
+  // standard in-process overlap guard (a slow tenant loop must never overlap the next
+  // tick). (1) SFTP/folder POLL every 10 min — pulls new device export files since
+  // each device's pollCursor and ingests them through the SAME adapter→RawPunchEvent→
+  // recompute path (idempotent by dedupKey). (2) Stale-device WATCHDOG every 15 min —
+  // alerts canManageAttendance ops when a device goes silent past expectedSilenceMin.
+  // Tenant-isolated, per-device failures skipped, engine UNTOUCHED (only recompute).
+  let biometricPollRunning = false;
+  cron.schedule('*/10 * * * *', async () => {
+    if (biometricPollRunning) { console.log('[Scheduler] biometric poll still running — skipping tick'); return; }
+    biometricPollRunning = true;
+    try {
+      const { runPoll } = require('../../hr/attendance/biometric/poll.runner');
+      const r = await runPoll({ now: new Date() });
+      if (r.files > 0 || r.errors > 0) console.log(`[Scheduler] biometric poll: ${JSON.stringify(r)}`);
+    } catch (err) {
+      console.error('[Scheduler] biometric poll failed:', err.message);
+    } finally {
+      biometricPollRunning = false;
+    }
+  });
+
+  let biometricWatchdogRunning = false;
+  cron.schedule('*/15 * * * *', async () => {
+    if (biometricWatchdogRunning) { console.log('[Scheduler] biometric watchdog still running — skipping tick'); return; }
+    biometricWatchdogRunning = true;
+    try {
+      const { runDeviceWatchdog } = require('../../hr/attendance/biometric/watchdog.runner');
+      const r = await runDeviceWatchdog({ now: new Date() });
+      if (r.alerts > 0 || r.errors > 0) console.log(`[Scheduler] biometric watchdog: ${JSON.stringify(r)}`);
+    } catch (err) {
+      console.error('[Scheduler] biometric watchdog failed:', err.message);
+    } finally {
+      biometricWatchdogRunning = false;
+    }
+  });
+
   // HR Statutory Compliance (Feature 23) — daily 07:00 UTC (≈12:30 IST). One block,
   // three steps: (1) generate upcoming obligation stubs from each tenant's active
   // ComplianceObligation × StatutoryRegistration, (2) advance PENDING→DUE / →OVERDUE,

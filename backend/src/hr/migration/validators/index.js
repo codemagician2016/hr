@@ -215,12 +215,42 @@ function validateReimbursement(row, ctx) {
   return done(f, normalized, naturalKey);
 }
 
+// ── BIOMETRIC (Feature 28) ────────────────────────────────────────────────────
+// Device punch rows. ONLY structural validity is enforced here (deviceCode present;
+// localTime parseable to a YYYY-MM-DD[ HH:MM[:SS]] wall-clock). An UNKNOWN device
+// code is NOT an error: it lands as a parked UNMAPPED RawPunchEvent the operator maps
+// + reprocesses (§6.4), so we do not consult ctx.employeeCodes (the device code ≠
+// Employee.code in the common case — it resolves via DeviceEmployeeMap downstream).
+const BIO_TIME_RE = /^\d{4}-\d{2}-\d{2}([ T]\d{1,2}:\d{2}(:\d{2})?(\s*[AP]M)?)?$/i;
+const BIO_DDMM_RE = /^\d{1,2}[-/.]\d{1,2}[-/.]\d{4}([ T]\d{1,2}:\d{2}(:\d{2})?(\s*[AP]M)?)?$/i;
+function validateBiometric(row, _ctx) {
+  const f = [];
+  const deviceCode = row.deviceCode != null ? String(row.deviceCode).trim() : null;
+  if (isBlank(deviceCode)) f.push(finding('REQUIRED', 'ERROR', 'deviceCode is required', 'deviceCode'));
+
+  const localTime = row.localTime != null ? String(row.localTime).trim() : null;
+  if (isBlank(localTime)) {
+    f.push(finding('REQUIRED', 'ERROR', 'localTime is required', 'localTime'));
+  } else if (!BIO_TIME_RE.test(localTime) && !BIO_DDMM_RE.test(localTime)) {
+    f.push(finding('BAD_DATETIME', 'ERROR', `localTime "${localTime}" must be YYYY-MM-DD HH:MM[:SS] (or DD-MM-YYYY)`, 'localTime'));
+  }
+
+  const direction = row.direction != null ? String(row.direction).trim() : null;
+  // dedupKey natural key (per-file de-dup): code|time|direction. The DB @@unique on
+  // (businessId, dedupKey) is the authoritative cross-batch guard; this just catches
+  // an exact duplicate line WITHIN the file.
+  const naturalKey = (deviceCode && localTime) ? `${deviceCode}|${localTime}|${direction || ''}` : null;
+  const normalized = { deviceCode, localTimeRaw: localTime, rawDirection: direction || null, rawPayload: { ...row } };
+  return done(f, normalized, naturalKey);
+}
+
 const VALIDATORS = {
   EMPLOYEE: validateEmployee,
   COMPENSATION: validateCompensation,
   ATTENDANCE: validateAttendance,
   PAYROLL_HISTORY: validatePayrollHistory,
   REIMBURSEMENT: validateReimbursement,
+  BIOMETRIC: validateBiometric,
 };
 
 function validateRow(kind, row, ctx) {

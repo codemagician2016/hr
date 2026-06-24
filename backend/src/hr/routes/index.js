@@ -31,6 +31,13 @@ router.use('/leave', require('./leave.routes'));
 // approve/void + ops run triggers). AVAIL stays on /leave (the engine-routed path).
 router.use('/comp-off', require('./compOff.routes'));
 router.use('/attendance', require('./attendance.routes'));
+// FLAG (Feature 28 — NEW mount): Biometric / device punch ingestion operator API —
+// device registry, device-code→employee mapping, raw-event triage, reprocess +
+// manual correction. canManageAttendance-gated. The device-facing PUSH ingest
+// webhook (POST /api/hr/biometric/ingest/:serial) is device-secret-authed and
+// mounted at app root in src/index.js (before express.json()); the file-import door
+// reuses the F18 /imports endpoints with kind=BIOMETRIC.
+router.use('/biometric', require('./biometric.routes'));
 router.use('/compensation', require('./compensation.routes'));
 // FLAG (Feature 17 — NEW mount): the friendly CTC-policy builder (reusable,
 // CTC-agnostic salary templates) + a pure preview (compile → deriveBreakup →

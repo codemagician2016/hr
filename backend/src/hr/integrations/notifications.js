@@ -70,6 +70,9 @@ const HR_EVENT_TEMPLATES = Object.freeze({
   'leave-encash.approved':  'HR_LEAVE_ENCASH_APPROVED',  // → employee on approval (days + amount)
   'leave-encash.rejected':  'HR_LEAVE_ENCASH_REJECTED',  // → employee on rejection
   'leave-encash.paid':      'HR_LEAVE_ENCASH_PAID',       // → employee when the payout rides a payslip
+  // Feature 28 — Biometric ingestion watchdog fan-out (→ canManageAttendance ops).
+  'biometric.device_silent': 'HR_BIOMETRIC_DEVICE_SILENT', // a registered device went quiet past expectedSilenceMin
+  'biometric.high_unmapped': 'HR_BIOMETRIC_HIGH_UNMAPPED', // a batch parked >X% UNMAPPED (likely re-numbering / new joiner)
 });
 
 // HR template registry. vertical: 'HR' so listTemplates({vertical:'HR'}) scopes
@@ -383,6 +386,25 @@ const HR_TEMPLATES = Object.freeze([
     body: 'Hi {NAME}, {AMT} leave encashment was paid in your {PERIOD} payslip (taxable as salary; Section 89 relief may apply). View: {LINK} — {BIZ}',
     variables: ['NAME', 'AMT', 'PERIOD', 'LINK', 'BIZ'],
     channels: { sms: true, whatsapp: true, email: true },
+  },
+  // ─── Feature 28 — Biometric ingestion watchdog ───
+  {
+    key: 'HR_BIOMETRIC_DEVICE_SILENT',
+    displayName: 'Biometric device silent',
+    category: 'SERVICE',
+    vertical: 'HR',
+    body: '{BIZ}: biometric device {DEVICE} ({SITE}) has sent no punches for {MINUTES} min (last seen {LASTSEEN}). Check the terminal: {LINK}',
+    variables: ['BIZ', 'DEVICE', 'SITE', 'MINUTES', 'LASTSEEN', 'LINK'],
+    channels: { sms: true, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_BIOMETRIC_HIGH_UNMAPPED',
+    displayName: 'Biometric high unmapped rate',
+    category: 'SERVICE',
+    vertical: 'HR',
+    body: '{BIZ}: {PCT}% of a punch batch from {DEVICE} ({COUNT} rows) had no employee mapping. Map the codes + reprocess: {LINK}',
+    variables: ['BIZ', 'DEVICE', 'PCT', 'COUNT', 'LINK'],
+    channels: { sms: false, whatsapp: true, email: true },
   },
 ]);
 
