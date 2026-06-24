@@ -79,10 +79,19 @@ async function main() {
   const sa = require('../../../superadmin/controllers/tenantCountry.controller');
   const { assertTenantCurrencyWrite } = require('../assertTenantCountry.middleware');
   const lettersSvc = require('../../letters/letters.service');
+  const { recompute } = require('../../attendance/service');
+  const meAttendance = require('../../controllers/meAttendance.controller');
 
   async function cleanup() {
     const bs = await prisma.business.findMany({ where: { slug: { startsWith: PREFIX } }, select: { id: true } });
     for (const b of bs) {
+      await prisma.attendancePayInput.deleteMany({ where: { businessId: b.id } }).catch(() => {});
+      await prisma.attendance.deleteMany({ where: { businessId: b.id } }).catch(() => {});
+      await prisma.attendancePunch.deleteMany({ where: { businessId: b.id } }).catch(() => {});
+      await prisma.attendanceRegularizationRequest.deleteMany({ where: { businessId: b.id } }).catch(() => {});
+      await prisma.shiftAssignment.deleteMany({ where: { businessId: b.id } }).catch(() => {});
+      await prisma.shiftPattern.deleteMany({ where: { businessId: b.id } }).catch(() => {});
+      await prisma.overtimeRule.deleteMany({ where: { businessId: b.id } }).catch(() => {});
       await prisma.holiday.deleteMany({ where: { businessId: b.id } });
       await prisma.leaveTransaction.deleteMany({ where: { businessId: b.id } }).catch(() => {});
       await prisma.leaveBalance.deleteMany({ where: { businessId: b.id } }).catch(() => {});
@@ -90,6 +99,7 @@ async function main() {
       await prisma.employmentRecord.deleteMany({ where: { businessId: b.id } }).catch(() => {});
       await prisma.employee.deleteMany({ where: { businessId: b.id } }).catch(() => {});
       await prisma.grade.deleteMany({ where: { businessId: b.id } }).catch(() => {});
+      await prisma.entity.deleteMany({ where: { businessId: b.id } }).catch(() => {});
     }
     await prisma.business.deleteMany({ where: { slug: { startsWith: PREFIX } } });
   }
@@ -257,6 +267,120 @@ async function main() {
         check('tenantCountry(ambiguous) throws HR_COUNTRY_AMBIGUOUS (letters rethrow → no NZ fallback)', code === 'HR_COUNTRY_AMBIGUOUS');
       }
       void nzEntity;
+    }
+
+    /* ─────────────────────────────────────────────────────────────────────
+       6) MED — the ATTENDANCE/pay holiday path is country-pinned (F14 round 2)
+       Two holes the first F14 fix missed (it closed the operator holidays
+       controller + leaveContext but NOT the attendance/pay path):
+         (a) recompute()'s holiday read had no countryCode filter → an off-country
+             (NZ) row would mark an IN working day HOLIDAY_WORKED, altering
+             status / overtimeMinutes / lopFraction and persisting holidayId.
+         (b) ESS GET /me/attendance/holidays filtered by the per-row employee/
+             entity countryCode (fail-OPEN) → when that is null, ALL rows incl.
+             off-country are shown. Now pinned to the TENANT country fail-closed.
+       ───────────────────────────────────────────────────────────────────── */
+    log('\n=== 6) MED — attendance derive/pay + ESS holiday list are country-pinned ===');
+    {
+      // Fresh IN tenant with an IN entity (Asia/Kolkata) so tz + employment resolve.
+      const attBiz = await prisma.business.create({
+        data: { name: 'F14SC ATT', slug: `${PREFIX}-att`, hrCountry: 'IN', hrCurrency: 'INR', hrCountrySetAt: new Date() },
+      });
+      const inEntity = await prisma.entity.create({
+        data: { businessId: attBiz.id, code: `${PREFIX}-INE`, legalName: 'IN Co', countryCode: 'IN', payCurrency: 'INR', timezone: 'Asia/Kolkata', activeFrom: new Date('2020-01-01') },
+      });
+
+      // 2027-06-03 is a Thursday (a normal working day, not Sat/Sun weekly-off).
+      const day = (s) => new Date(`${s}T00:00:00Z`);
+      const WORKDAY = '2027-06-03';
+
+      // Plant an OFF-COUNTRY (NZ) holiday ON that working day, global scope
+      // (entityId/locationId null) so isHoliday() would match ANY employee if the
+      // read weren't country-filtered. This simulates a bad backfill / legacy row.
+      await prisma.holiday.create({
+        data: {
+          businessId: attBiz.id, entityId: null, locationId: null,
+          date: day(WORKDAY), name: 'NZ Off-Country Day', type: 'PUBLIC',
+          countryCode: 'NZ', isPaid: true, isRestricted: false, scopeKey: '*:*',
+        },
+      });
+
+      // An employee on the IN entity with a known workEmail (drives ESS resolution).
+      const empEmail = `att-emp-${Date.now()}@f14sc.test`;
+      const emp = await prisma.employee.create({
+        data: { businessId: attBiz.id, code: `${PREFIX}-ATT1`, firstName: 'Att', lastName: 'Emp', status: 'ACTIVE', countryCode: 'IN', workEmail: empEmail },
+      });
+      await prisma.employmentRecord.create({
+        data: { businessId: attBiz.id, employeeId: emp.id, entityId: inEntity.id, employmentType: 'FULL_TIME', workerCategory: 'STAFF', changeReason: 'HIRE', effectiveFrom: day('2027-01-01'), isCurrent: true },
+      });
+      // A day shift (Sat/Sun off) assigned for June so the workday is "scheduled".
+      const shift = await prisma.shiftPattern.create({
+        data: {
+          businessId: attBiz.id, entityId: inEntity.id, code: `${PREFIX}-GEN`, name: 'Gen', startTime: '09:00', endTime: '18:00',
+          breakMinutes: 60, graceInMinutes: 10, fullDayMinutes: 480, halfDayThresholdMinutes: 240,
+          weeklyOffDays: '0,6', otEligible: true, dailyOtThresholdMin: 480, isActive: true,
+        },
+      });
+      await prisma.shiftAssignment.create({
+        data: { businessId: attBiz.id, employeeId: emp.id, shiftPatternId: shift.id, effectiveFrom: day('2027-06-01'), effectiveTo: day('2027-06-30') },
+      });
+      await prisma.overtimeRule.create({
+        data: { businessId: attBiz.id, entityId: inEntity.id, dailyThresholdMin: 480, weekdayMultiplier: 1.5, holidayMultiplier: 2, roundingMin: 0, isActive: true },
+      });
+      // Full 9-to-6 IST punches on the workday (09:00 IST = 03:30Z, 18:00 IST = 12:30Z).
+      await prisma.attendancePunch.create({ data: { businessId: attBiz.id, employeeId: emp.id, punchType: 'IN', source: 'WEB', punchAt: new Date(`${WORKDAY}T03:30:00Z`) } });
+      await prisma.attendancePunch.create({ data: { businessId: attBiz.id, employeeId: emp.id, punchType: 'OUT', source: 'WEB', punchAt: new Date(`${WORKDAY}T12:30:00Z`) } });
+
+      try {
+        // (a) Derive/pay path: the off-country NZ row must be INERT. The worked
+        // Thursday derives PRESENT (NOT HOLIDAY/HOLIDAY_WORKED), 0 OT, 0 LOP, and
+        // NO holidayId is persisted. Under the bug it would be HOLIDAY_WORKED.
+        await recompute(attBiz.id, emp.id, day(WORKDAY), day(WORKDAY));
+        const att = await prisma.attendance.findFirst({ where: { businessId: attBiz.id, employeeId: emp.id, date: day(WORKDAY) } });
+        check('recompute() wrote an Attendance row for the workday', !!att);
+        check('off-country NZ holiday does NOT flip the workday to HOLIDAY/HOLIDAY_WORKED (status=PRESENT)', !!att && att.status === 'PRESENT');
+        check('off-country NZ holiday does NOT inflate overtimeMinutes (worked 480 → 0 OT)', !!att && att.overtimeMinutes === 0);
+        check('off-country NZ holiday does NOT change lopFraction (0)', !!att && Number(att.lopFraction) === 0);
+        const exJson = att && att.exceptionsJson ? att.exceptionsJson : {};
+        check('no holidayId persisted from the off-country row', !exJson.holidayId);
+
+        // (b) ESS holiday list: reproduce the OLD fail-OPEN condition — the employee
+        // countryCode is null AND there is no entity countryCode to fall back to.
+        // (Entity.countryCode is non-nullable, so the only way the OLD code resolved
+        // `countryCode = null` was a null employee code with NO current employment
+        // record to read an entity from.) Under the bug that left the holiday read
+        // UNFILTERED, leaking the NZ row; the fix pins it to the TENANT country (IN).
+        await prisma.employee.update({ where: { id: emp.id }, data: { countryCode: null } });
+        await prisma.employmentRecord.deleteMany({ where: { businessId: attBiz.id, employeeId: emp.id } });
+        // Also plant an IN row in the same year so we can prove IN rows still show.
+        await prisma.holiday.create({
+          data: {
+            businessId: attBiz.id, entityId: null, locationId: null,
+            date: day('2027-08-15'), name: 'Independence Day', type: 'PUBLIC',
+            countryCode: 'IN', isPaid: true, isRestricted: false, scopeKey: '*:*',
+          },
+        });
+        const essReq = { customer: { businessId: attBiz.id, email: empEmail }, query: { year: '2027' } };
+        const essRes = await runCtrl(meAttendance.listHolidays, essReq);
+        check('ESS GET /me/attendance/holidays → 200', essRes.statusCode === 200);
+        const items = (essRes.body && essRes.body.items) || [];
+        check('ESS list reports the TENANT country (IN), not a null per-row code', essRes.body && essRes.body.countryCode === 'IN');
+        check('ESS list EXCLUDES the off-country NZ row even with null emp/entity countryCode', !items.some((h) => h.countryCode === 'NZ' || h.name === 'NZ Off-Country Day'));
+        check('ESS list still SHOWS the IN row (fail-closed, not empty)', items.some((h) => h.countryCode === 'IN' && h.name === 'Independence Day'));
+        check('ESS list is all-IN', items.every((h) => h.countryCode === 'IN'));
+      } finally {
+        await prisma.attendancePayInput.deleteMany({ where: { businessId: attBiz.id } }).catch(() => {});
+        await prisma.attendance.deleteMany({ where: { businessId: attBiz.id } });
+        await prisma.attendancePunch.deleteMany({ where: { businessId: attBiz.id } });
+        await prisma.shiftAssignment.deleteMany({ where: { businessId: attBiz.id } });
+        await prisma.shiftPattern.deleteMany({ where: { businessId: attBiz.id } });
+        await prisma.overtimeRule.deleteMany({ where: { businessId: attBiz.id } });
+        await prisma.holiday.deleteMany({ where: { businessId: attBiz.id } });
+        await prisma.employmentRecord.deleteMany({ where: { businessId: attBiz.id } });
+        await prisma.employee.deleteMany({ where: { businessId: attBiz.id } });
+        await prisma.entity.deleteMany({ where: { businessId: attBiz.id } });
+        await prisma.business.delete({ where: { id: attBiz.id } });
+      }
     }
   } finally {
     await cleanup();
