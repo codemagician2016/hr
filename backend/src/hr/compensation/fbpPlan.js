@@ -118,8 +118,10 @@ function indiaFbpHeadTemplate() {
 /**
  * validatePlan — pure structural validation of a plan-create/replace payload.
  * Enforces: exactly one envelope component; every head bound to a component; no
- * duplicate headType; caps ≥ 0; OTHER heads may not be proof-required without a
- * claim type. Returns { ok:true } or { ok:false, code, message }.
+ * duplicate headType; caps ≥ 0; a proof-free head with a claim type is rejected;
+ * ONLY MEAL_CARD may be proof-free (the card is its own control); and every
+ * proof-free head MUST carry a finite statutory cap (it is exempt without bills, so
+ * the cap is the only bound). Returns { ok:true } or { ok:false, code, message }.
  *
  * @param {object} plan
  *   { envelopeComponentId, heads:[{ headType, componentId, annualCapRupees?,
@@ -168,6 +170,26 @@ function validatePlan(plan = {}) {
     // proof-free head with a claimType is a contradiction.
     if (h.proofRequired === false && h.claimType) {
       return { ok: false, code: 'FBP_PROOFFREE_WITH_CLAIM', message: `Head ${h.headType} is proof-free but has a bill claim type.` };
+    }
+    // A proof-free head is exempt with NO uploaded bills (the engine's alwaysVerified
+    // floor), so MEAL_CARD is the only head allowed to be proof-free — the card itself is
+    // the §17(2)/3(7)(iii) control. Any OTHER head authored proofRequired:false would be
+    // fully exempt with zero substantiation and survive the §201 deadline. Reject it.
+    if (h.proofRequired === false && h.headType !== 'MEAL_CARD') {
+      return { ok: false, code: 'FBP_PROOFFREE_NOT_MEAL', message: `Head ${h.headType} cannot be proof-free; only the meal card is its own control.` };
+    }
+    // A proof-free (exempt-without-bills) head MUST carry a finite statutory cap — its
+    // exemption is bounded ONLY by the cap (there are no bills to cap it). Without one the
+    // declared ceiling is the full allocation and the head becomes an uncapped, proof-free,
+    // fully-exempt allowance (the ₹2,200/mo meal cap is silently droppable by omission).
+    // Require a finite annual OR monthly cap on every proof-free head.
+    const annualCapNum = h.annualCapRupees != null ? Number(h.annualCapRupees) : null;
+    const monthlyCapNum = h.monthlyCapRupees != null ? Number(h.monthlyCapRupees) : null;
+    const hasFiniteCap =
+      (annualCapNum != null && Number.isFinite(annualCapNum) && annualCapNum > 0) ||
+      (monthlyCapNum != null && Number.isFinite(monthlyCapNum) && monthlyCapNum > 0);
+    if (h.proofRequired === false && !hasFiniteCap) {
+      return { ok: false, code: 'FBP_PROOFFREE_NO_CAP', message: `Head ${h.headType} is proof-free and must carry a statutory cap (annual or monthly).` };
     }
   }
   return { ok: true };

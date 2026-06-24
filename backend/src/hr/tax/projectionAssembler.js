@@ -582,6 +582,100 @@ async function buildRegimeComparison({ businessId, employeeId, asOf, db = prisma
   };
 }
 
+/**
+ * resolveRunTaxOverride — Feature 25 (FBP) / Feature 15 reconciliation. The LIVE
+ * monthly TDS run (payroll/service → engine → india.compute → computeTds) must
+ * deduct the SAME tax the ESS projection (buildTaxProjection) promises. Without
+ * this, the run annualises the FULL taxable gross (FBP head lines included, all
+ * isTaxable) and over-withholds, while the projection subtracts the FBP exemption —
+ * the two surfaces diverge and the employee is over-deducted every month until the
+ * Form-16 true-up.
+ *
+ * This returns the elected regime's paise-precise ANNUAL TAXABLE income and the
+ * projected annual GROSS, computed through the EXACT SAME pure path the projection
+ * uses (resolveFbpExempt → computeFbpExempt → buildEngineInput → projectAnnualIncomeTax),
+ * so handing them to computeTds as { annualTaxableOverrideMinor, annualProjectionOverrideMinor }
+ * makes run TDS === projection TDS to the paise. It is a STRICT SUBSET of
+ * buildTaxProjection's elected-regime computation (no rupee rounding, no statement
+ * assembly), so the single computeFbpExempt source is preserved.
+ *
+ * Returns null when there's no compensation or the projection would not apply an FBP
+ * exemption (electedRegime !== OLD, or no allocation) — in that case the run keeps its
+ * existing behaviour (golden parity for non-FBP / NEW-regime employees is untouched).
+ *
+ * @returns {{ annualTaxableOverrideMinor:number, annualProjectionOverrideMinor:number,
+ *   regime:'OLD', fbpExemptMinor:number } | null}
+ */
+async function resolveRunTaxOverride({ businessId, employeeId, asOf, db = prisma } = {}) {
+  if (!businessId || !employeeId) return null;
+  const asOfIso = asOf ? String(asOf).slice(0, 10) : todayIso();
+
+  // Country gate — FBP/OLD-regime projection is India-only. Fail-safe to null
+  // (the run keeps its default §192 annualisation) if anything is missing.
+  const emp = await db.employee.findFirst({
+    where: { id: employeeId, businessId, deletedAt: null },
+    select: { id: true, countryCode: true },
+  });
+  if (!emp) return null;
+  const country = await resolveStatutoryCountry(businessId, emp, db);
+  if (country !== 'IN') return null;
+
+  const taxYear = payrollService._internal.taxYearFor(asOfIso, 4);
+
+  // The declaration drives the elected regime. The FBP exemption (and therefore any
+  // run/projection divergence) exists ONLY under OLD — NEW exempts ₹0, so the run's
+  // default full-gross annualisation already equals the projection. Skip (return null)
+  // for NEW so non-OLD employees are byte-identical to today.
+  const sp = await db.statutoryProfile.findFirst({ where: { businessId, employeeId } });
+  const elected = sp && sp.taxRegime ? String(sp.taxRegime).toUpperCase() : 'NEW';
+  if (elected !== 'OLD') return null;
+
+  // The current FBP exemption (the SINGLE computeFbpExempt source). No allocation →
+  // nothing to reconcile; let the run behave as before.
+  const fbp = await resolveFbpExempt({
+    businessId, employeeId, financialYear: taxYear, asOf: asOfIso, regime: 'OLD', db,
+  });
+  if (!fbp.hasAllocation || fbp.totalExemptMinor <= 0) return null;
+
+  // Earnings spine + declaration — identical to buildTaxProjection steps 3/5.
+  const compensation = await payrollService._internal.resolveCurrentCompensation(
+    businessId, employeeId, asOfIso, db,
+  );
+  if (!compensation) return null;
+  const annualEarnings = bucketAnnualEarnings(compensation);
+
+  const startYear = Number(taxYear.slice(0, 4));
+  const fyStartIso = `${startYear}-04-01`;
+  const fyEndIso = `${startYear + 1}-03-31`;
+  const window = await resolveWindow({ businessId, financialYear: taxYear, db });
+  const acceptedProofs = window
+    ? await db.investmentProof.findMany({
+        where: { businessId, employeeId, financialYear: taxYear, deletedAt: null, status: 'ACCEPTED' },
+        select: { claimType: true, verifiedAmount: true, status: true, deletedAt: true },
+      })
+    : [];
+  const pfAnnualMinor = derivePfAnnualMinor(annualEarnings.basicDaMinor);
+  const decl = readDeclaration(sp, { window, proofs: acceptedProofs, asOf: asOfIso, pfAnnualMinor });
+  const prevEmployerCounted = decl.prevEmployerFY === taxYear;
+
+  // The SAME engine input the projection builds (FBP exemption subtracted in
+  // buildEngineInput), through the SAME pure projectAnnualIncomeTax.
+  const result = projectAnnualIncomeTax(
+    buildEngineInput({ regime: 'OLD', annualEarnings, decl, prevEmployerCounted, fbpExemptMinor: fbp.totalExemptMinor }),
+  );
+
+  // The projected annual GROSS for the run = grossSalary (pre-exemption Σ earnings).
+  // computeTds uses annualTaxableOverrideMinor verbatim (no further std deduction), so
+  // the annualProjectionOverrideMinor is informational/consistent but the taxable
+  // override is what makes the deduction reconcile.
+  return {
+    regime: 'OLD',
+    fbpExemptMinor: fbp.totalExemptMinor,
+    annualTaxableOverrideMinor: result.taxableIncomeMinor,
+    annualProjectionOverrideMinor: result.grossSalaryMinor,
+  };
+}
+
 // Derive the employee's auto-80C PF: EE 12% of min(Basic+DA monthly, ₹15,000) × 12.
 function derivePfAnnualMinor(basicDaAnnualMinor) {
   if (basicDaAnnualMinor <= 0) return 0;
@@ -592,4 +686,4 @@ function derivePfAnnualMinor(basicDaAnnualMinor) {
   return monthlyPf * 12;
 }
 
-module.exports = { buildTaxProjection, buildRegimeComparison, _internals: { bucketAnnualEarnings, readDeclaration, derivePfAnnualMinor } };
+module.exports = { buildTaxProjection, buildRegimeComparison, resolveRunTaxOverride, _internals: { bucketAnnualEarnings, readDeclaration, derivePfAnnualMinor } };

@@ -1984,12 +1984,19 @@ function compute(ctx = {}) {
   }
 
   // ----- 5. TDS (§192 annualised) ------------------------------------------
+  // Feature 25 (FBP) / Feature 15 — when the run hands in the projection's pre-computed
+  // annual TAXABLE income (post-FBP-exemption / Chapter-VIA, std deduction already
+  // removed), computeTds uses it verbatim so the live monthly TDS equals the ESS
+  // projection to the paise. This is the SAME figure the assembler subtracts the FBP
+  // exemption into (the single computeFbpExempt source), so the run no longer
+  // over-withholds an OLD-regime FBP basket. Absent → §192 full-gross annualisation.
   const tds = computeTds({
     periodGrossMinor,
     ytd,
     period,
     employee,
     annualProjectionOverrideMinor: ctx.annualProjectionOverrideMinor ?? null,
+    annualTaxableOverrideMinor: ctx.annualTaxableOverrideMinor ?? null,
   });
   if (tds.monthlyTdsMinor > 0) {
     employeeDeductions.push({

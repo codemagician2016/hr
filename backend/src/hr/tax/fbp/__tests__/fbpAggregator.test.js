@@ -99,6 +99,38 @@ const allocation = [
   eq(fuel.exemptMinor, 2160000, 'fuel verified capped at allocation (₹21,600), not the inflated bill');
 })();
 
+// ── FBP-1 FIX: the always-verified floor is gated to MEAL_CARD ONLY. A NON-meal
+//    head authored proofRequired:false (e.g. a FUEL_CAR) must NOT be auto-verified —
+//    with zero bills it is exempt only pre-deadline (provisional) and FULLY DROPS to
+//    ₹0 post-deadline (the §192(2D)/§201 control bites), exactly like a proof-required
+//    head with no bills. Only MEAL_CARD keeps the card-as-control floor. ──
+(() => {
+  // A fuel head misconfigured proof-free (the exploit shape) with a finite cap.
+  const proofFreeFuelHeads = [
+    { id: 'h-meal', headType: 'MEAL_CARD', label: 'Meal', taxSection: '3(7)(iii)', claimType: null, annualCapMinor: 2640000, monthlyCapMinor: 220000, proofRequired: false, payCadence: 'MONTHLY' },
+    { id: 'h-fuel', headType: 'FUEL_CAR', label: 'Fuel', taxSection: '3(2)', claimType: null, annualCapMinor: 2160000, monthlyCapMinor: null, proofRequired: false, payCadence: 'MONTHLY' },
+  ];
+  const alloc = [
+    { headId: 'h-meal', annualAmountMinor: 2640000 },
+    { headId: 'h-fuel', annualAmountMinor: 2160000 },
+  ];
+
+  // PRE-deadline: provisional declared ceiling for both (no window → DECLARED).
+  const pre = computeFbpExempt({ heads: proofFreeFuelHeads, allocation: alloc, proofs: [], window: null, asOf: '2026-06-01', regime: 'OLD' });
+  const preFuel = pre.lines.find((l) => l.headType === 'FUEL_CAR');
+  eq(preFuel.exemptMinor, 2160000, 'FBP-1: proof-free fuel exempt provisionally pre-deadline (declared ceiling)');
+
+  // POST-deadline with ZERO bills: meal stays exempt (the card), fuel DROPS to ₹0.
+  const window = { proofDeadline: '2027-02-15' };
+  const post = computeFbpExempt({ heads: proofFreeFuelHeads, allocation: alloc, proofs: [], window, asOf: '2027-03-01', regime: 'OLD' });
+  const postMeal = post.lines.find((l) => l.headType === 'MEAL_CARD');
+  const postFuel = post.lines.find((l) => l.headType === 'FUEL_CAR');
+  eq(postMeal.exemptMinor, 2640000, 'FBP-1: MEAL_CARD keeps the always-verified floor post-deadline');
+  eq(postFuel.exemptMinor, 0, 'FBP-1: NON-meal proof-free head is NOT auto-verified → ₹0 post-deadline (§201 holds)');
+  eq(postFuel.verifiedMinor, 0, 'FBP-1: proof-free fuel verified figure is 0 (no floor leaked)');
+  eq(post.totalExemptMinor, 2640000, 'FBP-1: only the meal card survives the deadline with zero bills');
+})();
+
 // ── PENDING/REJECTED proofs contribute 0 ──
 (() => {
   const window = { proofDeadline: '2027-02-15' };

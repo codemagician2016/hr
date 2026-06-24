@@ -184,10 +184,17 @@ function computeFbpExempt({ heads = [], allocation = [], proofs = [], window = n
     // can ever be exempt for this head (before proofs).
     const declaredCeilingMinor = capMinor == null ? allocatedMinor : Math.min(allocatedMinor, capMinor);
 
-    // The verified figure. proofRequired:false heads (meal card) are ALWAYS verified
-    // up to their declared ceiling (the card is the control — the alwaysVerified floor,
-    // exactly the PF auto-80C treatment in F20). proof-required heads use Σ ACCEPTED bills.
-    const alwaysVerifiedMinor = head.proofRequired === false ? declaredCeilingMinor : 0;
+    // The verified figure. The MEAL_CARD head (proofRequired:false) is the ONLY head
+    // ALWAYS verified up to its declared ceiling — the card itself IS the control, so
+    // no bills are needed (exactly the PF auto-80C treatment in F20). This floor MUST be
+    // gated to MEAL_CARD: any OTHER proofRequired:false head (e.g. a FUEL_CAR authored
+    // proof-free) would otherwise be fully exempt with ZERO uploaded bills AND survive the
+    // post-deadline §192(2D)/§201 freeze (verifiedMinor would inherit the floor). All other
+    // heads — proof-required or proof-free — earn their verified figure from Σ ACCEPTED bills
+    // only, so the deadline control bites. validatePlan separately rejects proofRequired:false
+    // on a non-MEAL_CARD head, but the engine fails safe regardless of how the head was authored.
+    const alwaysVerifiedMinor =
+      (head.proofRequired === false && head.headType === 'MEAL_CARD') ? declaredCeilingMinor : 0;
     const rawVerifiedMinor = sumAcceptedVerifiedMinor(proofs, head.claimType) + alwaysVerifiedMinor;
     // Verified can never exceed the declared ceiling (a double-uploaded bill can't
     // inflate relief): min(declaredCeiling, Σverified). Edge case 8.
