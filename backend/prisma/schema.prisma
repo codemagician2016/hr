@@ -6691,6 +6691,11 @@ model Employee {
   addresses         EmployeeAddress[]
 
   @@unique([businessId, code])
+  // FLAG (Feature 17 — review HIGH fix): a PARTIAL unique index backs the
+  // onboard-by-CTC email+DOJ idempotency. Prisma's @@unique cannot express the
+  // WHERE predicate, so it lives ONLY in migration
+  // 20260624_feature17_onboard_dedupe/migration.sql (NOT declared here, by design):
+  //   UNIQUE (businessId, workEmail, hireDate) WHERE workEmail IS NOT NULL AND deletedAt IS NULL
   @@index([businessId, status])
   @@index([businessId, managerEmployeeId])
   @@index([businessId, workEmail])

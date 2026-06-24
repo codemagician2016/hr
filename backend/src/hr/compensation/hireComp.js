@@ -19,7 +19,7 @@
  */
 
 const { materializeRevisionLines } = require('./deriveBreakup');
-const { compilePolicyToStructureLines } = require('./ctcPolicy');
+const { compilePolicyToStructureLines, CompilePolicyError } = require('./ctcPolicy');
 const money = require('../payroll/money');
 
 /** Decimal|number|string → integer minor units (paise), reusing payroll money math. */
@@ -38,6 +38,16 @@ function isoDateOnly(d) {
   if (typeof d === 'string') return d.slice(0, 10);
   try { return new Date(d).toISOString().slice(0, 10); } catch (_e) { return undefined; }
 }
+
+// ── Shared statutory-quote defaults for the hire fixed point (review LOW finding). ──
+// The CTC employer-cost fixed point in deriveBreakup is a function of these two knobs
+// (they change gross → Basic → the 50% verdict). To keep the two hire paths in parity,
+// BOTH the ATS provision path (no policy → these defaults) and the onboard path (an
+// ESI-less policy → policy.esiApplicable === false / capPfAtCeiling !== false, which
+// equal these) source the knobs from ONE place. A hire produces byte-identical lines
+// across the two paths FOR IDENTICAL STATUTORY INPUTS — that is the scoped §4.1 claim.
+const HIRE_ESI_DEFAULT = false;     // employer ESI not folded into the CTC quote by default
+const HIRE_PF_CAP_DEFAULT = true;   // PF capped at the ₹15,000 wage ceiling in the quote
 
 /** A structured error the controllers map to an HTTP status (mirrors ProvisionError). */
 class HireCompError extends Error {
@@ -87,19 +97,35 @@ async function buildHireRevisionLines({
   ctcAnnual,
   grossMonthly,
   joinDate,
-  esiApplicable = false,
-  capPfAtCeiling,
+  // Default both statutory-quote knobs from the SHARED constants so the two hire
+  // callers (ATS provision + onboard-by-CTC) cannot silently diverge (review LOW
+  // finding). deriveBreakup treats capPfAtCeiling `!== false` as capped.
+  esiApplicable = HIRE_ESI_DEFAULT,
+  capPfAtCeiling = HIRE_PF_CAP_DEFAULT,
 }) {
   const cc = String(countryCode || '').toUpperCase();
   const basis = cc === 'IN' ? 'CTC' : 'GROSS';
+
+  // Compile a policy → line shape, translating a CompilePolicyError (unresolved /
+  // soft-deleted component) into a HireCompError so the hire FAILS CLOSED (422)
+  // instead of silently dropping a line and persisting the full CTC (MED finding #2).
+  const compile = (pol, comps) => {
+    try {
+      return compilePolicyToStructureLines(pol, { components: comps || [] }).lines;
+    } catch (err) {
+      if (err instanceof CompilePolicyError) {
+        throw new HireCompError(err.message, { status: err.status || 422, reason: err.reason || 'policy-unresolved' });
+      }
+      throw err;
+    }
+  };
 
   // ── 1. Resolve the deriveBreakup line shape (structure | policy | pre-resolved). ──
   let lines = Array.isArray(preLines) ? preLines : null;
 
   if (!lines && policy) {
     // Onboard path with a pre-loaded policy + its components.
-    const compiled = compilePolicyToStructureLines(policy, { components: policyComponents || [] });
-    lines = compiled.lines;
+    lines = compile(policy, policyComponents);
   } else if (!lines && policyId) {
     // Onboard path — load the policy + its lines (+ joined components) here.
     const pol = await tx.ctcPolicy.findFirst({
@@ -111,8 +137,7 @@ async function buildHireRevisionLines({
     const comps = componentIds.length
       ? await tx.salaryComponent.findMany({ where: { id: { in: componentIds }, businessId, deletedAt: null } })
       : [];
-    const compiled = compilePolicyToStructureLines(pol, { components: comps });
-    lines = compiled.lines;
+    lines = compile(pol, comps);
   } else if (!lines && structureId) {
     // ATS path — load the structure's lines joined to their component (the exact
     // shape provision.js STEP 8 used before extraction).
@@ -183,4 +208,10 @@ async function buildHireRevisionLines({
   return { lineCreates, breakup, basis };
 }
 
-module.exports = { buildHireRevisionLines, HireCompError, _internal: { toMinor, isoDateOnly } };
+module.exports = {
+  buildHireRevisionLines,
+  HireCompError,
+  HIRE_ESI_DEFAULT,
+  HIRE_PF_CAP_DEFAULT,
+  _internal: { toMinor, isoDateOnly },
+};

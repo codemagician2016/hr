@@ -26,6 +26,7 @@ const {
   compilePolicyToStructureLines,
   validatePolicy,
   policyDefaults,
+  CompilePolicyError,
 } = require('../compensation/ctcPolicy');
 const { renderCtcPdf } = require('../compensation/ctcPdf');
 const { tenantCountry, tenantCurrency, CountryError } = require('../tenant/countryContext');
@@ -228,6 +229,13 @@ async function create(req, res, next) {
     if (bodyCountry && bodyCountry !== tenant.country) {
       return res.status(409).json({ error: 'COUNTRY_MISMATCH', message: 'A CTC policy must use your company country.' });
     }
+    // SINGLE-SOURCE BASIS (review MED finding #3): onboard FORCES basis from country
+    // (IN → CTC). Refuse to persist a GROSS-basis policy on an IN tenant, else preview
+    // would derive a basis onboard never materializes — the package the candidate sees
+    // would diverge from what is committed. Basis is then always the country basis.
+    if (tenant.country === 'IN' && String(basis || '').toUpperCase() === 'GROSS') {
+      return res.status(422).json({ error: 'BASIS_NOT_ALLOWED', message: 'India CTC policies must use a CTC basis (GROSS is not supported).' });
+    }
 
     const v = await validateLines(businessId, lines);
     if (!v.ok) return res.status(422).json({ error: 'POLICY_INVALID', errors: v.errors, advisories: v.advisories });
@@ -269,6 +277,11 @@ async function update(req, res, next) {
 
     if (req.body.countryCode && String(req.body.countryCode).toUpperCase() !== existing.countryCode) {
       return res.status(409).json({ error: 'COUNTRY_MISMATCH', message: 'A CTC policy country cannot be changed.' });
+    }
+    // Single-source basis (review MED finding #3): an IN policy may never become GROSS
+    // basis (onboard forces CTC from country; a GROSS policy would mislead preview).
+    if (req.body.basis !== undefined && existing.countryCode === 'IN' && String(req.body.basis || '').toUpperCase() === 'GROSS') {
+      return res.status(422).json({ error: 'BASIS_NOT_ALLOWED', message: 'India CTC policies must use a CTC basis (GROSS is not supported).' });
     }
 
     const data = {};
@@ -326,19 +339,28 @@ async function remove(req, res, next) {
 // + line items + employer cost + 50% verdict, at a sample CTC. PURE (no persist).
 // Accepts either a persisted policy { lines, components } or an in-flight draft
 // (lines on the body) so the builder previews UNSAVED edits too.
+//
+// SINGLE-SOURCE BASIS (review MED finding #3): the committed hire (onboard.controller)
+// FORCES basis from the tenant country (IN → CTC, else GROSS) and IGNORES policy.basis.
+// Preview MUST use the EXACT SAME resolution so the candidate's previewed package is
+// byte-identical to what onboard commits — never policy.basis or a body-supplied basis.
 async function computePreview({ businessId, policy, components, ctcAnnual, grossMonthly, countryCode, currencyCode, asOf }) {
-  const { lines, basis } = compilePolicyToStructureLines(policy, { components });
+  const cc = (countryCode || 'IN').toUpperCase();
+  // Force basis from country — IDENTICAL to onboard.controller.byCtc (`basis =
+  // countryCode === 'IN' ? 'CTC' : 'GROSS'`). policy.basis is intentionally not read.
+  const basis = cc === 'IN' ? 'CTC' : 'GROSS';
+  const { lines } = compilePolicyToStructureLines(policy, { components });
   const tgt = {};
-  if ((policy.basis || basis) === 'CTC' && ctcAnnual != null) tgt.ctcAnnualMinor = toMinorSafe(ctcAnnual);
+  if (basis === 'CTC' && ctcAnnual != null) tgt.ctcAnnualMinor = toMinorSafe(ctcAnnual);
   else if (grossMonthly != null) tgt.grossMonthlyMinor = toMinorSafe(grossMonthly);
   else if (ctcAnnual != null) tgt.ctcAnnualMinor = toMinorSafe(ctcAnnual);
 
   const breakup = deriveBreakup({
     target: tgt,
-    basis: policy.basis || basis,
+    basis,
     lines,
     ctx: {
-      countryCode: (countryCode || 'IN').toUpperCase(),
+      countryCode: cc,
       asOf,
       esiApplicable: policy.esiApplicable === true,
       capPfAtCeiling: policy.capPfAtCeiling !== false,
@@ -351,7 +373,7 @@ async function computePreview({ businessId, policy, components, ctcAnnual, gross
   else if (employerCostMonthlyMinor > 0) waterfall.ctcAnnualMinor = (breakup.targetGrossMinor + employerCostMonthlyMinor) * 12;
   else waterfall.grossAnnualMinor = breakup.grossMinor * 12;
 
-  return { basis: policy.basis || basis, currencyCode, target: tgt, waterfall, resolved: breakup.resolved, employerCost: breakup.employerCost, basicDaMonthlyMinor: breakup.basicDaMonthlyMinor, wagesVerdict: breakup.wagesVerdict };
+  return { basis, currencyCode, target: tgt, waterfall, resolved: breakup.resolved, employerCost: breakup.employerCost, basicDaMonthlyMinor: breakup.basicDaMonthlyMinor, wagesVerdict: breakup.wagesVerdict };
 }
 
 // Load a persisted policy + its components (tenant-scoped) for preview/statement.
@@ -408,6 +430,7 @@ async function preview(req, res, next) {
         countryCode: tenant.country, currencyCode: tenant.currency, asOf,
       });
     } catch (err) {
+      if (err instanceof CompilePolicyError) return res.status(err.status || 422).json({ error: 'POLICY_UNRESOLVED', message: err.message });
       if (err instanceof DeriveError) return res.status(422).json({ error: err.code, message: err.message });
       throw err;
     }
@@ -437,6 +460,7 @@ async function statementPdf(req, res, next) {
         countryCode: tenant.country, currencyCode: tenant.currency, asOf,
       });
     } catch (err) {
+      if (err instanceof CompilePolicyError) return res.status(err.status || 422).json({ error: 'POLICY_UNRESOLVED', message: err.message });
       if (err instanceof DeriveError) return res.status(422).json({ error: err.code, message: err.message });
       throw err;
     }

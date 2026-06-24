@@ -51,7 +51,7 @@ const { offerWageCheck } = recruitmentInternals;
 // in the SHARED `buildHireRevisionLines` helper, so ATS-provision and the new
 // direct onboard-by-CTC path cannot drift (one source of hire-pay math). Behaviour
 // is byte-identical to the old inline block (golden-asserted).
-const { buildHireRevisionLines, HireCompError } = require('../compensation/hireComp');
+const { buildHireRevisionLines, HireCompError, HIRE_ESI_DEFAULT, HIRE_PF_CAP_DEFAULT } = require('../compensation/hireComp');
 
 // A structured error the controller maps to an HTTP status. `reason` is a stable
 // machine code; `status` the HTTP code; `employeeId` the already-linked id (409).
@@ -574,9 +574,13 @@ async function provisionEmployee({ journeyId, actorId } = {}, prismaOrTx) {
     if (offer.structureId) {
       // Feature 17: the materialize-from-structure + India 50% re-check is the SHARED
       // helper buildHireRevisionLines (also used by direct onboard-by-CTC), so the
-      // two hire paths can never produce different lines. esiApplicable:false matches
-      // the historical STEP-8 quote. A HireCompError is mapped to a ProvisionError so
-      // the FAILED/BLOCKED bookkeeping + HTTP status surface exactly as before.
+      // two hire paths can never produce different lines FOR IDENTICAL STATUTORY
+      // INPUTS. The employer-cost knobs come from the SHARED hireComp defaults (an
+      // offer/structure carries no ESI/PF-cap knob), which equal an ESI-less CTC
+      // policy's knobs — so an ATS hire and an onboard-by-CTC hire from the same
+      // economic intent are byte-identical (review LOW finding). A HireCompError is
+      // mapped to a ProvisionError so the FAILED/BLOCKED bookkeeping + HTTP status
+      // surface exactly as before.
       try {
         const { lineCreates } = await buildHireRevisionLines({
           tx,
@@ -586,7 +590,8 @@ async function provisionEmployee({ journeyId, actorId } = {}, prismaOrTx) {
           ctcAnnual: basis === 'CTC' ? offer.ctcAnnual : null,
           grossMonthly,
           joinDate,
-          esiApplicable: false,
+          esiApplicable: HIRE_ESI_DEFAULT,
+          capPfAtCeiling: HIRE_PF_CAP_DEFAULT,
         });
         revisionLineCreates = lineCreates;
       } catch (err) {

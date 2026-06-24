@@ -34,6 +34,25 @@ const BASE_CTC = 'CTC';
 const BASE_GROSS = 'GROSS';
 
 /**
+ * CompilePolicyError — a policy line could not be compiled because its referenced
+ * SalaryComponent is missing or soft-deleted (callers load components with
+ * `deletedAt: null`, so a head deleted between policy save and compile vanishes from
+ * the set). Silently dropping such a line would UNDER-ALLOCATE the derived breakup
+ * while the revision still persists the FULL CTC — a money leak (review MED finding
+ * #2). We FAIL CLOSED instead. Controllers map this to 422 (mirrors HireCompError/
+ * DeriveError).
+ */
+class CompilePolicyError extends Error {
+  constructor(message, { status = 422, reason = 'policy-unresolved', componentId } = {}) {
+    super(message);
+    this.name = 'CompilePolicyError';
+    this.status = status;
+    this.reason = reason;
+    this.componentId = componentId;
+  }
+}
+
+/**
  * Coerce a Decimal | number | numeric-string | null to a JS number (for the
  * calcValue echoed onto the compiled line — deriveBreakup re-coerces it). Display
  * fidelity is the controller's job; here we only need a stable scalar.
@@ -63,14 +82,17 @@ function up(s) {
  * percent-of-CTC line and a percent-of-BASIC line derive in the right pass. A
  * BALANCING / STATUTORY line carries no base.
  *
- * Pure. Throws nothing — an unresolved component is dropped (validatePolicy is the
- * gate); the engine still asserts on a truly infeasible structure.
+ * Pure. FAILS CLOSED — an unresolved component (missing/soft-deleted between save
+ * and compile) throws CompilePolicyError; the derived breakup MUST reconcile to the
+ * full CTC, never silently lose a line (review MED finding #2). The compiled line
+ * count is asserted to equal the policy line count.
  *
  * @param {Object} policy            { basis?, lines:[CtcPolicyLine] }
  * @param {Object} ctx
  * @param {Array}  ctx.components    SalaryComponent rows (id + code + kind + category
  *                                   + derivationPass + calcBaseScope + calcBaseCode + …)
  * @returns {{ lines: Array, basis: string }}
+ * @throws {CompilePolicyError} when a policy line's component does not resolve.
  */
 function compilePolicyToStructureLines(policy, { components } = {}) {
   const policyLines = Array.isArray(policy && policy.lines) ? policy.lines : [];
@@ -82,7 +104,14 @@ function compilePolicyToStructureLines(policy, { components } = {}) {
     .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
     .forEach((pl, i) => {
       const master = byId.get(pl.componentId);
-      if (!master) return; // unresolved component — validatePolicy rejects this upfront
+      if (!master) {
+        // Unresolved (missing or soft-deleted) component — FAIL CLOSED. Dropping it
+        // would persist the full CTC against under-allocated line items.
+        throw new CompilePolicyError(
+          `A pay component on this CTC policy no longer exists (it may have been deleted). Fix the policy before onboarding.`,
+          { componentId: pl.componentId },
+        );
+      }
       const method = up(pl.calcMethod);
 
       // Shallow-clone the master so we never mutate the shared row; override only
@@ -118,6 +147,15 @@ function compilePolicyToStructureLines(policy, { components } = {}) {
         sortOrder: pl.sortOrder != null ? pl.sortOrder : i,
       });
     });
+
+  // Belt-and-suspenders reconciliation: every policy line must have compiled. If the
+  // counts diverge a line was lost (e.g. a duplicate/missing id slipped past) — the
+  // derived breakup would no longer reconcile to the full CTC, so refuse.
+  if (lines.length !== policyLines.length) {
+    throw new CompilePolicyError(
+      `This CTC policy did not fully compile (${lines.length}/${policyLines.length} lines). A pay component is missing or deleted.`,
+    );
+  }
 
   return { lines, basis: (policy && policy.basis) || 'CTC' };
 }
@@ -245,6 +283,7 @@ module.exports = {
   compilePolicyToStructureLines,
   validatePolicy,
   policyDefaults,
+  CompilePolicyError,
   METHOD,
   _internal: { num, up },
 };
