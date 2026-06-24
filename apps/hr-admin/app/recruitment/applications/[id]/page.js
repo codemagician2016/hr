@@ -127,6 +127,10 @@ export default function ApplicationPage() {
               <button onClick={() => setShowOffer(true)} className="w-full text-sm px-3 py-2 rounded-lg border" style={{ borderColor: 'var(--theme-primary)', color: 'var(--theme-primary)' }}>Make offer</button>
             </div>
           </section>
+
+          {/* Offers — drives DRAFT → SENT → ACCEPTED (accept seeds onboarding). */}
+          <OffersSection offers={asList(app.offers)} onChanged={load} />
+
           <section className="rounded-2xl border border-gray-200 bg-white p-4 text-xs text-gray-500 space-y-1">
             <div><b>Source:</b> {app.appliedSource || 'MANUAL'}</div>
             {cand.phone && <div><b>Phone:</b> {cand.phone}</div>}
@@ -137,6 +141,70 @@ export default function ApplicationPage() {
 
       {showSchedule && <ScheduleModal applicationId={id} jobId={app.jobId} onClose={() => setShowSchedule(false)} onScheduled={() => { setShowSchedule(false); load(); }} />}
       {showOffer && <OfferModal applicationId={id} countryCode={(snap && snap.countryCode)} onClose={() => setShowOffer(false)} onDone={() => { setShowOffer(false); load(); }} />}
+    </div>
+  );
+}
+
+// ── Offers (Feature 12) — the missing DRAFT → SENT → ACCEPTED rail. ───────────
+// getApplication includes app.offers; this renders each with its status + the
+// terms, and wires the existing offer endpoints:
+//   • DRAFT/APPROVED/PENDING_APPROVAL → Send  (→ SENT)
+//   • SENT                            → Accept (→ ACCEPTED, seeds onboarding) /
+//                                       Decline (→ DECLINED)
+//   • ACCEPTED                        → surfaces that onboarding was seeded
+// All controls call POST /api/hr/recruitment/offers/:id/<action>; the server
+// enforces the offer-approval SoD (maker ≠ checker) + F1 read-scope, so a 403
+// here means "a different approver is required", which we surface verbatim.
+function OffersSection({ offers, onChanged }) {
+  const sorted = [...offers].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  return (
+    <section className="rounded-2xl border border-gray-200 bg-white p-4">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">
+        Offers
+        <Info text="An offer must be drafted, then Sent to the candidate, then marked Accepted. Accepting seeds the onboarding journey — that is what turns a candidate into a hire." />
+      </h3>
+      {sorted.length === 0 && <p className="text-sm text-gray-400">No offer yet. Use “Make offer” to draft one.</p>}
+      <div className="space-y-2">
+        {sorted.map((o) => <OfferRow key={o.id} offer={o} onChanged={onChanged} />)}
+      </div>
+    </section>
+  );
+}
+
+function OfferRow({ offer, onChanged }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const canSend = ['DRAFT', 'APPROVED', 'PENDING_APPROVAL'].includes(offer.status);
+  const canRespond = offer.status === 'SENT';
+  async function act(action) {
+    setBusy(true); setError('');
+    try { await post(`/api/hr/recruitment/offers/${offer.id}/${action}`, {}); onChanged(); }
+    catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+  const amount = offer.grossMonthly != null
+    ? `${offer.currencyCode} ${Number(offer.grossMonthly).toLocaleString()}/mo`
+    : (offer.ctcAnnual != null ? `${offer.currencyCode} ${Number(offer.ctcAnnual).toLocaleString()} CTC` : offer.currencyCode);
+  return (
+    <div className="rounded-lg border border-gray-200 p-3">
+      <div className="flex items-center justify-between">
+        <div className="text-sm text-gray-900">{amount}</div>
+        <StatusBadge status={offer.status} />
+      </div>
+      <div className="text-[11px] text-gray-500 mt-0.5 space-y-0.5">
+        {offer.joiningDate && <div>Joins {new Date(offer.joiningDate).toLocaleDateString()}</div>}
+        {offer.sentAt && <div>Sent {new Date(offer.sentAt).toLocaleDateString()}</div>}
+        {offer.status === 'ACCEPTED' && <div className="text-emerald-600">Accepted — onboarding journey seeded.</div>}
+        {offer.status === 'DECLINED' && <div className="text-red-600">Declined by candidate.</div>}
+      </div>
+      {(canSend || canRespond) && (
+        <div className="flex items-center justify-end gap-2 mt-2">
+          {canSend && <ActionButton tone="positive" onClick={() => act('send')} disabled={busy}>Send offer</ActionButton>}
+          {canRespond && <ActionButton tone="danger" onClick={() => act('decline')} disabled={busy}>Decline</ActionButton>}
+          {canRespond && <ActionButton tone="positive" onClick={() => act('accept')} disabled={busy}>Accept</ActionButton>}
+        </div>
+      )}
+      {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
     </div>
   );
 }

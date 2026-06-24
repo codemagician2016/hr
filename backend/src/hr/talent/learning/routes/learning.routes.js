@@ -36,7 +36,11 @@ const teamScope = withEmployeeScope('canViewTeamLearning');
 // ── Courses (builder) ─────────────────────────────────────────────────────────
 router.get('/courses', viewGate, courses.listCourses);
 router.post('/courses', manage, courses.createCourse);
-router.get('/courses/:id', manage, courses.getCourse);
+// Course-detail READ uses the same viewGate as the list so a canViewTeamLearning
+// Manager (TEAM band, no canManageLearning) can open the read-only builder after
+// clicking 'View' — it previously 403'd on `manage` and dead-ended. All writes
+// below stay on canManageLearning.
+router.get('/courses/:id', viewGate, courses.getCourse);
 router.put('/courses/:id', manage, courses.updateCourse);
 router.delete('/courses/:id', manage, courses.deleteCourse);
 
