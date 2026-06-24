@@ -90,6 +90,12 @@ const PERMISSIONS = Object.freeze({
   // OWN tickets) on the customer ESS session — that needs no key (the SELF scope band
   // carries it), exactly like ESS leave/expenses. SoD is not critical for helpdesk.
   canManageHelpdesk:        'Operate the HR helpdesk: queue, categories, assign, reply, change status, SLA',
+  // Engagement (Cycle 1) — the announcements/news-feed admin key: create/edit/publish/
+  // pin/archive company announcements + target the audience + schedule the go-live.
+  // Reads on the ESS news feed need NO permission (every employee sees their own
+  // in-audience feed via the customer session); this gates only the operator authoring
+  // surface. Seeded true for Owner (all) + HR-Admin below.
+  canManageAnnouncements:   'Create, publish, pin + archive company announcements (news feed)',
 });
 
 const PERMISSION_KEYS = Object.freeze(Object.keys(PERMISSIONS));
@@ -129,6 +135,8 @@ const SYSTEM_ROLES = Object.freeze({
     canManageImports: true,
     // Cycle 1 — HR-Admin operates the HR helpdesk (queue, assignment, replies, SLA).
     canManageHelpdesk: true,
+    // Engagement (Cycle 1) — HR-Admin authors + publishes company announcements.
+    canManageAnnouncements: true,
     // No canEditBilling / canEditDomain / canApprovePayroll — Owner/Finance only
   },
   // Finance — payroll + compensation + statutory + billing.

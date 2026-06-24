@@ -583,6 +583,9 @@ model Business {
   // Data Migration / Bulk Import (Feature 18)
   importJobs               ImportJob[]
   importRows               ImportRow[]
+  // Engagement (Cycle 1) — company announcements / news feed + read receipts.
+  announcements            Announcement[]
+  announcementReads        AnnouncementRead[]
 }
 
 // BusinessPage — multi-page CMS. Each row is a single sub-page under one
@@ -6703,6 +6706,10 @@ model Employee {
   // Feature 13 — rich profile sub-models (Education + typed Addresses)
   educations        EmployeeEducation[]
   addresses         EmployeeAddress[]
+  // Engagement (Cycle 1) — per-employee announcement read receipts. Read receipts
+  // are keyed by employee (the ESS session resolves the subject employee), so the
+  // unread badge + per-row read state survive a userId remap.
+  announcementReads AnnouncementRead[]
 
   @@unique([businessId, code])
   // FLAG (Feature 17 — review HIGH fix): a PARTIAL unique index backs the
@@ -10910,4 +10917,96 @@ model ImportRow {
   // Idempotency within a job: one row per natural key (a re-parse replaces).
   @@unique([importJobId, naturalKey])
   @@index([businessId, importJobId, status])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Engagement (Cycle 1) — Announcements / company news feed
+// ─────────────────────────────────────────────────────────────────────────────
+// A net-new, fully-additive model (no existing table touched). One row = one
+// company announcement authored by an operator (HR-Admin/Owner — canManageAnnouncements)
+// and surfaced on the employee (ESS) news feed when PUBLISHED + in-audience + not
+// expired. Tenant-isolated by businessId on every row + index.
+//
+// Audience scoping (tenant + Feature-1-aware): the author targets ALL employees, or
+// narrows to one-or-more entities / departments / a specific employee set. An ESS
+// reader sees an announcement only when their CURRENT EmploymentRecord (entity/
+// department) intersects the target — or they are individually named — so a
+// company-wide note reaches everyone while a department note never leaks outside it.
+// Scope is stored as denormalised id arrays (audienceEntityIds/audienceDeptIds/
+// audienceEmployeeIds) so the membership test is a single in-memory intersection
+// against the reader's current segment (no join fan-out per render).
+model Announcement {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  // Authoring operator (User.id). Kept as a bare id (no FK) so an author offboard
+  // never cascades-away the announcement; the name is denormalised for display.
+  authorUserId  String
+  authorName    String?
+  // Content
+  title         String
+  bodyRichText  String   @db.Text     // sanitised rich text / markdown (rendered client-side)
+  category      AnnouncementCategory @default(NEWS)
+  // Audience — ALL | ENTITY | DEPARTMENT | SPECIFIC. The id arrays are honoured only
+  // for the matching scope (e.g. DEPARTMENT reads audienceDeptIds). ALL ignores them.
+  audienceScope AnnouncementAudienceScope @default(ALL)
+  audienceEntityIds   String[] @default([])
+  audienceDeptIds     String[] @default([])
+  audienceEmployeeIds String[] @default([])
+  // Presentation + lifecycle
+  pinned        Boolean  @default(false)
+  status        AnnouncementStatus @default(DRAFT)
+  // Schedule — publishedAt may be a FUTURE timestamp (scheduled go-live); the feed
+  // filters publishedAt <= now(). expiresAt (NULL = never) drops it from the feed.
+  publishedAt   DateTime?
+  expiresAt     DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  archivedAt    DateTime?
+  version       Int      @default(0)
+
+  reads         AnnouncementRead[]
+
+  // Feed hot-path: tenant + status + publishedAt window, pinned-first.
+  @@index([businessId, status, publishedAt])
+  @@index([businessId, status, pinned, publishedAt])
+}
+
+enum AnnouncementCategory {
+  NEWS
+  POLICY
+  EVENT
+  HOLIDAY
+  CELEBRATION
+  GENERAL
+}
+
+enum AnnouncementAudienceScope {
+  ALL          // every active employee in the tenant
+  ENTITY       // employees whose current entity ∈ audienceEntityIds
+  DEPARTMENT   // employees whose current department ∈ audienceDeptIds
+  SPECIFIC     // explicitly-named employees (audienceEmployeeIds)
+}
+
+enum AnnouncementStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+// Per-employee read receipt for an announcement (powers mark-as-read + the unread
+// badge). Keyed by (announcementId, employeeId) so each employee marks each note
+// once; tenant-stamped for isolation. The receipt row's existence == "read".
+model AnnouncementRead {
+  id             String   @id @default(uuid())
+  businessId     String
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  announcementId String
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  employeeId     String
+  employee       Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  readAt         DateTime @default(now())
+
+  @@unique([announcementId, employeeId])
+  @@index([businessId, employeeId])
 }

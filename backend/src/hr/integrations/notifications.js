@@ -42,6 +42,10 @@ const HR_EVENT_TEMPLATES = Object.freeze({
   'helpdesk.assigned': 'HR_HELPDESK_ASSIGNED',  // → new assignee on (re)assignment
   'helpdesk.replied':  'HR_HELPDESK_REPLIED',   // → the OTHER party on a new reply
   'helpdesk.resolved': 'HR_HELPDESK_RESOLVED',  // → requester on resolve/close
+  // Cycle 1 — engagement: announcements + celebrations.
+  'announcement.published': 'HR_ANNOUNCEMENT_PUBLISHED',
+  'celebration.birthday':   'HR_BIRTHDAY',
+  'celebration.anniversary':'HR_ANNIVERSARY',
 });
 
 // HR template registry. vertical: 'HR' so listTemplates({vertical:'HR'}) scopes
@@ -156,6 +160,34 @@ const HR_TEMPLATES = Object.freeze([
     body: 'Hi {NAME}, your support ticket {CODE} ("{SUBJECT}") is now {STATUS} on {BIZ}. View + rate: {LINK}',
     variables: ['NAME', 'CODE', 'SUBJECT', 'STATUS', 'BIZ', 'LINK'],
     channels: { sms: true, whatsapp: true, email: true },
+  },
+  // ─── Cycle 1 — engagement: announcements + celebrations (India-first copy) ────
+  {
+    key: 'HR_ANNOUNCEMENT_PUBLISHED',
+    displayName: 'New announcement published',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {NAME}, {BIZ} posted a new announcement: "{TITLE}". Read it on your portal: {LINK}',
+    variables: ['NAME', 'BIZ', 'TITLE', 'LINK'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_BIRTHDAY',
+    displayName: 'Birthday wishes',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Happy Birthday {NAME}! Wishing you a wonderful year ahead. - {BIZ}',
+    variables: ['NAME', 'BIZ'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_ANNIVERSARY',
+    displayName: 'Work anniversary wishes',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Congratulations {NAME} on {YEARS} year(s) with {BIZ}! Thank you for everything you do.',
+    variables: ['NAME', 'YEARS', 'BIZ'],
+    channels: { sms: false, whatsapp: true, email: true },
   },
 ]);
 
