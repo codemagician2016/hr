@@ -16,6 +16,7 @@
 
 const prisma = require('../../core/lib/prisma');
 const { writeAudit } = require('../../core/lib/audit');
+const { effectivePermissions } = require('../../core/lib/rbac');
 const svc = require('./helpdesk.service');
 const notify = require('./helpdesk.notify');
 
@@ -235,7 +236,32 @@ async function replyTicket(req, res, next) {
   } catch (e) { next(e); }
 }
 
+// ═══ AGENTS ════════════════════════════════════════════════════════════════════
+// GET /helpdesk/agents — the tenant's helpdesk-capable operators (those whose
+// EFFECTIVE permissions include canManageHelpdesk: Owner/HR-Admin + any custom role
+// granting it). Returns { id: userId, name, email } so the console can offer an
+// assignee picker (assignTicket is keyed by User id) and label assigned tickets by
+// name instead of a raw UUID. Tenant-walled; active users only.
+async function listAgents(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const users = await prisma.user.findMany({
+      where: { businessId, isActive: true },
+      select: {
+        id: true, name: true, email: true, role: true,
+        businessRole: { select: { permissions: true, name: true, isSystem: true } },
+      },
+      orderBy: { name: 'asc' },
+    });
+    const agents = users
+      .filter((u) => { const p = effectivePermissions(u); return !!(p && p.canManageHelpdesk); })
+      .map((u) => ({ id: u.id, name: u.name, email: u.email }));
+    res.json({ items: agents, total: agents.length });
+  } catch (e) { next(e); }
+}
+
 module.exports = {
   listCategories, createCategory, updateCategory,
   listTickets, queueStats, getTicket, assignTicket, changeStatus, replyTicket,
+  listAgents,
 };

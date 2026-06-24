@@ -70,6 +70,7 @@ export default function HelpdeskPage() {
   const [data, setData] = useState(null);
   const [stats, setStats] = useState(null);
   const [categories, setCategories] = useState([]);
+  const [agents, setAgents] = useState([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState(null);
@@ -87,6 +88,9 @@ export default function HelpdeskPage() {
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     get('/api/hr/helpdesk/categories', { activeOnly: 'true' }).then((r) => setCategories(r.items || [])).catch(() => {});
+    // The tenant's helpdesk-capable operators — powers the assignee filter + the drawer
+    // assignee picker (so a ticket can be routed to any teammate, not just self).
+    get('/api/hr/helpdesk/agents').then((r) => setAgents(r.items || [])).catch(() => {});
   }, []);
 
   // Reset to page 1 whenever a filter changes.
@@ -147,10 +151,11 @@ export default function HelpdeskPage() {
             {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </label>
-        <label className="inline-flex items-center gap-1 text-sm text-gray-600">Assignee<InfoTip text="Unassigned shows the tickets waiting for pickup." />
+        <label className="inline-flex items-center gap-1 text-sm text-gray-600">Assignee<InfoTip text="Filter by the agent who owns the ticket. 'Unassigned' shows the tickets waiting for pickup." />
           <select className={sel} value={assignee} onChange={(e) => setAssignee(e.target.value)}>
             <option value="">All</option>
             <option value="UNASSIGNED">Unassigned</option>
+            {agents.map((a) => <option key={a.id} value={a.id}>{a.name || a.email}</option>)}
           </select>
         </label>
         <input className={`${sel} min-w-[12rem]`} placeholder="Search code or subject…" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -166,7 +171,7 @@ export default function HelpdeskPage() {
         sizes={PAGE_SIZES} noun="tickets"
       />
 
-      {openId && <TicketDrawer id={openId} onClose={() => setOpenId(null)} onChanged={load} />}
+      {openId && <TicketDrawer id={openId} agents={agents} onClose={() => setOpenId(null)} onChanged={load} />}
     </div>
   );
 }
@@ -181,7 +186,7 @@ function HelpdeskInfo() {
 }
 
 // ── Detail drawer: thread + reply + assign + status ──────────────────────────────
-function TicketDrawer({ id, onClose, onChanged }) {
+function TicketDrawer({ id, agents = [], onClose, onChanged }) {
   const [ticket, setTicket] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -193,7 +198,11 @@ function TicketDrawer({ id, onClose, onChanged }) {
     get(`/api/hr/helpdesk/tickets/${id}`).then(setTicket).catch((e) => setError(e.message));
   }, [id]);
   useEffect(() => { reload(); }, [reload]);
-  useEffect(() => { get('/api/auth/me').then(setMe).catch(() => {}); }, []);
+  // /api/auth/me nests the operator under `.user` ({ user: { id, ... } }) — unwrap it
+  // so me.id is the real operator userId. Without this, assignToMe sent assigneeId:
+  // undefined → null, which the backend reads as UNASSIGN (so "Assign to me" un-picked
+  // the ticket instead of picking it up), and the "You" label never matched.
+  useEffect(() => { get('/api/auth/me').then((r) => setMe(r?.user || r)).catch(() => {}); }, []);
 
   async function doAction(fn, okThen) {
     setBusy(true); setError('');
@@ -207,8 +216,18 @@ function TicketDrawer({ id, onClose, onChanged }) {
     () => { setReply(''); setIsInternal(false); }
   );
   const assignToMe = () => doAction(() => post(`/api/hr/helpdesk/tickets/${id}/assign`, { assigneeId: me?.id || null }));
+  const assignTo = (assigneeId) => doAction(() => post(`/api/hr/helpdesk/tickets/${id}/assign`, { assigneeId: assigneeId || null }));
   const unassign = () => doAction(() => post(`/api/hr/helpdesk/tickets/${id}/assign`, { assigneeId: null }));
   const changeStatus = (to) => doAction(() => post(`/api/hr/helpdesk/tickets/${id}/status`, { status: to }));
+
+  // Resolve an assignee userId to a human label (so an assigned ticket shows a name,
+  // not a raw UUID). 'You' for the current operator; falls back to the id if unknown.
+  const agentName = (uid) => {
+    if (!uid) return 'Unassigned';
+    if (uid === me?.id) return 'You';
+    const a = agents.find((x) => x.id === uid);
+    return a ? (a.name || a.email) : uid;
+  };
 
   const nextStates = ticket ? (NEXT_STATUS[ticket.status] || []) : [];
 
@@ -228,9 +247,21 @@ function TicketDrawer({ id, onClose, onChanged }) {
 
           {/* Assign + status actions */}
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-100 bg-gray-50 p-2">
-            <span className="text-xs font-medium text-gray-500">Assignee<InfoTip text="Pick the ticket up so the queue shows who owns it. Assigning an OPEN ticket moves it to IN PROGRESS." /></span>
-            <span className="text-xs text-gray-700">{ticket.assigneeId ? (ticket.assigneeId === me?.id ? 'You' : ticket.assigneeId) : 'Unassigned'}</span>
+            <span className="text-xs font-medium text-gray-500">Assignee<InfoTip text="Pick the ticket up yourself, or route it to a teammate. Assigning an OPEN ticket moves it to IN PROGRESS." /></span>
+            <span className="text-xs text-gray-700">{agentName(ticket.assigneeId)}</span>
             <button onClick={assignToMe} disabled={busy} className="rounded-md border border-gray-300 px-2 py-0.5 text-xs hover:bg-white disabled:opacity-40">Assign to me</button>
+            {agents.length > 0 && (
+              <select
+                value={agents.some((a) => a.id === ticket.assigneeId) ? ticket.assigneeId : ''}
+                onChange={(e) => assignTo(e.target.value)}
+                disabled={busy}
+                className="rounded-md border border-gray-300 bg-white px-2 py-0.5 text-xs disabled:opacity-40"
+                aria-label="Assign to a teammate"
+              >
+                <option value="">Assign to…</option>
+                {agents.map((a) => <option key={a.id} value={a.id}>{a.id === me?.id ? `${a.name || a.email} (you)` : (a.name || a.email)}</option>)}
+              </select>
+            )}
             {ticket.assigneeId && <button onClick={unassign} disabled={busy} className="rounded-md border border-gray-300 px-2 py-0.5 text-xs hover:bg-white disabled:opacity-40">Unassign</button>}
             <span className="ml-3 text-xs font-medium text-gray-500">Move to<InfoTip text="The lifecycle is enforced server-side; only legal next steps are offered." /></span>
             {nextStates.length === 0 ? <span className="text-xs text-gray-400">terminal</span> : nextStates.map((s) => (

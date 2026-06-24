@@ -29,6 +29,7 @@ router.post('/roles', ROLES, c.createRole);
 router.put('/roles/:id', ROLES, c.updateRole);
 router.delete('/roles/:id', ROLES, c.deleteRole);
 router.post('/roles/:id/grants', ROLES, c.addGrant);
+router.delete('/roles/:id/grants/:grantId', ROLES, c.deleteGrant);
 
 // ── Org tree (read) + re-parent (canManageHierarchy) + assign role ──
 router.get('/org-tree', VIEW, c.orgTree);

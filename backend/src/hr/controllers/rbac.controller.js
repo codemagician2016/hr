@@ -278,6 +278,22 @@ async function addGrant(req, res, next) {
   } catch (e) { next(e); }
 }
 
+// DELETE /rbac/roles/:id/grants/:grantId — revoke an entity-scoped/time-bound grant
+// early (before it auto-expires). Tenant-walled: a grant from another tenant ⇒ 404.
+async function deleteGrant(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const role = await prisma.businessRole.findFirst({ where: { id: req.params.id, businessId }, select: { id: true } });
+    if (!role) return res.status(404).json({ message: 'Not found' });
+    const grant = await prisma.hrRolePermissionGrant.findFirst({
+      where: { id: req.params.grantId, roleId: role.id, businessId }, select: { id: true },
+    });
+    if (!grant) return res.status(404).json({ message: 'Grant not found' });
+    await prisma.hrRolePermissionGrant.delete({ where: { id: grant.id } });
+    res.json({ ok: true, id: grant.id });
+  } catch (e) { next(e); }
+}
+
 // ── GET /rbac/org-tree — the reporting tree (recursive CTE; reuses the F1 shape) ─
 async function orgTree(req, res, next) {
   try {
@@ -414,6 +430,6 @@ async function assignRole(req, res, next) {
 
 module.exports = {
   listPermissions,
-  listRoles, createRole, updateRole, deleteRole, addGrant,
+  listRoles, createRole, updateRole, deleteRole, addGrant, deleteGrant,
   orgTree, reparent, assignRole,
 };

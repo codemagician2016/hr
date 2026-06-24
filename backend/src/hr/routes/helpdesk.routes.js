@@ -14,6 +14,9 @@ const c = require('../helpdesk/tickets.controller');
 router.use(protect);
 router.use(requirePermission('canManageHelpdesk'));
 
+// Helpdesk-capable operators (assignee picker + assigned-by-name labels).
+router.get('/agents', c.listAgents);
+
 // Categories (SLA buckets + default assignee).
 router.get('/categories', c.listCategories);
 router.post('/categories', c.createCategory);
