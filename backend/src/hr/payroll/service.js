@@ -1170,6 +1170,48 @@ async function persistComputedRun(tx, { businessId, payRun, actorId, now, inputH
   let totGross = 0, totDed = 0, totNet = 0, totEr = 0;
   for (const ln of lines) {
     const r = ln.result;
+
+    // Feature 26 (FLAGGED) — RECONCILE the reimbursement payout to ONE locked claim set
+    // BEFORE pricing the payslip, closing the compute-vs-persist double-pay race. The
+    // engine priced the EXPENSE_REIMBURSEMENT line + net at COMPUTE time off a non-tx,
+    // UN-locked select (ln.reimbursementPayout.claims). Between then and now a racing
+    // run / manual reimburse could settle some of those claims, so we RE-SELECT the
+    // payable claims UNDER LOCK (FOR UPDATE) inside THIS persist tx and intersect: the
+    // authoritative set is the priced claims that are STILL lockable. We then REPRICE
+    // the EXPENSE_REIMBURSEMENT component + net DOWN to exactly that set's total and
+    // remember it (reimbReconciled) so the LATER applyPayout stamps EXACTLY the claims
+    // the payslip credits — priced set == stamped set, to the paise, no race window.
+    // A priced claim that was settled out-of-band drops out (never paid twice); a claim
+    // approved AFTER compute is NOT added (it was never on this payslip) — it stays
+    // APPROVED for the next run. The net-floor guard already cleared ln.reimbursementPayout
+    // for any deferred employee, so we never reach here for them.
+    let reimbReconciled = null;
+    if (ln.reimbursementPayout && ln.reimbursementPayout.claims && ln.reimbursementPayout.claims.length) {
+      const locked = await reimbursementPayout.selectPayableClaims(tx, {
+        businessId,
+        employeeId: ln.employeeId,
+        periodEnd: payRun.periodEnd,
+        currentPayRunId: payRun.id,
+        runCurrency: payRun.currencyCode || null,
+      });
+      reimbReconciled = reimbursementPayout.reconcilePayout(ln.reimbursementPayout.claims, locked.claims);
+      const pricedMinor = (r.reimbursements || [])
+        .filter((rb) => rb.code === 'EXPENSE_REIMBURSEMENT')
+        .reduce((acc, rb) => acc + (rb.amountMinor || 0), 0);
+      // If the locked∩priced set differs from what the engine priced, reprice the line +
+      // net so the persisted payslip credits EXACTLY what we will stamp (delta on net).
+      if (reimbReconciled.totalMinor !== pricedMinor) {
+        const delta = reimbReconciled.totalMinor - pricedMinor; // <= 0 (we only ever drop claims)
+        r.reimbursements = (r.reimbursements || [])
+          .map((rb) => (rb.code === 'EXPENSE_REIMBURSEMENT'
+            ? { ...rb, amountMinor: reimbReconciled.totalMinor }
+            : rb))
+          .filter((rb) => !(rb.code === 'EXPENSE_REIMBURSEMENT' && rb.amountMinor <= 0));
+        r.reimbursementsMinor = (r.reimbursementsMinor || 0) + delta;
+        r.netMinor = r.netMinor + delta;
+      }
+    }
+
     const lineRow = await tx.payRunLine.create({
       data: {
         businessId,
@@ -1259,42 +1301,24 @@ async function persistComputedRun(tx, { businessId, payRun, actorId, now, inputH
       }
     }
 
-    // Feature 26 (FLAGGED) — STAMP the reimbursement payout off the engine's ACTUAL
-    // EXPENSE_REIMBURSEMENT figure (the line ADDED to net; the net-floor guard already
-    // deferred any employee whose set was unsafe, clearing ln.reimbursementPayout so we
-    // never reach here for them). Mirror of the loan-stamp block as a POSITIVE payment:
-    // re-select the claims UNDER LOCK inside this persist tx (the default compute path
-    // selected them earlier on the non-tx client, lock not held, so a racing run could
-    // otherwise grab the same APPROVED claim) and stamp each REIMBURSED + payRunId +
-    // paidViaPayrollAmount. The unwind above already released THIS run's own prior
-    // stamps, so the lock re-select reproduces the original set on a clean recompute.
-    // paidMinor (the credit) == Σ claim amounts in the normal, race-free case.
-    if (ln.reimbursementPayout && ln.reimbursementPayout.claims && ln.reimbursementPayout.claims.length) {
-      const paidMinor = (r.reimbursements || [])
-        .filter((rb) => rb.code === 'EXPENSE_REIMBURSEMENT')
-        .reduce((acc, rb) => acc + (rb.amountMinor || 0), 0);
-      if (paidMinor > 0) {
-        const locked = await reimbursementPayout.selectPayableClaims(tx, {
-          businessId,
-          employeeId: ln.employeeId,
-          periodEnd: payRun.periodEnd,
-          currentPayRunId: payRun.id,
-          runCurrency: payRun.currencyCode || null,
-        });
-        // Pay the engine-reported figure across the LOCKED set, never beyond what is
-        // actually payable under the lock (a concurrent run may have taken some claims).
-        const payable = Math.min(paidMinor, locked.totalPayableMinor);
-        if (payable > 0) {
-          await reimbursementPayout.applyPayout(tx, {
-            businessId,
-            payRunId: payRun.id,
-            paidAt: now,
-            actorId,
-            claims: locked.claims,
-            paidMinor: payable,
-          });
-        }
-      }
+    // Feature 26 (FLAGGED) — STAMP the reimbursement payout on EXACTLY the reconciled
+    // priced∩locked claim set captured at the TOP of this loop (reimbReconciled). That
+    // is the SAME set whose Σ amounts we already wrote to the EXPENSE_REIMBURSEMENT line
+    // + net above, and the lock taken there is STILL HELD in this tx — so no concurrent
+    // run can settle these claims between the price and this stamp. applyPayout credits
+    // each claim its OWN priced amount (credit == claim-paid). We do NOT re-select a
+    // fresh candidate set here (that re-introduced the race) and do NOT spread an
+    // aggregate across a lock-ordered list (that could stamp a DIFFERENT claim than the
+    // engine priced). The unwind above already released THIS run's own prior stamps, so a
+    // clean recompute re-stamps exactly once.
+    if (reimbReconciled && reimbReconciled.claims.length) {
+      await reimbursementPayout.applyPayout(tx, {
+        businessId,
+        payRunId: payRun.id,
+        paidAt: now,
+        actorId,
+        claims: reimbReconciled.claims,
+      });
     }
 
     totGross += r.grossMinor;

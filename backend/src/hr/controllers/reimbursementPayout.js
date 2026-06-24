@@ -143,36 +143,70 @@ async function selectPayableClaims(tx, { businessId, employeeId, periodEnd, curr
 }
 
 /**
- * applyPayout — stamp `paidMinor` (the amount the engine ACTUALLY reported on the
- * EXPENSE_REIMBURSEMENT line) across the supplied claims, oldest-first, so each
- * claim is credited EXACTLY what was added to net (credit == claim-paid). Because the
- * engine does NOT cap a reimbursement, in the normal case paidMinor == totalPayableMinor
- * and every selected claim is paid IN FULL.
+ * reconcilePayout — pin the AUTHORITATIVE claim set a persist tx will both PRICE on the
+ * payslip and STAMP, eliminating the compute-vs-persist race (the two HIGH double-pay
+ * bugs). The engine priced ONE set at compute time (`pricedClaims`, selected on the
+ * non-tx client, un-locked); the persist tx holds a FOR UPDATE lock on a possibly-
+ * different `lockedClaims` set. The only set that is BOTH (a) what the engine actually
+ * summed onto the line and (b) provably un-settleable by any concurrent run is the
+ * INTERSECTION: priced claims that are still lockable now.
  *
- * Per claim: take min(claim.amountMinor, remaining). A claim is paid WHOLE or not at
- * all — if `remaining` cannot cover a claim's full amount (the net-floor sanity guard
- * fired upstream, which should already have deferred the WHOLE set), we STOP rather
- * than partial-pay it, leaving it APPROVED for the next run. This keeps reconciliation
- * 1:1 (a claim is either fully REIMBURSED via this run or untouched) and the stamp
- * idempotent — unlike loans, which genuinely split across installments.
+ *   - A priced claim MISSING from the lock set was settled out-of-band (manual reimburse
+ *     or another run grabbed it) between compute and persist → we MUST NOT pay it again,
+ *     so it drops out and the payslip line is repriced DOWN to match (see service.js).
+ *   - A lock-set claim that was NOT priced (a newer/older claim approved after compute)
+ *     is NOT added — the engine never put it on the line nor vetted it through the
+ *     net-floor guard; adding it would credit money the payslip never showed. It stays
+ *     APPROVED for the next run.
+ *
+ * The result is the EXACT set whose Σ amounts the caller writes to BOTH the
+ * EXPENSE_REIMBURSEMENT line / net AND the claim stamps — priced set == stamped set,
+ * to the paise, with no race window. We keep the priced claims' own amounts (the engine
+ * summed THOSE), intersecting against lock-set membership only.
+ *
+ * @param {Array<{id, amountMinor}>} pricedClaims  what the engine priced (ln.reimbursementPayout.claims)
+ * @param {Array<{id, amountMinor}>} lockedClaims  the FOR UPDATE set re-selected in the persist tx
+ * @returns {{ claims: Array<{id, amountMinor}>, totalMinor: number, droppedIds: string[] }}
+ */
+function reconcilePayout(pricedClaims, lockedClaims) {
+  const lockedIds = new Set((lockedClaims || []).map((c) => c.id));
+  const claims = [];
+  const droppedIds = [];
+  let totalMinor = 0;
+  for (const c of pricedClaims || []) {
+    const amountMinor = Math.max(0, Math.round(c.amountMinor != null ? c.amountMinor : 0));
+    if (amountMinor <= 0) continue;
+    if (!lockedIds.has(c.id)) { droppedIds.push(c.id); continue; }
+    claims.push({ id: c.id, amountMinor });
+    totalMinor += amountMinor;
+  }
+  return { claims, totalMinor, droppedIds };
+}
+
+/**
+ * applyPayout — stamp EXACTLY the supplied claims REIMBURSED, crediting each its OWN
+ * priced amount (credit == claim-paid, to the paise). The caller passes the RECONCILED
+ * set (reconcilePayout) — the same claims whose Σ amounts it ALSO wrote to the
+ * EXPENSE_REIMBURSEMENT line / net — so the engine-priced set and the stamped set are
+ * identical (closes the "stamp a different lock-ordered set than the engine priced"
+ * bug). We do NOT greedily spread an aggregate `paidMinor` across a re-derived,
+ * lock-ordered candidate list; every claim handed in is an engine-priced claim and is
+ * stamped its own amount.
  *
  * Idempotent by construction: the caller unwinds (see unwindForRun) any prior stamps
  * for this payRunId BEFORE re-selecting + re-applying, so re-running the same run
  * never double-pays.
  *
+ * @param {Array<{id, amountMinor}>} claims  the reconciled priced∩locked claim set
  * @returns {{ paidMinor, paidClaimIds: string[] }}
  */
-async function applyPayout(tx, { businessId, payRunId, paidAt, actorId = null, claims, paidMinor }) {
-  let remaining = Math.max(0, Math.round(paidMinor || 0));
-  const requested = remaining;
+async function applyPayout(tx, { businessId, payRunId, paidAt, actorId = null, claims }) {
+  let paidMinor = 0;
   const paidClaimIds = [];
 
   for (const claim of claims) {
-    if (remaining <= 0) break;
     const amountMinor = Math.round(claim.amountMinor != null ? claim.amountMinor : 0);
     if (amountMinor <= 0) continue;
-    // NEVER partial-pay: a claim is settled whole through one run or carried untouched.
-    if (amountMinor > remaining) break;
 
     await tx.expenseClaim.update({
       where: { id: claim.id },
@@ -186,12 +220,11 @@ async function applyPayout(tx, { businessId, payRunId, paidAt, actorId = null, c
       },
     });
     paidClaimIds.push(claim.id);
-    remaining -= amountMinor;
+    paidMinor += amountMinor;
   }
 
-  // paidMinor returned = what we actually stamped (requested − remaining). In the
-  // normal, race-free case this equals `requested`, so credit == claim-paid.
-  return { paidMinor: requested - remaining, paidClaimIds };
+  // paidMinor returned = Σ stamped amounts == Σ priced amounts of the reconciled set.
+  return { paidMinor, paidClaimIds };
 }
 
 /**
@@ -232,6 +265,7 @@ async function unwindForRun(tx, { businessId, payRunId }) {
 module.exports = {
   PAYROLL_CHANNEL,
   selectPayableClaims,
+  reconcilePayout,
   applyPayout,
   unwindForRun,
   _internals: { toMinor, decStr },
