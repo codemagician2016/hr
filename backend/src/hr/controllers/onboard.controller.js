@@ -7,17 +7,26 @@
  *
  * It reuses the SHARED hire-pay math (compensation/hireComp.buildHireRevisionLines)
  * + the SAME 50% fail-closed guard + employer-cost fixed point + line math that ATS
- * provisioning uses, so a direct hire and an ATS hire produce BYTE-IDENTICAL pay
- * (the §4.1 parity contract). The resulting revision is an ordinary HIRE/EFFECTIVE
- * revision — indistinguishable downstream from an ATS hire.
+ * provisioning uses, so a direct hire and an ATS hire produce BYTE-IDENTICAL pay FOR
+ * IDENTICAL STATUTORY INPUTS (the scoped §4.1 parity contract): the ESI/PF-cap knobs
+ * come from the persisted policy here and from the SHARED hireComp defaults on the ATS
+ * path, which equal an ESI-less policy's knobs. The resulting revision is an ordinary
+ * HIRE/EFFECTIVE revision — indistinguishable downstream from an ATS hire.
  *
  * Invariants:
  *   - SINGLE-COUNTRY: countryCode/currency from the tenant (countryContext), never
  *     the body; basis = CTC for IN.
  *   - 50% wage floor FAIL-CLOSED on the DERIVED Basic+DA (HireCompError → 422).
  *   - APPEND-ONLY: writes a fresh revision; never edits.
- *   - IDEMPOTENT: dedupe on (businessId, workEmail, dateOfJoining) → 409 returning the
- *     existing employee, so a retry never double-creates.
+ *   - IDEMPOTENT (TOCTOU-SAFE — review HIGH finding): dedupe is enforced by DB-level
+ *     uniqueness, not just an app pre-check. A partial-unique on
+ *     (businessId, workEmail, hireDate) WHERE workEmail IS NOT NULL AND deletedAt IS
+ *     NULL backs the email+DOJ key; the existing (businessId, code) unique backs a
+ *     client-supplied code. The Employee.create runs INSIDE the tx; a P2002 on either
+ *     constraint is translated to 409 ALREADY_ONBOARDED returning the EXISTING row, so
+ *     concurrent/retried identical POSTs converge to ONE employee (never a duplicate).
+ *     A null-email hire MUST carry a stable natural key (person.code or
+ *     idempotencyKey) — without one we refuse (400) rather than risk a double-insert.
  *   - TENANT-ISOLATED + audited (employee.create + compensation.change).
  */
 
@@ -106,8 +115,23 @@ async function byCtc(req, res, next) {
 
     const email = person.email ? String(person.email).trim().toLowerCase() : null;
 
-    // IDEMPOTENCY / dedupe: an existing non-deleted employee with the same work
-    // email AND hire date → 409 returning that employee (a retry never double-creates).
+    // The client-stable natural key for null-email hires: an explicit person.code, or
+    // a body idempotencyKey used AS the code when no code is given. Without email AND
+    // without either of these there is NO stable key to dedupe on, so a retry could
+    // double-insert (the original TOCTOU bug) — refuse rather than risk a duplicate.
+    const explicitCode = person.code && String(person.code).trim() ? String(person.code).trim() : null;
+    const idemKey = req.body && req.body.idempotencyKey ? String(req.body.idempotencyKey).trim() : null;
+    const requestedCode = explicitCode || idemKey || null; // the code we will insert if any
+    if (!email && !requestedCode) {
+      return res.status(400).json({
+        error: 'IDEMPOTENCY_KEY_REQUIRED',
+        message: 'A work email, employee code, or idempotencyKey is required so a retry cannot create a duplicate.',
+      });
+    }
+
+    // IDEMPOTENCY / dedupe FAST PATH (correctness rests on the DB constraints below,
+    // not on this pre-check). An existing non-deleted employee with the same work
+    // email AND hire date → 409 returning that employee.
     if (email) {
       const existing = await prisma.employee.findFirst({
         where: { businessId, deletedAt: null, workEmail: email, hireDate: joinDate },
@@ -115,6 +139,16 @@ async function byCtc(req, res, next) {
       });
       if (existing) {
         return res.status(409).json({ error: 'ALREADY_ONBOARDED', message: 'This person is already onboarded for that joining date.', employee: existing });
+      }
+    }
+    // Fast path for a client-supplied code (backed by the (businessId, code) unique).
+    if (requestedCode) {
+      const existingByCode = await prisma.employee.findFirst({
+        where: { businessId, deletedAt: null, code: requestedCode },
+        select: { id: true, code: true },
+      });
+      if (existingByCode) {
+        return res.status(409).json({ error: 'ALREADY_ONBOARDED', message: 'An employee with that code is already onboarded.', employee: existingByCode });
       }
     }
 
@@ -145,24 +179,40 @@ async function byCtc(req, res, next) {
       const entity = await resolveEntityId(tx, { businessId, entityId: person.entityId, locationId: person.locationId });
 
       // ── 3. Create the Employee (auto-number if no code), mirroring the
-      //    employee-create service so org/number-sequence/defaults match. ──
-      let code = person.code && String(person.code).trim() ? String(person.code).trim() : null;
-      if (!code) code = await allocateCode(tx, { businessId, scope: 'EMPLOYEE' });
-      let employee = await tx.employee.create({
-        data: {
-          businessId,
-          code,
-          firstName: person.firstName,
-          lastName: person.lastName,
-          workEmail: email,
-          phone: person.phone || null,
-          countryCode,
-          status: 'ACTIVE',
-          isActive: true,
-          hireDate: joinDate,
-          managerEmployeeId: person.managerEmployeeId || null,
-        },
-      });
+      //    employee-create service so org/number-sequence/defaults match. The create
+      //    is INSIDE the tx so a P2002 on the email+DOJ partial-unique OR the
+      //    (businessId, code) unique aborts the whole hire atomically (no orphan
+      //    revision/leave rows) — the outer catch then resolves the existing employee
+      //    and returns 409 ALREADY_ONBOARDED (TOCTOU-safe, review HIGH finding).
+      const code = requestedCode || await allocateCode(tx, { businessId, scope: 'EMPLOYEE' });
+      let employee;
+      try {
+        employee = await tx.employee.create({
+          data: {
+            businessId,
+            code,
+            firstName: person.firstName,
+            lastName: person.lastName,
+            workEmail: email,
+            phone: person.phone || null,
+            countryCode,
+            status: 'ACTIVE',
+            isActive: true,
+            hireDate: joinDate,
+            managerEmployeeId: person.managerEmployeeId || null,
+          },
+        });
+      } catch (err) {
+        if (err && err.code === 'P2002') {
+          // A concurrent identical onboard already inserted this natural key. Carry the
+          // collided key out so the outer catch can return the EXISTING row (idempotent).
+          const e = new Error('ONBOARD_RACE');
+          e.code = 'ONBOARD_RACE';
+          e.dedupe = { email, hireDate: joinDate, code, target: err.meta && err.meta.target };
+          throw e;
+        }
+        throw err;
+      }
 
       // ── 4. Initial HIRE EmploymentRecord (org context), if we can anchor an
       //    entity (mirror of provision STEP 4 / employee-create). ──
@@ -245,10 +295,29 @@ async function byCtc(req, res, next) {
     });
   } catch (e) {
     if (e instanceof HireCompError) {
-      return res.status(e.status || 422).json({ error: e.reason === 'wage-rule' ? 'WAGE_RULE' : (e.reason || 'COMP_STRUCTURE').toUpperCase(), message: e.message });
+      return res.status(e.status || 422).json({ error: e.reason === 'wage-rule' ? 'WAGE_RULE' : String(e.reason || 'COMP_STRUCTURE').toUpperCase().replace(/-/g, '_'), message: e.message });
     }
+    // A concurrent identical onboard won the insert (the DB unique fired inside the
+    // tx). Resolve the existing employee by the collided natural key and return 409
+    // ALREADY_ONBOARDED — idempotent, never a second employee (review HIGH finding).
+    if (e && e.code === 'ONBOARD_RACE') {
+      try {
+        const { businessId } = req.user;
+        const d = e.dedupe || {};
+        const where = d.email && d.hireDate
+          ? { businessId, deletedAt: null, workEmail: d.email, hireDate: d.hireDate }
+          : { businessId, deletedAt: null, code: d.code };
+        const existing = await prisma.employee.findFirst({ where, select: { id: true, code: true } })
+          || (d.code ? await prisma.employee.findFirst({ where: { businessId, deletedAt: null, code: d.code }, select: { id: true, code: true } }) : null);
+        return res.status(409).json({ error: 'ALREADY_ONBOARDED', message: 'This person is already onboarded.', employee: existing || undefined });
+      } catch (_inner) {
+        return res.status(409).json({ error: 'ALREADY_ONBOARDED', message: 'This person is already onboarded.' });
+      }
+    }
+    // A raw P2002 that escaped the tx (e.g. the code unique on a path without the
+    // sentinel) — treat as already-onboarded rather than a 500.
     if (e && e.code === 'P2002') {
-      return res.status(409).json({ error: 'DUPLICATE', message: 'An employee with that code already exists.' });
+      return res.status(409).json({ error: 'ALREADY_ONBOARDED', message: 'An employee with that natural key is already onboarded.' });
     }
     return next(e);
   }
