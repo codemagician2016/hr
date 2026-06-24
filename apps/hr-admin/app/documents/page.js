@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ErrorBanner, PrimaryButton, TextInput, DateField, formatAdminDate, DocumentDropzone, maskDocumentNumber } from '@hr/ui';
 import { get, post, del } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, employeeLabel, ServerPagination } from '@/lib/ui';
+import EmployeeSearchSelect from '@/components/EmployeeSearchSelect';
 
 const PAGE_SIZES = [25, 50, 100];
 
@@ -266,90 +267,23 @@ const TABS = [
   { key: 'requests', label: 'Requests' },
 ];
 
-// Debounced employee search/autocomplete backed by GET /api/hr/employees.
-// Replaces the old paste-a-raw-UUID input: the admin types a name/code, picks a
-// person, and we hand the caller the selected employee (id + label). F1 scoping
-// is enforced server-side, so this only ever surfaces people the admin may see.
+// Employee search/autocomplete backed by GET /api/hr/employees. The admin
+// clicks to see the directory, filters by name/code/email, and we hand the
+// caller the selected employee object. F1 scoping is enforced server-side, so
+// this only ever surfaces people the admin may see. Thin wrapper over the
+// reusable EmployeeSearchSelect — keeps the { selected, onSelect, onClear }
+// contract used by this page.
 function EmployeePicker({ selected, onSelect, onClear }) {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    const term = query.trim();
-    if (!term) { setResults([]); setLoading(false); return undefined; }
-    setLoading(true);
-    const h = setTimeout(() => {
-      get('/api/hr/employees', { q: term, page: 1, pageSize: 20 })
-        .then((r) => setResults(asList(r)))
-        .catch(() => setResults([]))
-        .finally(() => setLoading(false));
-    }, 250);
-    return () => clearTimeout(h);
-  }, [query]);
-
-  function choose(emp) {
-    onSelect(emp);
-    setQuery('');
-    setResults([]);
-    setOpen(false);
-  }
-
   return (
     <div className="mb-5 max-w-md">
-      <label className="block text-sm font-medium text-gray-700 mb-1">Employee</label>
-      {selected ? (
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2.5">
-          <span className="text-sm text-gray-900">
-            <span className="font-medium">{employeeLabel(selected)}</span>
-            {selected.code && <span className="ml-2 text-gray-400">{selected.code}</span>}
-          </span>
-          <button
-            type="button"
-            onClick={onClear}
-            className="text-xs font-medium text-gray-500 hover:text-gray-800"
-          >
-            Change
-          </button>
-        </div>
-      ) : (
-        <div className="relative">
-          <input
-            value={query}
-            onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
-            onFocus={() => setOpen(true)}
-            placeholder="Search by name, code or email…"
-            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--theme-primary)]"
-            autoComplete="off"
-          />
-          {open && query.trim() && (
-            <div className="absolute z-10 mt-1 w-full rounded-lg border border-gray-200 bg-white shadow-lg overflow-hidden">
-              {loading ? (
-                <div className="px-3 py-3 text-sm text-gray-400">Searching…</div>
-              ) : results.length === 0 ? (
-                <div className="px-3 py-3 text-sm text-gray-400">No matching employees.</div>
-              ) : (
-                <ul className="max-h-64 overflow-y-auto divide-y divide-gray-50">
-                  {results.map((e) => (
-                    <li key={e.id}>
-                      <button
-                        type="button"
-                        onClick={() => choose(e)}
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                      >
-                        <span className="font-medium text-gray-900">{employeeLabel(e)}</span>
-                        {e.code && <span className="ml-2 text-gray-400">{e.code}</span>}
-                        {e.workEmail && <span className="block text-xs text-gray-400">{e.workEmail}</span>}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+      <EmployeeSearchSelect
+        label="Employee"
+        tip="Click to browse the directory, then filter by name, code or work email."
+        value={selected?.id || ''}
+        selectedLabel={selected ? employeeLabel(selected) : ''}
+        onSelect={(emp) => (emp ? onSelect(emp) : onClear())}
+        placeholder="Search by name, code or email…"
+      />
     </div>
   );
 }

@@ -18,6 +18,7 @@ import { ErrorBanner, PrimaryButton, TextInput, TextArea, DateField, Spinner } f
 import { get, post } from '@/lib/api';
 import { PageHeader, asList, employeeLabel, Tabs } from '@/lib/ui';
 import { postForPdf, InfoTip } from '../lib';
+import EmployeeSearchSelect from '@/components/EmployeeSearchSelect';
 
 // Map an ESS request templateKind → a hint for matching a template by category.
 const REQUEST_KIND_CATEGORY = {
@@ -42,8 +43,6 @@ export default function IssueLetterPage() {
   // recipient mode: 'employee' (link an employee) | 'external' (free addressee)
   const [recipientMode, setRecipientMode] = useState('employee');
 
-  const [empQuery, setEmpQuery] = useState('');
-  const [employees, setEmployees] = useState([]);
   const [employeeId, setEmployeeId] = useState('');
   const [employeeLabelText, setEmployeeLabelText] = useState('');
 
@@ -104,16 +103,6 @@ export default function IssueLetterPage() {
       });
   }, []);
   useEffect(() => { loadRequests(); }, [loadRequests]);
-
-  // ── employee search (debounced) ────────────────────────────────────────────
-  useEffect(() => {
-    const h = setTimeout(() => {
-      get('/api/hr/employees', { q: empQuery.trim(), status: 'ACTIVE', page: 1, pageSize: 20 })
-        .then((r) => setEmployees(asList(r)))
-        .catch(() => setEmployees([]));
-    }, 250);
-    return () => clearTimeout(h);
-  }, [empQuery]);
 
   const overrides = useMemo(() => {
     const o = { issueDate };
@@ -210,7 +199,6 @@ export default function IssueLetterPage() {
     if (reqRow.employee) {
       setEmployeeId(reqRow.employee.id);
       setEmployeeLabelText([reqRow.employee.name, reqRow.employee.code].filter(Boolean).join(' · '));
-      setEmpQuery('');
     }
     // best-effort: pre-select a template whose category matches the requested kind.
     const wantCat = REQUEST_KIND_CATEGORY[reqRow.templateKind];
@@ -325,34 +313,23 @@ export default function IssueLetterPage() {
             </Field>
 
             {recipientMode === 'employee' ? (
-              <Field label="Employee (optional for company-wide letters)" tip="Search by name or code. Leave empty for a company-wide letter with no specific employee.">
-                <TextInput
-                  value={empQuery}
-                  onChange={(v) => setEmpQuery(v)}
-                  placeholder="Search by name or code…"
-                />
-                {employeeId && (
-                  <div className="mt-1 flex items-center gap-2 text-sm text-gray-700">
-                    <span className="font-medium">{employeeLabelText}</span>
-                    <button type="button" onClick={() => { setEmployeeId(''); setEmployeeLabelText(''); }} className="text-xs text-gray-400 hover:text-gray-600">clear</button>
-                  </div>
-                )}
-                {empQuery && employees.length > 0 && (
-                  <ul className="mt-1 max-h-44 overflow-y-auto rounded-lg border border-gray-200 divide-y divide-gray-50">
-                    {employees.map((e) => (
-                      <li key={e.id}>
-                        <button
-                          type="button"
-                          onClick={() => { setEmployeeId(e.id); setEmployeeLabelText(employeeLabel(e)); setEmpQuery(''); }}
-                          className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                        >
-                          {employeeLabel(e)} <span className="text-gray-400">{e.code}</span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </Field>
+              <EmployeeSearchSelect
+                label="Employee (optional for company-wide letters)"
+                tip="Click to see the directory, then filter by name, code or email. Leave empty for a company-wide letter with no specific employee."
+                status="ACTIVE"
+                value={employeeId}
+                selectedLabel={employeeLabelText}
+                onSelect={(emp) => {
+                  if (emp) {
+                    setEmployeeId(emp.id);
+                    setEmployeeLabelText(employeeLabel(emp));
+                  } else {
+                    setEmployeeId('');
+                    setEmployeeLabelText('');
+                  }
+                }}
+                placeholder="Search by name, code or email…"
+              />
             ) : (
               <div className="space-y-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
                 <TextInput
