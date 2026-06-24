@@ -93,8 +93,19 @@ async function isDayLocked(businessId, employeeId, day) {
 
 const noEmployee = (res) => res.status(404).json({ message: 'No active employee record for this account' });
 
+// Parse a geo coordinate from the punch body: a finite number in range, else null.
+// Lat ∈ [-90,90], Lng ∈ [-180,180]. Anything else (string junk, out-of-range, NaN)
+// degrades to null so a malformed coord never crashes / never marks out-of-geofence.
+function parseCoord(v, max) {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || Math.abs(n) > max) return null;
+  return n;
+}
+
 // ── POST /me/attendance/punch — clock IN/OUT/BREAK (self only) ────────────────
-// employeeId is derived from the session; the body carries ONLY { type, punchAt? }.
+// employeeId is derived from the session; the body carries { type, punchAt?,
+// geoLat?, geoLng? } (coords drive the geofence check; source is NEVER trusted).
 async function createPunch(req, res, next) {
   try {
     const emp = await resolveActiveSelf(req);
@@ -106,12 +117,22 @@ async function createPunch(req, res, next) {
     }
     const punchAt = req.body && req.body.punchAt ? new Date(req.body.punchAt) : new Date();
     if (Number.isNaN(punchAt.getTime())) return res.status(400).json({ message: 'punchAt is not a valid date' });
+    const geoLat = parseCoord(req.body && req.body.geoLat, 90);
+    const geoLng = parseCoord(req.body && req.body.geoLng, 180);
 
     const tz = await resolveEmployeeTz(businessId, emp.id, emp);
     const localDay = civilDayInTz(punchAt, tz);
     if (await isDayLocked(businessId, emp.id, localDay)) {
       return res.status(409).json({ message: 'Attendance for this day is locked (period closed)' });
     }
+
+    // Stamp the assigned location so the punch carries its site context (and the
+    // geofence is evaluated against it in recompute). Best-effort: a missing
+    // employment/location simply leaves locationId null (no geofence → no flag).
+    const employment = await prisma.employmentRecord.findFirst({
+      where: { businessId, employeeId: emp.id, isCurrent: true },
+      select: { locationId: true },
+    });
 
     const punch = await prisma.attendancePunch.create({
       data: {
@@ -120,11 +141,18 @@ async function createPunch(req, res, next) {
         punchType: type,
         source: 'WEB', // ESS self-punch — never trust a client-supplied source.
         punchAt,
+        locationId: employment ? employment.locationId : null,
+        geoLat, // Decimal pass-through (validated finite + in range); null otherwise.
+        geoLng,
         ipAddress: req.ip || null,
       },
     });
+    // recompute runs the Haversine geofence check (geoLat/geoLng vs the assigned
+    // Location.geofenceM) and stamps punch.outOfGeofence + surfaces OUT_OF_GEOFENCE.
     await recompute(businessId, emp.id, localDay, localDay);
-    res.status(201).json(punch);
+    // Re-read so the response carries the geofence marker the recompute just stamped.
+    const stamped = await prisma.attendancePunch.findUnique({ where: { id: punch.id } });
+    res.status(201).json(stamped || punch);
   } catch (e) { next(e); }
 }
 

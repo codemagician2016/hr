@@ -147,9 +147,13 @@ async function createPunch(req, res, next) {
 
     const punch = await prisma.attendancePunch.create({ data });
     // Re-derive the affected LOCAL civil day so the daily Attendance rollup stays
-    // current (recompute keys @db.Date by the employee-local day — H5).
+    // current (recompute keys @db.Date by the employee-local day — H5). recompute
+    // also runs the Haversine geofence check and stamps punch.outOfGeofence when the
+    // punch carries coords and the assigned Location has a geofence.
     await recompute(businessId, employeeId, localDay, localDay);
-    res.status(201).json(punch);
+    // Re-read so the response carries the geofence marker the recompute just stamped.
+    const stamped = await prisma.attendancePunch.findUnique({ where: { id: punch.id } });
+    res.status(201).json(stamped || punch);
   } catch (e) { next(e); }
 }
 

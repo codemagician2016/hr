@@ -30,6 +30,17 @@ const {
 } = require('./derive');
 const { resolveTimezone, civilDateInTz, zonedWallTimeToUtc } = require('./tz');
 const { tenantCountry } = require('../tenant/countryContext');
+const { evaluatePunchGeofence } = require('./geo');
+
+// Resolve the tenant-wide geofence-enforce default from Business.featureFlags
+// (attendance.geofenceEnforce). Falls back to false (WARN ONLY). A per-location
+// Location.geofenceEnforce always overrides this (see geo.evaluatePunchGeofence).
+function tenantGeofenceEnforce(business) {
+  const ff = business && business.featureFlags;
+  if (!ff || typeof ff !== 'object') return false;
+  const att = ff.attendance;
+  return !!(att && typeof att === 'object' && att.geofenceEnforce);
+}
 
 // A @db.Date column is stored at UTC midnight. Build the civil-day key the same
 // way everywhere so the unique (businessId, employeeId, date) lines up. The civil
@@ -177,6 +188,42 @@ function resolveOtRule(employee, rules) {
 }
 
 /**
+ * evaluateDayGeofence(punches, location, tenantEnforce) — Cycle 0 geofence check.
+ *
+ * Runs the PURE Haversine check (geo.evaluatePunchGeofence) over a day's WORK
+ * punches (IN/OUT — break punches don't gate presence) and collapses to:
+ *   - outOfGeofence: true when ANY evaluated work punch fell outside the radius
+ *   - maxDistanceM:  the farthest out-of-geofence distance (board detail)
+ *   - enforce:       the resolved enforce mode (per-location overrides tenant)
+ *   - markerUpdates: per-punch { id, outOfGeofence, geoDistanceM } to persist,
+ *                    ONLY for punches whose stored marker actually changed (so a
+ *                    re-run doesn't churn writes — idempotent).
+ *
+ * GRACEFUL: no location geofence, or no punch coords → every punch evaluates to
+ * evaluated:false → outOfGeofence:false, no marker updates, nothing thrown.
+ */
+function evaluateDayGeofence(punches, location, tenantEnforce) {
+  const out = { outOfGeofence: false, maxDistanceM: null, enforce: false, markerUpdates: [] };
+  for (const p of punches || []) {
+    // Only IN/OUT gate presence; BREAK punches are ignored for the geofence verdict.
+    if (p.punchType !== 'IN' && p.punchType !== 'OUT') continue;
+    const v = evaluatePunchGeofence(p, location, { tenantEnforce });
+    if (!v.evaluated) continue;
+    out.enforce = v.enforce;
+    if (v.outOfGeofence) {
+      out.outOfGeofence = true;
+      if (out.maxDistanceM == null || v.distanceM > out.maxDistanceM) out.maxDistanceM = v.distanceM;
+    }
+    // Persist the marker only when it changed (idempotent re-run discipline).
+    const newDist = v.distanceM == null ? null : v.distanceM;
+    if (p.outOfGeofence !== v.outOfGeofence || p.geoDistanceM !== newDist) {
+      out.markerUpdates.push({ id: p.id, outOfGeofence: v.outOfGeofence, geoDistanceM: newDist });
+    }
+  }
+  return out;
+}
+
+/**
  * recompute(businessId, employeeId, fromDate, toDate, tx?)
  *
  * Re-derive + upsert the daily Attendance rollup for one employee across a civil
@@ -205,13 +252,26 @@ async function recompute(businessId, employeeId, fromDate, toDate, tx) {
     select: {
       entityId: true, locationId: true,
       entity: { select: { timezone: true, countryCode: true } },
-      location: { select: { timezone: true, countryCode: true } },
+      // Geofence config travels with the assigned Location (geoLat/geoLng/geofenceM
+      // + the per-location enforce lever). Pulled here so the per-day loop can flag
+      // out-of-geofence punches without a per-day round-trip.
+      location: {
+        select: {
+          timezone: true, countryCode: true,
+          geoLat: true, geoLng: true, geofenceM: true, geofenceEnforce: true,
+        },
+      },
     },
   });
   const [empMeta, business] = await Promise.all([
     db.employee.findFirst({ where: { id: employeeId, businessId }, select: { countryCode: true } }),
-    db.business.findFirst({ where: { id: businessId }, select: { timezone: true } }),
+    db.business.findFirst({ where: { id: businessId }, select: { timezone: true, featureFlags: true } }),
   ]);
+  // Geofence: the assigned-location geofence config + the tenant-wide enforce
+  // default (per-location enforce overrides). When the location has no geofence
+  // this resolves to a no-op (evaluatePunchGeofence returns evaluated:false).
+  const geofenceLocation = employment ? employment.location : null;
+  const tenantEnforce = tenantGeofenceEnforce(business);
   const employee = {
     id: employeeId,
     entityId: employment ? employment.entityId : null,
@@ -315,8 +375,29 @@ async function recompute(businessId, employeeId, fromDate, toDate, tx) {
         OR: [{ isManual: false }, { isManual: true, regularizationRequestId: null }],
       },
       orderBy: { punchAt: 'asc' },
-      select: { punchType: true, punchAt: true },
+      // id + geo coords are needed for the geofence evaluation (and to persist the
+      // per-punch out-of-geofence marker). outOfGeofence is read to skip a redundant
+      // re-write when the stored marker already matches.
+      select: {
+        id: true, punchType: true, punchAt: true,
+        geoLat: true, geoLng: true, outOfGeofence: true, geoDistanceM: true,
+      },
     });
+
+    // Geofence (Cycle 0). For each punch carrying coords, Haversine-compare against
+    // the assigned Location's geofence; if ANY work punch (IN/OUT) lands outside the
+    // radius, set ctx.flags.outOfGeofence so derive.js surfaces the OUT_OF_GEOFENCE
+    // exception. Persist the per-punch marker (idempotent — only when it changed).
+    // Graceful: no location geofence or no punch coords → evaluated:false → no flag.
+    const geo = evaluateDayGeofence(punches, geofenceLocation, tenantEnforce);
+    if (geo.markerUpdates.length) {
+      for (const u of geo.markerUpdates) {
+        await db.attendancePunch.update({
+          where: { id: u.id },
+          data: { outOfGeofence: u.outOfGeofence, geoDistanceM: u.geoDistanceM },
+        });
+      }
+    }
 
     const holiday = isHoliday(employee, day, holidays, null);
     const weeklyOff = schedule ? isWeeklyOff(day, schedule.weeklyOffDays) : false;
@@ -339,6 +420,10 @@ async function recompute(businessId, employeeId, fromDate, toDate, tx) {
       holiday: !!holiday,
       weeklyOff,
       otRule,
+      // Geofence flag → derive.js Step C surfaces OUT_OF_GEOFENCE when set. WARN vs
+      // ENFORCE does NOT change whether we flag (we always flag); enforce is carried
+      // for a future hard-block path and recorded on the day for the board.
+      flags: geo.outOfGeofence ? { outOfGeofence: true } : {},
     };
 
     const d = derive(ctx);
@@ -356,9 +441,16 @@ async function recompute(businessId, employeeId, fromDate, toDate, tx) {
       overtimeMinutes: d.overtimeMinutes || 0,
       status: d.status,
       lopFraction: d.lopFraction || 0,
-      exceptionsJson: (d.exceptions && d.exceptions.length)
-        ? { flags: d.exceptions, otEquivalentHours: d.otEquivalentHours, holidayId: holiday ? holiday.id : null }
-        : { otEquivalentHours: d.otEquivalentHours, holidayId: holiday ? holiday.id : null },
+      exceptionsJson: {
+        ...(d.exceptions && d.exceptions.length ? { flags: d.exceptions } : {}),
+        otEquivalentHours: d.otEquivalentHours,
+        holidayId: holiday ? holiday.id : null,
+        // Geofence detail for the team/attendance board (read-only). Only present
+        // when the day had an out-of-geofence punch: max distance + enforce mode.
+        ...(geo.outOfGeofence
+          ? { geofence: { outOfGeofence: true, distanceM: geo.maxDistanceM, enforce: geo.enforce } }
+          : {}),
+      },
     };
 
     // L3 — TOCTOU-safe write. A plain upsert(update) would overwrite a row that
@@ -393,5 +485,6 @@ module.exports = {
   _internals: {
     resolveLeaveForDay, resolvePresenceForDay, resolveOtRule, eachDay, utcDay, dayKey,
     shiftInstantWindow, clockInstant, dayKeyToDate,
+    evaluateDayGeofence, tenantGeofenceEnforce,
   },
 };

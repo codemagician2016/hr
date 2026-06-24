@@ -6469,6 +6469,12 @@ model Location {
   geoLat           Decimal? @db.Decimal(9, 6)
   geoLng           Decimal? @db.Decimal(9, 6)
   geofenceM        Int? // allowed punch radius, metres
+  // Geofence policy: false (default) = WARN ONLY (flag + surface OUT_OF_GEOFENCE
+  // but never block); true = ENFORCE (still flags; a future hard-block path keys
+  // off this). Default warn so a freshly-configured geofence never locks people
+  // out on day one. Per-location lever; a tenant-wide default can live on
+  // Business.featureFlags.attendance.geofenceEnforce (resolved in service.js).
+  geofenceEnforce  Boolean  @default(false)
   ptRegistrationId String? // IN: PT registration is per state
   accClassUnit     String? // NZ: ACC classification unit (CU) code
   isPrimary        Boolean  @default(false)
@@ -8220,6 +8226,12 @@ model AttendancePunch {
   source      PunchSource
   geoLat      Decimal? @db.Decimal(9, 6)
   geoLng      Decimal? @db.Decimal(9, 6)
+  // Out-of-geofence marker, stamped at punch time when the punch carries coords
+  // AND the employee's assigned Location has a geofence (geoLat/geoLng/geofenceM).
+  // null = not evaluated (no location geofence or no punch coords); false = inside
+  // the radius; true = outside. Drives the OUT_OF_GEOFENCE exception via derive.js.
+  outOfGeofence Boolean?
+  geoDistanceM  Int? // Haversine distance (m) from the assigned location, when evaluated
   ipAddress   String?
   deviceId    String?
   selfieUrl   String?  @db.Text // @pii:sensitive (optional)
