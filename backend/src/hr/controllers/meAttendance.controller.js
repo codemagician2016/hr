@@ -23,6 +23,7 @@
  */
 
 const prisma = require('../../core/lib/prisma');
+const s3 = require('../../core/lib/s3');
 const payrollService = require('../payroll/service');
 const { recompute } = require('../attendance/service');
 const { resolveTimezone, civilDateInTz } = require('../attendance/tz');
@@ -30,6 +31,9 @@ const { resolveApprover } = require('../lib/approvalRouting');
 const { tenantCountry } = require('../tenant/countryContext');
 // Feature 29 — ESS shift-swap rides the F10 SHIFT_SWAP approval engine.
 const engine = require('../approvals/engine');
+// Feature 2 (multi-mode capture) — policy resolver + enforcement (geo/IP/face).
+const capture = require('../attendance/capture/policy');
+const faceMatcher = require('../attendance/capture/faceMatcher');
 
 const PUNCH_TYPES = ['IN', 'OUT', 'BREAK_START', 'BREAK_END'];
 // Mirror the RegularizationKind enum in prisma/schema.prisma exactly — writing a
@@ -105,6 +109,57 @@ function parseCoord(v, max) {
   return n;
 }
 
+// Feature 2 — validate an inbound selfie data URL (FACE capture). Accepts only a
+// base64 image data URL within a sane size cap (DoS guard: size computed from the
+// base64 length WITHOUT allocating). Returns { ok, dataUrl } or { ok:false, status,
+// message }. A malformed/oversize selfie is rejected up-front (the matcher never sees
+// junk). Mirrors documents.controller's validateDocDataUrl posture.
+const MAX_SELFIE_BYTES = 6 * 1024 * 1024; // 6 MB — a phone selfie is well under this
+function validateSelfieDataUrl(dataUrl) {
+  if (dataUrl == null || dataUrl === '') return { ok: true, dataUrl: null }; // optional
+  if (typeof dataUrl !== 'string') return { ok: false, status: 400, message: 'selfieDataUrl must be a data URL string' };
+  const m = /^data:(image\/(?:png|jpe?g|webp))(;base64)?,(.*)$/i.exec(dataUrl);
+  if (!m || !m[2]) return { ok: false, status: 422, message: 'selfieDataUrl must be a base64 image data URL (png/jpeg/webp)' };
+  const b64 = m[3] || '';
+  const approxBytes = Math.floor((b64.length * 3) / 4);
+  if (approxBytes > MAX_SELFIE_BYTES) return { ok: false, status: 413, message: `Selfie exceeds the ${MAX_SELFIE_BYTES / (1024 * 1024)} MB limit` };
+  return { ok: true, dataUrl, mime: m[1] };
+}
+
+// Store a selfie data URL for audit: real object storage when configured, else the
+// data URL is persisted inline (dev/test) — same fallback documents.controller uses.
+async function storeSelfie(businessId, dataUrl) {
+  if (!dataUrl) return null;
+  if (s3.isConfigured()) {
+    try {
+      const up = await s3.uploadDataUrl({ dataUrl, businessId, scope: 'attendance-selfie' });
+      return up.url;
+    } catch (_e) {
+      return dataUrl; // never fail a punch on a storage hiccup — keep the bytes inline
+    }
+  }
+  return dataUrl;
+}
+
+// Resolve the capture context (entity/location/department + the Location geofence
+// row) for an employee's CURRENT employment. Used by the punch enforcement + the
+// /policy preview endpoint. Tenant-scoped.
+async function resolveCaptureContext(businessId, employeeId) {
+  const employment = await prisma.employmentRecord.findFirst({
+    where: { businessId, employeeId, isCurrent: true },
+    select: {
+      entityId: true, locationId: true, departmentId: true,
+      location: { select: { id: true, geoLat: true, geoLng: true, geofenceM: true, geofenceEnforce: true } },
+    },
+  });
+  return {
+    entityId: employment ? employment.entityId : null,
+    locationId: employment ? employment.locationId : null,
+    departmentId: employment ? employment.departmentId : null,
+    location: employment ? employment.location : null,
+  };
+}
+
 // ── POST /me/attendance/punch — clock IN/OUT/BREAK (self only) ────────────────
 // employeeId is derived from the session; the body carries { type, punchAt?,
 // geoLat?, geoLng? } (coords drive the geofence check; source is NEVER trusted).
@@ -122,6 +177,11 @@ async function createPunch(req, res, next) {
     const geoLat = parseCoord(req.body && req.body.geoLat, 90);
     const geoLng = parseCoord(req.body && req.body.geoLng, 180);
 
+    // Feature 2 — validate the optional selfie up-front (size/MIME) before any work.
+    const selfieCheck = validateSelfieDataUrl(req.body && req.body.selfieDataUrl);
+    if (!selfieCheck.ok) return res.status(selfieCheck.status).json({ message: selfieCheck.message });
+    const selfieDataUrl = selfieCheck.dataUrl;
+
     const tz = await resolveEmployeeTz(businessId, emp.id, emp);
     const localDay = civilDayInTz(punchAt, tz);
     if (await isDayLocked(businessId, emp.id, localDay)) {
@@ -131,10 +191,31 @@ async function createPunch(req, res, next) {
     // Stamp the assigned location so the punch carries its site context (and the
     // geofence is evaluated against it in recompute). Best-effort: a missing
     // employment/location simply leaves locationId null (no geofence → no flag).
-    const employment = await prisma.employmentRecord.findFirst({
-      where: { businessId, employeeId: emp.id, isCurrent: true },
-      select: { locationId: true },
-    });
+    const ctx = await resolveCaptureContext(businessId, emp.id);
+
+    // Feature 2 — resolve + ENFORCE the multi-mode capture policy (geo/IP/face).
+    // The trusted req.ip (single nginx hop via app.set('trust proxy',1)) is NOT
+    // spoofable via raw XFF. A hard ENFORCE failure rejects BEFORE we create the
+    // punch; a WARN failure flags the punch + queues it for HR review.
+    const verdict = await capture.evaluatePunchCapture(
+      businessId,
+      ctx,
+      { geoLat, geoLng, ip: req.ip || null, selfieDataUrl },
+      { employeeId: emp.id },
+    );
+    if (verdict.reject) {
+      return res.status(403).json({
+        message: verdict.reason || 'Punch rejected by attendance capture policy',
+        reason: 'CAPTURE_POLICY',
+        methods: verdict.methods,
+        flags: verdict.flags,
+      });
+    }
+
+    // Store the selfie for audit (object storage when configured; inline otherwise).
+    const selfieUrl = await storeSelfie(businessId, selfieDataUrl);
+    const marks = verdict.marks || {};
+    const flagged = !!marks.captureFlagged;
 
     const punch = await prisma.attendancePunch.create({
       data: {
@@ -143,18 +224,108 @@ async function createPunch(req, res, next) {
         punchType: type,
         source: 'WEB', // ESS self-punch — never trust a client-supplied source.
         punchAt,
-        locationId: employment ? employment.locationId : null,
+        locationId: ctx.locationId || null,
         geoLat, // Decimal pass-through (validated finite + in range); null otherwise.
         geoLng,
         ipAddress: req.ip || null,
+        selfieUrl,
+        // Feature 2 capture marks (additive). reviewStatus PENDING parks a flagged
+        // punch in the HR review queue; a clean punch carries no review row.
+        captureMethods: marks.captureMethods || [],
+        ipAllowed: marks.ipAllowed != null ? marks.ipAllowed : null,
+        faceMatchScore: marks.faceMatchScore != null ? marks.faceMatchScore : null,
+        faceMatched: marks.faceMatched != null ? marks.faceMatched : null,
+        faceMatchStatus: marks.faceMatchStatus || null,
+        captureFlagged: flagged,
+        captureFlagReasons: marks.captureFlagReasons || [],
+        reviewStatus: flagged ? 'PENDING' : null,
       },
     });
     // recompute runs the Haversine geofence check (geoLat/geoLng vs the assigned
     // Location.geofenceM) and stamps punch.outOfGeofence + surfaces OUT_OF_GEOFENCE.
+    // (Engine math untouched — we only call recompute, exactly as before.)
     await recompute(businessId, emp.id, localDay, localDay);
     // Re-read so the response carries the geofence marker the recompute just stamped.
     const stamped = await prisma.attendancePunch.findUnique({ where: { id: punch.id } });
-    res.status(201).json(stamped || punch);
+    res.status(201).json({ ...(stamped || punch), captureFlagged: flagged, captureFlagReasons: marks.captureFlagReasons || [] });
+  } catch (e) { next(e); }
+}
+
+// ── GET /me/attendance/policy — the capture policy that applies to ME ─────────
+// Tells the mobile/web client which methods are required (so it can prompt for a
+// selfie when FACE is on). SELF_ONLY: resolved from the session's employment.
+async function getCapturePolicy(req, res, next) {
+  try {
+    const emp = await resolveActiveSelf(req);
+    if (!emp) return res.json({ requireGeo: false, requireIp: false, requireFace: false, faceEnrolled: false });
+    const { businessId } = req.customer;
+    const ctx = await resolveCaptureContext(businessId, emp.id);
+    const policy = await capture.resolvePolicy(businessId, ctx);
+    const ref = await capture.loadFaceReference(businessId, emp.id);
+    res.json({
+      scope: policy.scope,
+      requireGeo: !!policy.requireGeo,
+      requireIp: !!policy.requireIp,
+      requireFace: !!policy.requireFace,
+      geoEnforce: !!policy.geoEnforce,
+      ipEnforce: !!policy.ipEnforce,
+      faceEnforce: !!policy.faceEnforce,
+      // Does the assigned location actually have a geofence? (so the client knows geo
+      // can be evaluated). Coords come from the location row in ctx.
+      hasGeofence: !!(ctx.location && ctx.location.geoLat != null && ctx.location.geoLng != null && ctx.location.geofenceM),
+      faceEnrolled: !!ref.hasReference,
+    });
+  } catch (e) { next(e); }
+}
+
+// ── POST /me/attendance/face/enroll { selfieDataUrl } — enroll MY reference face ─
+// SELF_ONLY. Stores the reference selfie (audit) + computes an embedding via the
+// pluggable matcher (null for the stub). Upserts the single active enrollment.
+async function enrollFace(req, res, next) {
+  try {
+    const emp = await resolveActiveSelf(req);
+    if (!emp) return noEmployee(res);
+    const { businessId } = req.customer;
+    const check = validateSelfieDataUrl(req.body && req.body.selfieDataUrl);
+    if (!check.ok) return res.status(check.status).json({ message: check.message });
+    if (!check.dataUrl) return res.status(400).json({ message: 'selfieDataUrl is required to enroll a face' });
+
+    const imageUrl = await storeSelfie(businessId, check.dataUrl);
+    const embedded = await faceMatcher.getMatcher().embed(check.dataUrl, {});
+
+    const row = await prisma.faceEnrollment.upsert({
+      where: { businessId_employeeId: { businessId, employeeId: emp.id } },
+      create: {
+        businessId, employeeId: emp.id, imageUrl,
+        embedding: embedded.embedding || undefined,
+        matcher: embedded.matcher || null,
+        enrolledBy: emp.id,
+      },
+      update: {
+        imageUrl,
+        embedding: embedded.embedding || undefined,
+        matcher: embedded.matcher || null,
+        isActive: true,
+        enrolledAt: new Date(),
+        enrolledBy: emp.id,
+        version: { increment: 1 },
+      },
+    });
+    res.status(201).json({ enrolled: true, matcher: row.matcher, enrolledAt: row.enrolledAt });
+  } catch (e) { next(e); }
+}
+
+// ── GET /me/attendance/face — is MY face enrolled? (for the enrollment screen) ──
+async function getFaceEnrollment(req, res, next) {
+  try {
+    const emp = await resolveActiveSelf(req);
+    if (!emp) return res.json({ enrolled: false });
+    const { businessId } = req.customer;
+    const row = await prisma.faceEnrollment.findFirst({
+      where: { businessId, employeeId: emp.id, isActive: true },
+      select: { enrolledAt: true, matcher: true },
+    });
+    res.json({ enrolled: !!row, enrolledAt: row ? row.enrolledAt : null, matcher: row ? row.matcher : null });
   } catch (e) { next(e); }
 }
 
@@ -590,6 +761,10 @@ async function withdrawMySwap(req, res, next) {
 
 module.exports = {
   createPunch,
+  // Feature 2 — multi-mode capture (policy preview + face enrolment)
+  getCapturePolicy,
+  enrollFace,
+  getFaceEnrollment,
   listPunches,
   summary,
   listDays,

@@ -23,6 +23,12 @@ router.use('/holidays', require('./holidays.routes'));
    inherit protect + attachSelfEmployee; the sub-router adds F1 scope + RBAC. */
 router.use('/', require('./roster.routes'));
 
+/* FLAG (Feature 2 — shared edit): multi-mode capture policy admin (geo/IP/face
+   settings, office CIDR allow-list, flagged-punch review queue). Mounted here so
+   /attendance/capture/* inherit protect + attachSelfEmployee; the sub-router adds
+   RBAC (canManageAttendance on mutations + the review queue). */
+router.use('/capture', require('./captureAdmin.routes'));
+
 /* Punches — clock in/out. Recording a punch is a self/manager action scoped to the
    sub-tree; an out-of-scope target → 404, a punch into a locked day → 409. On
    success the affected (employee, day) is re-derived. */

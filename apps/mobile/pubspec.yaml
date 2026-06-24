@@ -27,6 +27,12 @@ dependencies:
   # Geolocation for the attendance punch (lat/long + permission handling)
   geolocator: ^12.0.0
 
+  # Feature 2 — selfie capture for FACE attendance capture + face enrolment. Uses
+  # the front camera (preferred) and returns a JPEG we encode to a base64 data URL
+  # (the backend's selfieDataUrl). image_picker is the lightest option (no custom
+  # camera preview UI) and pulls in the platform camera permission flow.
+  image_picker: ^1.1.2
+
   # Open / download payslip + letter PDFs (authenticated byte fetch → temp file
   # → OS viewer). open_filex opens the saved PDF in the platform viewer.
   open_filex: ^4.5.0

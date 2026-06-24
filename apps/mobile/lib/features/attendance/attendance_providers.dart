@@ -41,3 +41,21 @@ final regularizationsProvider = FutureProvider<List<Map<String, dynamic>>>((ref)
   final res = await api.get(Api.regularizations);
   return asList(res, keys: const ['items', 'requests']);
 });
+
+/// Feature 2 — the multi-mode capture policy that applies to ME. Tells the punch
+/// flow which methods are required (so it knows to capture a selfie when FACE is on)
+/// and whether my face is already enrolled. A failed fetch degrades to "no policy"
+/// so the punch button never gets stuck behind a transient error.
+final capturePolicyProvider = FutureProvider<Map<String, dynamic>>((ref) async {
+  final api = ref.watch(apiClientProvider);
+  try {
+    final res = await api.get(Api.capturePolicy);
+    if (res is Map<String, dynamic>) return res;
+  } catch (_) {/* degrade to empty policy */}
+  return const {
+    'requireGeo': false,
+    'requireIp': false,
+    'requireFace': false,
+    'faceEnrolled': false,
+  };
+});
