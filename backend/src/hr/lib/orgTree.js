@@ -72,20 +72,51 @@ function scopeIdList(scope) {
   return [...scope.ids];
 }
 
+// Normalize a `statuses` argument into a clean string array (or null = no filter).
+// Pushed into the DB where-clause so pagination + nextCursor are computed over
+// ALREADY-VISIBLE rows (the ESS status filter no longer post-cuts a finished page).
+function normalizeStatuses(statuses) {
+  if (!statuses) return null;
+  const arr = Array.isArray(statuses) ? statuses : [...statuses];
+  const clean = arr.filter((s) => typeof s === 'string' && s.length);
+  return clean.length ? clean : null;
+}
+
+// AND a status predicate into a Prisma where (no-op when statuses is null/empty).
+function applyStatusFilter(where, statuses) {
+  const list = normalizeStatuses(statuses);
+  if (list) where.status = { in: list };
+  return where;
+}
+
 // ── node projector ───────────────────────────────────────────────────────────
 // Hydrate a set of bare employee rows into the OrgNode DTO. designation/department
 // come from a SINGLE follow-up employmentRecord fetch keyed by the page's ids
 // (the same current-segment join the legacy readers use, but bounded to ≤200 rows,
 // never the tenant). reportsCount is filled by a single grouped sub-count over the
 // page's ids — not an N+1.
-async function projectNodes(businessId, rows, { isSelfId = null } = {}) {
+//
+// reportsCount is CLAMPED to the caller's scope (Finding #3): the count only ever
+// reflects direct reports the caller may themselves enumerate. For an IDS scope we
+// AND `managerEmployeeId IN page ∧ id IN scope`; for ALL there is no clamp. Plus an
+// optional `countStatuses` so the ESS surface counts only the same (active) rows it
+// would actually render — never leaking out-of-scope / hidden headcount.
+async function projectNodes(businessId, rows, { isSelfId = null, countScopeIds = null, countStatuses = null } = {}) {
   if (!rows.length) return [];
   const ids = rows.map((r) => r.id);
 
-  // Direct-report counts for THIS page's nodes, in one grouped query.
+  // Direct-report counts for THIS page's nodes, in one grouped query, clamped to the
+  // caller's in-scope id-set (and visible statuses) so reportsCount never reveals
+  // out-of-scope / hidden subordinate headcount of senior cards the caller can't drill.
+  const countWhere = { businessId, deletedAt: null, managerEmployeeId: { in: ids } };
+  if (countScopeIds) {
+    const scopeArr = Array.isArray(countScopeIds) ? countScopeIds : [...countScopeIds];
+    countWhere.id = { in: scopeArr };
+  }
+  applyStatusFilter(countWhere, countStatuses);
   const counts = await prisma.employee.groupBy({
     by: ['managerEmployeeId'],
-    where: { businessId, deletedAt: null, managerEmployeeId: { in: ids } },
+    where: countWhere,
     _count: { _all: true },
   });
   const countByMgr = new Map(counts.map((c) => [c.managerEmployeeId, c._count._all]));
@@ -142,7 +173,10 @@ function keysetWhere(cursor) {
 const ORDER = [{ lastName: 'asc' }, { firstName: 'asc' }, { id: 'asc' }];
 
 // Run a keyset-paginated page query and split off nextCursor (the +1 probe row).
-async function pageQuery(where, cursor, limit, { isSelfId = null, businessId } = {}) {
+// `where` is expected to ALREADY carry every visibility predicate (scope id-set +
+// status filter) so the keyset window and nextCursor are computed over rows the
+// caller may actually see — no post-filtering after the page is cut.
+async function pageQuery(where, cursor, limit, { isSelfId = null, businessId, countScopeIds = null, countStatuses = null } = {}) {
   const take = limit + 1;
   const rows = await prisma.employee.findMany({
     where: { ...where, ...keysetWhere(cursor) },
@@ -156,7 +190,7 @@ async function pageQuery(where, cursor, limit, { isSelfId = null, businessId } =
     pageRows = rows.slice(0, limit);
     nextCursor = encodeCursor(pageRows[pageRows.length - 1]);
   }
-  const nodes = await projectNodes(businessId, pageRows, { isSelfId });
+  const nodes = await projectNodes(businessId, pageRows, { isSelfId, countScopeIds, countStatuses });
   return { nodes, nextCursor };
 }
 
@@ -165,13 +199,19 @@ async function pageQuery(where, cursor, limit, { isSelfId = null, businessId } =
 // expected to have already validated `parentId ∈ scope` (scopeAllows) at the
 // route — but we defensively AND-restrict the child rows to the scope id-set too
 // (a manager can only ever see in-scope children).
-async function getChildren({ businessId, scope, parentId, cursor, limit, isSelfId = null }) {
+async function getChildren({ businessId, scope, parentId, cursor, limit, isSelfId = null, statuses = null }) {
   const lim = clampLimit(limit);
   const ids = scopeIdList(scope);
   if (ids && ids.length === 0) return { nodes: [], nextCursor: null }; // NONE
   const where = { businessId, deletedAt: null, managerEmployeeId: parentId };
   if (ids) where.id = { in: ids };
-  return pageQuery(where, decodeCursor(cursor), lim, { isSelfId, businessId });
+  // Push the status filter into the WHERE (Finding #1): the keyset window + nextCursor
+  // are computed over visible rows only — an inactive sibling can never consume the
+  // page and hide an active report further down, and nextCursor is always correct.
+  applyStatusFilter(where, statuses);
+  // reportsCount is clamped to the same scope + status the children rows obey, so a
+  // child card's count never reveals out-of-scope / hidden grandchildren.
+  return pageQuery(where, decodeCursor(cursor), lim, { isSelfId, businessId, countScopeIds: ids, countStatuses: statuses });
 }
 
 // ── getRoots ─────────────────────────────────────────────────────────────────
@@ -181,53 +221,90 @@ async function getChildren({ businessId, scope, parentId, cursor, limit, isSelfI
 // scope anchor's own node (?root=me semantics) — no scan. An explicit in-scope
 // rootId re-roots the viewport at that node (validated by the caller via
 // scopeAllows).
-async function getRoots({ businessId, scope, cursor, limit, rootId = null, isSelfId = null }) {
+async function getRoots({ businessId, scope, cursor, limit, rootId = null, isSelfId = null, statuses = null }) {
   const lim = clampLimit(limit);
   const ids = scopeIdList(scope);
   if (ids && ids.length === 0) return { nodes: [], nextCursor: null }; // NONE
 
   // Explicit re-root (admin ?root=<id>): return just that node as the single root.
   if (rootId) {
-    const rows = await prisma.employee.findMany({
-      where: { businessId, deletedAt: null, id: rootId },
-      select: PAGE_SELECT, take: 1,
-    });
-    const nodes = await projectNodes(businessId, rows, { isSelfId });
+    const where = { businessId, deletedAt: null, id: rootId };
+    applyStatusFilter(where, statuses);
+    const rows = await prisma.employee.findMany({ where, select: PAGE_SELECT, take: 1 });
+    const nodes = await projectNodes(businessId, rows, { isSelfId, countScopeIds: ids, countStatuses: statuses });
     return { nodes, nextCursor: null };
   }
 
-  // IDS scope (manager/ESS): the sole root is the anchor's own node.
+  // IDS scope (manager/ESS): the sole root is the anchor's OWN node. The anchor MUST
+  // be passed explicitly as isSelfId and MUST be in the scope set — we never fall back
+  // to a non-deterministic Set element (Finding #4). If the anchor is absent from the
+  // scope (e.g. an approval-style self-dropped scope), fail closed with an empty page
+  // rather than mis-rooting the viewport at an arbitrary sub-tree member.
   if (ids) {
-    // The scope anchor is the actor's own employee id; for a TEAM band it is the
-    // smallest "covering root" — but resolveAccessibleEmployeeIds always seeds the
-    // set WITH selfId, and the caller passes isSelfId = the anchor. Return the
-    // anchor node as the single root.
-    const anchorId = isSelfId && ids.includes(isSelfId) ? isSelfId : ids[0];
-    const rows = await prisma.employee.findMany({
-      where: { businessId, deletedAt: null, id: anchorId },
-      select: PAGE_SELECT, take: 1,
-    });
-    const nodes = await projectNodes(businessId, rows, { isSelfId });
+    if (!isSelfId || !ids.includes(isSelfId)) return { nodes: [], nextCursor: null };
+    const where = { businessId, deletedAt: null, id: isSelfId };
+    applyStatusFilter(where, statuses);
+    const rows = await prisma.employee.findMany({ where, select: PAGE_SELECT, take: 1 });
+    const nodes = await projectNodes(businessId, rows, { isSelfId, countScopeIds: ids, countStatuses: statuses });
     return { nodes, nextCursor: null };
   }
 
-  // ALL scope: real roots = managerEmployeeId IS NULL ∪ orphans (manager not in the
-  // live tenant set). Compute the orphan set once, then keyset-paginate the union.
-  // The orphan manager-ids are bounded by distinct managers; in practice tiny.
-  const liveIds = new Set(
-    (await prisma.employee.findMany({ where: { businessId, deletedAt: null }, select: { id: true } })).map((r) => r.id),
-  );
-  const orphanManagerRows = await prisma.employee.findMany({
-    where: { businessId, deletedAt: null, managerEmployeeId: { not: null } },
-    select: { id: true, managerEmployeeId: true },
-  });
-  const orphanIds = orphanManagerRows.filter((r) => !liveIds.has(r.managerEmployeeId)).map((r) => r.id);
+  // ALL scope: real roots = managerEmployeeId IS NULL ∪ orphans (manager soft-deleted /
+  // out-of-tenant). Finding #2: do NOT materialise the tenant in Node. The root-id set
+  // is computed by a single index-served keyset query — a row is a root iff it has no
+  // manager OR its manager is not a live in-tenant employee (NOT EXISTS sub-query). The
+  // keyset (lastName, firstName, id) + LIMIT keep it O(page), never O(tenant).
+  const cur = decodeCursor(cursor);
+  const statusList = normalizeStatuses(statuses);
+  const take = lim + 1;
 
-  const where = {
-    businessId, deletedAt: null,
-    OR: [{ managerEmployeeId: null }, { id: { in: orphanIds } }],
-  };
-  return pageQuery(where, decodeCursor(cursor), lim, { isSelfId, businessId });
+  // Keyset predicate as raw SQL (mirrors keysetWhere, parameterised).
+  const ksClause = cur
+    ? Prisma.sql`AND (e."lastName" > ${cur.lastName}
+        OR (e."lastName" = ${cur.lastName} AND e."firstName" > ${cur.firstName})
+        OR (e."lastName" = ${cur.lastName} AND e."firstName" = ${cur.firstName} AND e.id > ${cur.id}))`
+    : Prisma.empty;
+  // status is the EmployeeStatus enum — cast each literal to the enum type so the
+  // comparison is index-served (avoids `operator does not exist: EmployeeStatus = text`).
+  const statusClause = statusList
+    ? Prisma.sql`AND e.status IN (${Prisma.join(statusList.map((s) => Prisma.sql`${s}::"EmployeeStatus"`))})`
+    : Prisma.empty;
+
+  const rootRows = await prisma.$queryRaw`
+    SELECT e.id
+      FROM "Employee" e
+     WHERE e."businessId" = ${businessId}
+       AND e."deletedAt" IS NULL
+       AND (
+         e."managerEmployeeId" IS NULL
+         OR NOT EXISTS (
+           SELECT 1 FROM "Employee" m
+            WHERE m.id = e."managerEmployeeId"
+              AND m."businessId" = ${businessId}
+              AND m."deletedAt" IS NULL
+         )
+       )
+       ${ksClause}
+       ${statusClause}
+     ORDER BY e."lastName" ASC, e."firstName" ASC, e.id ASC
+     LIMIT ${take}`;
+
+  let nextCursor = null;
+  let pageIds = rootRows.map((r) => r.id);
+  if (pageIds.length > lim) {
+    pageIds = pageIds.slice(0, lim);
+  }
+  if (!pageIds.length) return { nodes: [], nextCursor: null };
+
+  // Hydrate the bounded root page (≤lim ids) — never the tenant — through the projector.
+  const rows = await prisma.employee.findMany({
+    where: { businessId, id: { in: pageIds } },
+    orderBy: ORDER,
+    select: PAGE_SELECT,
+  });
+  const nodes = await projectNodes(businessId, rows, { isSelfId, countScopeIds: ids, countStatuses: statuses });
+  if (rootRows.length > lim) nextCursor = encodeCursor(rows[rows.length - 1]);
+  return { nodes, nextCursor };
 }
 
 // ── getAncestors ─────────────────────────────────────────────────────────────
@@ -275,7 +352,7 @@ async function getAncestors({ businessId, scope, nodeId, isSelfId = null }) {
 // one batched getAncestors per hit to attach ancestorIds (so the client expands
 // exactly the branches to reveal a result — never the whole tree). Out-of-scope
 // rows are never returned.
-async function searchNodes({ businessId, scope, q, limit, isSelfId = null }) {
+async function searchNodes({ businessId, scope, q, limit, isSelfId = null, statuses = null, clampAncestorsToScope = false }) {
   const term = String(q || '').trim();
   if (term.length < 1) return { results: [] };
   const lim = clampLimit(limit || 20);
@@ -288,13 +365,14 @@ async function searchNodes({ businessId, scope, q, limit, isSelfId = null }) {
     OR: [{ firstName: like }, { lastName: like }, { code: like }],
   };
   if (ids) where.id = { in: ids };
+  applyStatusFilter(where, statuses); // Finding #1: hidden statuses never returned
 
   const rows = await prisma.employee.findMany({
     where, orderBy: ORDER, take: lim, select: PAGE_SELECT,
   });
   if (!rows.length) return { results: [] };
 
-  const nodes = await projectNodes(businessId, rows, { isSelfId });
+  const nodes = await projectNodes(businessId, rows, { isSelfId, countScopeIds: ids, countStatuses: statuses });
 
   // Batched ancestor-ids per hit, in a single recursive CTE seeded with all hit ids.
   const hitIds = rows.map((r) => r.id);
@@ -318,8 +396,13 @@ async function searchNodes({ businessId, scope, q, limit, isSelfId = null }) {
     ancBySeed.get(r.seed).push({ id: r.id, lvl: Number(r.lvl) });
   }
 
+  // Finding #3: on the ESS surface (clampAncestorsToScope), strip ancestor ids that
+  // fall OUTSIDE the actor's scope id-set so search-to-locate works for in-subtree hits
+  // without disclosing the raw employee ids of out-of-band managers above each hit.
+  const scopeSet = clampAncestorsToScope && ids ? new Set(ids) : null;
   const results = nodes.map((node) => {
-    const anc = (ancBySeed.get(node.id) || []).sort((a, b) => b.lvl - a.lvl).map((a) => a.id);
+    let anc = (ancBySeed.get(node.id) || []).sort((a, b) => b.lvl - a.lvl).map((a) => a.id);
+    if (scopeSet) anc = anc.filter((id) => scopeSet.has(id));
     return { node, ancestorIds: anc };
   });
   return { results };
@@ -336,6 +419,7 @@ module.exports = {
   decodeCursor,
   clampLimit,
   scopeIdList,
+  normalizeStatuses,
   scopeAllows,
   DEFAULT_PAGE,
   MAX_PAGE,
