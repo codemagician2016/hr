@@ -5,7 +5,7 @@
 // effective-dated history lives in EmploymentRecord (added by the service layer).
 const prisma = require('../../core/lib/prisma');
 const { writeAudit } = require('../../core/lib/audit');
-const { scopeWhere } = require('../lib/scopeResolver');
+const { scopeWhere, scopeAllows } = require('../lib/scopeResolver');
 const { allocateCode, SCOPE_DEFAULTS } = require('../lifecycle/lib/codes');
 const portalInvite = require('../lifecycle/portalInvite');
 
@@ -636,11 +636,16 @@ async function inviteBulk(req, res, next) {
     if (ids.length === 0) return res.status(400).json({ message: 'employeeIds is required' });
     if (ids.length > 200) return res.status(400).json({ message: 'Too many employees in one request (max 200).' });
 
-    // Scope-enforce: only invite employees the actor can manage. req.scope is set
-    // by withEmployeeScope on the route; ALL → no filter, IDS → intersect.
-    const scoped = req.scope && req.scope.kind === 'IDS'
-      ? ids.filter((eid) => req.scope.ids.has(eid))
-      : ids;
+    // Scope-enforce: only invite employees the actor can manage. req.scope is the
+    // F1 ScopeResult set by withEmployeeScope on the route. Resolve the accessible
+    // set EXPLICITLY for every band — NEVER fall open:
+    //   ALL  → every requested id (tenant-wide operator)
+    //   IDS  → only the requested ids inside the actor's sub-tree
+    //   NONE → ∅ (a NONE/limited operator invites NOTHING)
+    // A missing/unknown scope is treated as NONE (fail-closed). scopeAllows()
+    // already encodes ALL→true / NONE→false / IDS→membership, so the intersection
+    // is just a filter over it — there is no `else` that returns the raw ids.
+    const scoped = ids.filter((eid) => scopeAllows(req.scope, eid));
 
     const results = [];
     let sent = 0;

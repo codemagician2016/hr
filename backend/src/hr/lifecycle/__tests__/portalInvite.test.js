@@ -261,6 +261,102 @@ async function main() {
     assert(sample && sample.portalStatus === 'ACTIVE', `emp1 row shows portalStatus ACTIVE (got ${sample && sample.portalStatus})`);
     const sample5 = listRes.body.items.find((i) => i.id === emp5.id);
     assert(sample5 && sample5.portalStatus === 'ACTIVE', `emp5 row shows ACTIVE after claim (got ${sample5 && sample5.portalStatus})`);
+
+    // ── 11: ACCOUNT-TAKEOVER GUARD (HIGH) ───────────────────────────────────
+    // A stale PENDING first-claim token must NOT be able to overwrite the password
+    // of a login that is ALREADY active/claimed (activated through another path).
+    // Only an EXPLICIT reset-minted token (allowReset) may re-set a claimed login.
+    log('\n11) acceptInvite cannot take over an already-active login:');
+    // emp6 has an UNCLAIMED ESS identity. Mint a first-claim invite while unclaimed.
+    const emp6 = await makeEmployee(bizA.id, 'EMP6', { withCustomer: true, claimed: false });
+    const inv6 = await portalInvite.createInvite({ businessId: bizA.id, employeeId: emp6.id });
+    const stale6 = new URL(inv6.link, 'https://x.example').searchParams.get('token');
+    const stale6Row = await prisma.employeeInvite.findUnique({ where: { tokenHash: crypto.createHash('sha256').update(stale6).digest('hex') } });
+    assert(stale6Row && stale6Row.isReset === false, 'first-claim token is NOT marked isReset');
+    // The login becomes ACTIVE by some OTHER path (e.g. self-serve verify / earlier
+    // claim) while the token is still sitting PENDING in someone's inbox.
+    const knownHash = bcrypt.hashSync('LegitOwner#123', 12);
+    await prisma.customer.update({
+      where: { businessId_email: { businessId: bizA.id, email: emp6.workEmail } },
+      data: { password: knownHash, emailVerified: true, isActive: true, passwordChangedAt: new Date() },
+    });
+    // Replaying the stale token must be REFUSED (generic), and must NOT change the pw.
+    const takeover = await portalInvite.acceptInvite({ token: stale6, passwordHash: bcrypt.hashSync('Attacker#123', 12) });
+    assert(takeover.ok === false && takeover.reason === 'INVALID', 'stale first-claim token on an active login → INVALID (no takeover)');
+    const cust6 = await prisma.customer.findUnique({ where: { businessId_email: { businessId: bizA.id, email: emp6.workEmail } } });
+    assert(cust6.password === knownHash, 'active login password UNCHANGED (attacker password not written)');
+    assert(bcrypt.compareSync('LegitOwner#123', cust6.password) && !bcrypt.compareSync('Attacker#123', cust6.password), 'legit owner password still verifies; attacker password does not');
+    // The stale token is NOT consumed by the refusal (tx rolled back) — it stays
+    // PENDING and useless against the active login until revoked/expired.
+    const stale6After = await prisma.employeeInvite.findUnique({ where: { id: stale6Row.id } });
+    assert(stale6After.status === 'PENDING' && stale6After.usedAt == null, 'refused token left PENDING (tx rolled back, not silently consumed)');
+
+    // ── 12: RESET-invite STILL WORKS over an active login ───────────────────
+    log('\n12) explicit reset-invite can still re-set an active login:');
+    const resetInv = await portalInvite.createInvite({ businessId: bizA.id, employeeId: emp6.id, allowReset: true });
+    assert(resetInv.ok === true, 'allowReset over an active login mints a token');
+    const resetRaw = new URL(resetInv.link, 'https://x.example').searchParams.get('token');
+    const resetRow = await prisma.employeeInvite.findUnique({ where: { tokenHash: crypto.createHash('sha256').update(resetRaw).digest('hex') } });
+    assert(resetRow && resetRow.isReset === true, 'reset token IS marked isReset');
+    const resetHash = bcrypt.hashSync('OwnerResetPw#123', 12);
+    const resetAccept = await portalInvite.acceptInvite({ token: resetRaw, passwordHash: resetHash });
+    assert(resetAccept.ok === true && resetAccept.businessId === bizA.id, 'reset token accepted → owner can re-set their password');
+    const cust6Reset = await prisma.customer.findUnique({ where: { businessId_email: { businessId: bizA.id, email: emp6.workEmail } } });
+    assert(cust6Reset.password === resetHash, 'reset wrote the new password (legitimate self-service reset)');
+
+    // ── 13: BULK-INVITE SCOPE — fail-CLOSED, never fail-open (HIGH) ──────────
+    // The bulk controller must intersect the requested ids with the actor's F1
+    // accessible set for EVERY band. A NONE-band operator invites NOTHING; an IDS
+    // operator invites only ids inside their sub-tree; ALL invites tenant-wide.
+    log('\n13) inviteBulk scope: NONE→none, IDS→intersect, ALL→all (no fail-open):');
+    const bScopeA = await makeEmployee(bizA.id, 'SCOPE-IN', { withCustomer: true });
+    const bScopeB = await makeEmployee(bizA.id, 'SCOPE-OUT', { withCustomer: true });
+    const reqIds = [bScopeA.id, bScopeB.id];
+
+    // 13a: NONE band → no invites sent, both reported OUT_OF_SCOPE (the bug let a
+    // NONE operator invite everyone — it must now invite nobody).
+    const noneRes = await callController(employeeCtrl.inviteBulk, {
+      user: { businessId: bizA.id, id: 'op-none', role: 'BUSINESS_USER' },
+      body: { employeeIds: reqIds }, scope: { kind: 'NONE' },
+    });
+    assert(noneRes.statusCode === 200 && noneRes.body.sent === 0, `NONE band sends 0 invites (got sent=${noneRes.body && noneRes.body.sent})`);
+    assert(noneRes.body.results.every((r) => r.ok === false && r.reason === 'OUT_OF_SCOPE'), 'NONE band: every requested id reported OUT_OF_SCOPE');
+    const noneMinted = await prisma.employeeInvite.count({ where: { businessId: bizA.id, employeeId: { in: reqIds } } });
+    assert(noneMinted === 0, 'NONE band minted NO invite rows (fail-closed, not fail-open)');
+
+    // 13b: IDS band that includes only bScopeA → only bScopeA invited, bScopeB OUT.
+    const idsRes = await callController(employeeCtrl.inviteBulk, {
+      user: { businessId: bizA.id, id: 'op-team', role: 'BUSINESS_USER' },
+      body: { employeeIds: reqIds }, scope: { kind: 'IDS', ids: new Set([bScopeA.id]) },
+    });
+    assert(idsRes.statusCode === 200 && idsRes.body.sent === 1, `IDS band sends exactly 1 (got sent=${idsRes.body && idsRes.body.sent})`);
+    const okRow = idsRes.body.results.find((r) => r.employeeId === bScopeA.id);
+    const outRow = idsRes.body.results.find((r) => r.employeeId === bScopeB.id);
+    assert(okRow && okRow.ok === true, 'IDS band: in-scope id invited');
+    assert(outRow && outRow.ok === false && outRow.reason === 'OUT_OF_SCOPE', 'IDS band: out-of-scope id blocked (OUT_OF_SCOPE)');
+    const bScopeBMinted = await prisma.employeeInvite.count({ where: { businessId: bizA.id, employeeId: bScopeB.id } });
+    assert(bScopeBMinted === 0, 'IDS band: NO invite minted for the out-of-scope employee');
+
+    // 13c: ALL band → both invited (the legitimate tenant-wide operator).
+    const allRes = await callController(employeeCtrl.inviteBulk, {
+      user: { businessId: bizA.id, id: 'op-all', role: 'BUSINESS_ADMIN' },
+      body: { employeeIds: reqIds }, scope: { kind: 'ALL' },
+    });
+    assert(allRes.statusCode === 200 && allRes.body.sent === 2, `ALL band sends to every requested id (got sent=${allRes.body && allRes.body.sent})`);
+    assert(allRes.body.results.every((r) => r.ok === true), 'ALL band: every requested id invited');
+
+    // 13d: TENANT ISOLATION — an ALL-band operator cannot bulk-invite ANOTHER
+    // tenant's employee id (it isn't in their tenant, so createInvite 404s it).
+    const foreignEmp = await makeEmployee(bizB.id, 'FOREIGN', { withCustomer: true });
+    const crossRes = await callController(employeeCtrl.inviteBulk, {
+      user: { businessId: bizA.id, id: 'op-all', role: 'BUSINESS_ADMIN' },
+      body: { employeeIds: [foreignEmp.id] }, scope: { kind: 'ALL' },
+    });
+    assert(crossRes.statusCode === 200 && crossRes.body.sent === 0, 'cross-tenant id is not invited (sent=0)');
+    const crossRow = crossRes.body.results.find((r) => r.employeeId === foreignEmp.id);
+    assert(crossRow && crossRow.ok === false, "another tenant's employee id is refused");
+    const foreignMinted = await prisma.employeeInvite.count({ where: { employeeId: foreignEmp.id } });
+    assert(foreignMinted === 0, 'no invite minted against the cross-tenant employee (tenant wall holds)');
   } finally {
     notifications.notifyHrEvent = realNotify;
     // ── cleanup (children first; businesses cascade the rest) ──
