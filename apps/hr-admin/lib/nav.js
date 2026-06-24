@@ -76,6 +76,11 @@ export const NAV_ITEMS = [
   // dates + reminders + mark-filed). Read = canViewPayrollReports (finance/HR can
   // see); mutations require canManageStatutory (server is the real boundary).
   { key: 'compliance', label: 'Compliance Calendar', href: '/payroll/compliance', feature: 'payroll', permission: 'canViewPayrollReports', icon: 'report' },
+  // Feature 32 — Statutory Registers (muster roll + wage/overtime/leave/fines/
+  // employee + PF-3A/ESI registers). READ-ONLY projection over the frozen
+  // attendance + payroll + leave data. Read/export = canViewPayrollReports;
+  // definition management = canManageStatutory (server is the real boundary).
+  { key: 'registers', label: 'Statutory Registers', href: '/payroll/registers', feature: 'payroll', permission: 'canViewPayrollReports', icon: 'register' },
   { key: 'reports', label: 'Reports', href: '/reports', feature: 'payroll', permission: 'canViewPayrollReports', icon: 'report' },
   // FLAG (Feature 20 — NEW nav items): Investment-proof workflow (India year-end §192(2D)/
   // Rule 26C/Form 12BB). Two flat items in the Pay group. The window admin actions are
@@ -150,7 +155,7 @@ export const NAV_GROUPS = [
   { key: 'people-org', label: 'People & Org', icon: 'people', items: ['people', 'org', 'profile-changes', 'profile-policy', 'helpdesk', 'announcements'] },
   { key: 'talent', label: 'Talent', icon: 'onboarding', items: ['recruitment', 'onboarding', 'separations', 'performance'] },
   { key: 'time', label: 'Time', icon: 'calendar', items: ['leave', 'comp-off', 'attendance'] },
-  { key: 'pay', label: 'Pay', icon: 'wallet', items: ['compensation', 'ctc-policies', 'fbp-plans', 'fbp-allocations', 'payroll', 'bonus', 'arrears', 'form16', 'tax-declaration-window', 'tax-proof-verification', 'expenses', 'travel', 'loans', 'reports'] },
+  { key: 'pay', label: 'Pay', icon: 'wallet', items: ['compensation', 'ctc-policies', 'fbp-plans', 'fbp-allocations', 'payroll', 'bonus', 'arrears', 'form16', 'compliance', 'registers', 'tax-declaration-window', 'tax-proof-verification', 'expenses', 'travel', 'loans', 'reports'] },
   // FLAG FOR MERGE: new Feature 10 group — approval chains + RBAC + reporting tree.
   { key: 'approvals-access', label: 'Approvals & Access', icon: 'approvals', items: ['approvals', 'access-roles', 'access-hierarchy'] },
 ];
