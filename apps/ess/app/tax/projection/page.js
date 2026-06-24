@@ -54,6 +54,23 @@ function Row({ label, value, bold, muted, tip, indent }) {
   );
 }
 
+// Feature 20 — the quiet badge per Chapter VI-A: "using declared (provisional)" before
+// the proof deadline, flipping to "using verified" after — so the employee understands
+// why their projected TDS moved.
+function ProofBasisBadge({ basis, deadline }) {
+  const isVerified = basis === 'VERIFIED';
+  return (
+    <span
+      title={isVerified
+        ? 'The proof deadline has passed — only HR-verified investments now reduce your TDS.'
+        : `Provisional — your declared figures are used until the proof deadline${deadline ? ` (${String(deadline).slice(0, 10)})` : ''}.`}
+      className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${isVerified ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`}
+    >
+      {isVerified ? 'using verified' : 'using declared (provisional)'}
+    </span>
+  );
+}
+
 function ProjectionInner() {
   const { country, loading: countryLoading } = useCountry();
   const [statement, setStatement] = useState(null);
@@ -164,7 +181,11 @@ function ProjectionInner() {
 
       {/* Chapter VI-A (OLD only) — gross / qualifying / deductible table */}
       {isOld && s.chapterVIA && Array.isArray(s.chapterVIA.lines) && s.chapterVIA.lines.length > 0 && (
-        <Card title="Deductions under Chapter VI-A" tip="Each section has a cap: the DEDUCTIBLE amount is the lower of what you qualify for and the legal limit.">
+        <Card
+          title="Deductions under Chapter VI-A"
+          tip="Each section has a cap: the DEDUCTIBLE amount is the lower of what you qualify for and the legal limit."
+          right={s.proofBasis ? <ProofBasisBadge basis={s.proofBasis} deadline={s.proofWindow ? s.proofWindow.proofDeadline : null} /> : null}
+        >
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>

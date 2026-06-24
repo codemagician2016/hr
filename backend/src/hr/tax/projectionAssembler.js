@@ -25,6 +25,11 @@ const IN = require('../payroll/compliance/india.js');
 const money = require('../payroll/money');
 const payrollService = require('../payroll/service');
 const { resolveStatutoryCountry } = require('../lib/resolveStatutoryCountry');
+// Feature 20 — the window-aware DECLARED→VERIFIED switch. readDeclaration consumes
+// these to flip TDS to verified-only on/after the proof deadline (the §201 control).
+const { resolveWindow } = require('./investmentProof/windowResolver');
+const { amountForSection, shouldUseVerified } = require('./investmentProof/proofAggregator');
+const { CLAIM_TYPE_META } = require('./investmentProof/claimTypes');
 
 const {
   projectAnnualIncomeTax,
@@ -142,19 +147,51 @@ async function loadYtdActuals({ businessId, employeeId, taxYear, fyStartIso, fyE
  * Read the employee's StatutoryProfile declaration into the engine input bag.
  * Under NEW regime exemptions/deductions are structurally skipped by the engine;
  * we still load the raw fields so the page can show "declared but ignored".
+ *
+ * Feature 20 — THE TDS SWITCH. `ctx = { window, proofs, asOf, pfAnnualMinor }` makes
+ * this window-aware: BEFORE the proofDeadline → DECLARED (provisional, today's
+ * behaviour); ON/AFTER → ONLY the HR-VERIFIED amount per claim = min(declared, Σ
+ * ACCEPTED), then the existing 80C ₹1.5L / 24b ₹2L caps in chapterVIADeductions. No
+ * window → fail-open-provisional (DECLARED). PF auto-80C (derived from our payslips)
+ * is always "verified" — passed as the SEC_80C floor so it never drops out for want of
+ * an upload. `proofBasis` + per-line `{declared,verified,used,basis}` are exposed for
+ * the statement annotations. Backward-compatible: called with no ctx → DECLARED.
  */
-function readDeclaration(sp) {
+function readDeclaration(sp, ctx = {}) {
   const regime = sp && sp.taxRegime ? String(sp.taxRegime).toUpperCase() : 'NEW';
+  const window = ctx.window || null;
+  const proofs = Array.isArray(ctx.proofs) ? ctx.proofs : [];
+  const asOf = ctx.asOf || todayIso();
+  const pfAnnualMinor = Math.max(0, Math.round(ctx.pfAnnualMinor || 0));
+  const useVerified = shouldUseVerified(window, asOf);
+
+  // Resolve one section's amount via the pure aggregator. Records the per-line basis.
+  const lineBasis = {};
+  function amountFor(claimType, declaredColumn, alwaysVerifiedMinor = 0) {
+    const declaredMinor = rupeesToMinor(declaredColumn);
+    const r = amountForSection({ declaredMinor, proofs, claimType, useVerified, alwaysVerifiedMinor });
+    lineBasis[claimType] = {
+      declared: toRupees(r.declaredMinor),
+      verified: toRupees(r.verifiedMinor),
+      used: toRupees(r.usedMinor),
+      basis: r.basis,
+    };
+    return r.usedMinor;
+  }
+
   return {
     regime: regime === 'OLD' ? 'OLD' : 'NEW',
     hasPan: !!(sp && sp.pan),
-    sec80cGrossMinor: rupeesToMinor(sp && sp.section80CDeclared),
-    sec80dGrossMinor: rupeesToMinor(sp && sp.sec80DDeclared),
-    sec80ccd1bGrossMinor: rupeesToMinor(sp && sp.sec80CCD1BDeclared),
-    sec80ttaGrossMinor: rupeesToMinor(sp && sp.sec80TTADeclared),
-    sec24bGrossMinor: rupeesToMinor(sp && sp.sec24BHomeLoanInterest),
-    hraRentPaidMinor: rupeesToMinor(sp && sp.hraAnnualRentPaid),
+    sec80cGrossMinor: amountFor('SEC_80C', sp && sp.section80CDeclared, pfAnnualMinor),
+    sec80dGrossMinor: amountFor('SEC_80D', sp && sp.sec80DDeclared),
+    sec80ccd1bGrossMinor: amountFor('SEC_80CCD1B', sp && sp.sec80CCD1BDeclared),
+    sec80ttaGrossMinor: amountFor('SEC_80TTA', sp && sp.sec80TTADeclared),
+    sec24bGrossMinor: amountFor('SEC_24B_HOME_LOAN', sp && sp.sec24BHomeLoanInterest),
+    hraRentPaidMinor: amountFor('HRA_RENT', sp && sp.hraAnnualRentPaid),
     hraMetro: !!(sp && sp.hraMetroCity),
+    // Feature 20 — surfaced for the statement annotations (slice 20d).
+    proofBasis: useVerified ? 'VERIFIED' : 'DECLARED',
+    proofLines: lineBasis,
     perq: {
       accom: sp && sp.perqRentFreeAccom
         ? {
@@ -280,9 +317,21 @@ async function buildTaxProjection({ businessId, employeeId, asOf, db = prisma } 
   const monthsElapsed = Math.min(12, ytd.monthsElapsed);
   const monthsRemaining = Math.max(1, 12 - monthsElapsed);
 
-  // 5. Declaration.
+  // 5. Declaration + Feature 20 TDS switch (window-aware DECLARED→VERIFIED).
   const sp = await db.statutoryProfile.findFirst({ where: { businessId, employeeId } });
-  const decl = readDeclaration(sp);
+  // Load the FY window + this employee's ACCEPTED proofs (the verified truth). No
+  // window → fail-open-provisional (resolveWindow returns null). PF auto-80C is
+  // derived from our own payslips and is always "verified" — passed as the SEC_80C
+  // floor so it never drops out for want of an upload (edge case 5).
+  const window = await resolveWindow({ businessId, financialYear: taxYear, db });
+  const acceptedProofs = window
+    ? await db.investmentProof.findMany({
+        where: { businessId, employeeId, financialYear: taxYear, deletedAt: null, status: 'ACCEPTED' },
+        select: { claimType: true, verifiedAmount: true, status: true, deletedAt: true },
+      })
+    : [];
+  const pfAnnualMinor = derivePfAnnualMinor(annualEarnings.basicDaMinor);
+  const decl = readDeclaration(sp, { window, proofs: acceptedProofs, asOf: asOfIso, pfAnnualMinor });
 
   // Previous-employer counted ONLY when its declared FY equals the current FY.
   const prevEmployerCounted = decl.prevEmployerFY === taxYear;
@@ -322,9 +371,7 @@ async function buildTaxProjection({ businessId, employeeId, asOf, db = prisma } 
   // is the employee figure. We surface a small, honest table.
   const investments80C = [];
   // Derived PF: 12% of (Basic+DA capped at ₹15,000/mo) × 12 — the employee EPF
-  // that auto-counts toward 80C. Read from the compensation employer block if
-  // present; else approximate from Basic+DA.
-  const pfAnnualMinor = derivePfAnnualMinor(annualEarnings.basicDaMinor);
+  // that auto-counts toward 80C (computed above for the SEC_80C verified-floor).
   if (pfAnnualMinor > 0) {
     investments80C.push({ code: 'PF', label: 'Provident Fund (auto, from payslips)', amount: toRupees(pfAnnualMinor), source: 'DERIVED' });
   }
@@ -341,6 +388,25 @@ async function buildTaxProjection({ businessId, employeeId, asOf, db = prisma } 
   }
   if (!hasComp) {
     anomalies.push({ code: 'NO_COMPENSATION', severity: 'INFO', message: "We'll show your full projection once your salary structure is set up." });
+  }
+  // Feature 20 — verified<declared after the deadline. The unverified portion silently
+  // → ₹0 for TDS; surface it LOUDLY (the §201 protection working as intended). Only
+  // under OLD regime + on/after the deadline (when VERIFIED actually drives TDS).
+  if (electedRegime === 'OLD' && decl.proofBasis === 'VERIFIED') {
+    let unverifiedMinor = 0;
+    const sections = [];
+    for (const [claimType, line] of Object.entries(decl.proofLines || {})) {
+      if (!CLAIM_TYPE_META[claimType] || !CLAIM_TYPE_META[claimType].engineConsumed) continue;
+      const gap = rupeesToMinor(line.declared) - rupeesToMinor(line.used);
+      if (gap > 0) { unverifiedMinor += gap; sections.push(CLAIM_TYPE_META[claimType].label); }
+    }
+    if (unverifiedMinor > 0) {
+      anomalies.push({
+        code: 'UNVERIFIED_DECLARATION',
+        severity: 'WARN',
+        message: `₹${toRupees(unverifiedMinor).toLocaleString('en-IN')} of declared deductions is unverified and excluded from TDS (${sections.join(', ')}). Upload/verify proof before March or your TDS stays higher.`,
+      });
+    }
   }
 
   const electedTotalRupees = toRupees(electedResult.totalAnnualTaxMinor);
@@ -390,6 +456,16 @@ async function buildTaxProjection({ businessId, employeeId, asOf, db = prisma } 
       : { total: 0, lines: [] },
 
     chapterVIA: electedRegime === 'OLD' ? chapterVIAToStatement(electedResult.chapterVIA) : null,
+
+    // Feature 20 — the proof-basis the projection used: DECLARED (provisional, before
+    // the deadline) or VERIFIED (on/after, min(declared, Σaccepted)). Per-line
+    // {declared, verified, used, basis} drives the ESS "using declared/verified" badge.
+    proofBasis: decl.proofBasis,
+    proofWindow: window ? {
+      financialYear: window.financialYear, status: window.status,
+      proofDeadline: window.proofDeadline, opensAt: window.opensAt, closesAt: window.closesAt,
+    } : null,
+    proofLines: electedRegime === 'OLD' ? decl.proofLines : {},
 
     standardDeduction: toRupees(electedResult.standardDeductionMinor),
     totalTaxableIncome: toRupees(electedResult.taxableIncomeMinor),

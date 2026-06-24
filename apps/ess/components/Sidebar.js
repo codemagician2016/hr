@@ -190,6 +190,10 @@ export default function Sidebar({ onNavigate }) {
         const children = [
           ...n.children.slice(0, insertAt),
           { href: '/tax/projection', label: 'Tax projection', icon: 'chart' },
+          // FLAG (Feature 20): India-only "Investment proofs" — the year-end proof
+          // upload + Form 12BB. Window-gated server-side; the link is always shown
+          // for India (the page explains when the window is open / not configured).
+          { href: '/tax/proofs', label: 'Investment proofs', icon: 'doc' },
           ...n.children.slice(insertAt),
         ];
         return { ...n, children };
