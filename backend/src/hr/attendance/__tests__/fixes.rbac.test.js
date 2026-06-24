@@ -147,6 +147,11 @@ async function main() {
       const d11 = await prisma.attendance.findFirst({ where: { businessId, employeeId: r1.id, date: day('2027-03-11') } });
       assert(d10 && d10.status === 'PRESENT' && d10.workedMinutes === 480,
         '03-10 PRESENT 480 worked (cross-midnight OUT paired with the start day)');
+      // The fix's heart: window AND scheduledEnd use ONE predicate, so the on-time
+      // 06:00 OUT does NOT read as early. No bogus EARLY_OUT on the overnight day.
+      const d10Flags = d10 && d10.exceptionsJson && d10.exceptionsJson.flags ? d10.exceptionsJson.flags : [];
+      assert(!d10Flags.includes('EARLY_OUT'), '03-10 overnight on-time OUT → NO false EARLY_OUT');
+      assert(!d10Flags.includes('MISSING_PUNCH'), '03-10 overnight IN/OUT pair cleanly (no MISSING_PUNCH)');
       // 03-11's window starts at its OWN 22:00, so 03-10's 00:30Z OUT is NOT re-pulled.
       const d11Flags = d11 && d11.exceptionsJson && d11.exceptionsJson.flags ? d11.exceptionsJson.flags : [];
       assert(d11 == null || d11.status !== 'MISSING_PUNCH', '03-11 is NOT falsely MISSING_PUNCH from the prior night OUT');
@@ -156,6 +161,44 @@ async function main() {
       await prisma.attendance.deleteMany({ where: { businessId, employeeId: r1.id, date: { gte: day('2027-03-01'), lte: day('2027-03-31') } } });
       await prisma.attendancePunch.deleteMany({ where: { businessId, employeeId: r1.id, punchAt: { gte: day('2027-03-01'), lt: day('2027-04-01') } } });
       await prisma.shiftAssignment.deleteMany({ where: { businessId, employeeId: r1.id, shiftPatternId: night.id } });
+    }
+
+    /* ── C1b — predicate consistency: window AND scheduledEnd use ONE cross-
+     * midnight test. A DAY shift whose crossesMidnight flag is (wrongly) set must
+     * NOT have its scheduledEnd rolled to D+1 nor its window leaked into the next
+     * day — the wall clock (endTime > startTime) is authoritative, so no false
+     * EARLY_OUT and the IN/OUT pair on the SAME day. A clean day shift is the
+     * control. ─────────────────────────────────────────────────────────────── */
+    log('C1b — day shift wrongly flagged crossesMidnight: NO false EARLY_OUT (clock wins):');
+    {
+      // 09:00→18:00 IST day shift, but crossesMidnight:true set in error. Worked
+      // 09:00→18:00 = 540 gross, break 60 → 480 → PRESENT. On-time OUT.
+      const flagged = await prisma.shiftPattern.create({
+        data: {
+          businessId, entityId: inEntity.id, code: `${PREFIX}-DAYFLAG`, name: 'DayFlagged',
+          startTime: '09:00', endTime: '18:00', breakMinutes: 60, graceInMinutes: 10, graceOutMinutes: 10,
+          fullDayMinutes: 480, halfDayThresholdMinutes: 240,
+          isNightShift: true, crossesMidnight: true, weeklyOffDays: '0,6', isActive: true,
+        },
+      });
+      await prisma.shiftAssignment.create({
+        data: { businessId, employeeId: r1.id, shiftPatternId: flagged.id, effectiveFrom: day('2027-05-03'), effectiveTo: day('2027-05-31') },
+      });
+      // Mon 2027-05-03 (weekday). IST 09:00 = 03:30Z; IST 18:00 = 12:30Z (same UTC day).
+      await prisma.attendancePunch.create({ data: { businessId, employeeId: r1.id, punchType: 'IN', source: 'WEB', punchAt: new Date('2027-05-03T03:30:00Z') } });
+      await prisma.attendancePunch.create({ data: { businessId, employeeId: r1.id, punchType: 'OUT', source: 'WEB', punchAt: new Date('2027-05-03T12:30:00Z') } });
+      await recompute(businessId, r1.id, day('2027-05-03'), day('2027-05-03'));
+      const dFlag = await prisma.attendance.findFirst({ where: { businessId, employeeId: r1.id, date: day('2027-05-03') } });
+      const dFlagFlags = dFlag && dFlag.exceptionsJson && dFlag.exceptionsJson.flags ? dFlag.exceptionsJson.flags : [];
+      assert(dFlag && dFlag.status === 'PRESENT' && dFlag.workedMinutes === 480,
+        '05-03 day-shift PRESENT 480 (crossesMidnight flag ignored — clock is same-day)');
+      assert(!dFlagFlags.includes('EARLY_OUT'),
+        '05-03 NO false EARLY_OUT (scheduledEnd not rolled by a same-day clock)');
+      assert(!dFlagFlags.includes('MISSING_PUNCH'),
+        '05-03 IN/OUT pair on the SAME day (window not leaked into D+1)');
+      await prisma.attendance.deleteMany({ where: { businessId, employeeId: r1.id, date: { gte: day('2027-05-03'), lte: day('2027-05-31') } } });
+      await prisma.attendancePunch.deleteMany({ where: { businessId, employeeId: r1.id, punchAt: { gte: day('2027-05-03'), lt: day('2027-06-01') } } });
+      await prisma.shiftAssignment.deleteMany({ where: { businessId, employeeId: r1.id, shiftPatternId: flagged.id } });
     }
 
     /* ── C2 — LATE_IN off the LOCAL clock ─────────────────────────────────── */

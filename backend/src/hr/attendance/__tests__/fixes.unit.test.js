@@ -20,6 +20,7 @@
 
 const assert = require('assert');
 const tz = require('../tz');
+const { derive } = require('../derive');
 const { _internals: svc } = require('../service');
 const payroll = require('../../payroll/service');
 const holidays = require('../../controllers/holidays.controller');
@@ -87,6 +88,89 @@ check('tz resolve UTC default',
     wD1.gte.getTime() === wD.lt.getTime());
   check('C1 night-shift D OUT excluded from D+1 window',
     outOnTime < wD1.gte);
+}
+
+/* ── C1b — ONE consistent cross-midnight predicate for window AND scheduledEnd ─
+ * Regression: the punch-FILTER window and the scheduledEnd day-roll used DIFFERENT
+ * night logic. The window keyed off (crossesMidnight || isNightShift || end<=start);
+ * scheduledEnd keyed off ONLY (end<=start). When they disagreed a shift's worked
+ * span and its scheduledEnd landed on different civil days → IN/OUT mis-pair + a
+ * BOGUS EARLY_OUT. The fix unifies both on isCrossMidnightShift (the wall clock:
+ * endTime <= startTime is authoritative; a flag can never override a same-day clock).
+ */
+{
+  const ic = svc.isCrossMidnightShift;
+  // Genuine overnight (end <= start) → crosses midnight.
+  check('C1b 22:00→06:00 crosses midnight', ic({ startTime: '22:00', endTime: '06:00' }) === true);
+  // Same-day clock (end > start) → does NOT cross, EVEN IF a flag is set (clock wins).
+  check('C1b 09:00→18:00 does not cross', ic({ startTime: '09:00', endTime: '18:00' }) === false);
+  check('C1b flag cannot force a same-day clock to cross (09:00→18:00 crossesMidnight:true)',
+    ic({ startTime: '09:00', endTime: '18:00', crossesMidnight: true }) === false);
+  check('C1b flag cannot force a same-day clock to cross (08:00→17:00 isNightShift:true)',
+    ic({ startTime: '08:00', endTime: '17:00', isNightShift: true }) === false);
+  // 24h shift (equal times) → crosses (worked span runs to next start).
+  check('C1b equal start/end (24h) crosses', ic({ startTime: '06:00', endTime: '06:00' }) === true);
+  // Missing times → not cross (degenerate / open attendance).
+  check('C1b no times → not cross', ic({ crossesMidnight: true }) === false);
+
+  // The window predicate now MATCHES scheduledEnd's day-roll. Prove via the public
+  // helpers: for any schedule, the window spans into D+1 exactly when endKey rolls.
+  const tzU = 'UTC';
+  const key = '2026-06-22';
+  const nextKey = tz.civilDateInTz(new Date(Date.UTC(2026, 5, 23)), tzU);
+  const endKeyOf = (s) => (svc.isCrossMidnightShift(s) ? nextKey : key);
+  const dayShift = { startTime: '09:00', endTime: '18:00', crossesMidnight: true }; // flag set, same-day clock
+  const wDay = svc.shiftInstantWindow(key, dayShift, tzU);
+  check('C1b day-shift (flagged) window is the civil day — flag does NOT leak it',
+    wDay.gte.toISOString() === '2026-06-22T00:00:00.000Z' && wDay.lt.toISOString() === '2026-06-23T00:00:00.000Z');
+  check('C1b day-shift (flagged) scheduledEnd stays on D', endKeyOf(dayShift) === key);
+  const nightShift = { startTime: '22:00', endTime: '06:00' };
+  const wNight = svc.shiftInstantWindow(key, nightShift, tzU);
+  check('C1b night-shift window spans into D+1',
+    wNight.gte.toISOString() === '2026-06-22T22:00:00.000Z' && wNight.lt.toISOString() === '2026-06-23T22:00:00.000Z');
+  check('C1b night-shift scheduledEnd rolls to D+1', endKeyOf(nightShift) === nextKey);
+
+  // End-to-end through derive: overnight IN 22:00 / OUT 06:00 (next day) → PRESENT
+  // 480, NO false EARLY_OUT. scheduledEnd is built on the rolled endKey.
+  const night = {
+    startTime: '22:00', endTime: '06:00', breakMinutes: 0, graceInMinutes: 10,
+    graceOutMinutes: 10, fullDayMinutes: 480, halfDayThresholdMinutes: 240, weeklyOffDays: '',
+  };
+  const dNight = derive({
+    date: key, schedule: night,
+    scheduledStart: tz.zonedWallTimeToUtc(key, '22:00', tzU),
+    scheduledEnd: tz.zonedWallTimeToUtc(endKeyOf(night), '06:00', tzU),
+    punches: [
+      { punchType: 'IN', punchAt: new Date('2026-06-22T22:00:00Z') },
+      { punchType: 'OUT', punchAt: new Date('2026-06-23T06:00:00Z') },
+    ],
+    leave: null, presence: {}, holiday: false, weeklyOff: false, flags: {},
+  });
+  check('C1b overnight IN 22:00 / OUT 06:00 → PRESENT 480', dNight.status === 'PRESENT' && dNight.workedMinutes === 480);
+  check('C1b overnight pairs cleanly — NO MISSING_PUNCH', !dNight.exceptions.includes('MISSING_PUNCH'));
+  check('C1b overnight on-time OUT → NO false EARLY_OUT', !dNight.exceptions.includes('EARLY_OUT'));
+
+  // The disagreement that USED to fire a bogus EARLY_OUT: a same-day clock with the
+  // crossesMidnight flag set. Both punches are pre-midnight; scheduledEnd must stay
+  // on D (not roll), so NO EARLY_OUT. (Under the old split predicate, the window's
+  // flag path + scheduledEnd's clock path diverged and mis-flagged this.)
+  const flaggedDay = {
+    startTime: '01:00', endTime: '09:00', breakMinutes: 0, graceInMinutes: 10,
+    graceOutMinutes: 10, fullDayMinutes: 480, halfDayThresholdMinutes: 240,
+    crossesMidnight: true, weeklyOffDays: '',
+  };
+  const dFlag = derive({
+    date: key, schedule: flaggedDay,
+    scheduledStart: tz.zonedWallTimeToUtc(key, '01:00', tzU),
+    scheduledEnd: tz.zonedWallTimeToUtc(endKeyOf(flaggedDay), '09:00', tzU),
+    punches: [
+      { punchType: 'IN', punchAt: new Date('2026-06-22T01:00:00Z') },
+      { punchType: 'OUT', punchAt: new Date('2026-06-22T09:00:00Z') },
+    ],
+    leave: null, presence: {}, holiday: false, weeklyOff: false, flags: {},
+  });
+  check('C1b same-day clock + crossesMidnight flag → PRESENT 480', dFlag.status === 'PRESENT' && dFlag.workedMinutes === 480);
+  check('C1b same-day clock + crossesMidnight flag → NO false EARLY_OUT', !dFlag.exceptions.includes('EARLY_OUT'));
 }
 
 /* ── M5 — resolveLeaveForDay aggregates ─────────────────────────────────────*/
