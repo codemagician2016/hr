@@ -639,8 +639,13 @@ async function commitReimbursement(tx, job, n, actorId, _opts) {
   // SYSTEM:MIGRATION actor. This preserves maker≠checker (the import door cannot be
   // used to self-approve) while keeping the owner's intent (claims land as their
   // historical APPROVED/REIMBURSED state). Provenance is recorded for audit.
-  const empActorIds = new Set([emp.code, emp.userId, emp.id].filter(Boolean));
-  const priorApprover = (n.approvedBy && !empActorIds.has(n.approvedBy)) ? n.approvedBy : null;
+  // The forbidden set is the CLAIMANT (code/userId/id) AND the importing operator
+  // (actorId, the canManageImports holder). An approvedBy equal to EITHER falls back
+  // to the dedicated MIGRATION_ACTOR — the import door can never be used to
+  // self-approve (operator-as-checker) nor to record the claimant approving their own
+  // claim. Only a genuine prior-system approver (neither) is honoured as the checker.
+  const forbidden = new Set([emp.code, emp.userId, emp.id, actorId].filter(Boolean));
+  const priorApprover = (n.approvedBy && !forbidden.has(n.approvedBy)) ? n.approvedBy : null;
   const checker = priorApprover || MIGRATION_ACTOR;
   const provenance = {
     migrated: true, importJobId: job.id, importedBy: actorId || 'system',
