@@ -65,6 +65,11 @@ const HR_EVENT_TEMPLATES = Object.freeze({
   'comp-off.earn-pending':  'HR_COMP_OFF_EARN_PENDING',  // → manager when a credit awaits approval
   'comp-off.expiring-soon': 'HR_COMP_OFF_EXPIRING_SOON', // → employee N days before a credit lapses
   'comp-off.lapsed':        'HR_COMP_OFF_LAPSED',        // → employee when a credit expires unused
+  // Feature 31 — In-service leave encashment fan-out.
+  'leave-encash.requested': 'HR_LEAVE_ENCASH_REQUESTED', // → approver when a request is raised
+  'leave-encash.approved':  'HR_LEAVE_ENCASH_APPROVED',  // → employee on approval (days + amount)
+  'leave-encash.rejected':  'HR_LEAVE_ENCASH_REJECTED',  // → employee on rejection
+  'leave-encash.paid':      'HR_LEAVE_ENCASH_PAID',       // → employee when the payout rides a payslip
 });
 
 // HR template registry. vertical: 'HR' so listTemplates({vertical:'HR'}) scopes
@@ -341,6 +346,43 @@ const HR_TEMPLATES = Object.freeze([
     body: 'Hi {NAME}, {DAYS} unused comp-off day(s) lapsed on {EXPIRES}. — {BIZ}',
     variables: ['NAME', 'DAYS', 'EXPIRES', 'BIZ'],
     channels: { sms: false, whatsapp: true, email: true },
+  },
+  // ─── Feature 31 — In-service leave encashment ───
+  {
+    key: 'HR_LEAVE_ENCASH_REQUESTED',
+    displayName: 'Leave encashment requested (approver)',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: '{BIZ}: {NAME} requested to encash {DAYS} {TYPE} day(s) (≈ {AMT}, taxable). Review + approve: {LINK}',
+    variables: ['BIZ', 'NAME', 'DAYS', 'TYPE', 'AMT', 'LINK'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_LEAVE_ENCASH_APPROVED',
+    displayName: 'Leave encashment approved',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {NAME}, your encashment of {DAYS} {TYPE} day(s) is approved (≈ {AMT}, fully taxable — TDS applies). It pays in your next payslip. — {BIZ}',
+    variables: ['NAME', 'DAYS', 'TYPE', 'AMT', 'BIZ'],
+    channels: { sms: true, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_LEAVE_ENCASH_REJECTED',
+    displayName: 'Leave encashment rejected',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {NAME}, your request to encash {DAYS} {TYPE} day(s) was not approved. Your leave balance is unchanged. — {BIZ}',
+    variables: ['NAME', 'DAYS', 'TYPE', 'BIZ'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_LEAVE_ENCASH_PAID',
+    displayName: 'Leave encashment paid',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {NAME}, {AMT} leave encashment was paid in your {PERIOD} payslip (taxable as salary; Section 89 relief may apply). View: {LINK} — {BIZ}',
+    variables: ['NAME', 'AMT', 'PERIOD', 'LINK', 'BIZ'],
+    channels: { sms: true, whatsapp: true, email: true },
   },
 ]);
 

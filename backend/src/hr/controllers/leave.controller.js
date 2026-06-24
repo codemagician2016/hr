@@ -44,6 +44,10 @@ const LEAVE_POLICY_FIELDS = [
   'maxBalanceCap', 'maxConsecutive', 'minNoticeDays', 'allowNegative', 'negativeCap',
   'minTenureMonths', 'appliesToEmploymentTypes', 'genderRestriction', 'encashOnExit',
   'encashFormula', 'maxEncashCap', 'workflowDefinitionId', 'isActive',
+  // Feature 31 — IN-SERVICE encashment knobs (beside the EXIT encashOnExit ones).
+  'encashInService', 'encashBasis', 'encashMaxDaysPerYear', 'encashMinDaysPerRequest',
+  'encashMinBalanceAfter', 'encashMaxRequestsPerYear', 'encashWindowOpenMonth',
+  'encashWindowCloseMonth', 'encashPfWages', 'encashEsiWages', 'encashPtWages', 'encashWorkflowId',
 ];
 
 // Feature 16 — the India statutory-leave floor resolver lives in the IN compliance
