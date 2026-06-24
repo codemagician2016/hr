@@ -114,6 +114,11 @@ router.use('/me/payslips', require('../payroll/mePayslips.routes'));
 // Feature 22 — Statutory Bonus (operator) + ESS self-view. India-gated in service.
 router.use('/bonus', require('../payroll/bonus.routes'));
 router.use('/me/bonus', require('../payroll/meBonus.routes'));
+// FLAG (Feature 27 — NEW mount): Auto-Arrear engine (retro salary revision) operator
+// API + ESS self-view. India-gated in service. Same payroll RBAC set (canRunPayroll /
+// canApprovePayroll / canViewPayrollReports); SoD + idempotency live in the service.
+router.use('/arrears', require('../payroll/arrears.routes'));
+router.use('/me/arrears', require('../payroll/meArrears.routes'));
 // FLAG (Feature 23 — NEW mount): Statutory Compliance Calendar + reminder cron.
 // Read = canViewPayrollReports; mark-filed/proof/waive/obligations/seed/sweep =
 // canManageStatutory. Reuses the StatutoryRemittance instance row (extended) +

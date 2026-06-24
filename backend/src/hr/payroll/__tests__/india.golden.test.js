@@ -1322,6 +1322,48 @@ const {
 }
 
 // ===========================================================================
+// SECTION N — FEATURE 27: AUTO-ARREAR per-source-month PF/ESI delta primitives.
+//   The auto-arrear engine charges PF/ESI on the arrear by taking the INCREMENTAL
+//   computeEpf/computeEsi difference between the OLD and NEW wage OF EACH SOURCE
+//   MONTH, so the ₹15,000 PF ceiling / ₹21,000 ESI cap bind on the source month, not
+//   the payout month. These pin that delta math to the paise (docs/features/27 §2/§9).
+//   No new module: these are the SAME computeEpf/computeEsi the engine + arrears.js use.
+// ===========================================================================
+{
+  // N1 — below-ceiling increment: old PF wage ₹10,000 → new ₹14,000. EE delta = 12% of
+  //   the ₹4,000 rise = ₹480 (both sides below the ₹15,000 cap).
+  const oldPf = computeEpf({ pfWageMinor: R(10000), capAtCeiling: true });
+  const newPf = computeEpf({ pfWageMinor: R(14000), capAtCeiling: true });
+  check('N1 below-ceiling EPF EE delta = ₹480', R(480), newPf.epfEeMinor - oldPf.epfEeMinor);
+
+  // N2 — AT-CEILING source month: old PF wage already ₹16,000 (≥ ₹15,000) → new ₹20,000.
+  //   Both cap at ₹15,000 → ₹0 incremental EE PF (the spec §9 zero-PF edge).
+  const oldPfCap = computeEpf({ pfWageMinor: R(16000), capAtCeiling: true });
+  const newPfCap = computeEpf({ pfWageMinor: R(20000), capAtCeiling: true });
+  check('N2 at-ceiling EPF EE delta = ₹0 (cap binds both sides)', 0, newPfCap.epfEeMinor - oldPfCap.epfEeMinor);
+
+  // N3 — straddle-ceiling: old ₹13,000 → new ₹18,000. EE delta = 12%×(₹15,000−₹13,000)
+  //   = 12% of ₹2,000 = ₹240 (the new side caps at ₹15,000).
+  const oldStr = computeEpf({ pfWageMinor: R(13000), capAtCeiling: true });
+  const newStr = computeEpf({ pfWageMinor: R(18000), capAtCeiling: true });
+  check('N3 straddle-ceiling EPF EE delta = ₹240', R(240), newStr.epfEeMinor - oldStr.epfEeMinor);
+
+  // N4 — ESI delta below cap: old gross ₹18,000 → new ₹20,000, both covered (latched).
+  //   EE 0.75% rounds UP to the next ₹1: ₹18,000→₹135, ₹20,000→₹150 → delta ₹15.
+  const oldEsi = computeEsi({ esiGrossMinor: R(18000), latchedCovered: true });
+  const newEsi = computeEsi({ esiGrossMinor: R(20000), latchedCovered: true });
+  check('N4 ESI EE delta (₹18k→₹20k, latched) = ₹15', R(15), newEsi.esiEeMinor - oldEsi.esiEeMinor);
+
+  // N5 — ESI coverage CONTINUITY: a source month that was covered stays covered for the
+  //   arrear even when the revised gross crosses ₹21,000 (latch honoured, §2).
+  const newEsiOver = computeEsi({ esiGrossMinor: R(22000), latchedCovered: true });
+  check('N5 ESI latched-covered above ₹21k still charges EE (continuity)', true, newEsiOver.esiEeMinor > 0);
+
+  // N6 — ESI employer 3.25% delta (₹18k→₹20k): ₹585 → ₹650 → delta ₹65.
+  check('N6 ESI ER delta (₹18k→₹20k, latched) = ₹65', R(65), newEsi.esiErMinor - oldEsi.esiErMinor);
+}
+
+// ===========================================================================
 console.log('');
 console.log(`India golden test: ${passed} passed, ${failed} failed of ${passed + failed} assertions.`);
 if (failed > 0) {

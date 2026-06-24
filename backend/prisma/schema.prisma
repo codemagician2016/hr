@@ -482,6 +482,7 @@ model Business {
   payRunLineComponents     PayRunLineComponent[]
   bonusCycles              BonusCycle[]
   bonusAwards              BonusAward[]
+  arrearCycles             ArrearCycle[]
   attendancePayInputs      AttendancePayInput[]
   payslips                 Payslip[]
   statutoryRemittances     StatutoryRemittance[]
@@ -6479,6 +6480,7 @@ model Entity {
   employments   EmploymentRecord[]
   payRuns       PayRun[]
   bonusCycles   BonusCycle[]
+  arrearCycles  ArrearCycle[]
   remittances   StatutoryRemittance[]
   complianceObligations ComplianceObligation[]
   compensations CompensationRevision[]
@@ -6752,6 +6754,7 @@ model Employee {
   documentRequests       DocumentRequest[]
   regularizationRequests AttendanceRegularizationRequest[]
   bonusAwards            BonusAward[]
+  arrearCycles           ArrearCycle[]
   // Letters & Communication (Feature 9) — letters issued to this employee
   issuedLetters          IssuedLetter[]
   // Feature 13 — rich profile sub-models (Education + typed Addresses)
@@ -8300,6 +8303,110 @@ model BonusAward {
 
   @@unique([businessId, bonusCycleId, employeeId])
   @@index([businessId, bonusCycleId, eligible])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §27  AUTO-ARREAR ENGINE (retro salary revision) — Feature 27. India-only.
+//   A CompensationRevision effective-dated in the PAST (an April increment
+//   processed in July) yields ARREARS for the already-paid, FROZEN elapsed months.
+//   Mirrors BonusCycle/BonusAward 1:1 (DRAFT → COMPUTED → APPROVED (SoD) → PAID):
+//   one ArrearCycle per (business, revision), one ArrearMonth per source month
+//   holding the recompute-vs-frozen diff to the paise. The approved cycle pays the
+//   arrear by INJECTing a PayRunInputItem(kind=ARREAR) onto the open run OR MINTing
+//   a PayRun(type=ARREAR) through the SAME persist path bonus/FnF use. Additive
+//   only — two new models + one new enum; reuses PayRunType.ARREAR,
+//   PayRunInputKind.ARREAR, CompRevisionReason, CompensationRevision.sourcePeriodCode.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// One detected retro revision turned into an arrears computation. Exactly-once on
+/// (businessId, compensationRevisionId): a revision yields ONE cycle (the @@unique
+/// is the idempotency guard that prevents a second cycle / double-pay).
+model ArrearCycle {
+  id                     String       @id @default(uuid())
+  businessId             String
+  business               Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId               String
+  entity                 Entity       @relation(fields: [entityId], references: [id], onDelete: Restrict)
+  employeeId             String // arrears are per-employee (one revision = one employee)
+  employee               Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  compensationRevisionId String // the retro revision that triggered this
+  revisionReason         CompRevisionReason // drives the ESI-on-arrears gate (§2)
+  effectiveFrom          DateTime     @db.Date // revision retro date
+  detectedInPeriod       String // "YYYY-MM" — the open period it was detected in
+  taxYear                String // receipt FY, e.g. "2026-27" (drives Form 10E vs 39)
+  esiOnArrears           Boolean      @default(true) // resolved from reason; operator-overridable
+  status                 ArrearStatus @default(DRAFT)
+  targetMode             String? // 'INJECT' | 'MINT' (set at approve)
+  // Totals (paise) — filled at compute.
+  grossArrearMinor       BigInt       @default(0)
+  pfArrearEeMinor        BigInt       @default(0)
+  pfArrearErMinor        BigInt       @default(0)
+  esiArrearEeMinor       BigInt       @default(0)
+  esiArrearErMinor       BigInt       @default(0)
+  // Section 89(1) relief data point (paise; null until computed).
+  s89ReliefMinor         BigInt?
+  s89DatapointJson       Json? // per-source-year slices + the 6-step arithmetic
+  // Lifecycle.
+  payRunId               String? // the minted/target run that pays the arrear
+  payRunInputItemId      String? // the INJECTed PayRunInputItem (INJECT mode stamp)
+  computedAt             DateTime?
+  computedBy             String?
+  approvedAt             DateTime?
+  approvedBy             String?
+  notes                  String?
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+  deletedAt              DateTime?
+  version                Int          @default(0)
+
+  months ArrearMonth[]
+
+  @@unique([businessId, compensationRevisionId]) // exactly-once per revision
+  @@index([businessId, employeeId, status])
+  @@index([businessId, entityId, detectedInPeriod])
+}
+
+/// Per source-month diff: the recompute-vs-frozen delta. The audit trail that makes
+/// the arrear idempotent and explainable to the paise.
+model ArrearMonth {
+  id                     String      @id @default(uuid())
+  businessId             String
+  arrearCycleId          String
+  arrearCycle            ArrearCycle @relation(fields: [arrearCycleId], references: [id], onDelete: Cascade)
+  sourcePeriod           String // "YYYY-MM"
+  sourcePayRunId         String // the frozen run that paid this month (the baseline)
+  // Baseline (already paid) vs recomputed (at new comp) — paise.
+  paidGrossMinor         BigInt
+  recomputedGrossMinor   BigInt
+  deltaGrossMinor        BigInt // recomputed − paid (can be negative for a downward revision)
+  paidPfWageMinor        BigInt
+  recomputedPfWageMinor  BigInt
+  deltaPfWageMinor       BigInt
+  paidEsiWageMinor       BigInt
+  recomputedEsiWageMinor BigInt
+  deltaEsiWageMinor      BigInt
+  // Per-source-month statutory arrear (paise) — PF capped per source month, ESI gated.
+  pfArrearEeMinor        BigInt      @default(0)
+  pfArrearErMinor        BigInt      @default(0)
+  esiArrearEeMinor       BigInt      @default(0)
+  esiArrearErMinor       BigInt      @default(0)
+  // Component-level deltas for the payslip explain (Json: [{code,label,deltaMinor}]).
+  componentDeltasJson    Json
+  // The frozen attendance the recompute used (provenance, not recomputed live).
+  payableDays            Decimal     @db.Decimal(8, 4)
+  lopDays                Decimal     @db.Decimal(8, 4)
+  createdAt              DateTime    @default(now())
+
+  @@unique([arrearCycleId, sourcePeriod]) // one diff row per source month
+  @@index([businessId, sourcePeriod])
+}
+
+enum ArrearStatus {
+  DRAFT // detected, not yet computed
+  COMPUTED // per-month diffs + 89(1) figured
+  APPROVED // SoD-approved; arrear injected into a run / minted
+  PAID
+  CANCELLED
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

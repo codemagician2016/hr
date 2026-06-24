@@ -39,6 +39,10 @@ const loanRecovery = require('../controllers/loanRecovery');
 // statutory deductions (no engine fork). Wired at the SAME three points loan recovery
 // uses (loadRunRowBundles / buildEmployeePayInput / persistComputedRun + reopen/cancel).
 const reimbursementPayout = require('../controllers/reimbursementPayout');
+// SHARED-FILE EDIT (Feature 27 — FLAGGED): the auto-arrears run-pass (stamp/unwind the
+// injected ArrearCycle lifecycle flag). MIRRORS loanRecovery/reimbursementPayout; lives
+// in a thin controller to avoid a circular require (arrears.service ⟶ service).
+const arrears = require('../controllers/arrearsPass');
 // Feature 14: a payroll run's entity country MUST equal the tenant country. The
 // engine still routes by the entity's countryCode (the correct per-run design);
 // this is a fail-closed TRIPWIRE at the run boundary so a quarantined / bad
@@ -398,6 +402,85 @@ function buildEmployeePayInput(rows) {
     order += 1;
   }
 
+  // SHARED-FILE EDIT (Feature 27 — FLAGGED): auto-arrears (retro salary revision)
+  // injected into the open run. The mirror of the LOAN_REPAYMENT / EXPENSE_REIMBURSEMENT
+  // blocks above. An approved ArrearCycle (arrears.service.approveArrearCycle, INJECT
+  // mode) writes a PayRunInputItem(kind=ARREAR); loadRunRowBundles rolls those up into
+  // rows.arrearInputs = { grossArrearMinor, pfArrearEeMinor, pfArrearErMinor,
+  //   esiArrearEeMinor, esiArrearErMinor, isTaxable, sourcePeriods[], cycleIds[] }.
+  //
+  // The arrear flows through the engine as ORDINARY lines so TDS, net, and the payslip
+  // all see it — NOT a bypass:
+  //   • ARREAR_EARNINGS — a CATEGORY.EARNING, CALC.FIXED, FIXED_REGARDLESS (already
+  //     earned; never re-prorated) line. isTaxable=true so it inflates the §192 taxable
+  //     base (the F15 projection smooths the recovered TDS). CRUCIALLY isPfWages=false /
+  //     isEsiWages=false: the arrear's PF/ESI was ALREADY computed PER SOURCE MONTH in
+  //     arrears.js (so the ₹15,000 PF ceiling / ₹21,000 ESI cap bound on the SOURCE
+  //     month, not the payout month). If we flagged it as PF/ESI wages, the compliance
+  //     module would re-charge against the PAYOUT month's wage — wrong. So we carry the
+  //     precomputed figures as explicit statutory passthrough components instead (§5.4).
+  //   • EPF_ARREAR / ESI_ARREAR — CATEGORY.DEDUCTION, CALC.FIXED voluntary-style EE
+  //     deductions carrying the precomputed per-source-month EE amounts (the engine
+  //     passes a FIXED deduction straight through; not LOP-prorated).
+  //   • EPF_ER_ARREAR / ESI_ER_ARREAR — CATEGORY.EMPLOYER_COST, CALC.FIXED employer
+  //     contributions (CTC, never netted from pay) carrying the precomputed ER amounts.
+  // persistComputedRun stamps the originating ArrearCycle(s) PAID off the run.
+  const arrearInputs = rows.arrearInputs || null;
+  if (arrearInputs && arrearInputs.grossArrearMinor > 0) {
+    componentsForEngine.push({
+      code: 'ARREAR_EARNINGS',
+      name: 'Salary arrears (retro revision)',
+      category: CATEGORY.EARNING,
+      calcMethod: CALC.FIXED,
+      amountMinor: arrearInputs.grossArrearMinor,
+      prorationPolicy: 'NONE',
+      lopBehavior: 'FIXED_REGARDLESS', // already earned; current attendance must not re-prorate it
+      showOnPayslip: true,
+      _order: order,
+      isTaxable: arrearInputs.isTaxable !== false, // taxable as current-period income (Sec.15)
+      isPfWages: false, // PF precomputed per source month → carried as EPF_ARREAR, not re-charged here
+      isEsiWages: false, // ESI precomputed per source month → carried as ESI_ARREAR
+      isPtWages: false,
+    });
+    order += 1;
+    if (arrearInputs.pfArrearEeMinor > 0) {
+      componentsForEngine.push({
+        code: 'EPF_ARREAR', name: 'EPF on arrears (per source month)',
+        category: CATEGORY.DEDUCTION, calcMethod: CALC.FIXED,
+        amountMinor: arrearInputs.pfArrearEeMinor,
+        showOnPayslip: true, _order: order, isTaxable: false, isPayeable: false,
+      });
+      order += 1;
+    }
+    if (arrearInputs.esiArrearEeMinor > 0) {
+      componentsForEngine.push({
+        code: 'ESI_ARREAR', name: 'ESI on arrears (per source month)',
+        category: CATEGORY.DEDUCTION, calcMethod: CALC.FIXED,
+        amountMinor: arrearInputs.esiArrearEeMinor,
+        showOnPayslip: true, _order: order, isTaxable: false, isPayeable: false,
+      });
+      order += 1;
+    }
+    if (arrearInputs.pfArrearErMinor > 0) {
+      componentsForEngine.push({
+        code: 'EPF_ER_ARREAR', name: 'Employer EPF on arrears',
+        category: CATEGORY.EMPLOYER_COST, calcMethod: CALC.FIXED,
+        amountMinor: arrearInputs.pfArrearErMinor,
+        showOnPayslip: false, _order: order,
+      });
+      order += 1;
+    }
+    if (arrearInputs.esiArrearErMinor > 0) {
+      componentsForEngine.push({
+        code: 'ESI_ER_ARREAR', name: 'Employer ESI on arrears',
+        category: CATEGORY.EMPLOYER_COST, calcMethod: CALC.FIXED,
+        amountMinor: arrearInputs.esiArrearErMinor,
+        showOnPayslip: false, _order: order,
+      });
+      order += 1;
+    }
+  }
+
   // ── Inputs (proration / LOP / overtime) from the frozen AttendancePayInput ──
   // M1 — gate on `!= null` (presence), NOT truthiness. A frozen ZERO (e.g.
   // payableDays=0 for a fully-LOP month) is meaningful and MUST reach the engine;
@@ -519,6 +602,10 @@ function buildEmployeePayInput(rows) {
     // reports the EXPENSE_REIMBURSEMENT it added to net. Net-floor sanity guard +
     // applyPayout run in persistComputedRun off result.reimbursements.
     reimbursementPayout: reimb || null,
+    // Feature 27 (FLAGGED) — the approved arrear cycles this run pays (INJECT mode).
+    // persistComputedRun stamps them PAID + their payRunId off the run; reopen/cancel
+    // unwind via arrears.service. Carries hasArrear so variance suppresses the swing.
+    arrearInputs: arrearInputs || null,
   };
 
   return { componentsForEngine, engineArgs, meta };
@@ -802,6 +889,39 @@ async function loadRunRowBundles(businessId, payRun, db = prisma) {
     }
   }
 
+  // SHARED-FILE EDIT (Feature 27 — FLAGGED): auto-arrears injected into this run. An
+  // approved ArrearCycle (INJECT mode) was stamped with payRunId = this run and wrote a
+  // PayRunInputItem(kind=ARREAR). We roll up the cycle totals (already paise-exact, PF/ESI
+  // capped per source month in arrears.js) into b.arrearInputs so buildEmployeePayInput
+  // emits the ARREAR_EARNINGS line + the precomputed statutory passthroughs. Read off the
+  // CYCLE (not the input item) so the per-source-month PF/ESI figure is authoritative. Not
+  // gated on run type (an ARREAR can ride a REGULAR run); MIGRATED never auto-injects.
+  if (!isMigrated) {
+    const cycles = await db.arrearCycle.findMany({
+      where: { businessId, payRunId: payRun.id, status: 'APPROVED', targetMode: 'INJECT', deletedAt: null },
+    });
+    if (cycles.length) {
+      const byEmp = new Map();
+      for (const c of cycles) {
+        const cur = byEmp.get(c.employeeId) || {
+          grossArrearMinor: 0, pfArrearEeMinor: 0, pfArrearErMinor: 0,
+          esiArrearEeMinor: 0, esiArrearErMinor: 0, isTaxable: true, cycleIds: [],
+        };
+        cur.grossArrearMinor += Number(c.grossArrearMinor);
+        cur.pfArrearEeMinor += Number(c.pfArrearEeMinor);
+        cur.pfArrearErMinor += Number(c.pfArrearErMinor);
+        cur.esiArrearEeMinor += Number(c.esiArrearEeMinor);
+        cur.esiArrearErMinor += Number(c.esiArrearErMinor);
+        cur.cycleIds.push(c.id);
+        byEmp.set(c.employeeId, cur);
+      }
+      for (const b of bundles) {
+        const ai = byEmp.get(b.employee.id);
+        if (ai && ai.grossArrearMinor > 0) b.arrearInputs = ai;
+      }
+    }
+  }
+
   return { entity, bundles };
 }
 
@@ -1039,6 +1159,14 @@ async function persistComputedRun(tx, { businessId, payRun, actorId, now, inputH
   // (paidViaPayrollAmount set) — never a manually-reimbursed PAY_SEPARATELY claim.
   await reimbursementPayout.unwindForRun(tx, { businessId, payRunId: payRun.id });
 
+  // SHARED-FILE EDIT (Feature 27 — FLAGGED): UNWIND any arrear PAID-stamps a PRIOR compute
+  // of THIS run wrote (revert the ArrearCycle PAID → APPROVED) BEFORE re-stamping. Same
+  // idempotency model as loan/reimbursement: a recompute/reopened-run never double-pays an
+  // arrear; the cycle stays APPROVED + still bound to this run (payRunId/targetMode kept) so
+  // the re-stamp below pays it exactly once. (A full release of payRunId/targetMode is the
+  // CANCEL path in arrears.service, not the recompute path.)
+  await arrears.unwindArrearStampsForRun(tx, { businessId, payRunId: payRun.id });
+
   let totGross = 0, totDed = 0, totNet = 0, totEr = 0;
   for (const ln of lines) {
     const r = ln.result;
@@ -1174,6 +1302,14 @@ async function persistComputedRun(tx, { businessId, payRun, actorId, now, inputH
     totNet += r.netMinor;
     totEr += r.totalEmployerContributionsMinor;
   }
+
+  // SHARED-FILE EDIT (Feature 27 — FLAGGED): STAMP the injected arrear cycles PAID. The
+  // unwind above reverted any prior PAID-stamp, so this re-stamps the run's APPROVED+INJECT
+  // cycles exactly once (APPROVED → PAID). The cycle totals were already paid through the
+  // engine as the ARREAR_EARNINGS line + statutory passthroughs (per-source-month exact);
+  // here we only flip the lifecycle flag so re-running this run does NOT double-pay and a
+  // reopen/cancel can unwind. Mirror of the loan/reimbursement stamp discipline.
+  await arrears.stampArrearCyclesPaidForRun(tx, { businessId, payRunId: payRun.id, paidAt: now });
 
   await tx.payRun.update({
     where: { id: payRun.id },
@@ -2523,6 +2659,11 @@ async function cancelRun({ businessId, actorId, payRunId, reason }) {
   // (REIMBURSED → APPROVED, payRunId/paidViaPayrollAmount cleared) so the next regular
   // run pays them. No-op when the run never computed / paid no reimbursements.
   await reimbursementPayout.unwindForRun(prisma, { businessId, payRunId });
+  // Feature 27 (FLAGGED) — a cancelled run FULLY releases its injected arrear cycles
+  // (→ COMPUTED, un-bound) so a later run can re-approve + pay the arrear; also remove the
+  // orphaned PayRunInputItem(kind=ARREAR) rows this run carried. No-op if it had no arrears.
+  await arrears.releaseArrearCyclesForRun(prisma, { businessId, payRunId });
+  await prisma.payRunInputItem.deleteMany({ where: { businessId, payRunId, kind: 'ARREAR' } });
   await writeAudit({
     businessId, actorId, action: 'payrun.cancel', entityType: 'PayRun', entityId: payRunId,
     meta: { code: payRun.code, reason: reason || null, from: payRun.status },
@@ -2568,6 +2709,10 @@ async function reopenRun({ businessId, actorId, payRunId }) {
     // (REIMBURSED → APPROVED, payRunId/paidViaPayrollAmount cleared) so reopening
     // cleanly undoes the payout; a later recompute re-selects the now-APPROVED claims.
     await reimbursementPayout.unwindForRun(tx, { businessId, payRunId });
+    // Feature 27 (FLAGGED) — revert any arrear PAID-stamps this run wrote (→ APPROVED).
+    // The cycles stay bound to the run (still INJECT, still payRunId) so a recompute
+    // re-stamps them exactly once; a full release only happens on CANCEL.
+    await arrears.unwindArrearStampsForRun(tx, { businessId, payRunId });
     await tx.payRun.update({
       where: { id: payRunId },
       data: { varianceReport: null, totalsHash: null, headcount: 0, totalGross: 0, totalDeductions: 0, totalNet: 0, totalEmployerCost: 0 },
