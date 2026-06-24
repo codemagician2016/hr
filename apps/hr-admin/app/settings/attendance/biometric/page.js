@@ -29,6 +29,7 @@ import { ErrorBanner, Modal, ModalActions, PrimaryButton, TextInput, Spinner } f
 import { get, post, patch, del } from '@/lib/api';
 import { PageHeader, Tabs, DataTable, StatusBadge, ActionButton } from '@/lib/ui';
 import { SectionTitle, InfoTip } from '@/lib/widgets';
+import EmployeeSearchSelect from '@/components/EmployeeSearchSelect';
 
 const HEALTH_DOT = { green: 'bg-green-500', amber: 'bg-amber-500', red: 'bg-red-500' };
 const HEALTH_TIP = {
@@ -63,10 +64,10 @@ export default function BiometricDevicesPage() {
         active={tab}
         onChange={setTab}
         tabs={[
-          { key: 'devices', header: 'Devices' },
-          { key: 'mapping', header: 'Employee mapping' },
-          { key: 'activity', header: 'Ingest activity' },
-          { key: 'triage', header: 'Triage' },
+          { key: 'devices', label: 'Devices' },
+          { key: 'mapping', label: 'Employee mapping' },
+          { key: 'activity', label: 'Ingest activity' },
+          { key: 'triage', label: 'Triage' },
         ]}
       />
       {tab === 'devices' ? <DevicesTab meta={meta} setError={setError} setNotice={setNotice} /> : null}
@@ -351,6 +352,7 @@ function TriageTab({ setError, setNotice }) {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState('UNMAPPED');
+  const [remapping, setRemapping] = useState(null); // the parked row being mapped to an employee
 
   const load = useCallback(() => {
     setLoading(true);
@@ -366,8 +368,8 @@ function TriageTab({ setError, setNotice }) {
     catch (e) { setError(e.message); }
   };
   const correct = async (id, action, employeeId) => {
-    try { await post(`/api/hr/biometric/events/${id}/correct`, { action, employeeId }); setNotice('Correction applied.'); load(); }
-    catch (e) { setError(e.message); }
+    try { await post(`/api/hr/biometric/events/${id}/correct`, { action, employeeId }); setNotice('Correction applied.'); load(); return true; }
+    catch (e) { setError(e.message); return false; }
   };
 
   return (
@@ -393,6 +395,7 @@ function TriageTab({ setError, setNotice }) {
           {
             key: 'actions', header: '', render: (r) => (
               <div className="flex gap-2">
+                {status === 'UNMAPPED' ? <ActionButton onClick={() => setRemapping(r)}>Map to employee</ActionButton> : null}
                 {r.resolvedType ? <ActionButton onClick={() => correct(r.id, 'flip')}>Flip IN/OUT</ActionButton> : null}
                 <ActionButton tone="danger" onClick={() => correct(r.id, 'discard')}>Discard</ActionButton>
               </div>
@@ -401,6 +404,34 @@ function TriageTab({ setError, setNotice }) {
         ]}
         rows={events}
       />
+      {remapping ? <RemapModal event={remapping} onClose={() => setRemapping(null)} onRemap={async (emp) => { const ok = await correct(remapping.id, 'remap', emp.id); if (ok) setRemapping(null); }} /> : null}
     </div>
+  );
+}
+
+// Map a parked UNMAPPED event to an employee → backend remap (set employeeId +
+// re-materialise the day). One-off fix for a single event; for a recurring code
+// add a Mapping (Mapping tab) so future punches resolve automatically.
+function RemapModal({ event, onClose, onRemap }) {
+  const [emp, setEmp] = useState(null);
+  const [busy, setBusy] = useState(false);
+  return (
+    <Modal title="Map punch to employee" onClose={onClose} size="md">
+      <div className="space-y-3 text-sm">
+        <p className="text-gray-600">Device code <code className="rounded bg-gray-100 px-1">{event.deviceCode}</code> at {event.localTimeRaw || '—'} has no employee mapping. Pick the person this punch belongs to.</p>
+        <EmployeeSearchSelect
+          label="Employee"
+          value={emp?.id || ''}
+          selectedLabel={emp ? `${emp.firstName || ''} ${emp.lastName || ''} (${emp.code || ''})`.trim() : ''}
+          onSelect={(e) => setEmp(e || null)}
+          placeholder="Search by name, code or email…"
+        />
+        <p className="text-xs text-gray-500">This maps only this event. To resolve this code for all future punches, add a mapping on the <strong>Employee mapping</strong> tab, then <strong>Reprocess parked rows</strong>.</p>
+      </div>
+      <ModalActions>
+        <button className="rounded border px-3 py-1.5 text-sm" onClick={onClose}>Cancel</button>
+        <PrimaryButton onClick={async () => { setBusy(true); await onRemap(emp); setBusy(false); }} loading={busy} disabled={!emp}>Map &amp; materialise</PrimaryButton>
+      </ModalActions>
+    </Modal>
   );
 }
