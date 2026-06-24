@@ -27,6 +27,8 @@ export const NAV_ITEMS = [
   { key: 'leave', label: 'Leave', href: '/leave', feature: 'leave', permission: 'canApproveLeave', icon: 'leaf' },
   { key: 'comp-off', label: 'Comp-off', href: '/comp-off-admin', feature: 'leave', permission: 'canApproveLeave', icon: 'calendar' },
   { key: 'attendance', label: 'Attendance', href: '/attendance', feature: 'attendance', permission: 'canManageAttendance', icon: 'clock' },
+  // FLAG (Feature 29 — shared edit): shift roster grid + rotation + swap queue.
+  { key: 'roster', label: 'Roster', href: '/roster', feature: 'attendance', permission: 'canViewEmployees', icon: 'calendar' },
   { key: 'compensation', label: 'Compensation', href: '/compensation', feature: 'hr', permission: 'canViewCompensation', icon: 'coin' },
   // FLAG (Feature 17 — NEW nav item): the friendly CTC-policy builder workspace
   // (reusable salary templates). Gated on canViewCompensation (the read key; writes

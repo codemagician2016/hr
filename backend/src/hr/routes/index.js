@@ -145,6 +145,10 @@ router.use('/me/compensation', require('./meCompensation.routes'));
 // attendance/leave domains but authenticate the CUSTOMER session and derive the
 // employee server-side, fixing the ESS pages that 401'd against the operator API.
 router.use('/me/attendance', require('./meAttendance.routes'));
+// FLAG (Feature 29 — NEW mount): ESS shift swaps (file/consent/withdraw + my list).
+// Customer session, SELF_ONLY. The schedule surface (my-shift week/month) stays on
+// /me/attendance/schedule (extended to return the PUBLISHED roster window).
+router.use('/me/shifts', require('./meShifts.routes'));
 router.use('/me/leave', require('./meLeave.routes'));
 // FLAG (Feature 30 — NEW mount): ESS comp-off (my lots + balance). Customer session,
 // SELF_ONLY. AVAIL reuses the existing Apply-Leave form (COMP_OFF leave type).

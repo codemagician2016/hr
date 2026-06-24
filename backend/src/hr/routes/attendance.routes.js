@@ -18,6 +18,11 @@ router.use(attachSelfEmployee); // Feature 1: hierarchy anchor (req.user.employe
 /* Holidays — calendar CRUD + statutory import (own controller, mounted here). */
 router.use('/holidays', require('./holidays.routes'));
 
+/* FLAG (Feature 29 — shared edit): shift management (roster grid + rotation +
+   shift-swap manager queue). Mounted here so /attendance/roster|rotations|swaps
+   inherit protect + attachSelfEmployee; the sub-router adds F1 scope + RBAC. */
+router.use('/', require('./roster.routes'));
+
 /* Punches — clock in/out. Recording a punch is a self/manager action scoped to the
    sub-tree; an out-of-scope target → 404, a punch into a locked day → 409. On
    success the affected (employee, day) is re-derived. */

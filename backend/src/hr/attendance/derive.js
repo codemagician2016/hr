@@ -220,13 +220,19 @@ function derive(ctx) {
 // ── pure resolvers (caller passes the candidate lists; no DB here) ───────────
 
 /**
- * resolveSchedule(date, assignments, defaults) — pick the effective schedule.
+ * resolveSchedule(date, assignments, defaults, rosterDay?) — pick the effective
+ * schedule.
+ * v2 (Feature 29): a PUBLISHED RosterDay for THIS day WINS — dayType OFF returns the
+ * { __off:true } sentinel (service maps to weeklyOff=true, schedule=null); dayType
+ * WORK returns rosterDay.shiftPattern. A null/absent rosterDay (no-roster tenant)
+ * falls straight through to the v1 path below, so the output is byte-identical (I1).
  * v1: the ShiftAssignment whose [effectiveFrom, effectiveTo] covers `date`
  * (latest effectiveFrom wins); else the entity/location default; else null
- * (open-attendance). Roster cycles are a v2 extension that slots in here.
+ * (open-attendance).
  * `assignments` = [{ effectiveFrom, effectiveTo, shiftPattern }].
  */
-function resolveSchedule(date, assignments, defaultPattern) {
+function resolveSchedule(date, assignments, defaultPattern, rosterDay) {
+  if (rosterDay) return rosterDay.dayType === 'OFF' ? { __off: true } : (rosterDay.shiftPattern || null);
   const d = toMs(date);
   const covering = (assignments || [])
     .filter((a) => a && a.shiftPattern && toMs(a.effectiveFrom) <= d && (!a.effectiveTo || toMs(a.effectiveTo) >= d))

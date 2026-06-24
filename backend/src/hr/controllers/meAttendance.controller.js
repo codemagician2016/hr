@@ -28,6 +28,8 @@ const { recompute } = require('../attendance/service');
 const { resolveTimezone, civilDateInTz } = require('../attendance/tz');
 const { resolveApprover } = require('../lib/approvalRouting');
 const { tenantCountry } = require('../tenant/countryContext');
+// Feature 29 — ESS shift-swap rides the F10 SHIFT_SWAP approval engine.
+const engine = require('../approvals/engine');
 
 const PUNCH_TYPES = ['IN', 'OUT', 'BREAK_START', 'BREAK_END'];
 // Mirror the RegularizationKind enum in prisma/schema.prisma exactly — writing a
@@ -361,11 +363,15 @@ async function createRegularization(req, res, next) {
   } catch (e) { next(e); }
 }
 
-// ── GET /me/attendance/schedule — own current shift assignment + pattern ──────
+// ── GET /me/attendance/schedule?from&to — own shift assignment + PUBLISHED roster ──
+// Feature 29 — when from/to are supplied, also return the PUBLISHED roster week/month
+// (per-day shift or OFF). The single covering assignment is still returned for the
+// legacy "what's my shift" card; the roster[] drives the my-shifts strip. Only
+// PUBLISHED cells are exposed (an employee never sees a DRAFT plan).
 async function getSchedule(req, res, next) {
   try {
     const emp = await resolveActiveSelf(req);
-    if (!emp) return res.json({ shift: null, assignment: null });
+    if (!emp) return res.json({ shift: null, assignment: null, roster: [] });
     const { businessId } = req.customer;
     const today = utcDay(new Date());
     const assignment = await prisma.shiftAssignment.findFirst({
@@ -377,9 +383,23 @@ async function getSchedule(req, res, next) {
       orderBy: { effectiveFrom: 'desc' },
       include: { shiftPattern: true },
     });
-    if (!assignment) return res.json({ shift: null, assignment: null });
+
+    let roster = [];
+    if (req.query.from && req.query.to) {
+      const rows = await prisma.rosterDay.findMany({
+        where: { businessId, employeeId: emp.id, status: 'PUBLISHED', date: { gte: utcDay(req.query.from), lte: utcDay(req.query.to) } },
+        include: { shiftPattern: { select: { id: true, code: true, name: true, startTime: true, endTime: true, breakMinutes: true, isNightShift: true } } },
+        orderBy: { date: 'asc' },
+      });
+      roster = rows.map((r) => ({
+        date: utcDay(r.date).toISOString().slice(0, 10),
+        dayType: r.dayType, source: r.source, shift: r.shiftPattern || null,
+      }));
+    }
+
+    if (!assignment) return res.json({ shift: null, assignment: null, roster });
     const { shiftPattern, ...assignmentRow } = assignment;
-    res.json({ shift: shiftPattern || null, assignment: assignmentRow });
+    res.json({ shift: shiftPattern || null, assignment: assignmentRow, roster });
   } catch (e) { next(e); }
 }
 
@@ -408,6 +428,139 @@ async function listHolidays(req, res, next) {
   } catch (e) { next(e); }
 }
 
+/* ------------------------------------------------------------------ */
+/* Feature 29 — ESS shift swaps (SELF_ONLY; subject from session)      */
+/* ------------------------------------------------------------------ */
+
+// GET /me/shifts/swaps — my swap requests (sent + received).
+async function listMySwaps(req, res, next) {
+  try {
+    const emp = await resolveActiveSelf(req);
+    if (!emp) return noEmployee(res);
+    const { businessId } = req.customer;
+    const items = await prisma.shiftSwapRequest.findMany({
+      where: { businessId, OR: [{ requesterEmployeeId: emp.id }, { counterpartyEmployeeId: emp.id }] },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        requester: { select: { id: true, code: true, firstName: true, lastName: true } },
+        counterparty: { select: { id: true, code: true, firstName: true, lastName: true } },
+      },
+    });
+    res.json({ items: items.map((s) => ({ ...s, role: s.requesterEmployeeId === emp.id ? 'REQUESTER' : 'COUNTERPARTY' })) });
+  } catch (e) { next(e); }
+}
+
+// A published, unlocked WORK/OFF cell must exist for (employee, day) to swap it.
+async function publishedCell(businessId, employeeId, date) {
+  return prisma.rosterDay.findFirst({ where: { businessId, employeeId, date: utcDay(date), status: 'PUBLISHED' } });
+}
+
+// POST /me/shifts/swaps { counterpartyEmployeeId, requesterDate, counterpartyDate, reason }
+async function createMySwap(req, res, next) {
+  try {
+    const emp = await resolveActiveSelf(req);
+    if (!emp) return noEmployee(res);
+    const { businessId } = req.customer;
+    const { counterpartyEmployeeId, requesterDate, counterpartyDate, reason } = req.body;
+    if (!counterpartyEmployeeId || !requesterDate || !counterpartyDate || !reason) {
+      return res.status(400).json({ message: 'counterpartyEmployeeId, requesterDate, counterpartyDate and reason are required' });
+    }
+    if (counterpartyEmployeeId === emp.id) return res.status(400).json({ message: 'Cannot swap with yourself' });
+    // Counterparty must be a real, active peer in the SAME tenant (IDOR-safe).
+    const cp = await prisma.employee.findFirst({ where: { id: counterpartyEmployeeId, businessId, deletedAt: null, isActive: true }, select: { id: true } });
+    if (!cp) return res.status(404).json({ message: 'Counterparty not found' });
+    // Both days must be PUBLISHED & unlocked.
+    const [cellA, cellB] = await Promise.all([
+      publishedCell(businessId, emp.id, requesterDate),
+      publishedCell(businessId, counterpartyEmployeeId, counterpartyDate),
+    ]);
+    if (!cellA || !cellB) return res.status(409).json({ message: 'Both days must have a published roster shift to swap' });
+    if (await isDayLocked(businessId, emp.id, requesterDate) || await isDayLocked(businessId, counterpartyEmployeeId, counterpartyDate)) {
+      return res.status(409).json({ message: 'A day is in a locked attendance period' });
+    }
+    const created = await prisma.shiftSwapRequest.create({
+      data: {
+        businessId, requesterEmployeeId: emp.id, counterpartyEmployeeId,
+        requesterDate: utcDay(requesterDate), counterpartyDate: utcDay(counterpartyDate),
+        reason, counterpartyConsent: 'PENDING', status: 'PENDING',
+      },
+    });
+    res.status(201).json(created);
+  } catch (e) { next(e); }
+}
+
+// POST /me/shifts/swaps/:id/consent { decision: 'ACCEPT'|'DECLINE' }
+// Only the COUNTERPARTY may call. ACCEPT opens the F10 chain; DECLINE closes it.
+async function consentMySwap(req, res, next) {
+  try {
+    const emp = await resolveActiveSelf(req);
+    if (!emp) return noEmployee(res);
+    const { businessId } = req.customer;
+    const swap = await prisma.shiftSwapRequest.findFirst({ where: { id: req.params.id, businessId } });
+    // IDOR-safe: a non-counterparty caller gets a 404 (cannot even confirm existence).
+    if (!swap || swap.counterpartyEmployeeId !== emp.id) return res.status(404).json({ message: 'Swap not found' });
+    if (swap.status !== 'PENDING' || swap.counterpartyConsent !== 'PENDING') {
+      return res.status(409).json({ message: `Swap is already ${swap.counterpartyConsent}/${swap.status}` });
+    }
+    const decision = String(req.body.decision || '').toUpperCase();
+    if (decision === 'DECLINE') {
+      const updated = await prisma.shiftSwapRequest.update({
+        where: { id: swap.id },
+        data: { counterpartyConsent: 'DECLINED', status: 'CANCELLED', decidedAt: new Date(), decidedBy: emp.id },
+      });
+      return res.json(updated);
+    }
+    if (decision !== 'ACCEPT') return res.status(400).json({ message: "decision must be 'ACCEPT' or 'DECLINE'" });
+
+    // ACCEPT: mark consent + open the F10 SHIFT_SWAP manager chain (same as leave).
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.shiftSwapRequest.update({ where: { id: swap.id }, data: { counterpartyConsent: 'ACCEPTED' } });
+      const opened = await engine.openRequest({
+        businessId,
+        module: 'SHIFT_SWAP',
+        entityType: 'ShiftSwapRequest',
+        entityId: swap.id,
+        requesterEmployeeId: swap.requesterEmployeeId,
+        payload: { requesterDate: u.requesterDate, counterpartyDate: u.counterpartyDate, reason: u.reason, counterpartyEmployeeId: u.counterpartyEmployeeId },
+        ctx: { entityId: swap.id },
+      }, tx);
+      const reqId = opened && opened.approvalRequest ? opened.approvalRequest.id : null;
+      if (reqId) await tx.shiftSwapRequest.update({ where: { id: swap.id }, data: { approvalRequestId: reqId } });
+      return tx.shiftSwapRequest.findUnique({ where: { id: swap.id } });
+    });
+    res.json(updated);
+  } catch (e) {
+    if (e && (e.code === 'DECISION_RACE' || e.code === 'P2025')) {
+      return res.status(409).json({ message: 'Swap changed concurrently; please retry', reason: 'DECISION_RACE' });
+    }
+    next(e);
+  }
+}
+
+// POST /me/shifts/swaps/:id/withdraw — requester withdraws (drives engine.withdraw/cancel).
+async function withdrawMySwap(req, res, next) {
+  try {
+    const emp = await resolveActiveSelf(req);
+    if (!emp) return noEmployee(res);
+    const { businessId } = req.customer;
+    const swap = await prisma.shiftSwapRequest.findFirst({ where: { id: req.params.id, businessId } });
+    if (!swap || swap.requesterEmployeeId !== emp.id) return res.status(404).json({ message: 'Swap not found' });
+    if (swap.status !== 'PENDING') return res.status(409).json({ message: `Swap is already ${swap.status}` });
+    // If an approval chain is open, cancel it (fires onCancel → CANCELLED). Otherwise
+    // (consent still pending, no chain) just close the request directly.
+    const open = await prisma.approvalRequest.findFirst({
+      where: { businessId, module: 'SHIFT_SWAP', entityType: 'ShiftSwapRequest', entityId: swap.id, status: { in: ['PENDING', 'ESCALATED'] } },
+    });
+    if (open) {
+      await engine.cancel({ approvalRequestId: open.id, actorUserId: emp.id, comment: req.body.reason || 'Withdrawn by requester' });
+    } else {
+      await prisma.shiftSwapRequest.updateMany({ where: { id: swap.id, status: 'PENDING' }, data: { status: 'CANCELLED', decidedAt: new Date(), decidedBy: emp.id } });
+    }
+    const fresh = await prisma.shiftSwapRequest.findUnique({ where: { id: swap.id } });
+    res.json(fresh);
+  } catch (e) { next(e); }
+}
+
 module.exports = {
   createPunch,
   listPunches,
@@ -420,4 +573,9 @@ module.exports = {
   createRegularization,
   getSchedule,
   listHolidays,
+  // Feature 29 — ESS shift swaps
+  listMySwaps,
+  createMySwap,
+  consentMySwap,
+  withdrawMySwap,
 };

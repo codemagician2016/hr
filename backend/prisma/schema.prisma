@@ -502,6 +502,9 @@ model Business {
   // Attendance / time
   shiftPatterns                ShiftPattern[]
   shiftAssignments             ShiftAssignment[]
+  rosterDays                   RosterDay[] // Feature 29 — roster cells
+  rotationTemplates            RotationTemplate[] // Feature 29 — rotation rings
+  shiftSwapRequests            ShiftSwapRequest[] // Feature 29 — shift swaps
   hrHolidays                   Holiday[]
   attendancePunches            AttendancePunch[]
   attendances                  Attendance[]
@@ -6734,9 +6737,16 @@ model Employee {
   dependants             Dependant[]
   leaveBalances          LeaveBalance[]
   leaveTxns              LeaveTransaction[]
+  // Feature 29 — women/graveyard night-shift consent. Default false = must opt in;
+  // the rotation generator + swap consumer refuse to place a non-consenting employee
+  // on an isNightShift pattern (hard block, admin override audited).
+  nightShiftEligible     Boolean                           @default(false)
   compOffCredits         CompOffCredit[] // Feature 30 — comp-off expiry lots
   punches                AttendancePunch[]
   shiftAssignments       ShiftAssignment[]
+  rosterDays             RosterDay[] // Feature 29 — per-day roster cells
+  swapsRequested         ShiftSwapRequest[]                @relation("SwapRequester") // Feature 29
+  swapsCounterparty      ShiftSwapRequest[]                @relation("SwapCounterparty") // Feature 29
   timesheets             Timesheet[]
   attendances            Attendance[]                      @relation("EmployeeAttendances")
   attendancePayInputs    AttendancePayInput[]
@@ -9191,6 +9201,7 @@ model ShiftPattern {
   deletedAt               DateTime?
   version                 Int               @default(0)
   assignments             ShiftAssignment[]
+  rosterDays              RosterDay[] // Feature 29 — per-day roster cells referencing this pattern
 
   @@unique([businessId, code])
   @@index([businessId, isActive])
@@ -9210,6 +9221,113 @@ model ShiftAssignment {
   updatedAt      DateTime     @updatedAt
 
   @@index([businessId, employeeId, effectiveFrom])
+}
+
+// ── Feature 29: Shift management (rosters, rotation, swap) — India ──
+// Reuses ShiftPattern (master) + ShiftAssignment (effective-dated window) UNCHANGED.
+// Adds the per-employee-per-day roster CELL, a reusable rotation ring, and the
+// shift-swap request that rides the F10 SHIFT_SWAP approval. All businessId-scoped.
+
+/// One employee × one civil day → the shift to work that day (or an explicit OFF).
+/// THE roster cell. derive.js reads PUBLISHED rows FIRST (precedence over the
+/// covering ShiftAssignment); a DRAFT row is ignored by derive (invariant I4). A
+/// dayType=OFF surfaces as WEEKLY_OFF; dayType=WORK requires a shiftPattern.
+model RosterDay {
+  id                 String        @id @default(uuid())
+  businessId         String
+  business           Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId         String
+  employee           Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  date               DateTime      @db.Date // civil day (UTC-midnight, same convention as Attendance)
+  dayType            RosterDayType @default(WORK)
+  shiftPatternId     String?
+  shiftPattern       ShiftPattern? @relation(fields: [shiftPatternId], references: [id], onDelete: Restrict)
+  status             RosterStatus  @default(DRAFT) // DRAFT until published; derive ignores DRAFT
+  source             RosterSource  @default(MANUAL) // ROTATION | MANUAL | SWAP — provenance for the grid + audit
+  rotationTemplateId String? // set when generated, for "regenerate" idempotency
+  swapRequestId      String? // set when a SWAP overwrote this cell
+  note               String?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  version            Int           @default(0) // optimistic lock for the swap consumer
+
+  @@unique([businessId, employeeId, date]) // ONE roster cell per employee per day (idempotent generate/upsert)
+  @@index([businessId, date, status]) // grid page (a date column across employees)
+  @@index([businessId, employeeId, date]) // ESS my-week + derive read
+}
+
+enum RosterDayType {
+  WORK
+  OFF
+}
+
+enum RosterStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum RosterSource {
+  ROTATION
+  MANUAL
+  SWAP
+}
+
+/// A reusable rotation ring. slotsJson = ordered array; each slot is a shiftPatternId
+/// OR an OFF marker. cycleLength = slotsJson.length. The generator walks the ring from
+/// anchorDate, one slot per civil day, looping. Population is resolved at apply-time
+/// (entity/dept/picked ids), NOT stored as a static member list.
+model RotationTemplate {
+  id          String    @id @default(uuid())
+  businessId  String
+  business    Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId    String?
+  code        String
+  name        String // "Factory 3-shift 6-1-6-1-6-2"
+  /// slots: [{ kind:"WORK", shiftPatternId } | { kind:"OFF" }] — ordered, length = cycleLength
+  slotsJson   Json
+  cycleLength Int // = slotsJson.length (denormalised for validation)
+  anchorDate  DateTime  @db.Date // day 0 of the ring (so two teams can be phase-offset)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  version     Int       @default(0)
+
+  @@unique([businessId, code])
+  @@index([businessId, isActive])
+}
+
+/// Employee A asks to swap their shift on requesterDate with employee B's shift on
+/// counterpartyDate (commonly the same day, two people trading). Drives an F10
+/// SHIFT_SWAP approval; on APPROVED the consumer swaps the two RosterDay cells.
+model ShiftSwapRequest {
+  id                     String        @id @default(uuid())
+  businessId             String
+  business               Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  requesterEmployeeId    String
+  requester              Employee      @relation("SwapRequester", fields: [requesterEmployeeId], references: [id], onDelete: Cascade)
+  counterpartyEmployeeId String
+  counterparty           Employee      @relation("SwapCounterparty", fields: [counterpartyEmployeeId], references: [id], onDelete: Cascade)
+  requesterDate          DateTime      @db.Date // the day the requester gives away
+  counterpartyDate       DateTime      @db.Date // the day they take (== requesterDate for a same-day trade)
+  reason                 String
+  counterpartyConsent    ConsentStatus @default(PENDING) // B must accept before the manager chain activates
+  status                 RequestStatus @default(PENDING)
+  approvalRequestId      String? // the F10 ApprovalRequest (manager chain)
+  decidedBy              String?
+  decidedAt              DateTime?
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+
+  @@index([businessId, requesterEmployeeId, requesterDate])
+  @@index([businessId, counterpartyEmployeeId, counterpartyDate])
+  @@index([businessId, status])
+}
+
+enum ConsentStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
 }
 
 /// Public/company holiday calendar. NZ regional anniversary days + mondayisation
@@ -11652,6 +11770,7 @@ enum WorkflowModule {
   DOCUMENT_SIGN
   PAYRUN
   COMP_OFF // Feature 30 — comp-off EARN approval (manager green-lights a credit)
+  SHIFT_SWAP // Feature 29 — shift-swap approval (manager green-lights a roster-cell trade)
 }
 
 model WorkflowStep {
