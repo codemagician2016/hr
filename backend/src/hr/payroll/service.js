@@ -2356,6 +2356,13 @@ async function disburseRun({ businessId, actorId, payRunId }) {
   transition(runState, STATE.PAID, { actorId, at: new Date() });
   await persistTransition({ prisma, payRunId, from: STATE.APPROVED, to: STATE.PAID, ctx: { actorId } });
 
+  // SHARED-FILE EDIT (Feature 27 — FLAGGED): a MINTed standalone ARREAR run completes the
+  // arrear lifecycle on disburse — stamp its APPROVED+MINT cycle(s) → PAID (finding #2: the
+  // MINT path previously had NO step advancing the cycle past APPROVED, so a paid arrear
+  // never showed PAID). INJECT cycles are stamped in computeRun (they ride a regular run);
+  // MINT cycles ride their own ARREAR run and are stamped here, at the PAID boundary.
+  await arrears.stampArrearMintCyclesPaidForRun(prisma, { businessId, payRunId, paidAt: new Date() });
+
   // Publish on the disbursement boundary.
   await publishRun({ businessId, actorId, payRunId });
 

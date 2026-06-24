@@ -183,7 +183,7 @@ function labelFor(recomputed, paid, code) {
 
 /**
  * pfArrearForMonth({ india, oldPfWageMinor, newPfWageMinor, capAtCeiling })
- *   → { eeMinor, erMinor } incremental PF on the arrear FOR ONE SOURCE MONTH.
+ *   → { eeMinor, erMinor } incremental PF on the arrear FOR ONE SOURCE MONTH (SIGNED).
  *
  * Computed as computeEpf(new) − computeEpf(old): the ₹15,000 ceiling is applied to
  * the SOURCE month's full wage inside computeEpf, so a month whose OLD wage was
@@ -191,32 +191,43 @@ function labelFor(recomputed, paid, code) {
  * the A/c1 employer-EPF balance delta (EPS/EDLI/admin are establishment-level and
  * NOT charged incrementally on a single employee's arrear).
  *
+ * FIX (finding #4): the per-month delta is SIGNED — a DOWN-revision month (PF wage
+ * dropped) returns a NEGATIVE delta so it nets against the up-months at the aggregate
+ * seam (the ONLY place the total is floored, see aggregateArrear). Flooring HERE (per
+ * month) over-billed PF on a MIXED up/down cycle: down-months silently contributed 0
+ * instead of reducing the total, so EPF remitted to EPFO exceeded the PF on the true
+ * net arrear. The `Math.max(0, …)` on the WAGE inputs is kept — a wage base is never
+ * negative; only the EE/ER DELTA may be.
+ *
  * @param {Object} india  the india._internals namespace (computeEpf)
  */
 function pfArrearForMonth({ india, oldPfWageMinor, newPfWageMinor, capAtCeiling = true }) {
   const oldEpf = india.computeEpf({ pfWageMinor: Math.max(0, oldPfWageMinor), capAtCeiling });
   const newEpf = india.computeEpf({ pfWageMinor: Math.max(0, newPfWageMinor), capAtCeiling });
   return {
-    eeMinor: Math.max(0, newEpf.epfEeMinor - oldEpf.epfEeMinor),
-    erMinor: Math.max(0, newEpf.epfErMinor - oldEpf.epfErMinor),
+    eeMinor: newEpf.epfEeMinor - oldEpf.epfEeMinor,
+    erMinor: newEpf.epfErMinor - oldEpf.epfErMinor,
   };
 }
 
 /**
  * esiArrearForMonth({ india, oldEsiWageMinor, newEsiWageMinor, latchedCovered })
- *   → { eeMinor, erMinor } incremental ESI on the arrear FOR ONE SOURCE MONTH.
+ *   → { eeMinor, erMinor } incremental ESI on the arrear FOR ONE SOURCE MONTH (SIGNED).
  *
  * Computed as computeEsi(new) − computeEsi(old). The contribution-period latch is
  * honoured: a month that was COVERED stays covered for the arrear even if the
  * revised gross now crosses ₹21,000 (coverage continuity, §2). Pass latchedCovered
  * = the source month's frozen coverage verdict.
+ *
+ * FIX (finding #4): SIGNED, same as pfArrearForMonth — a down-ESI-wage month nets
+ * against the up-months at the aggregate seam rather than being asymmetrically dropped.
  */
 function esiArrearForMonth({ india, oldEsiWageMinor, newEsiWageMinor, latchedCovered = true }) {
   const oldEsi = india.computeEsi({ esiGrossMinor: Math.max(0, oldEsiWageMinor), latchedCovered });
   const newEsi = india.computeEsi({ esiGrossMinor: Math.max(0, newEsiWageMinor), latchedCovered });
   return {
-    eeMinor: Math.max(0, newEsi.esiEeMinor - oldEsi.esiEeMinor),
-    erMinor: Math.max(0, newEsi.esiErMinor - oldEsi.esiErMinor),
+    eeMinor: newEsi.esiEeMinor - oldEsi.esiEeMinor,
+    erMinor: newEsi.esiErMinor - oldEsi.esiErMinor,
   };
 }
 
@@ -231,13 +242,22 @@ function esiArrearForMonth({ india, oldEsiWageMinor, newEsiWageMinor, latchedCov
  * PF on Σ deltaPfWage is computed PER SOURCE MONTH (the ₹15,000-ceiling logic
  * applies to that month additively). ESI on Σ deltaEsiWage only if esiOnArrears
  * (the revisionReason gate resolved by the caller).
+ *
+ * FIX (finding #4): per-month PF/ESI deltas are accumulated SIGNED (up-months +,
+ * down-months −) and the AGGREGATE is floored at 0 — never each month independently.
+ * This nets a mixed up/down cycle correctly (a small allowance cut in one month
+ * reduces the PF billed on the bigger basic raise in another) so EPF/ESI charged on
+ * the arrear is consistent with the net gross delta paid. The aggregate floor at 0
+ * preserves the "never auto-claw statutory back" rule: a NET-negative statutory cycle
+ * yields 0 here and the net-negative GROSS is gated as a recovery at approve.
  */
 function aggregateArrear({ months, esiOnArrears, india }) {
   let grossArrearMinor = 0;
-  let pfArrearEeMinor = 0;
-  let pfArrearErMinor = 0;
-  let esiArrearEeMinor = 0;
-  let esiArrearErMinor = 0;
+  // Signed running sums — floored only AFTER the loop (the aggregate seam).
+  let pfArrearEeSigned = 0;
+  let pfArrearErSigned = 0;
+  let esiArrearEeSigned = 0;
+  let esiArrearErSigned = 0;
   const perMonth = [];
 
   for (const m of months || []) {
@@ -249,8 +269,8 @@ function aggregateArrear({ months, esiOnArrears, india }) {
       newPfWageMinor: Math.round(Number(m.newPfWageMinor) || 0),
       capAtCeiling: m.pfCapAtCeiling !== false,
     });
-    pfArrearEeMinor += pf.eeMinor;
-    pfArrearErMinor += pf.erMinor;
+    pfArrearEeSigned += pf.eeMinor;
+    pfArrearErSigned += pf.erMinor;
 
     let esi = { eeMinor: 0, erMinor: 0 };
     if (esiOnArrears) {
@@ -261,9 +281,11 @@ function aggregateArrear({ months, esiOnArrears, india }) {
         latchedCovered: m.esiLatchedCovered !== false,
       });
     }
-    esiArrearEeMinor += esi.eeMinor;
-    esiArrearErMinor += esi.erMinor;
+    esiArrearEeSigned += esi.eeMinor;
+    esiArrearErSigned += esi.erMinor;
 
+    // perMonth keeps the SIGNED per-month figure (the audit trail must show the true
+    // down-month reduction); the cycle TOTAL below is the floored aggregate.
     perMonth.push({
       sourcePeriod: m.sourcePeriod,
       deltaGrossMinor: Math.round(Number(m.deltaGrossMinor) || 0),
@@ -276,10 +298,11 @@ function aggregateArrear({ months, esiOnArrears, india }) {
 
   return {
     grossArrearMinor,
-    pfArrearEeMinor,
-    pfArrearErMinor,
-    esiArrearEeMinor,
-    esiArrearErMinor,
+    // Floor the AGGREGATE (not each month): up/down months have already netted.
+    pfArrearEeMinor: Math.max(0, pfArrearEeSigned),
+    pfArrearErMinor: Math.max(0, pfArrearErSigned),
+    esiArrearEeMinor: Math.max(0, esiArrearEeSigned),
+    esiArrearErMinor: Math.max(0, esiArrearErSigned),
     perMonth,
   };
 }

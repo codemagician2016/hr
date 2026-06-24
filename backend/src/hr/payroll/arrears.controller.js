@@ -78,6 +78,14 @@ async function approveCycle(req, res) {
   } catch (err) { handleError(res, err); }
 }
 
+async function cancelCycle(req, res) {
+  try {
+    const { reason } = req.body || {};
+    const out = await svc.cancelArrearCycle({ businessId: req.user.businessId, actorId: req.user.id, arrearCycleId: req.params.id, reason });
+    res.json(out);
+  } catch (err) { handleError(res, err); }
+}
+
 async function publishCycle(req, res) {
   try {
     const out = await svc.publishArrearSlips({ businessId: req.user.businessId, actorId: req.user.id, arrearCycleId: req.params.id });
@@ -97,5 +105,5 @@ async function getMyArrears(req, res) {
 }
 
 module.exports = {
-  detect, createCycle, listCycles, getCycle, updateCycle, computeCycle, approveCycle, publishCycle, getMyArrears,
+  detect, createCycle, listCycles, getCycle, updateCycle, computeCycle, approveCycle, cancelCycle, publishCycle, getMyArrears,
 };

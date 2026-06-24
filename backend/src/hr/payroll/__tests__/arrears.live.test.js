@@ -118,6 +118,146 @@ async function mkRetroRevision(businessId, employeeId, baseComp, { effectiveFrom
   return newComp;
 }
 
+// Pick a current IN employee (optionally skipping `skipIds`) whose CURRENT comp has a flat
+// BASIC line, freeze Apr/May/Jun 2026 baselines at that comp, and return { employeeId,
+// baseComp }. Mirrors main()'s base-employee selection.
+async function pickEmployeeAndFreeze(businessId, entity, cal, skipIds = new Set()) {
+  const emps = await prisma.employmentRecord.findMany({ where: { businessId, entityId: entity.id, isCurrent: true }, select: { employeeId: true } });
+  let employeeId = null;
+  for (const e of emps) {
+    if (skipIds.has(e.employeeId)) continue;
+    const comp = await prisma.compensationRevision.findFirst({
+      where: { businessId, employeeId: e.employeeId, isCurrent: true },
+      include: { lines: { include: { component: true } } },
+    });
+    if (comp && comp.lines.some((l) => l.component && l.component.kind === 'BASIC' && l.amountMonthly != null)) {
+      employeeId = e.employeeId; break;
+    }
+  }
+  if (!employeeId) return null;
+  // Clean FIRST (restores the original notes=null comp as current + wipes any PREFIX test
+  // revisions/runs), THEN re-read the restored ORIGINAL comp as the baseline to clone from.
+  await cleanup(businessId, employeeId);
+  const baseComp = await prisma.compensationRevision.findFirst({
+    where: { businessId, employeeId, isCurrent: true },
+    include: { lines: { include: { component: true } } },
+  });
+  if (!baseComp || !baseComp.lines.some((l) => l.component && l.component.kind === 'BASIC' && l.amountMonthly != null)) return null;
+  for (const [m, seq, dstart, dend] of [['04', 4, '2026-04-01', '2026-04-30'], ['05', 5, '2026-05-01', '2026-05-31'], ['06', 6, '2026-06-01', '2026-06-30']]) {
+    const run = await mkRun(businessId, entity, cal, { periodStart: dstart, periodEnd: dend, payDate: dend, taxYear: '2026-27', seq, suffix: `B-${m}` });
+    await computeLine(businessId, run, employeeId);
+  }
+  return { employeeId, baseComp };
+}
+
+// review fix #1 — two OVERLAPPING retro revisions (R1 effective Apr, R2 effective Jun) must
+// each pay only THEIR OWN incremental delta; Jun must NOT be paid twice.
+async function twoRevisionNoDoublePay(businessId, entity, cal) {
+  const picked = await pickEmployeeAndFreeze(businessId, entity, cal);
+  if (!picked) { ok(false, '7.0 (skipped) no second IN employee for two-revision test'); return; }
+  const { employeeId, baseComp } = picked;
+  const B1 = 400000; // R1 +₹4,000
+  const B2 = 300000; // R2 +₹3,000 on top of R1
+  await prisma.compensationRevision.updateMany({ where: { businessId, employeeId, isCurrent: true }, data: { isCurrent: false } });
+  const r1 = await mkRetroRevision(businessId, employeeId, baseComp, { effectiveFrom: '2026-04-01', bumpMinor: B1, reason: 'ANNUAL_REVISION', current: false });
+  // R2 clones R1 (so its BASIC is R1's BASIC + B2) and is the CURRENT comp.
+  const r1full = await prisma.compensationRevision.findUnique({ where: { id: r1.id } });
+  const r2 = await mkRetroRevision(businessId, employeeId, r1full, { effectiveFrom: '2026-06-01', bumpMinor: B2, reason: 'ANNUAL_REVISION', current: true });
+
+  const c1 = await arrearsSvc.createArrearCycle({ businessId, actorId: 'maker7', compensationRevisionId: r1.id, detectedInPeriod: '2026-07' });
+  const c1c = await arrearsSvc.computeArrearCycle({ businessId, actorId: 'maker7', arrearCycleId: c1.id });
+  const c2 = await arrearsSvc.createArrearCycle({ businessId, actorId: 'maker7', compensationRevisionId: r2.id, detectedInPeriod: '2026-07' });
+  const c2c = await arrearsSvc.computeArrearCycle({ businessId, actorId: 'maker7', arrearCycleId: c2.id });
+
+  // R1 covers Apr,May,Jun — each delta = R1−R0 = ₹4,000 → ₹12,000.
+  ok(c1c.grossArrearMinor === 3 * B1, `7.1 R1 cycle = 3×₹4,000 = ₹12,000 (got ${c1c.grossArrearMinor})`);
+  // R2 covers Jun only — delta = R2−R1 = ₹3,000 (NOT R2−R0 = ₹7,000, and NOT double-paid).
+  ok(c2c.months.length === 1 && c2c.months[0].sourcePeriod === '2026-06', '7.2 R2 cycle covers only June');
+  ok(c2c.grossArrearMinor === B2, `7.3 R2 cycle pays only ITS delta = ₹3,000 (not ₹7,000) (got ${c2c.grossArrearMinor})`);
+  // The Jun month is paid ₹4,000 (R1) + ₹3,000 (R2) = ₹7,000 total across the two cycles —
+  // the correct single R0→R2 delta, NOT ₹14,000 (the old double-pay).
+  const junR1 = c1c.months.find((m) => m.sourcePeriod === '2026-06');
+  ok(junR1 && junR1.deltaGrossMinor === B1, `7.4 R1's June delta = ₹4,000 (not the full R0→R2 ₹7,000) (got ${junR1 && junR1.deltaGrossMinor})`);
+  ok((junR1.deltaGrossMinor + c2c.months[0].deltaGrossMinor) === (B1 + B2), '7.5 June total across both cycles = ₹7,000 (R0→R2), no double-pay');
+
+  await cleanup(businessId, employeeId);
+}
+
+// review fix #2 — cancelArrearCycle releases the binding and lets the SAME revision be
+// detected + regenerated (the @@unique no longer permanently strands a cancelled cycle).
+async function cancelAndRegenerate(businessId, entity, cal) {
+  const picked = await pickEmployeeAndFreeze(businessId, entity, cal);
+  if (!picked) { ok(false, '8.0 (skipped) no IN employee for cancel test'); return; }
+  const { employeeId, baseComp } = picked;
+  const BUMP = 400000;
+  await prisma.compensationRevision.updateMany({ where: { businessId, employeeId, isCurrent: true }, data: { isCurrent: false } });
+  const rev = await mkRetroRevision(businessId, employeeId, baseComp, { effectiveFrom: '2026-04-01', bumpMinor: BUMP, reason: 'ANNUAL_REVISION', current: true });
+
+  const c = await arrearsSvc.createArrearCycle({ businessId, actorId: 'maker8', compensationRevisionId: rev.id, detectedInPeriod: '2026-07' });
+  await arrearsSvc.computeArrearCycle({ businessId, actorId: 'maker8', arrearCycleId: c.id });
+  // MINT it (creates a standalone ARREAR run bound to the cycle).
+  const minted = await arrearsSvc.approveArrearCycle({ businessId, actorId: 'checker8', arrearCycleId: c.id, targetMode: 'MINT' });
+  ok(minted.status === 'APPROVED' && minted.targetMode === 'MINT', '8.1 MINT cycle created + bound');
+
+  // A second detect is blocked while the live cycle exists (exactly-once).
+  const det = await arrearsSvc.detectArrearCycles({ businessId, entityId: entity.id, openPeriodStart: '2026-07-01' });
+  ok(!det.candidates.some((x) => x.compensationRevisionId === rev.id), '8.2 revision NOT re-detected while a live cycle exists');
+
+  // Cancel the (un-paid) MINT cycle — releases + cancels the minted run + soft-deletes.
+  await arrearsSvc.cancelArrearCycle({ businessId, actorId: 'checker8', arrearCycleId: c.id, reason: 'wrong period' });
+  const cancelled = await prisma.arrearCycle.findUnique({ where: { id: c.id } });
+  ok(cancelled.status === 'CANCELLED' && cancelled.payRunId === null && cancelled.deletedAt != null, '8.3 cancel → CANCELLED, un-bound, soft-deleted');
+  const deadRun = await prisma.payRun.findUnique({ where: { id: minted.payRunId } });
+  ok(deadRun && deadRun.status === 'CANCELLED', '8.4 the minted ARREAR run was cancelled (not left orphaned)');
+
+  // The revision is now re-detectable + a fresh cycle can be created (no permanent strand).
+  const det2 = await arrearsSvc.detectArrearCycles({ businessId, entityId: entity.id, openPeriodStart: '2026-07-01' });
+  ok(det2.candidates.some((x) => x.compensationRevisionId === rev.id), '8.5 revision re-detected after cancel (not stranded)');
+  const c2 = await arrearsSvc.createArrearCycle({ businessId, actorId: 'maker8', compensationRevisionId: rev.id, detectedInPeriod: '2026-07' });
+  ok(c2 && c2.id !== c.id && c2.status === 'DRAFT', '8.6 a fresh cycle is created for the regenerated revision');
+
+  await cleanup(businessId, employeeId);
+}
+
+// review fix #6 — SoD: the CREATOR cannot approve (even if a different actor computed);
+// and toggling esiOnArrears on a COMPUTED cycle INVALIDATES the computation (→ DRAFT).
+async function sodAndToggleInvalidation(businessId, entity, cal) {
+  const picked = await pickEmployeeAndFreeze(businessId, entity, cal);
+  if (!picked) { ok(false, '9.0 (skipped) no IN employee for SoD test'); return; }
+  const { employeeId, baseComp } = picked;
+  const BUMP = 400000;
+  await prisma.compensationRevision.updateMany({ where: { businessId, employeeId, isCurrent: true }, data: { isCurrent: false } });
+  const rev = await mkRetroRevision(businessId, employeeId, baseComp, { effectiveFrom: '2026-04-01', bumpMinor: BUMP, reason: 'ANNUAL_REVISION', current: true });
+
+  // creatorA creates; a DIFFERENT actor computerB computes (so computedBy ≠ createdBy).
+  const c = await arrearsSvc.createArrearCycle({ businessId, actorId: 'creatorA', compensationRevisionId: rev.id, detectedInPeriod: '2026-07' });
+  await arrearsSvc.computeArrearCycle({ businessId, actorId: 'computerB', arrearCycleId: c.id });
+
+  // The CREATOR (creatorA) must NOT be able to approve, even though they did not compute.
+  let creatorBlocked = false;
+  try { await arrearsSvc.approveArrearCycle({ businessId, actorId: 'creatorA', arrearCycleId: c.id, targetMode: 'MINT' }); }
+  catch (e) { creatorBlocked = e.code === 'MAKER_CHECKER'; }
+  ok(creatorBlocked, '9.1 SoD: the CREATOR cannot approve (creator ≠ approver)');
+  // The COMPUTER (computerB) must NOT be able to approve either.
+  let computerBlocked = false;
+  try { await arrearsSvc.approveArrearCycle({ businessId, actorId: 'computerB', arrearCycleId: c.id, targetMode: 'MINT' }); }
+  catch (e) { computerBlocked = e.code === 'MAKER_CHECKER'; }
+  ok(computerBlocked, '9.2 SoD: the COMPUTER cannot approve (computer ≠ approver)');
+
+  // Toggling esiOnArrears on the COMPUTED cycle invalidates compute → DRAFT, clears computedBy.
+  const before = await prisma.arrearCycle.findUnique({ where: { id: c.id } });
+  await arrearsSvc.updateArrearCycle({ businessId, actorId: 'creatorA', arrearCycleId: c.id, esiOnArrears: !before.esiOnArrears });
+  const after = await prisma.arrearCycle.findUnique({ where: { id: c.id } });
+  ok(after.status === 'DRAFT' && after.computedBy === null, '9.3 esiOnArrears toggle INVALIDATES compute (→ DRAFT, computedBy cleared)');
+  // A stale approve on the now-DRAFT cycle is rejected (must re-compute first).
+  let staleBlocked = false;
+  try { await arrearsSvc.approveArrearCycle({ businessId, actorId: 'checker9', arrearCycleId: c.id, targetMode: 'MINT' }); }
+  catch (e) { staleBlocked = e.code === 'BAD_STATE'; }
+  ok(staleBlocked, '9.4 approve rejected after toggle until a fresh compute (no stale paid figure)');
+
+  await cleanup(businessId, employeeId);
+}
+
 async function main() {
   log('\n=== Auto-arrears proof (LIVE hr_test) ===\n');
   const demo = await prisma.business.findFirst({ where: { slug: 'demo' } });
@@ -260,14 +400,45 @@ async function main() {
   try { await arrearsSvc.approveArrearCycle({ businessId, actorId: 'arrear-checker', arrearCycleId: cycle0.id, targetMode: 'MINT' }); }
   catch (e) { dupBlocked = e.code === 'ALREADY_PAID' || e.code === 'BAD_STATE'; }
   ok(dupBlocked, '6.5 a second MINT is blocked (single-mint guard, no double-pay)');
+
+  // 6.6 (review fix #5) — the MINT run ran THROUGH the engine, so §192 TDS + PT apply.
+  // The minted line carries an engine-computed net (gross − PF/ESI − TDS − PT), NOT the
+  // old hand-rolled gross − PF/ESI. Assert the line's tds/pt columns are present (≥0) and
+  // the run net ≤ gross − PF/ESI (TDS/PT can only reduce net further, never inflate it).
+  const mintLineRow = await prisma.payRunLine.findFirst({ where: { payRunId: minted.payRunId } });
+  const pfEsiEe = Number(computed.pfArrearEeMinor) + Number(computed.esiArrearEeMinor);
+  const netCeil = 3 * BUMP - pfEsiEe; // gross − PF/ESI EE (the OLD hand-rolled net)
+  ok(mintLineRow && dec(mintLineRow.tds) >= 0 && dec(mintLineRow.pt) >= 0, '6.6 minted line has engine-computed TDS + PT columns (≥0)');
+  ok(mintLineRow && Math.round(dec(mintLineRow.netPay) * 100) <= netCeil, '6.7 minted net ≤ gross−PF/ESI (TDS/PT withheld, not bypassed)');
+
+  // 6.8 (review fix #2) — drive the minted ARREAR run to PAID; the MINT cycle reaches PAID.
+  await service.approveRun({ businessId, actorId: 'arrear-checker', payRunId: minted.payRunId });
+  await service.disburseRun({ businessId, actorId: 'arrear-checker', payRunId: minted.payRunId });
+  const mintPaidRun = await prisma.payRun.findUnique({ where: { id: minted.payRunId } });
+  ok(mintPaidRun.status === 'PAID', '6.8 minted ARREAR run reached PAID');
+  const mintPaidCycle = await prisma.arrearCycle.findUnique({ where: { id: cycle0.id } });
+  ok(mintPaidCycle.status === 'PAID', '6.9 MINT cycle stamped PAID on disburse (lifecycle completes)');
+
   // Tear down the minted run.
+  await prisma.statutoryRemittance.deleteMany({ where: { payRunId: minted.payRunId } });
+  await prisma.payslip.deleteMany({ where: { payRunId: minted.payRunId } });
   await prisma.payRunLineComponent.deleteMany({ where: { payRunLine: { payRunId: minted.payRunId } } });
   await prisma.payRunLine.deleteMany({ where: { payRunId: minted.payRunId } });
   await prisma.payRun.deleteMany({ where: { id: minted.payRunId } });
 
+  // Fully tear down the MAIN test employee's state BEFORE the isolated sections 7–9 (so
+  // their fresh chains never collide with this employee's leftover revisions).
   await cleanup(businessId, employeeId);
-  // Restore the employee's original current comp flag (we flipped isCurrent during the test).
   await prisma.compensationRevision.updateMany({ where: { id: baseComp.id }, data: { isCurrent: true } });
+
+  // ── 7. review fix #1 — TWO overlapping retro revisions each pay only THEIR delta ──
+  await twoRevisionNoDoublePay(businessId, inEntity, inCal);
+
+  // ── 8. review fix #2 — cancelArrearCycle releases + lets the revision regenerate ──
+  await cancelAndRegenerate(businessId, inEntity, inCal);
+
+  // ── 9. review fix #6 — SoD (creator≠approver) + esiOnArrears toggle invalidates compute ──
+  await sodAndToggleInvalidation(businessId, inEntity, inCal);
 
   log('');
   log(`Arrears live: ${failures === 0 ? 'ALL PASS' : failures + ' FAILURE(S)'}`);

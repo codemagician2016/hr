@@ -66,6 +66,67 @@ function taxYearForDate(date) {
   return `${startY}-${String((startY + 1) % 100).padStart(2, '0')}`;
 }
 
+// ── engine-result → PayRunLine persistence (MINT path, finding #5) ──
+// Mirror service.statutoryRollups / buildComponentRows so the minted ARREAR run's line
+// carries the SAME statutory rollups (incl. TDS + PT now that the arrear runs through the
+// engine) and every component the engine emitted. Kept local (not a service export) so the
+// arrears code stays self-contained and there is no new service↔arrears require coupling.
+function statutoryRollupsFromResult(r) {
+  const byCode = {};
+  const baseByCode = {};
+  for (const d of r.employeeDeductions || []) {
+    byCode[d.code] = d.amountMinor;
+    if (d.baseMinor != null) baseByCode[d.code] = d.baseMinor;
+  }
+  for (const c of r.employerContributions || []) {
+    byCode[c.code] = c.amountMinor;
+    if (c.baseMinor != null) baseByCode[c.code] = c.baseMinor;
+  }
+  const pick = (...codes) => {
+    for (const c of codes) if (byCode[c] != null) return minorToDecimal(byCode[c]);
+    return null;
+  };
+  const pickBase = (...codes) => {
+    for (const c of codes) if (baseByCode[c] != null) return minorToDecimal(baseByCode[c]);
+    return null;
+  };
+  return {
+    // The arrear's PF/ESI ride as EPF_ARREAR/ESI_ARREAR (precomputed per source month) —
+    // surface them on the line's pf/esi columns too so filing reconciles, plus TDS + PT.
+    pfEmployee: pick('EPF_ARREAR', 'EPF', 'EPF_EE'),
+    pfEmployer: pick('EPF_ER_ARREAR', 'EPF_ER'),
+    esiEmployee: pick('ESI_ARREAR', 'ESI', 'ESI_EE'),
+    esiEmployer: pick('ESI_ER_ARREAR', 'ESI_ER'),
+    pt: pick('PT'),
+    lwfEmployee: pick('LWF', 'LWF_EE'),
+    lwfEmployer: pick('LWF_ER'),
+    tds: pick('TDS'),
+    pfWagesBase: pickBase('EPF', 'EPF_EE', 'EPF_ER'),
+    epsWagesBase: pickBase('EPS_ER', 'EPS'),
+    edliWagesBase: pickBase('EDLI'),
+  };
+}
+
+function buildMintComponentRows(businessId, payRunLineId, r) {
+  const rows = [];
+  let sort = 0;
+  const row = (item, category, isStatutory) => ({
+    businessId, payRunLineId,
+    componentId: item.componentId || item.code,
+    componentCode: item.code,
+    componentName: item.label || item.code,
+    category,
+    amount: minorToDecimal(item.amountMinor),
+    baseAmount: item.baseMinor != null ? minorToDecimal(item.baseMinor) : null,
+    isStatutory,
+    sortOrder: sort++,
+  });
+  for (const e of r.earnings || []) rows.push(row(e, 'EARNING', false));
+  for (const d of r.employeeDeductions || []) rows.push(row(d, 'DEDUCTION', !!d.statutory));
+  for (const c of r.employerContributions || []) rows.push(row(c, 'EMPLOYER_COST', true));
+  return rows;
+}
+
 async function loadCycle(businessId, arrearCycleId, db = prisma) {
   const cycle = await db.arrearCycle.findFirst({ where: { id: arrearCycleId, businessId, deletedAt: null } });
   if (!cycle) throw new ArrearError('CYCLE_NOT_FOUND', 'Arrear cycle not found', 404);
@@ -152,6 +213,8 @@ async function createArrearCycle({ businessId, actorId, compensationRevisionId, 
         effectiveFrom: toDateOnly(rev.effectiveFrom),
         detectedInPeriod: detected, taxYear, esiOnArrears,
         status: 'DRAFT',
+        // SoD (finding #6): record the creator so approve can enforce approver ≠ creator.
+        createdBy: actorId || null,
       },
     });
     await writeAudit({ businessId, actorId, action: 'arrears.cycle.create', entityType: 'ArrearCycle', entityId: cycle.id, meta: { compensationRevisionId, detected, retroMonths: window } });
@@ -162,18 +225,77 @@ async function createArrearCycle({ businessId, actorId, compensationRevisionId, 
   }
 }
 
-// ── recompute one source month at the NEW comp using its FROZEN attendance ──
+// ── load a SPECIFIC CompensationRevision (with lines + components) ──
+/** Load one CompensationRevision by id with its lines/components, or null. */
+async function loadRevisionWithLines(businessId, revisionId, db = prisma) {
+  if (!revisionId) return null;
+  return db.compensationRevision.findFirst({
+    where: { id: revisionId, businessId },
+    include: { lines: { orderBy: { sortOrder: 'asc' }, include: { component: true } } },
+  });
+}
+
+/** Re-run the SAME pure engine at `compensation` with the month's FROZEN attendance. */
+function recomputeAtComp({ employee, compensation, attendance, entity, monthStart, monthEnd, taxYear }) {
+  const bundle = {
+    employee,
+    compensation,
+    statutory: employee.statutoryProfile || null,
+    attendance: attendance || null,
+    entity,
+    period: {
+      start: isoDate(monthStart), end: isoDate(monthEnd), payDate: isoDate(monthEnd),
+      frequency: null, taxYear, runType: 'REGULAR',
+    },
+    ytd: null,
+  };
+  const { engineArgs } = buildEmployeePayInput(bundle);
+  return engine.computePayslip(engineArgs);
+}
+
 /**
- * For a source "YYYY-MM": find the frozen paid Payslip (baseline) + the frozen
- * AttendancePayInput, re-run the engine at the NEW comp, return { month, diff,
- * recomputed, frozenSnapshot, oldPfWageMinor, newPfWageMinor, ... }. PURE-ish:
+ * frozenEsiCovered(snapshot) — derive the SOURCE month's actual ESI COVERAGE VERDICT
+ * from the frozen payslip (finding #3): a non-zero ESI deduction (code 'ESI' /
+ * 'ESI_EMPLOYEE') OR a non-zero employer ESI contribution ('ESI_ER' / 'ESI_EMPLOYER')
+ * in the frozen snapshot means the employee WAS in the scheme that month. We do NOT
+ * infer coverage from the ESI WAGE BASE (> ₹0): the engine sums ESI-flagged earnings
+ * into bases.esiWagesMinor for EVERY employee regardless of the ceiling, so a >₹21k
+ * (never-covered) worker still had a non-zero wage base. Fail-CLOSED: no ESI
+ * deduction/contribution in the snapshot ⇒ NOT covered ⇒ no ESI charged on the arrear.
+ */
+function frozenEsiCovered(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return false;
+  const num = (x) => Math.round((typeof x === 'number' ? x : Number(x)) * 100) || 0;
+  const eeCodes = new Set(['ESI', 'ESI_EMPLOYEE']);
+  const erCodes = new Set(['ESI_ER', 'ESI_EMPLOYER']);
+  const ded = Array.isArray(snapshot.employeeDeductions) ? snapshot.employeeDeductions : [];
+  for (const d of ded) if (eeCodes.has(d.code) && num(d.amount) > 0) return true;
+  const ec = Array.isArray(snapshot.employerContributions) ? snapshot.employerContributions : [];
+  for (const c of ec) if (erCodes.has(c.code) && num(c.amount) > 0) return true;
+  return false;
+}
+
+// ── recompute one source month at the CYCLE'S revision using its FROZEN attendance ──
+/**
+ * For a source "YYYY-MM": find the frozen paid Payslip + the frozen AttendancePayInput,
+ * then diff the recompute at THE CYCLE'S OWN revision (cycle.compensationRevisionId)
+ * against the recompute at the IMMEDIATELY-PRIOR revision (the baseline). PURE-ish:
  * reads frozen rows, calls the pure buildEmployeePayInput + computePayslip.
+ *
+ * FIX (finding #1): the recompute is PINNED to cycle.compensationRevisionId — NOT
+ * resolveCurrentCompensation (the LATEST revision covering the month). With two retro
+ * revisions R1→R2 both overlapping a month, the OLD code diffed BOTH cycles' recompute
+ * at R2 (latest) vs the same frozen slip, booking the full R1→R2 delta TWICE. Now each
+ * cycle recomputes at ITS OWN revision and diffs against the revision IMMEDIATELY PRIOR
+ * to it, so R1 books R0→R1 and R2 books R1→R2 — each pays only its own incremental
+ * delta, never the same month twice. When there is no prior revision (the cycle's
+ * revision is the first/original), the baseline is the actual FROZEN paid slip.
  */
 async function recomputeMonth({ businessId, cycle, sourcePeriod, db = prisma }) {
   const monthEnd = arrearsCore.monthEnd(sourcePeriod);
   const monthStart = arrearsCore.monthStart(sourcePeriod);
 
-  // The FROZEN paid payslip for this month (the baseline). Prefer a REGULAR run's slip.
+  // The FROZEN paid payslip for this month. Prefer a REGULAR run's slip.
   const paidSlip = await db.payslip.findFirst({
     where: {
       businessId, employeeId: cycle.employeeId,
@@ -192,32 +314,34 @@ async function recomputeMonth({ businessId, cycle, sourcePeriod, db = prisma }) 
     where: { businessId, payRunId: paidSlip.payRunId, employeeId: cycle.employeeId },
   });
 
-  // The NEW compensation effective on the source month-end (the retro revision).
-  const newComp = await resolveCurrentCompensation(businessId, cycle.employeeId, isoDate(monthEnd), db);
+  // The NEW compensation = the CYCLE'S OWN revision (NOT the latest covering this month).
+  const newComp = await loadRevisionWithLines(businessId, cycle.compensationRevisionId, db);
   if (!newComp) return { sourcePeriod, missingBaseline: true };
 
   const employee = await db.employee.findFirst({ where: { id: cycle.employeeId, businessId }, include: { statutoryProfile: true } });
   const entity = await db.entity.findFirst({ where: { id: cycle.entityId, businessId } });
-
-  // Re-run the SAME pure engine at the NEW comp with THIS month's FROZEN attendance.
-  const bundle = {
-    employee,
-    compensation: newComp,
-    statutory: employee.statutoryProfile || null,
-    attendance: att || null,
-    entity,
-    period: {
-      start: isoDate(monthStart), end: isoDate(monthEnd), payDate: isoDate(monthEnd),
-      frequency: null, taxYear: paidSlip.payRun.taxYear, runType: 'REGULAR',
-    },
-    ytd: null,
-  };
-  const { engineArgs } = buildEmployeePayInput(bundle);
-  const recomputed = engine.computePayslip(engineArgs);
-
-  // Diff recomputed (minor) vs the frozen snapshot (major units).
+  const taxYear = paidSlip.payRun.taxYear;
   const frozen = paidSlip.snapshotJson || {};
-  const diff = arrearsCore.diffMonth({ recomputed, paid: frozen, paidShape: 'snapshot' });
+
+  // NEW side — recompute at the cycle's own revision with THIS month's frozen attendance.
+  const recomputed = recomputeAtComp({ employee, compensation: newComp, attendance: att, entity, monthStart, monthEnd, taxYear });
+
+  // BASELINE side — the revision IMMEDIATELY PRIOR to the cycle's revision (resolve as of
+  // the day BEFORE the cycle revision's effectiveFrom). If there is a distinct prior
+  // revision, recompute at IT (so an R1→R2 chain books only R2's own delta on R2's
+  // cycle); otherwise the baseline is the actual FROZEN paid slip (the original comp).
+  const priorAsOf = new Date(toDateOnly(newComp.effectiveFrom).getTime() - 86400000); // −1 day
+  const priorComp = await resolveCurrentCompensation(businessId, cycle.employeeId, isoDate(priorAsOf), db);
+
+  let diff;
+  if (priorComp && priorComp.id !== newComp.id) {
+    // Engine-vs-engine: recompute the baseline at the prior revision, same frozen attendance.
+    const baseline = recomputeAtComp({ employee, compensation: priorComp, attendance: att, entity, monthStart, monthEnd, taxYear });
+    diff = arrearsCore.diffMonth({ recomputed, paid: baseline, paidShape: 'engine' });
+  } else {
+    // No prior revision → diff against the actual frozen paid snapshot (major units).
+    diff = arrearsCore.diffMonth({ recomputed, paid: frozen, paidShape: 'snapshot' });
+  }
 
   return {
     sourcePeriod,
@@ -226,14 +350,15 @@ async function recomputeMonth({ businessId, cycle, sourcePeriod, db = prisma }) 
     recomputed,
     payableDays: att ? Number(att.payableDays) : 0,
     lopDays: att ? Number(att.lopDays) : 0,
-    // PF/ESI wage bases (old=frozen snapshot, new=recomputed) for the per-source-month
+    // PF/ESI wage bases (old=baseline, new=recomputed) for the per-source-month
     // statutory arrear. The arrears.js aggregate applies the ceiling per source month.
     oldPfWageMinor: diff.paidPfWageMinor,
     newPfWageMinor: diff.recomputedPfWageMinor,
     oldEsiWageMinor: diff.paidEsiWageMinor,
     newEsiWageMinor: diff.recomputedEsiWageMinor,
-    // The source month's ESI coverage latch (was it covered then?).
-    esiLatchedCovered: diff.paidEsiWageMinor > 0,
+    // FIX (finding #3): the source month's ESI coverage verdict comes from the FROZEN
+    // slip's actual ESI deduction/contribution (fail-closed), NOT from wage-base > 0.
+    esiLatchedCovered: frozenEsiCovered(frozen),
   };
 }
 
@@ -353,9 +478,13 @@ async function computeArrearCycle({ businessId, actorId, arrearCycleId }) {
 async function approveArrearCycle({ businessId, actorId, arrearCycleId, targetMode = 'INJECT', targetPayRunId = null }) {
   const cycle = await loadCycle(businessId, arrearCycleId);
   if (cycle.status !== 'COMPUTED') throw new ArrearError('BAD_STATE', `Approve requires a COMPUTED cycle (current: ${cycle.status})`, 409);
-  // SoD: approver ≠ maker (computedBy). Fail-closed on unknown maker.
+  // SoD (finding #6): the approver must differ from BOTH the maker (computedBy) AND the
+  // creator (createdBy) — a single actor must never both author/compute the figure and
+  // approve it. Fail-closed on an unknown maker. (createdBy may be null on a legacy cycle
+  // created before this column; we only block when it IS recorded and equals the approver.)
   if (!cycle.computedBy) throw new ArrearError('SOD_MAKER_UNKNOWN', 'Cycle maker is unknown; cannot approve (fail-closed)', 403);
   if (cycle.computedBy === actorId) throw new ArrearError('MAKER_CHECKER', 'Maker-checker: the approver must differ from the employee who computed the cycle', 403);
+  if (cycle.createdBy && cycle.createdBy === actorId) throw new ArrearError('MAKER_CHECKER', 'Maker-checker: the approver must differ from the employee who created the cycle', 403);
   if (cycle.payRunId) throw new ArrearError('ALREADY_PAID', 'Cycle already bound to a pay run', 409);
 
   // Downward (negative) arrear → a RECOVERY, gated as a BLOCKER confirm. Never auto-pay.
@@ -414,8 +543,15 @@ async function approveInject({ businessId, actorId, cycle, targetPayRunId }) {
   return getArrearCycle({ businessId, arrearCycleId: cycle.id });
 }
 
-// MINT — a standalone PayRun(type=ARREAR) carrying the arrear earning + statutory comps
-// (exactly how bonus.service mints STAT_BONUS). F21 LWF run-gate already skips LWF on ARREAR.
+// MINT — a standalone PayRun(type=ARREAR) carrying the arrear earning + statutory comps.
+// FIX (finding #5): the arrear gross is run THROUGH the ENGINE (engine.computePayslip via
+// the SAME buildEmployeePayInput the live/INJECT path uses) so §192 TDS (annualised
+// projection) and Professional Tax apply to the arrear — instead of the old hand-rolled
+// net = gross − PF/ESI which silently withheld ZERO TDS and ZERO PT. The arrear's PF/ESI
+// stay PRECOMPUTED per source month (carried as EPF_ARREAR/ESI_ARREAR passthroughs, NOT
+// re-charged on the payout month) exactly as INJECT does. F21 LWF run-gate skips LWF on
+// ARREAR. The minted run then completes its lifecycle (DRAFT→COMPUTED→APPROVED→PAID); the
+// cycle is stamped PAID by disburseRun (stampArrearMintCyclesPaidForRun).
 async function approveMint({ businessId, actorId, cycle }) {
   const cal = await prisma.payCalendar.findFirst({ where: { businessId, entityId: cycle.entityId, isActive: true } })
     || await prisma.payCalendar.findFirst({ where: { businessId, entityId: cycle.entityId } });
@@ -424,9 +560,41 @@ async function approveMint({ businessId, actorId, cycle }) {
   const openStart = arrearsCore.monthStart(cycle.detectedInPeriod);
   const openEnd = arrearsCore.monthEnd(cycle.detectedInPeriod);
   const grossMinor = Number(cycle.grossArrearMinor);
-  const eeDed = Number(cycle.pfArrearEeMinor) + Number(cycle.esiArrearEeMinor);
-  const netMinor = grossMinor - eeDed;
-  const erCost = Number(cycle.pfArrearErMinor) + Number(cycle.esiArrearErMinor);
+
+  // Build the arrear-ONLY engine input: NO regular salary lines (compensation.lines = [])
+  // so we never re-pay the month's salary — just the ARREAR_EARNINGS line + the precomputed
+  // PF/ESI passthroughs. buildEmployeePayInput's arrearInputs branch emits exactly the INJECT
+  // component set; engine.computePayslip then adds §192 TDS + PT + net. This is the EXACT
+  // engine path the live run uses, scoped to one employee and the arrear.
+  const employee = await prisma.employee.findFirst({ where: { id: cycle.employeeId, businessId }, include: { statutoryProfile: true } });
+  const entity = await prisma.entity.findFirst({ where: { id: cycle.entityId, businessId } });
+  const { engineArgs } = buildEmployeePayInput({
+    employee,
+    compensation: { lines: [] }, // no regular salary on a standalone arrear run
+    statutory: employee && employee.statutoryProfile ? employee.statutoryProfile : null,
+    attendance: null,
+    entity,
+    period: {
+      start: isoDate(openStart), end: isoDate(openEnd), payDate: isoDate(openEnd),
+      frequency: cal.frequency || null, taxYear: cycle.taxYear, runType: 'ARREAR',
+    },
+    ytd: null,
+    arrearInputs: {
+      grossArrearMinor: grossMinor,
+      pfArrearEeMinor: Number(cycle.pfArrearEeMinor),
+      pfArrearErMinor: Number(cycle.pfArrearErMinor),
+      esiArrearEeMinor: Number(cycle.esiArrearEeMinor),
+      esiArrearErMinor: Number(cycle.esiArrearErMinor),
+      isTaxable: true,
+    },
+  });
+  const result = engine.computePayslip(engineArgs);
+
+  // The engine's authoritative figures (TDS + PT now included in the deductions/net).
+  const eeDed = result.totalEmployeeDeductionsMinor;
+  const netMinor = result.netMinor;
+  const erCost = result.totalEmployerContributionsMinor;
+  const roll = statutoryRollupsFromResult(result);
 
   let out;
   try {
@@ -437,13 +605,15 @@ async function approveMint({ businessId, actorId, cycle }) {
           businessId, entityId: cycle.entityId, payCalendarId: cal.id, code,
           periodStart: toDateOnly(openStart), periodEnd: toDateOnly(openEnd), payDate: toDateOnly(openEnd),
           sequenceInYear: 0, taxYear: cycle.taxYear,
-          type: 'ARREAR', status: 'DRAFT', currencyCode: 'INR',
+          // DRAFT + already-computed: the minted run is created COMPUTED-ready (lines below)
+          // then driven APPROVED→PAID through the normal run lifecycle (disburseRun stamps
+          // the cycle PAID). We persist the engine totals here so the run is consistent.
+          type: 'ARREAR', status: 'COMPUTED', currencyCode: 'INR',
           headcount: 1,
           totalGross: minorToDecimal(grossMinor),
           totalDeductions: minorToDecimal(eeDed),
           totalNet: minorToDecimal(netMinor),
           totalEmployerCost: minorToDecimal(erCost),
-          approvedAt: new Date(), approvedBy: actorId,
           notes: `Auto-arrears (revision ${cycle.compensationRevisionId}) — ${cycle.detectedInPeriod}`,
         },
       });
@@ -457,24 +627,13 @@ async function approveMint({ businessId, actorId, cycle }) {
           totalDeductions: minorToDecimal(eeDed),
           netPay: minorToDecimal(netMinor),
           employerCost: minorToDecimal(erCost),
-          pfEmployee: minorToDecimal(Number(cycle.pfArrearEeMinor)),
-          pfEmployer: minorToDecimal(Number(cycle.pfArrearErMinor)),
-          esiEmployee: minorToDecimal(Number(cycle.esiArrearEeMinor)),
-          esiEmployer: minorToDecimal(Number(cycle.esiArrearErMinor)),
+          ...roll, // pfEmployee/pfEmployer/esiEmployee/esiEmployer/pt/tds/... from the engine result
           currencyCode: 'INR', status: 'COMPUTED',
         },
       });
-      const comps = [{
-        businessId, payRunLineId: line.id, componentId: 'ARREAR_EARNINGS', componentCode: 'ARREAR_EARNINGS',
-        componentName: 'Salary arrears (retro revision)', category: 'EARNING',
-        amount: minorToDecimal(grossMinor), isStatutory: false, sortOrder: 0,
-      }];
-      let sort = 1;
-      if (Number(cycle.pfArrearEeMinor) > 0) comps.push({ businessId, payRunLineId: line.id, componentId: 'EPF_ARREAR', componentCode: 'EPF_ARREAR', componentName: 'EPF on arrears', category: 'DEDUCTION', amount: minorToDecimal(Number(cycle.pfArrearEeMinor)), isStatutory: true, sortOrder: sort++ });
-      if (Number(cycle.esiArrearEeMinor) > 0) comps.push({ businessId, payRunLineId: line.id, componentId: 'ESI_ARREAR', componentCode: 'ESI_ARREAR', componentName: 'ESI on arrears', category: 'DEDUCTION', amount: minorToDecimal(Number(cycle.esiArrearEeMinor)), isStatutory: true, sortOrder: sort++ });
-      if (Number(cycle.pfArrearErMinor) > 0) comps.push({ businessId, payRunLineId: line.id, componentId: 'EPF_ER_ARREAR', componentCode: 'EPF_ER_ARREAR', componentName: 'Employer EPF on arrears', category: 'EMPLOYER_COST', amount: minorToDecimal(Number(cycle.pfArrearErMinor)), isStatutory: true, sortOrder: sort++ });
-      if (Number(cycle.esiArrearErMinor) > 0) comps.push({ businessId, payRunLineId: line.id, componentId: 'ESI_ER_ARREAR', componentCode: 'ESI_ER_ARREAR', componentName: 'Employer ESI on arrears', category: 'EMPLOYER_COST', amount: minorToDecimal(Number(cycle.esiArrearErMinor)), isStatutory: true, sortOrder: sort++ });
-      await tx.payRunLineComponent.createMany({ data: comps });
+      // Persist EVERY engine component (ARREAR_EARNINGS + EPF/ESI passthroughs + TDS + PT).
+      const comps = buildMintComponentRows(businessId, line.id, result);
+      if (comps.length) await tx.payRunLineComponent.createMany({ data: comps });
 
       // Atomic single-mint guard (mirror bonus.service): only a COMPUTED+unbound cycle mints.
       const claim = await tx.arrearCycle.updateMany({
@@ -482,7 +641,7 @@ async function approveMint({ businessId, actorId, cycle }) {
         data: { status: 'APPROVED', targetMode: 'MINT', payRunId: payRun.id, approvedAt: new Date(), approvedBy: actorId, version: { increment: 1 } },
       });
       if (claim.count !== 1) throw new ArrearError('ALREADY_PAID', 'Cycle already minted an arrear PayRun (lost the concurrent approve race)', 409);
-      return { payRun };
+      return { payRun, netMinor };
     });
   } catch (e) {
     const isConcLoss = (e instanceof ArrearError && e.code === 'ALREADY_PAID') || (e && (e.code === 'P2002' || e.code === 'P2034'));
@@ -504,11 +663,95 @@ async function updateArrearCycle({ businessId, actorId, arrearCycleId, esiOnArre
     throw new ArrearError('BAD_STATE', `Cannot edit a ${cycle.status} cycle`, 409);
   }
   const data = { version: { increment: 1 } };
-  if (typeof esiOnArrears === 'boolean') data.esiOnArrears = esiOnArrears;
   if (notes !== undefined) data.notes = notes;
+
+  // FIX (finding #6): esiOnArrears is an economically MATERIAL input (whether ESI is
+  // charged on the whole arrear). The persisted PF/ESI figures were FROZEN at compute
+  // time, so flipping the flag post-compute would change the displayed gate WITHOUT
+  // recomputing the amounts — the checker would approve "ESI off" while the stored
+  // esiArrearEe/Er still carry the ESI charge (or vice-versa). To keep the gate and the
+  // paid figure in lock-step we INVALIDATE the computation when the flag actually
+  // changes on a COMPUTED cycle: status → DRAFT and computedBy/computedAt cleared, so a
+  // fresh SoD-checked compute (which re-derives the figures under the new flag) and a
+  // fresh approve are required before it can be paid.
+  let invalidated = false;
+  if (typeof esiOnArrears === 'boolean' && esiOnArrears !== cycle.esiOnArrears) {
+    data.esiOnArrears = esiOnArrears;
+    if (cycle.status === 'COMPUTED') {
+      data.status = 'DRAFT';
+      data.computedBy = null;
+      data.computedAt = null;
+      invalidated = true;
+    }
+  } else if (typeof esiOnArrears === 'boolean') {
+    // No-op flag write (same value) — set it harmlessly, never invalidate.
+    data.esiOnArrears = esiOnArrears;
+  }
+
   await prisma.arrearCycle.update({ where: { id: arrearCycleId }, data });
-  await writeAudit({ businessId, actorId, action: 'arrears.cycle.update', entityType: 'ArrearCycle', entityId: arrearCycleId, meta: { esiOnArrears, notesChanged: notes !== undefined } });
+  await writeAudit({ businessId, actorId, action: 'arrears.cycle.update', entityType: 'ArrearCycle', entityId: arrearCycleId, meta: { esiOnArrears, notesChanged: notes !== undefined, computeInvalidated: invalidated } });
   return getArrearCycle({ businessId, arrearCycleId });
+}
+
+// ── cancelArrearCycle — release any binding + soft-cancel so the revision can regenerate ──
+/**
+ * cancelArrearCycle (FIX, finding #2): the missing function arrearsPass.js referenced.
+ * Cancels an arrear cycle that has NOT yet been paid, releasing any binding so the
+ * obligation is never stranded behind the @@unique:
+ *   - DRAFT / COMPUTED (unbound)         → CANCELLED + soft-deleted.
+ *   - APPROVED + INJECT (run not paid)   → delete the orphan PayRunInputItem(kind=ARREAR),
+ *                                          then CANCELLED + soft-deleted.
+ *   - APPROVED + MINT (run not paid)     → cancel the minted standalone ARREAR PayRun
+ *                                          (it exists only for this cycle), then CANCELLED.
+ *   - PAID, or bound to a PAID/FILED run → refused (create a compensating CORRECTION).
+ * The cycle is SOFT-DELETED (deletedAt set) on cancel so the partial-unique index (which
+ * now excludes soft-deleted rows) lets a fresh cycle be detected + created for the SAME
+ * revision later — a cancelled/regenerated arrear is never permanently stranded.
+ */
+async function cancelArrearCycle({ businessId, actorId, arrearCycleId, reason = null }) {
+  const cycle = await loadCycle(businessId, arrearCycleId);
+  if (cycle.status === 'PAID') {
+    throw new ArrearError('CANNOT_CANCEL', 'A PAID arrear cannot be cancelled; reverse it with a compensating CORRECTION run.', 409);
+  }
+  if (cycle.status === 'CANCELLED') {
+    throw new ArrearError('BAD_STATE', 'Arrear cycle is already cancelled', 409);
+  }
+
+  // If bound to a run, the run must NOT already be PAID/FILED/CLOSED (money already moved).
+  if (cycle.payRunId) {
+    const run = await prisma.payRun.findFirst({ where: { id: cycle.payRunId, businessId } });
+    if (run && ['PAID', 'FILED'].includes(run.status)) {
+      throw new ArrearError('CANNOT_CANCEL', `The arrear is bound to a ${run.status} run; reverse it with a compensating CORRECTION run.`, 409);
+    }
+  }
+
+  await prisma.$transaction(async (tx) => {
+    if (cycle.payRunId) {
+      if (cycle.targetMode === 'INJECT') {
+        // Drop the orphan injected input item this cycle carried (its money never paid).
+        if (cycle.payRunInputItemId) {
+          await tx.payRunInputItem.deleteMany({ where: { id: cycle.payRunInputItemId, businessId } });
+        } else {
+          await tx.payRunInputItem.deleteMany({ where: { businessId, payRunId: cycle.payRunId, employeeId: cycle.employeeId, kind: 'ARREAR' } });
+        }
+      } else if (cycle.targetMode === 'MINT') {
+        // The minted standalone ARREAR run exists ONLY for this cycle — cancel it.
+        await tx.payRunLineComponent.deleteMany({ where: { payRunLine: { payRunId: cycle.payRunId } } });
+        await tx.payRunLine.deleteMany({ where: { payRunId: cycle.payRunId } });
+        await tx.payRun.updateMany({ where: { id: cycle.payRunId, businessId, status: { notIn: ['PAID', 'FILED'] } }, data: { status: 'CANCELLED' } });
+      }
+    }
+    await tx.arrearCycle.update({
+      where: { id: arrearCycleId },
+      data: {
+        status: 'CANCELLED', payRunId: null, payRunInputItemId: null, targetMode: null,
+        approvedAt: null, approvedBy: null, deletedAt: new Date(), version: { increment: 1 },
+      },
+    });
+  });
+
+  await writeAudit({ businessId, actorId, action: 'arrears.cycle.cancel', entityType: 'ArrearCycle', entityId: arrearCycleId, meta: { reason: reason || null, from: cycle.status, wasBoundTo: cycle.payRunId || null, targetMode: cycle.targetMode || null } });
+  return { arrearCycleId, status: 'CANCELLED' };
 }
 
 // ── 5. publishArrearSlips — fan out arrears.published + the §89(1) figure ──
@@ -587,6 +830,8 @@ function serializeCycle(c) {
     s89Datapoint: c.s89DatapointJson || null,
     reliefFormName: arrearsCore.resolveReliefFormName(c.taxYear),
     payRunId: c.payRunId || null, notes: c.notes || null,
+    // SoD provenance (finding #6): surface creator + computer so the checker UI shows them.
+    createdBy: c.createdBy || null, computedBy: c.computedBy || null, approvedBy: c.approvedBy || null,
     computedAt: c.computedAt, approvedAt: c.approvedAt,
   };
 }
@@ -609,11 +854,12 @@ module.exports = {
   computeArrearCycle,
   approveArrearCycle,
   updateArrearCycle,
+  cancelArrearCycle,
   publishArrearSlips,
   listArrearCycles,
   getArrearCycle,
   getMyArrears,
   ArrearError,
   // exposed for tests
-  _internal: { recomputeMonth, taxYearForDate },
+  _internal: { recomputeMonth, taxYearForDate, frozenEsiCovered },
 };
