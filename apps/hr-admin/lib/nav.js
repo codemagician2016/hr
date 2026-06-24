@@ -68,6 +68,11 @@ export const NAV_ITEMS = [
   { key: 'nine-box', label: '9-box grid', href: '/performance/nine-box', feature: 'hr', permission: 'canViewTeamPerformance', icon: 'chart' },
   { key: 'competencies', label: 'Competencies', href: '/performance/competencies', feature: 'hr', permission: 'canManagePerformanceCycle', icon: 'chart' },
   { key: 'talent-pool', label: 'Talent pool', href: '/performance/talent-pool', feature: 'hr', permission: 'canViewTeamPerformance', icon: 'people' },
+  // FLAG (Feature 37 — NEW nav item): LMS / Learning. Visible to L&D + HR-Admin
+  // (canManageLearning — author/assign + full compliance) OR Managers (canViewTeamLearning
+  // — TEAM-band training compliance for their reports). The server is the real boundary;
+  // this just shows the link to anyone with either learning key.
+  { key: 'learning', label: 'Learning', href: '/learning', feature: 'hr', anyPermission: ['canManageLearning', 'canViewTeamLearning'], icon: 'chart' },
   // Recruitment / ATS (Feature 12). Visible to anyone with the new canViewHiring
   // read key OR canManageHiring (recruiters/HR) OR the legacy canManageEmployees
   // super-set. The server is the real boundary; this just hides the nav link.

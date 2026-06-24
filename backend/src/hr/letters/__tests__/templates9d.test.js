@@ -208,7 +208,9 @@ async function partB() {
     // ── B6 (run before B5 so a system row exists): seed idempotency ──
     log('B6) seedLetterTemplates idempotent + IN/NZ variants:');
     const r1 = await seed.seedLetterTemplates(prisma, businessId);
-    assert(r1.length === 13, `first seed creates/upserts 13 system templates (got ${r1.length})`);
+    // 6 IN + 6 NZ statutory variants + the market-agnostic CUSTOM scaffold + the
+    // market-agnostic Feature-37 LMS_CERTIFICATE template (LMS-CERT-STD) = 14.
+    assert(r1.length === 14, `first seed creates/upserts 14 system templates (got ${r1.length})`);
     const inSeeded = r1.filter((t) => t.countryCode === 'IN').length;
     const nzSeeded = r1.filter((t) => t.countryCode === 'NZ').length;
     assert(inSeeded === 6 && nzSeeded === 6, `seed has 6 IN + 6 NZ variants (got ${inSeeded}/${nzSeeded})`);

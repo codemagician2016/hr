@@ -25,6 +25,13 @@ const prisma = require('../../core/lib/prisma');
 
 const SCOPE = Object.freeze({ ALL: 'ALL', ENTITY: 'ENTITY', DEPARTMENT: 'DEPARTMENT', SPECIFIC: 'SPECIFIC' });
 
+// Feature 37 (LMS) — the course-assignment audience IS the announcement audience model,
+// plus a ROLE band (target employees by their assigned BusinessRole). LEARNING_SCOPE
+// extends SCOPE additively; the announcement SCOPE above is untouched so its feed +
+// notification suites stay green. resolveLearningAudienceEmployees() below reuses the
+// announcement fan-out branches verbatim and only ADDS the ROLE branch.
+const LEARNING_SCOPE = Object.freeze({ ...SCOPE, ROLE: 'ROLE' });
+
 /**
  * Resolve the reader's CURRENT employment segment (entity + department). Reads the
  * one EmploymentRecord flagged isCurrent (the denormalised "now" segment the rest of
@@ -134,10 +141,43 @@ async function resolveAudienceEmployees(announcement, { cap = 2000 } = {}) {
   return prisma.employee.findMany({ where: { ...base, id: { in: empIds } }, select, take: cap });
 }
 
+/**
+ * Feature 37 (LMS) — resolve the recipient employees for a CourseAssignment. This is
+ * the announcement fan-out (resolveAudienceEmployees) with one ADDED branch: ROLE,
+ * which targets employees whose linked User.businessRoleId is in audienceRoleIds. The
+ * assignment record shares the same field shape as Announcement
+ * (audienceScope/audienceEntityIds/audienceDeptIds/audienceEmployeeIds) plus
+ * audienceRoleIds. Returns Employee rows (id + contact), active + non-deleted only,
+ * capped — same convention as the announcement fan-out. NO new scope engine.
+ */
+async function resolveLearningAudienceEmployees(assignment, { cap = 2000 } = {}) {
+  const scope = assignment.audienceScope || LEARNING_SCOPE.ALL;
+  if (scope === LEARNING_SCOPE.ROLE) {
+    const businessId = assignment.businessId;
+    const base = { businessId, deletedAt: null, isActive: true, status: 'ACTIVE' };
+    const select = {
+      id: true, code: true, firstName: true, lastName: true, userId: true,
+      workEmail: true, personalEmail: true, phone: true, countryCode: true, notifyPrefs: true,
+    };
+    const roleIds = assignment.audienceRoleIds || [];
+    if (!roleIds.length) return [];
+    // Employee -> User (userId) -> User.businessRoleId ∈ roleIds.
+    return prisma.employee.findMany({
+      where: { ...base, user: { is: { businessRoleId: { in: roleIds } } } },
+      select,
+      take: cap,
+    });
+  }
+  // ALL / ENTITY / DEPARTMENT / SPECIFIC — identical to the announcement fan-out.
+  return resolveAudienceEmployees(assignment, { cap });
+}
+
 module.exports = {
   SCOPE,
+  LEARNING_SCOPE,
   resolveEmployeeSegment,
   audienceMatchesEmployee,
   feedWhereForEmployee,
   resolveAudienceEmployees,
+  resolveLearningAudienceEmployees,
 };

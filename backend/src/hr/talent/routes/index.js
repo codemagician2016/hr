@@ -9,6 +9,11 @@ module.exports = {
   // F8 cycle). Mounted at /api/hr/ninebox.
   ninebox: require('./ninebox.routes'),
   essPerformance: require('./ess-performance.routes'),
+  // Feature 37 — LMS (Learning). Operator course-builder + assignment + compliance
+  // dashboards (canManageLearning / canViewTeamLearning), and the ESS learner runtime
+  // (customer session, self-only). Co-located under talent/learning/.
+  learning: require('../learning/routes/learning.routes'),
+  essLearning: require('../learning/routes/ess-learning.routes'),
   // Feature 12 — UNAUTHENTICATED public careers board + apply. Mounted at
   // /api/public/careers in backend/src/index.js (NOT under /api/hr).
   publicCareers: require('./publicCareers.routes'),

@@ -61,6 +61,9 @@ const REQUIRED_BY_CATEGORY = {
   BANK: [...ALWAYS_REQUIRED, 'employee.bankName'],
   CONTRACT: [...ALWAYS_REQUIRED, 'employee.designation', 'employee.dateOfJoining'],
   CUSTOM: [],
+  // Feature 37 — LMS certificate needs the learner + the course title to be a valid
+  // proof of record (the LMS always supplies these on the COMPLETED transition).
+  LMS_CERTIFICATE: [...ALWAYS_REQUIRED, 'course.title'],
 };
 
 /**
@@ -417,6 +420,31 @@ For {{company.legalName}}
 {{authority.designation}}`,
 };
 
+// Feature 37 — LMS course-completion certificate (market-agnostic). HR can brand/edit
+// the copy with NO deploy (it's a LetterTemplate); the LMS feeds course.* merge facts
+// via issueLetter overrides.course. Used as the tenant default when a course doesn't
+// pin its own certificateTemplateId.
+const LMS_CERTIFICATE_TEMPLATE = {
+  code: 'LMS-CERT-STD',
+  name: 'Course Completion Certificate',
+  category: 'LMS_CERTIFICATE',
+  countryCode: null,
+  subject: 'Certificate of Completion — {{course.title}}',
+  body: `Ref: {{letter.refNo}}
+Date: {{date.issueDate}}
+
+CERTIFICATE OF COMPLETION
+
+This is to certify that {{employee.name}} (Employee Code: {{employee.code}}), {{employee.designation}}, has successfully completed the training course "{{course.title}}" ({{course.code}}) on {{course.completedOn}}.
+
+This certificate is issued as a record of training and serves as proof of completion.
+
+For {{company.legalName}}
+
+{{authority.name}}
+{{authority.designation}}`,
+};
+
 /**
  * Build the full system-template descriptor list (12 country variants + 1 CUSTOM
  * scaffold). Each descriptor carries its derived mergeFieldsJson allow-list.
@@ -459,6 +487,22 @@ function systemTemplateDescriptors() {
     requiresSignature: false,
     locale: null,
     refNoPrefix: null,
+    isSystem: true,
+    isActive: true,
+  });
+  // Feature 37 — LMS course-completion certificate (market-agnostic system template).
+  const cert = LMS_CERTIFICATE_TEMPLATE;
+  descriptors.push({
+    code: cert.code,
+    name: cert.name,
+    category: cert.category,
+    countryCode: cert.countryCode,
+    subject: cert.subject,
+    bodyMarkdown: cert.body,
+    mergeFieldsJson: mergeFieldsFor([cert.body, cert.subject], { category: cert.category }),
+    requiresSignature: false,
+    locale: null,
+    refNoPrefix: 'CERT',
     isSystem: true,
     isActive: true,
   });

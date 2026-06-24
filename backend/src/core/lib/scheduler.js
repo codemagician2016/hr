@@ -1313,6 +1313,29 @@ function initScheduler() {
       complianceSweepRunning = false;
     }
   });
+
+  // Feature 37 — LMS training-calendar sweep (daily 08:00). New-joiner auto-assign
+  // (POSH 30-day), annual/periodic recurrence re-assign, and T-7/T-1/overdue reminders
+  // (deduped via the enrollment lastReminderStage cursor). Structural copy of the
+  // compliance/proof-window sweeps: per-tenant (businessId null = all), per-row
+  // try/catch inside the runner, idempotent (cycle unique), in-process overlap guard.
+  let learningSweepRunning = false;
+  cron.schedule('0 8 * * *', async () => {
+    if (learningSweepRunning) { console.log('[Scheduler] learning sweep still running — skipping tick'); return; }
+    learningSweepRunning = true;
+    try {
+      const { runSweep } = require('../../hr/talent/learning/learningReminderRunner');
+      const r = await runSweep({ asOf: new Date() });
+      if (r.newJoiner.created || r.recurrence.created || r.reminders.sent
+        || r.newJoiner.errors || r.recurrence.errors || r.reminders.errors) {
+        console.log(`[Scheduler] learning: ${JSON.stringify(r)}`);
+      }
+    } catch (err) {
+      console.error('[Scheduler] learning sweep failed:', err.message);
+    } finally {
+      learningSweepRunning = false;
+    }
+  });
 }
 
 // Find PENDING orders older than `maxAgeMinutes` (default 30) and cancel

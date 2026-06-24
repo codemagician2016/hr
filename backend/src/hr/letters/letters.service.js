@@ -92,6 +92,9 @@ const CATEGORY_TO_DOC = {
   EMPLOYMENT_PROOF: 'OTHER',
   SALARY_PROOF: 'OTHER',
   CUSTOM: 'OTHER',
+  // Feature 37 — an LMS completion certificate lands in the ESS vault as a typed
+  // TRAINING_CERTIFICATE document (employee-visible proof of training, POSH audit).
+  LMS_CERTIFICATE: 'TRAINING_CERTIFICATE',
 };
 
 const WATERMARK_PREVIEW = 'DRAFT — NOT VALID';
@@ -323,6 +326,9 @@ function buildRenderInputs({ template, ctx, overrides, refNo, locale, now }) {
     authority,
     perms,
     required,
+    // Feature 37 — LMS certificate facts (overrides.course), additive; only the
+    // LMS_CERTIFICATE template's course.* tokens consume them, ignored elsewhere.
+    course: o.course || null,
   });
 
   // Body: an explicit override body wins (custom paragraph append handled by the
