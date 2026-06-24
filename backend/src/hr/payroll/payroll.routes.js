@@ -38,7 +38,17 @@ router.get('/runs', requirePermission('canViewPayrollReports'), c.listRuns);
 router.get('/runs/:id', requirePermission('canViewPayrollReports'), c.getRun);
 router.get('/runs/:id/payslips', requirePermission('canViewPayrollReports'), c.getRunPayslips);
 // Feature 31 — preview the in-service leave encashments this run pays / has paid.
-router.get('/runs/:id/encashments', requirePermission('canViewPayrollReports'), enc.runEncashments);
+// F1-scoped (finding #1): attachSelfEmployee → withEmployeeScope populates req.scope so
+// the handler can filter BOTH the paid + queued lists to the caller's sub-tree. Without
+// the middleware req.scope is undefined and the preview leaks every employee's name +
+// amount tenant-wide. Mirrors the tax-projection mount below.
+router.get(
+  '/runs/:id/encashments',
+  requirePermission('canViewPayrollReports'),
+  attachSelfEmployee,
+  withEmployeeScope('canViewPayrollReports'),
+  enc.runEncashments,
+);
 router.get('/runs/:id/files/:kind', requirePermission('canViewPayrollReports'), c.getFile);
 
 // ── Feature 7 — guided run orchestration + lifecycle past APPROVED ──

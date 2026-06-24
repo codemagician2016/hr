@@ -144,6 +144,12 @@ console.log('Feature 31 — encashment money math');
   const mine = computeEncashAmount({ basis: 'BASIC_30', basicDaMonthlyMinor: 3000000, days: 6 });
   ok(mine.amountMinor === 600000, 'BASIC_30 ₹30,000/mo × 6/30 = ₹6,000');
   ok(mine.perDayMinor === 100000, 'BASIC_30 perDay = ₹1,000');
+  // Cycle-4 regression (finding #2): the caller MUST pass the basic-only figure, never
+  // Basic+DA. If a Basic+DA figure (₹40,000) leaked in, the amount would be ₹8,000 — a 33%
+  // over-pay. This asserts the per-day base is exactly what is supplied (no hidden DA add).
+  const wrong = computeEncashAmount({ basis: 'BASIC_30', basicDaMonthlyMinor: 4000000, days: 6 });
+  ok(wrong.amountMinor === 800000, 'BASIC_30 over Basic+DA ₹40,000 WOULD be ₹8,000 — proving the caller must feed Basic-only');
+  ok(mine.amountMinor !== wrong.amountMinor, 'BASIC_30 basic-only ₹6,000 ≠ Basic+DA ₹8,000 (the 33% over-pay the fix removes)');
 }
 // 11) GROSS_30 variant. ₹45,000/mo gross, 3 days → 45000*3/30 = 4500.
 {

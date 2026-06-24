@@ -50,6 +50,82 @@ async function loadReq(tx, approvalRequest) {
   });
 }
 
+// assertCapsWithinTx — re-validate the per-year request-count + days caps INSIDE the
+// approval tx, race-safe (finding #3). reqRow is THIS request (already flipped APPROVED).
+//
+// The cap is enforced over COMMITTED requests (APPROVED/PAID) — the same buckets that
+// actually debit the balance — plus THIS one. We FOR UPDATE-lock the period's COMMITTED
+// sibling rows so two concurrent approvals serialise on the same key: the first commits,
+// the second then SEES that committed row in its locked re-count and is rejected. Two
+// requests that are both still PENDING do NOT block each other at this gate (only one of
+// them wins the approval; the other then trips the re-check) — so the legitimate first
+// approval is never spuriously refused.
+//   • request count: locked APPROVED/PAID siblings + this one ≤ maxRequests
+//   • days/year:     Σ days on locked APPROVED/PAID siblings + this one ≤ encashMaxDaysPerYear
+// The policy is the snapshot the request carries (leavePolicyId); NULL ⇒ default 1/yr, no
+// day cap (matches the create-time gate's defaults). Fail closed: a busted cap throws.
+async function assertCapsWithinTx(tx, reqRow, days) {
+  // Serialise concurrent approvals on the SAME (employee, leaveType, period): take a FOR
+  // UPDATE lock on the shared LeaveBalance row FIRST. Two approvals that both see zero
+  // committed siblings would otherwise both pass — locking the one balance row they both
+  // debit forces them to run one-at-a-time, so the second re-counts AFTER the first's
+  // APPROVED row is visible and is correctly rejected. (If no balance row exists there is
+  // nothing to debit; the caps then reduce to the committed-sibling count below.)
+  await tx.$queryRaw`
+    SELECT b."id"
+    FROM "LeaveBalance" b
+    WHERE b."businessId" = ${reqRow.businessId}
+      AND b."employeeId" = ${reqRow.employeeId}
+      AND b."leaveTypeId" = ${reqRow.leaveTypeId}
+      AND b."periodCode" = ${reqRow.periodCode}
+    FOR UPDATE`;
+
+  // Lock the COMMITTED sibling rows for this employee/leaveType/period (the ones that count
+  // toward the caps). The lock serialises a concurrent approval of another sibling: it must
+  // wait for our commit, then re-counts and sees us.
+  const siblings = await tx.$queryRaw`
+    SELECT r."id", r."status", r."days"
+    FROM "LeaveEncashmentRequest" r
+    WHERE r."businessId" = ${reqRow.businessId}
+      AND r."employeeId" = ${reqRow.employeeId}
+      AND r."leaveTypeId" = ${reqRow.leaveTypeId}
+      AND r."periodCode" = ${reqRow.periodCode}
+      AND r."id" <> ${reqRow.id}
+      AND r."status" IN ('APPROVED', 'PAID')
+    FOR UPDATE`;
+
+  const policy = reqRow.leavePolicyId
+    ? await tx.leavePolicy.findFirst({
+        where: { id: reqRow.leavePolicyId, businessId: reqRow.businessId },
+        select: { encashMaxRequestsPerYear: true, encashMaxDaysPerYear: true },
+      })
+    : null;
+
+  // Request-count cap (default 1/yr when the policy is silent — mirror the pure validator).
+  const maxRequests = (policy && policy.encashMaxRequestsPerYear != null)
+    ? Number(policy.encashMaxRequestsPerYear)
+    : 1;
+  // Committed siblings + this one.
+  const requestsThisYear = siblings.length + 1;
+  if (requestsThisYear > maxRequests) {
+    const err = new Error(`Encashment request cap of ${maxRequests}/year exceeded (concurrent request race)`);
+    err.code = 'DECISION_RACE';
+    throw err;
+  }
+
+  // Days/year cap (only when the policy sets one). Σ committed sibling days + this one.
+  if (policy && policy.encashMaxDaysPerYear != null) {
+    const cap = Number(policy.encashMaxDaysPerYear);
+    let committedDays = 0;
+    for (const s of siblings) committedDays += Math.abs(Number(s.days));
+    if (committedDays + days > cap + 1e-9) {
+      const err = new Error(`Encashment yearly day cap of ${cap} exceeded (concurrent request race)`);
+      err.code = 'DECISION_RACE';
+      throw err;
+    }
+  }
+}
+
 // onApprove — PENDING → APPROVED. The real debit: release the hold, post the ENCASHMENT
 // ledger row, bump encashed+/closing−, snapshot Basic+DA + amount. Version-locked.
 async function onApprove(approvalRequest, tx) {
@@ -70,13 +146,33 @@ async function onApprove(approvalRequest, tx) {
     throw err;
   }
 
-  // (2) Resolve the snapshot money (last-drawn Basic+DA / gross) and compute the amount.
-  //     Valued at APPROVE because the days are debited at APPROVE (spec §10.1) — a later
-  //     comp revision must never re-value a surrendered day.
+  // (1b) RE-VALIDATE the per-year caps INSIDE the tx (finding #3). The create-time gate
+  //      (validateEncashRequest) reads a NON-tx ytd count, so two requests raised when the
+  //      count was 0 both pass it — then both reach here and would both debit, busting the
+  //      once/year and days/year caps. We re-count the SIBLING committed requests UNDER A
+  //      ROW LOCK (FOR UPDATE) so concurrent approvals serialise: the first commits, the
+  //      second sees it and is rejected. We lock the sibling rows (excluding this one, now
+  //      APPROVED) to pin the count, then re-apply the policy caps with THIS request added.
+  await assertCapsWithinTx(tx, reqRow, days);
+
+  // (2) Resolve the snapshot money (last-drawn Basic-only / Basic+DA / gross) and compute
+  //     the amount. Valued at APPROVE because the days are debited at APPROVE (spec §10.1)
+  //     — a later comp revision must never re-value a surrendered day.
+  //
+  //     The per-day BASE differs by basis (finding #2):
+  //       BASIC_DA_26 → Basic+DA  (basicDaMonthlyMinor)
+  //       BASIC_30    → Basic ONLY (basicMonthlyMinor) — NOT Basic+DA (no DA over-pay)
+  //       GROSS_30    → gross     (grossMonthlyMinor)
+  //     computeEncashAmount takes the "basic-ish" figure in basicDaMonthlyMinor, so we
+  //     pass the correct base for the request's basis. We snapshot that SAME base onto the
+  //     request so the audit row reflects what was actually paid per day.
   const pay = await resolveLastDrawnPay(approvalRequest.businessId, reqRow.employeeId, tx);
+  const basicIshMinor = reqRow.basis === 'BASIC_30'
+    ? Number(pay.basicMonthlyMinor || 0)
+    : Number(pay.basicDaMonthlyMinor || 0);
   const money = computeEncashAmount({
     basis: reqRow.basis,
-    basicDaMonthlyMinor: pay.basicDaMonthlyMinor,
+    basicDaMonthlyMinor: basicIshMinor,
     grossMonthlyMinor: pay.grossMonthlyMinor,
     days,
   });
@@ -123,10 +219,12 @@ async function onApprove(approvalRequest, tx) {
 
   // (4) Stamp the snapshot + the ledger-row link on the request (the secondary
   //     exactly-once guard + the figure the pay pass pays).
+  // Snapshot the per-day BASE actually used (finding #2): basic-only for BASIC_30, Basic+DA
+  // for BASIC_DA_26 — so perDayMinor reconciles with the stored base for the audit drill-down.
   await tx.leaveEncashmentRequest.update({
     where: { id: reqRow.id },
     data: {
-      basicDaMonthlyMinor: BigInt(pay.basicDaMonthlyMinor || 0),
+      basicDaMonthlyMinor: BigInt(basicIshMinor || 0),
       perDayMinor: BigInt(money.perDayMinor || 0),
       amountMinor: BigInt(money.amountMinor || 0),
       encashmentTxnId,
@@ -203,5 +301,5 @@ module.exports = {
   bundle,
   flooredRelease,
   // exported for the unit/live tests + the controller's direct fallback.
-  _internals: { onApprove, onReject, onCancel, releaseHold },
+  _internals: { onApprove, onReject, onCancel, releaseHold, assertCapsWithinTx },
 };
