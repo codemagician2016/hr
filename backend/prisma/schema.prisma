@@ -284,6 +284,7 @@ model Business {
   // Sprint 1.1 — multi-channel notifications (SMS + WhatsApp + Email + budget engine)
   notificationConfig             NotificationConfig?
   messageDeliveries              MessageDelivery[]
+  hrNotifyDedupes                HrNotifyDedupe[]
   budgetUsages                   BudgetUsage[]
   // Sprint 1.2 — marketing automation (Pro tier)
   automationCampaigns            AutomationCampaign[]
@@ -3064,6 +3065,26 @@ model MessageDelivery {
   @@index([recipientPhone, channel])
   @@index([status])
   @@index([triggeredBy])
+}
+
+// Atomic send-dedupe claim for the HR approval/SLA real-channel fan-out (notify.js).
+// The previous design did a check-then-act against MessageDelivery.triggeredBy, which
+// two concurrent sweeps could both pass — double-sending the same reminder/notice. This
+// table makes the dedupe a single atomic INSERT under a UNIQUE token: the first send
+// claims the token and proceeds; a concurrent second send hits the unique violation and
+// skips. Best-effort/non-blocking: a claim failure never breaks the domain tx.
+model HrNotifyDedupe {
+  id         String   @id @default(uuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  // The deterministic dedupe token (e.g. 'HR_REM:<reqId>:<step>:w<ver>:<uid>'). Unique
+  // per business so a token can only be claimed once.
+  token     String
+  createdAt DateTime @default(now())
+
+  @@unique([businessId, token])
+  @@index([businessId, createdAt])
 }
 
 // Per-business per-cycle messaging spend tracking. One row per (business,

@@ -29,23 +29,71 @@
 const prisma = require('../../core/lib/prisma');
 const engine = require('./engine');
 const { walkManagers, usersWithPermission } = require('./approverResolver');
+const { matches } = require('./conditions');
 // Cycle 0 — real-channel SLA fan-out (email/WhatsApp/push). Fire-and-forget; runs
 // AFTER the version-guarded tx commits so it never affects the sweep's idempotency.
 const notify = require('./notify');
 
 const SYSTEM_ACTOR = 'SYSTEM';
 
+// Terminal employee statuses — mirrors approverResolver.TERMINATED_STATUSES. A person
+// in one of these (or isActive:false) has left the company and must NEVER become a live
+// escalation target, even if their portal User row still lingers as active.
+const TERMINATED_STATUSES = ['TERMINATED', 'RETIRED'];
+
+// Resolve the active escalation user(s) by walking UP the requester's manager chain,
+// starting ABOVE the timed-out direct manager (level 2), and skipping any manager who is
+// terminated/inactive/soft-deleted. Returns the userIds of the FIRST level up the chain
+// that has at least one live manager-with-a-portal-user. Empty ⇒ caller does HR fallback.
+async function activeEscalationTargets(tx, reqEmp, businessId) {
+  // Full ancestor chain (cycle-guarded, depth-capped) in nearest-first order.
+  const chain = await walkManagers(reqEmp, businessId, 'ALL');
+  // Skip level 1 (the direct manager who timed out); escalate to one above and up.
+  for (let i = 1; i < chain.length; i++) {
+    const emp = await tx.employee.findFirst({
+      where: {
+        id: chain[i], businessId, deletedAt: null,
+        isActive: true, status: { notIn: TERMINATED_STATUSES }, userId: { not: null },
+      },
+      select: { userId: true },
+    });
+    if (emp && emp.userId) return [emp.userId];
+  }
+  return [];
+}
+
 // The active level's onTimeoutAction + slaHours, from the snapshot for currentStepOrder.
+// CRITICAL: a level can carry several steps whose conditionJson selects WHICH ones
+// actually applied for this request's ctx (the engine drops non-matching steps — see
+// engine.applicableSteps). The sweep MUST read the timeout action from the APPLIED
+// step(s), not blindly from steps[0]: steps[0] may be an unmatched config (e.g. a
+// high-value AUTO_REJECT branch) while the request actually landed on a REMIND step.
+// Reading steps[0] could AUTO_REJECT (as the SYSTEM actor, bypassing SoD) a request
+// that should only have been REMINDed. We therefore filter to the steps that match the
+// snapshotted ctx and derive the action + tightest SLA from those.
 function activeTimeout(request) {
   const snap = request.payloadJson && request.payloadJson._chain;
   if (!snap || !Array.isArray(snap.levels)) return { onTimeoutAction: 'ESCALATE', slaHours: null };
   const lvl = snap.levels.find((l) => l.stepOrder === request.currentStepOrder);
   if (!lvl || !lvl.steps || !lvl.steps.length) return { onTimeoutAction: 'ESCALATE', slaHours: null };
-  // tightest SLA + the FIRST step's timeout action (a level's steps share an action
-  // in practice; the first one drives the sweep decision).
-  const slas = lvl.steps.map((s) => s.slaHours).filter((h) => h != null && h > 0);
+  // The ctx the chain was resolved against (snapshotted at openRequest time). Use it to
+  // select the steps that genuinely applied — exactly the set the engine activated.
+  const ctx = (request.payloadJson && request.payloadJson._ctx) || {};
+  let applied = lvl.steps.filter((s) => matches(s.conditionJson, ctx));
+  // Defensive: if nothing matches (legacy snapshot / missing ctx), fall back to the
+  // whole level rather than mis-deriving from a single arbitrary step.
+  if (!applied.length) applied = lvl.steps;
+  // tightest SLA across the APPLIED steps.
+  const slas = applied.map((s) => s.slaHours).filter((h) => h != null && h > 0);
+  // The timeout action of the applied step bearing the tightest SLA (the step whose
+  // clock actually expired). Falls back to the first applied step when no SLA is set.
+  let driver = applied[0];
+  if (slas.length) {
+    const minSla = Math.min(...slas);
+    driver = applied.find((s) => s.slaHours === minSla) || applied[0];
+  }
   return {
-    onTimeoutAction: lvl.steps[0].onTimeoutAction || 'ESCALATE',
+    onTimeoutAction: (driver && driver.onTimeoutAction) || 'ESCALATE',
     slaHours: slas.length ? Math.min(...slas) : null,
   };
 }
@@ -104,6 +152,7 @@ async function remind(request, slaHours, now) {
   // fan-out runs AFTER the tx commits (never inside it).
   let notified = null;
   let fresh = null;
+  let windowKey = null;
   await prisma.$transaction(async (tx) => {
     fresh = await tx.approvalRequest.findUnique({ where: { id: request.id } });
     if (!fresh || fresh.status !== 'PENDING') { fresh = null; return; }
@@ -113,6 +162,11 @@ async function remind(request, slaHours, now) {
       data: { slaDueAt: next, version: { increment: 1 } },
     });
     if (flip.count === 0) { fresh = null; return; } // raced; safe no-op
+    // Per-window discriminator for the reminder dedupe token. The version is bumped
+    // exactly once per successful remind window, so the post-bump version uniquely and
+    // monotonically identifies THIS window — letting each due window send its reminder
+    // exactly once while a same-window double-run (same pre-bump version) still dedupes.
+    windowKey = fresh.version + 1;
     notified = [];
     for (const uid of (active && active.approverUserIds) || []) {
       if (!uid || uid === SYSTEM_ACTOR) continue;
@@ -131,11 +185,14 @@ async function remind(request, slaHours, now) {
     }
   });
   // Post-commit REMINDER fan-out (email/WhatsApp/push) with a deep-link. The dedupe
-  // token embeds currentStepOrder, so a nag pushed within the SAME window won't re-send
-  // until the slaDueAt window genuinely advances. Best-effort; never throws.
+  // token embeds reminderWindowKey (the bumped version), so a nag pushed within the SAME
+  // window won't re-send, but each genuinely-new SLA window sends its reminder exactly
+  // once (the prior bug keyed only on currentStepOrder, which never changes on REMIND, so
+  // only ONE reminder ever left). Best-effort; never throws.
   if (fresh && notified && notified.length) {
     await notify.fanOutApprovalPending({
       businessId: request.businessId, request: fresh, approverUserIds: notified, reminder: true,
+      reminderWindowKey: windowKey,
     }).catch(() => {});
   }
 }
@@ -151,22 +208,20 @@ async function escalate(request, slaHours, now) {
     if (!fresh || fresh.status !== 'PENDING') return false;
     const active = (fresh.payloadJson && fresh.payloadJson._active) || { approverUserIds: [] };
 
-    // resolve "one manager above" the requester as the escalation target (the
-    // simplest, cycle-safe choice that mirrors REPORTING_MANAGER N-up semantics).
+    // resolve "one manager above" the requester as the escalation target, applying the
+    // terminated/inactive lockout: a separated manager (status TERMINATED/RETIRED or
+    // isActive:false) is skipped and we climb to the NEXT live manager up the chain
+    // (activeEscalationTargets). This mirrors the leave/ESS terminated-employee lockout —
+    // an SLA timeout must never route an open request to someone who has left the company.
     let escalationUsers = [];
     if (fresh.requesterEmployeeId) {
       const reqEmp = await tx.employee.findFirst({ where: { id: fresh.requesterEmployeeId, businessId: fresh.businessId }, select: { id: true, businessId: true, managerEmployeeId: true } });
       if (reqEmp) {
-        // two levels up from the requester = one above the (timed-out) direct manager.
-        const twoUp = await walkManagers(reqEmp, fresh.businessId, '2');
-        if (twoUp.length) {
-          const emps = await tx.employee.findMany({ where: { id: { in: twoUp }, businessId: fresh.businessId, deletedAt: null, userId: { not: null } }, select: { userId: true } });
-          escalationUsers = emps.map((e) => e.userId).filter(Boolean);
-        }
+        escalationUsers = await activeEscalationTargets(tx, reqEmp, fresh.businessId);
       }
     }
     if (escalationUsers.length === 0) {
-      // HR fallback
+      // HR fallback (usersWithPermission already excludes terminated/inactive users).
       escalationUsers = await usersWithPermission(fresh.businessId, 'canApproveLeave');
     }
     // never route to the requester (SoD).
