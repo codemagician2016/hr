@@ -184,6 +184,8 @@ async function setJobPublic(req, res, next) {
     const { businessId } = req.user;
     const job = await prisma.job.findFirst({ where: { id: req.params.id, businessId, deletedAt: null } });
     if (!job) return res.status(404).json({ message: 'Not found' });
+    // F1 scope — an out-of-requisition job 404s (IDOR-safe), not 403.
+    if (!scopeAllowsJob(req.recruitmentScope, job)) return res.status(404).json({ message: 'Not found' });
     const isPublic = req.body.isPublic === undefined ? true : !!req.body.isPublic;
     const data = { isPublic };
     if (isPublic && !job.publicSlug) data.publicSlug = slugify(`${job.title}-${job.code}`);
@@ -225,9 +227,23 @@ async function updateJob(req, res, next) {
     const { businessId } = req.user;
     const existing = await prisma.job.findFirst({ where: { id: req.params.id, businessId, deletedAt: null } });
     if (!existing) return res.status(404).json({ message: 'Not found' });
+    // F1 scope — an out-of-requisition job 404s (IDOR-safe), not 403.
+    if (!scopeAllowsJob(req.recruitmentScope, existing)) return res.status(404).json({ message: 'Not found' });
     const weightErr = validateMeritWeights(req.body);
     if (weightErr) return res.status(400).json({ message: weightErr });
     const data = pickJob(req.body);
+    // Priv-esc guard: only an ALL-band caller (admin/HR) may reassign the hiring
+    // manager. A scoped recruiter cannot set hiringManagerId to widen their own
+    // read scope (they'd otherwise self-assign the req and gain its PII/candidates).
+    const reassigning = data.hiringManagerId !== undefined
+      && String(data.hiringManagerId ?? '') !== String(existing.hiringManagerId ?? '');
+    const isAllBand = !req.recruitmentScope || req.recruitmentScope.kind === 'ALL';
+    if (reassigning && !isAllBand) {
+      return res.status(403).json({
+        message: 'Only an admin/HR may reassign a requisition\'s hiring manager.',
+        code: 'HIRING_MANAGER_REASSIGN_FORBIDDEN',
+      });
+    }
     if (data.isPublic && !data.publicSlug && !existing.publicSlug) data.publicSlug = slugify(`${existing.title}-${existing.code}`);
     const item = await prisma.job.update({ where: { id: req.params.id }, data });
     res.json(item);
@@ -239,6 +255,8 @@ async function removeJob(req, res, next) {
     const { businessId } = req.user;
     const existing = await prisma.job.findFirst({ where: { id: req.params.id, businessId, deletedAt: null } });
     if (!existing) return res.status(404).json({ message: 'Not found' });
+    // F1 scope — an out-of-requisition job 404s (IDOR-safe), not 403.
+    if (!scopeAllowsJob(req.recruitmentScope, existing)) return res.status(404).json({ message: 'Not found' });
     await prisma.job.update({ where: { id: req.params.id }, data: { deletedAt: new Date() } });
     res.status(204).end();
   } catch (e) { next(e); }
@@ -251,6 +269,8 @@ async function publishJob(req, res, next) {
     const { businessId } = req.user;
     const job = await prisma.job.findFirst({ where: { id: req.params.id, businessId, deletedAt: null } });
     if (!job) return res.status(404).json({ message: 'Not found' });
+    // F1 scope — an out-of-requisition job 404s (IDOR-safe), not 403.
+    if (!scopeAllowsJob(req.recruitmentScope, job)) return res.status(404).json({ message: 'Not found' });
     if (job.status !== 'DRAFT') {
       return res.status(409).json({ message: `Cannot publish a job in status ${job.status}` });
     }
@@ -638,8 +658,10 @@ async function bulkApplicationAction(req, res, next) {
     if (!targets.length) return res.json({ changed: 0, skipped: 0, total: 0, ids: [] });
 
     // a bulk reject/shortlist/status move is a pipeline move; terminal apps are
-    // skipped (a HIRED/REJECTED/WITHDRAWN candidate is not silently flipped).
-    const actionable = targets.filter((a) => !BULK_TERMINAL.has(a.status) || action === 'set-status');
+    // ALWAYS skipped (a HIRED/REJECTED/WITHDRAWN candidate is never silently
+    // resurrected — matching the single-app moveApplication terminal guard). This
+    // applies to set-status too: bulk cannot reopen a hired/rejected/withdrawn app.
+    const actionable = targets.filter((a) => !BULK_TERMINAL.has(a.status));
     const skipped = targets.length - actionable.length;
     if (!actionable.length) return res.json({ changed: 0, skipped, total: targets.length, ids: [] });
 
@@ -656,12 +678,18 @@ async function bulkApplicationAction(req, res, next) {
     else if (action === 'shortlist') { targetStatus = 'INTERVIEWING'; targetKind = 'INTERVIEW'; }
     else if (action === 'set-status') {
       targetStatus = String(body.status || '').toUpperCase();
-      const VALID = ['APPLIED', 'SCREENING', 'INTERVIEWING', 'ASSESSMENT', 'OFFERED', 'HIRED', 'REJECTED', 'WITHDRAWN', 'ON_HOLD'];
+      // HIRED/ACCEPTED are NOT bulk-settable: a hire must go through the offer
+      // accept SoD path (acceptOffer), which enforces maker ≠ checker and seeds the
+      // onboarding journey atomically. Bulk only moves apps across non-terminal
+      // pipeline stages. REJECTED/WITHDRAWN remain reachable (legitimate bulk
+      // reject/withdraw of an OPEN candidate), but a TERMINAL source app is skipped
+      // above so a terminal app can never be flipped to another status either.
+      const VALID = ['APPLIED', 'SCREENING', 'INTERVIEWING', 'ASSESSMENT', 'OFFERED', 'REJECTED', 'WITHDRAWN', 'ON_HOLD'];
       if (!VALID.includes(targetStatus)) {
         return res.status(400).json({ message: `status must be one of ${VALID.join(', ')}` });
       }
       // map status → stage kind so the pipeline card follows the status.
-      const S2K = { APPLIED: 'SOURCED', SCREENING: 'SCREENING', INTERVIEWING: 'INTERVIEW', ASSESSMENT: 'ASSESSMENT', OFFERED: 'OFFER', HIRED: 'HIRED', REJECTED: 'REJECTED', WITHDRAWN: 'WITHDRAWN' };
+      const S2K = { APPLIED: 'SOURCED', SCREENING: 'SCREENING', INTERVIEWING: 'INTERVIEW', ASSESSMENT: 'ASSESSMENT', OFFERED: 'OFFER', REJECTED: 'REJECTED', WITHDRAWN: 'WITHDRAWN' };
       targetKind = S2K[targetStatus] || null;
     }
     const reason = body.reason != null ? String(body.reason).slice(0, 500) : null;
@@ -971,9 +999,12 @@ async function createOffer(req, res, next) {
     }
     const app = await prisma.application.findFirst({
       where: { id: applicationId, businessId },
-      include: { job: { select: { countryCode: true } } },
+      include: { job: { select: { countryCode: true, hiringManagerId: true } } },
     });
     if (!app) return res.status(404).json({ message: 'Application not found' });
+    // F1 scope — a scoped recruiter cannot draft an offer on an out-of-requisition
+    // application (404, IDOR-safe). Matches the read-side scope on getOffer/listOffers.
+    if (!scopeAllowsJob(req.recruitmentScope, app.job)) return res.status(404).json({ message: 'Application not found' });
 
     // ── 50% pre-flight (reuses payroll engine wage check) ──
     const check = offerWageCheck({
@@ -1030,8 +1061,16 @@ const SOD_MSG = 'Separation of duties: an interviewer who scored this candidate 
 async function sendOffer(req, res, next) {
   try {
     const { businessId } = req.user;
-    const offer = await prisma.offer.findFirst({ where: { id: req.params.id, businessId } });
+    const offer = await prisma.offer.findFirst({
+      where: { id: req.params.id, businessId },
+      include: { application: { select: { job: { select: { hiringManagerId: true } } } } },
+    });
     if (!offer) return res.status(404).json({ message: 'Not found' });
+    // F1 scope — a scoped recruiter cannot send an offer on an out-of-requisition
+    // job (404, IDOR-safe). The SoD guard alone only blocks a panellist/scorer.
+    if (!scopeAllowsJob(req.recruitmentScope, offer.application && offer.application.job)) {
+      return res.status(404).json({ message: 'Not found' });
+    }
     // SoD — the scorer/panellist of the candidate may not extend the offer.
     const conflict = await offerApproverConflict(businessId, offer, req.user.employeeId);
     if (conflict) return res.status(403).json({ message: SOD_MSG, code: 'OFFER_SOD' });
@@ -1055,8 +1094,16 @@ async function sendOffer(req, res, next) {
 async function acceptOffer(req, res, next) {
   try {
     const { businessId } = req.user;
-    const offer = await prisma.offer.findFirst({ where: { id: req.params.id, businessId } });
+    const offer = await prisma.offer.findFirst({
+      where: { id: req.params.id, businessId },
+      include: { application: { select: { job: { select: { hiringManagerId: true } } } } },
+    });
     if (!offer) return res.status(404).json({ message: 'Not found' });
+    // F1 scope — a scoped recruiter cannot finalise an offer on an out-of-requisition
+    // job (404, IDOR-safe).
+    if (!scopeAllowsJob(req.recruitmentScope, offer.application && offer.application.job)) {
+      return res.status(404).json({ message: 'Not found' });
+    }
     // SoD — the scorer/panellist may not finalise (provision the hire from) the
     // very offer they scored. Maker ≠ checker (§9.4, acceptance criterion 7).
     const conflict = await offerApproverConflict(businessId, offer, req.user.employeeId);
@@ -1090,8 +1137,15 @@ async function acceptOffer(req, res, next) {
 async function declineOffer(req, res, next) {
   try {
     const { businessId } = req.user;
-    const offer = await prisma.offer.findFirst({ where: { id: req.params.id, businessId } });
+    const offer = await prisma.offer.findFirst({
+      where: { id: req.params.id, businessId },
+      include: { application: { select: { job: { select: { hiringManagerId: true } } } } },
+    });
     if (!offer) return res.status(404).json({ message: 'Not found' });
+    // F1 scope — a scoped recruiter cannot decline an offer on an out-of-requisition job.
+    if (!scopeAllowsJob(req.recruitmentScope, offer.application && offer.application.job)) {
+      return res.status(404).json({ message: 'Not found' });
+    }
     if (offer.status !== 'SENT') {
       return res.status(409).json({ message: `Cannot decline an offer in status ${offer.status}` });
     }
@@ -1117,6 +1171,10 @@ async function renderOfferLetter(req, res, next) {
       include: { application: { include: { candidate: true, job: true } } },
     });
     if (!offer) return res.status(404).json({ message: 'Not found' });
+    // F1 scope — a scoped recruiter cannot render a letter for an out-of-requisition offer.
+    if (!scopeAllowsJob(req.recruitmentScope, offer.application && offer.application.job)) {
+      return res.status(404).json({ message: 'Not found' });
+    }
     const { templateId } = req.body || {};
     if (!templateId) {
       return res.status(422).json({ message: 'A Letters templateId is required to render the offer letter.' });
