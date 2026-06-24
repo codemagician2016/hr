@@ -44,6 +44,8 @@ const ICONS = {
   approvals: 'M4 6h10M4 12h7M4 18h10M16 14l2 2 4-4',
   // Feature 13 — My Team (Manager Self-Service): two figures
   team: 'M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75',
+  // Cycle 1 — Helpdesk (lifebuoy)
+  support: 'M12 3a9 9 0 100 18 9 9 0 000-18zM12 8a4 4 0 100 8 4 4 0 000-8zM5.6 5.6l3.2 3.2M15.2 15.2l3.2 3.2M18.4 5.6l-3.2 3.2M8.8 15.2l-3.2 3.2',
 };
 
 function Icon({ name, className }) {
@@ -86,6 +88,8 @@ const NAV = [
     ],
   },
   { type: 'item', href: '/performance', label: 'Performance', icon: 'chart' },
+  // Cycle 1 — HR Helpdesk: raise + track support tickets (self-service).
+  { type: 'item', href: '/helpdesk', label: 'Help & Support', icon: 'support' },
   { type: 'item', href: '/separation', label: 'Separation', icon: 'exit' },
 ];
 

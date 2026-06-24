@@ -10413,6 +10413,7 @@ model HelpdeskCategory {
   defaultAssigneeId String?
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
+  tickets     HelpdeskTicket[]
   @@unique([businessId, name])
   @@index([businessId, isActive])
 }
@@ -10425,15 +10426,21 @@ model HelpdeskTicket {
   employeeId  String                                   // raiser
   employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   categoryId  String?
+  category    HelpdeskCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   subject     String
   description String?  @db.Text
   priority    TicketPriority @default(NORMAL)
   status      TicketStatus @default(OPEN)
   assigneeId  String?
   slaDueAt    DateTime?
+  // Cycle-1 Helpdesk additive: real SLA first-response stamp (set on the first
+  // employee-visible HR reply) so a breach can be measured against response, not
+  // just resolution; the satisfaction free-text accompanies the 1–5 rating on close.
+  firstResponseAt    DateTime?
   resolvedAt  DateTime?
   closedAt    DateTime?
   satisfactionRating Int?
+  satisfactionComment String? @db.Text
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   deletedAt   DateTime?
@@ -10442,6 +10449,8 @@ model HelpdeskTicket {
   @@unique([businessId, code])
   @@index([businessId, status, priority])
   @@index([businessId, assigneeId, status])
+  // ESS "My tickets" — the employee's own queue, filtered by status.
+  @@index([businessId, employeeId, status])
 }
 
 enum TicketPriority {

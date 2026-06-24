@@ -40,6 +40,9 @@ const SCOPE_DEFAULTS = Object.freeze({
   // historical EXP-#### format, so existing EXP-0001..EXP-9999 claims interoperate.
   EXP: { prefix: 'EXP-', padding: 4 },
   TRV: { prefix: 'TRV-', padding: 4 },
+  // Cycle 1 — HR Helpdesk tickets carry a human reference HD-000219 (padding 6 to
+  // match the schema-doc example). Tenant-wide, non-resetting (periodKey: null).
+  HD: { prefix: 'HD-', padding: 6 },
 });
 
 function format(prefix, value, padding) {

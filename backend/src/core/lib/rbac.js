@@ -84,6 +84,12 @@ const PERMISSIONS = Object.freeze({
   // permission (payroll autogen still requires canRunPayroll; auto-publish requires
   // canApprovePayroll) so SoD is NOT weakened by going through import.
   canManageImports:         'Bulk-import & migrate prior-period data (employees, CTC, attendance, payslips, claims)',
+  // HR Helpdesk (Cycle 1) — the agent-console key. Gates the ticket QUEUE, category
+  // CRUD, assignment, HR replies/internal notes, and status changes. Without it an
+  // employee still has IMPLICIT self-service (raise/list/reply/reopen/rate on their
+  // OWN tickets) on the customer ESS session — that needs no key (the SELF scope band
+  // carries it), exactly like ESS leave/expenses. SoD is not critical for helpdesk.
+  canManageHelpdesk:        'Operate the HR helpdesk: queue, categories, assign, reply, change status, SLA',
 });
 
 const PERMISSION_KEYS = Object.freeze(Object.keys(PERMISSIONS));
@@ -121,6 +127,8 @@ const SYSTEM_ROLES = Object.freeze({
     canManageExpensePolicy: true, canApproveExpense: true,
     // Feature 18 — HR-Admin owns the data-migration / bulk-import center.
     canManageImports: true,
+    // Cycle 1 — HR-Admin operates the HR helpdesk (queue, assignment, replies, SLA).
+    canManageHelpdesk: true,
     // No canEditBilling / canEditDomain / canApprovePayroll — Owner/Finance only
   },
   // Finance — payroll + compensation + statutory + billing.

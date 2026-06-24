@@ -36,6 +36,8 @@ export const ICONS = {
   approvals: 'M4 6h10M4 12h7M4 18h10M16 14l2 2 4-4',
   shield: 'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z',
   hierarchy: 'M9 3h6v4H9zM3 17h6v4H3zM15 17h6v4h-6zM12 7v4M6 17v-2a1 1 0 011-1h10a1 1 0 011 1v2',
+  // Cycle 1 — HR Helpdesk (lifebuoy: ring + spokes for a "support" feel).
+  support: 'M12 3a9 9 0 100 18 9 9 0 000-18zM12 8a4 4 0 100 8 4 4 0 000-8zM5.6 5.6l3.2 3.2M15.2 15.2l3.2 3.2M18.4 5.6l-3.2 3.2M8.8 15.2l-3.2 3.2',
 };
 
 export function Icon({ name, size = 18, className, strokeWidth = 1.7 }) {
