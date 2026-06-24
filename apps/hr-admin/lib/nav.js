@@ -26,6 +26,8 @@ export const NAV_ITEMS = [
   { key: 'profile-policy', label: 'Field policy', href: '/profile/policy', feature: 'hr', permission: 'canViewEmployees', icon: 'shield' },
   { key: 'leave', label: 'Leave', href: '/leave', feature: 'leave', permission: 'canApproveLeave', icon: 'leaf' },
   { key: 'comp-off', label: 'Comp-off', href: '/comp-off-admin', feature: 'leave', permission: 'canApproveLeave', icon: 'calendar' },
+  // Feature 31 — in-service leave encashment (approvals queue + register).
+  { key: 'leave-encashment', label: 'Leave encashment', href: '/leave-encashment', feature: 'leave', permission: 'canApproveLeave', icon: 'coin' },
   { key: 'attendance', label: 'Attendance', href: '/attendance', feature: 'attendance', permission: 'canManageAttendance', icon: 'clock' },
   // FLAG (Feature 29 — shared edit): shift roster grid + rotation + swap queue.
   { key: 'roster', label: 'Roster', href: '/roster', feature: 'attendance', permission: 'canViewEmployees', icon: 'calendar' },
@@ -156,7 +158,7 @@ export const NAV_ITEMS = [
 export const NAV_GROUPS = [
   { key: 'people-org', label: 'People & Org', icon: 'people', items: ['people', 'org', 'profile-changes', 'profile-policy', 'helpdesk', 'announcements'] },
   { key: 'talent', label: 'Talent', icon: 'onboarding', items: ['recruitment', 'onboarding', 'separations', 'performance'] },
-  { key: 'time', label: 'Time', icon: 'calendar', items: ['leave', 'comp-off', 'attendance'] },
+  { key: 'time', label: 'Time', icon: 'calendar', items: ['leave', 'comp-off', 'leave-encashment', 'attendance'] },
   { key: 'pay', label: 'Pay', icon: 'wallet', items: ['compensation', 'ctc-policies', 'fbp-plans', 'fbp-allocations', 'payroll', 'bonus', 'arrears', 'form16', 'compliance', 'registers', 'tax-declaration-window', 'tax-proof-verification', 'expenses', 'travel', 'loans', 'reports'] },
   // FLAG FOR MERGE: new Feature 10 group — approval chains + RBAC + reporting tree.
   { key: 'approvals-access', label: 'Approvals & Access', icon: 'approvals', items: ['approvals', 'access-roles', 'access-hierarchy'] },

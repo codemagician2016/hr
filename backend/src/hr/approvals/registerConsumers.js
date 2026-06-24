@@ -30,6 +30,11 @@ const { registerCompOffConsumer } = require('./consumers.compOff');
 // load like the others; wired here too so the explicit boot path stays the single
 // source of truth.
 const { registerShiftSwapConsumer } = require('./consumers.shiftSwap');
+// FLAG (Feature 31 — shared edit): the LEAVE_ENCASHMENT consumer (in-service
+// encashment APPROVE → debit the leave balance via a ENCASHMENT LeaveTransaction +
+// snapshot the taxable amount). Self-registers on load like the others; wired here
+// too so the explicit boot path stays the single source of truth.
+const { registerEncashmentConsumer } = require('./consumers.encashment');
 
 let done = false;
 
@@ -41,6 +46,7 @@ function registerConsumers() {
   registerTravelConsumer();
   registerCompOffConsumer();
   registerShiftSwapConsumer();
+  registerEncashmentConsumer();
   done = true;
 }
 

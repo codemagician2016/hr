@@ -18,6 +18,10 @@ const { protect, requirePermission } = require('../../core/middleware/auth.middl
 const { payrollMutationLimiter } = require('../../core/middleware/abuse.middleware');
 const { attachSelfEmployee, withEmployeeScope } = require('../middleware/scope.middleware');
 const c = require('./payroll.controller');
+// FLAG (Feature 31 — shared edit): preview the in-service leave-encashment requests a
+// run will pay / has paid (read-only, reports-gated). The payout itself rides the
+// existing compute/disburse flow — no new mutation route.
+const enc = require('../controllers/encashment.controller');
 
 // Every payroll route requires an authenticated operator. `protect` runs first
 // so the per-tenant rate-limit key (req.user.businessId) is populated.
@@ -33,6 +37,8 @@ router.post('/runs/:id/approve', payrollMutationLimiter, requirePermission('canA
 router.get('/runs', requirePermission('canViewPayrollReports'), c.listRuns);
 router.get('/runs/:id', requirePermission('canViewPayrollReports'), c.getRun);
 router.get('/runs/:id/payslips', requirePermission('canViewPayrollReports'), c.getRunPayslips);
+// Feature 31 — preview the in-service leave encashments this run pays / has paid.
+router.get('/runs/:id/encashments', requirePermission('canViewPayrollReports'), enc.runEncashments);
 router.get('/runs/:id/files/:kind', requirePermission('canViewPayrollReports'), c.getFile);
 
 // ── Feature 7 — guided run orchestration + lifecycle past APPROVED ──

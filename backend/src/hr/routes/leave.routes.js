@@ -6,6 +6,9 @@ const { attachSelfEmployee, withEmployeeScope } = require('../middleware/scope.m
 const { validateBody } = require('../../core/lib/validate');
 const { createLeaveRequestSchema, adjustBalanceSchema, carryForwardRunSchema } = require('../../core/lib/schemas/leave.schema');
 const c = require('../controllers/leave.controller');
+// FLAG (Feature 31 — shared edit): in-service leave encashment operator routes
+// (list / approve / reject). Same RBAC + F1 scope discipline as the leave decisions.
+const enc = require('../controllers/encashment.controller');
 
 // All leave routes require an authenticated operator. Reading config + balances
 // is open to any operator; config writes need canManageOrg; request decisions
@@ -45,6 +48,14 @@ router.post('/requests/:id/reject', requirePermission('canApproveLeave'), withEm
 router.post('/requests/:id/cancel', c.cancelRequest);
 // Post-approval withdraw: self or in-scope approver; controller blocks closed-payrun days.
 router.post('/requests/:id/withdraw', withEmployeeScope('canViewEmployees'), c.withdrawRequest);
+
+// ── (b2) Feature 31 — IN-SERVICE leave encashment (operator) ─────────────────
+// List is F1-scoped (canViewEmployees sub-tree); approve/reject resolve the
+// canApproveLeave scope (excludes self — SoD) and 404 an out-of-scope target. The
+// approve debits the leave balance + queues a TAXABLE payout for the next pay run.
+router.get('/encashment', withEmployeeScope('canViewEmployees'), enc.adminList);
+router.post('/encashment/:id/approve', requirePermission('canApproveLeave'), withEmployeeScope('canApproveLeave'), enc.adminApprove);
+router.post('/encashment/:id/reject', requirePermission('canApproveLeave'), withEmployeeScope('canApproveLeave'), enc.adminReject);
 
 // ── (c) Leave calendar + reports (scope-filtered server-side) ────────────────
 router.get('/calendar', withEmployeeScope('canViewEmployees'), c.leaveCalendar);

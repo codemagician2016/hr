@@ -498,6 +498,7 @@ model Business {
   leavePolicyAssignments       LeavePolicyAssignment[]
   leaveBalances                LeaveBalance[]
   leaveTransactions            LeaveTransaction[]
+  leaveEncashmentRequests      LeaveEncashmentRequest[] // Feature 31 — in-service encashment
   compOffCredits               CompOffCredit[] // Feature 30 — comp-off expiry lots
   // Attendance / time
   shiftPatterns                ShiftPattern[]
@@ -6742,6 +6743,7 @@ model Employee {
   // on an isNightShift pattern (hard block, admin override audited).
   nightShiftEligible     Boolean                           @default(false)
   compOffCredits         CompOffCredit[] // Feature 30 — comp-off expiry lots
+  leaveEncashmentRequests LeaveEncashmentRequest[] // Feature 31 — in-service encashment
   punches                AttendancePunch[]
   shiftAssignments       ShiftAssignment[]
   rosterDays             RosterDay[] // Feature 29 — per-day roster cells
@@ -8860,6 +8862,7 @@ model LeaveType {
   policies       LeavePolicy[]
   balances       LeaveBalance[]
   txns           LeaveTransaction[]
+  encashRequests LeaveEncashmentRequest[] // Feature 31 — in-service encashment
 
   @@unique([businessId, code])
   @@index([businessId, countryCode, category])
@@ -8933,10 +8936,27 @@ model LeavePolicy {
   minTenureMonths          Int                     @default(0) // NZ annual leave vests at 12 months
   appliesToEmploymentTypes String? // CSV of EmploymentType
   genderRestriction        Gender? // maternity/paternity
-  // Encashment
+  // Encashment (EXIT — F&F, §10(10AA) exemption applies)
   encashOnExit             Boolean                 @default(false)
   encashFormula            String?
   maxEncashCap             Decimal?                @db.Decimal(8, 4) // cap encashable units (Feature 6 §3.2); NULL = unbounded
+  // Feature 31 — IN-SERVICE encashment (distinct from encashOnExit). The annual
+  // "encashment window" most IN factories/BPOs run alongside the leave year-end.
+  // FULLY TAXABLE under §17 (§10(10AA) is EXIT-ONLY); the per-day money basis is
+  // shared with F&F (fnf.perDay26 for BASIC_DA_26). maxEncashCap (exit) and
+  // encashMaxDaysPerYear (in-service) are SEPARATE caps. NZ tenants leave these inert.
+  encashInService          Boolean                 @default(false) // master opt-in for this type
+  encashBasis              EncashmentBasis          @default(BASIC_DA_26) // per-day money basis
+  encashMaxDaysPerYear     Decimal?                @db.Decimal(8, 4) // cap on days/policy-year (e.g. 15)
+  encashMinDaysPerRequest  Decimal?                @db.Decimal(8, 4) // floor (e.g. must encash >= 5)
+  encashMinBalanceAfter    Decimal?                @db.Decimal(8, 4) // must leave >= N days (statutory carry intent)
+  encashMaxRequestsPerYear Int                     @default(1)       // typically once/year
+  encashWindowOpenMonth    Int?                    // 1–12; NULL = always open (e.g. only in March)
+  encashWindowCloseMonth   Int?
+  encashPfWages            Boolean                 @default(false)   // §1.4 — usually NOT PF wages
+  encashEsiWages           Boolean                 @default(false)   // periodicity > 2 months => not ESI wages
+  encashPtWages            Boolean                 @default(true)    // part of month gross for PT slab
+  encashWorkflowId         String?                 // F10 approval chain; NULL => built-in default
   // Feature 30 — comp-off knobs (only meaningful for a COMP_OFF-type policy).
   // { expiryDays:60, requireApproval:true, autoEarn:true, minWorkedMinutesForCredit:240,
   //   fullDayMinutes:480, allowHalfDay:true, allowEncash:false,
@@ -9108,6 +9128,73 @@ enum LeaveTxnStatus {
 enum DayHalf {
   FIRST_HALF
   SECOND_HALF
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Feature 31 — IN-SERVICE leave encashment (distinct from F&F exit encashment).
+// An employee surrenders unused EL/PL days for cash WHILE in service; the request
+// debits the leave balance on APPROVE (a ENCASHMENT LeaveTransaction + encashed+/
+// closing−) and pays out via the next pay run as a positive, FULLY-TAXABLE earning.
+// The §10(10AA) exemption is EXIT-ONLY and is NEVER applied here.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum EncashmentBasis {
+  BASIC_DA_26 // (Basic+DA)/26 — reuses fnf.perDay26 (DEFAULT, market standard)
+  BASIC_30    // Basic/30
+  GROSS_30    // Gross/30
+}
+
+enum EncashmentStatus {
+  PENDING   // soft-hold placed; awaiting approval
+  APPROVED  // balance DEBITED; queued for next run (un-paid: payRunId NULL)
+  REJECTED  // hold released; no debit
+  CANCELLED // employee withdrew while PENDING; hold released
+  PAID      // run disbursed; payRunId + paidAmountMinor stamped (terminal)
+}
+
+/// The in-service encashment request. Mirrors LeaveTransaction's workflow fields +
+/// ExpenseClaim's payRunId/paidViaPayrollAmount payout-stamp fields (the two
+/// idempotency anchors: the balance debit at APPROVE, the cash stamp at DISBURSE).
+model LeaveEncashmentRequest {
+  id                  String           @id @default(uuid())
+  businessId          String
+  business            Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId          String
+  employee            Employee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveTypeId         String
+  leaveType           LeaveType        @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+  leavePolicyId       String? // the resolved policy at request time (audit)
+  periodCode          String // the LeaveBalance period the days come from ("2026-27")
+
+  // What & how much
+  days                Decimal          @db.Decimal(8, 4) // requested days
+  basis               EncashmentBasis // snapshot of policy.encashBasis at request
+  basicDaMonthlyMinor BigInt? // snapshot of last-drawn Basic+DA (paise) at APPROVE
+  perDayMinor         BigInt? // snapshot perDay at APPROVE (display)
+  amountMinor         BigInt? // floor(basicDa×days/26+0.5) — computed at APPROVE
+  reason              String?
+
+  // Workflow (mirror LeaveTransaction)
+  status              EncashmentStatus @default(PENDING)
+  approvalRequestId   String? // F10 ApprovalRequest link
+  appliedAt           DateTime?
+  decidedAt           DateTime?
+  decidedBy           String?
+  // The append-only ledger row that carried the balance debit (set at APPROVE).
+  encashmentTxnId     String? // → LeaveTransaction(txnType=ENCASHMENT)
+
+  // Payout stamp (set by the pay pass at DISBURSE — mirror ExpenseClaim.payRunId)
+  payRunId            String? // owning run; the idempotency anchor
+  paidAmountMinor     BigInt? // paise actually paid through the run (== amountMinor)
+  paidAt              DateTime?
+
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  version             Int              @default(0)
+
+  @@index([businessId, employeeId, status])
+  @@index([businessId, status, payRunId]) // pay-pass selection scan
+  @@index([businessId, leaveTypeId, periodCode])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -11771,6 +11858,7 @@ enum WorkflowModule {
   PAYRUN
   COMP_OFF // Feature 30 — comp-off EARN approval (manager green-lights a credit)
   SHIFT_SWAP // Feature 29 — shift-swap approval (manager green-lights a roster-cell trade)
+  LEAVE_ENCASHMENT // Feature 31 — in-service leave encashment request approval
 }
 
 model WorkflowStep {

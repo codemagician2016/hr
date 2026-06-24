@@ -15,6 +15,10 @@ const express = require('express');
 const router = express.Router();
 const { requireCustomer } = require('../../core/middleware/auth.middleware');
 const c = require('../controllers/meLeave.controller');
+// FLAG (Feature 31 — shared edit): in-service leave encashment ESS routes (raise /
+// list-mine / cancel). SELF_ONLY by construction — the employee is resolved from the
+// session inside the controller; no employeeId is accepted from any path/body.
+const enc = require('../controllers/encashment.controller');
 
 router.use(requireCustomer);
 
@@ -24,5 +28,10 @@ router.get('/history', c.listHistory);
 router.get('/requests', c.listRequests);
 router.post('/requests', c.applyForLeave);
 router.post('/requests/:id/cancel', c.cancelRequest);
+
+// Feature 31 — in-service leave encashment (ESS).
+router.get('/encashment', enc.meList);
+router.post('/encashment', enc.meCreate);
+router.post('/encashment/:id/cancel', enc.meCancel);
 
 module.exports = router;

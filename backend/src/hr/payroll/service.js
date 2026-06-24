@@ -43,6 +43,12 @@ const reimbursementPayout = require('../controllers/reimbursementPayout');
 // injected ArrearCycle lifecycle flag). MIRRORS loanRecovery/reimbursementPayout; lives
 // in a thin controller to avoid a circular require (arrears.service ⟶ service).
 const arrears = require('../controllers/arrearsPass');
+// SHARED-FILE EDIT (Feature 31 — FLAGGED): the in-service leave-encashment run-pass.
+// MIRRORS reimbursementPayout's idempotent stamp but emits a POSITIVE, FULLY-TAXABLE
+// EARNING (the F27 ARREAR_EARNINGS shape) — the encashed days were surrendered in
+// service, so §10(10AA) is NEVER applied. The leave-balance debit already happened at
+// APPROVE (consumers.encashment); this pass only settles cash. Wired at the SAME points.
+const encashmentPass = require('../controllers/encashmentPass');
 // Feature 14: a payroll run's entity country MUST equal the tenant country. The
 // engine still routes by the entity's countryCode (the correct per-run design);
 // this is a fail-closed TRIPWIRE at the run boundary so a quarantined / bad
@@ -487,6 +493,34 @@ function buildEmployeePayInput(rows) {
     }
   }
 
+  // SHARED-FILE EDIT (Feature 31 — FLAGGED): in-service leave encashment payout. ONE
+  // aggregated LEAVE_ENCASHMENT line per employee per run (Σ payable requests); the
+  // per-request breakdown lives on the requests (each stamped payRunId) for the payslip
+  // drill-down. This is the F27 ARREAR_EARNINGS shape — a CATEGORY.EARNING, CALC.FIXED,
+  // FIXED_REGARDLESS (the encashed days are already earned, NOT worked days; current
+  // attendance must never re-prorate them), FULLY TAXABLE under §17 (NO §10(10AA)). PF/ESI/
+  // PT honour the policy flags carried on the bundle (default not PF/ESI wages, IS PT wages
+  // — the settled IN position). persistComputedRun reads result.earnings back to stamp.
+  const enc = rows.leaveEncashmentPayout || null;
+  if (enc && enc.totalPayableMinor > 0) {
+    componentsForEngine.push({
+      code: 'LEAVE_ENCASHMENT',
+      name: 'Leave encashment',
+      category: CATEGORY.EARNING, // taxable earning (NOT a reimbursement)
+      calcMethod: CALC.FIXED,
+      amountMinor: enc.totalPayableMinor,
+      prorationPolicy: 'NONE',
+      lopBehavior: 'FIXED_REGARDLESS', // already earned; current attendance must not re-prorate
+      showOnPayslip: true,
+      _order: order,
+      isTaxable: true, // §17 salary — FULLY taxable (no §10(10AA))
+      isPfWages: enc.pfWages === true, // policy.encashPfWages (default false)
+      isEsiWages: enc.esiWages === true, // policy.encashEsiWages (default false)
+      isPtWages: enc.ptWages !== false, // policy.encashPtWages (default true)
+    });
+    order += 1;
+  }
+
   // ── Inputs (proration / LOP / overtime) from the frozen AttendancePayInput ──
   // M1 — gate on `!= null` (presence), NOT truthiness. A frozen ZERO (e.g.
   // payableDays=0 for a fully-LOP month) is meaningful and MUST reach the engine;
@@ -621,6 +655,10 @@ function buildEmployeePayInput(rows) {
     // persistComputedRun stamps them PAID + their payRunId off the run; reopen/cancel
     // unwind via arrears.service. Carries hasArrear so variance suppresses the swing.
     arrearInputs: arrearInputs || null,
+    // Feature 31 (FLAGGED) — the APPROVED encashment requests this run pays. The engine
+    // reported the LEAVE_ENCASHMENT taxable earning; persistComputedRun reconciles +
+    // stamps them PAID + payRunId off result.earnings; reopen/cancel unwind (no leave re-credit).
+    leaveEncashmentPayout: enc || null,
   };
 
   return { componentsForEngine, engineArgs, meta };
@@ -962,6 +1000,23 @@ async function loadRunRowBundles(businessId, payRun, db = prisma) {
     }
   }
 
+  // SHARED-FILE EDIT (Feature 31 — FLAGGED): in-service leave encashment paid via payroll.
+  // For each employee, select their APPROVED, un-paid encashment requests due in this
+  // period and attach them; buildEmployeePayInput emits one LEAVE_ENCASHMENT TAXABLE
+  // earning the engine inflates the §192/TDS base with, and persistComputedRun stamps the
+  // requests PAID. Like reimbursement, V1 pays only the REGULAR monthly run (an encashment
+  // should not surprise an OFF_CYCLE/BONUS/FNF run). MIGRATED selects nothing (a back-dated
+  // history run never auto-pays live requests, like loan/reimbursement).
+  if (!isMigrated && payRun.type === 'REGULAR') {
+    for (const b of bundles) {
+      const enc = await encashmentPass.selectPayableEncashments(db, {
+        businessId, employeeId: b.employee.id, periodEnd: payRun.periodEnd,
+        currentPayRunId: payRun.id,
+      });
+      if (enc.totalPayableMinor > 0) b.leaveEncashmentPayout = enc;
+    }
+  }
+
   return { entity, bundles };
 }
 
@@ -1091,6 +1146,9 @@ async function computeRun({ businessId, actorId, payRunId, freezeAttendance: doF
         // Feature 26 (FLAGGED) — the claims to stamp REIMBURSED from the engine's actual
         // EXPENSE_REIMBURSEMENT line (persistComputedRun applies the net-floor guard first).
         reimbursementPayout: meta.reimbursementPayout || null,
+        // Feature 31 (FLAGGED) — the encashment requests to reconcile + stamp PAID from
+        // the engine's LEAVE_ENCASHMENT line (persistComputedRun re-selects under lock).
+        leaveEncashmentPayout: meta.leaveEncashmentPayout || null,
         allAnomalies: lineAnoms, // persisted to errorJson so warnings survive re-read
       });
     }
@@ -1207,6 +1265,13 @@ async function persistComputedRun(tx, { businessId, payRun, actorId, now, inputH
   // CANCEL path in arrears.service, not the recompute path.)
   await arrears.unwindArrearStampsForRun(tx, { businessId, payRunId: payRun.id });
 
+  // SHARED-FILE EDIT (Feature 31 — FLAGGED): UNWIND any encashment PAID-stamps a PRIOR
+  // compute of THIS run wrote (reset PAID → APPROVED + clear payRunId/paidAmountMinor)
+  // BEFORE re-applying. Same idempotency model as reimbursement: a recompute never
+  // double-pays. Does NOT re-credit the leave balance — the surrender stands (the debit
+  // happened at APPROVE); the request simply rides this run again on the re-apply below.
+  await encashmentPass.unwindForRun(tx, { businessId, payRunId: payRun.id });
+
   let totGross = 0, totDed = 0, totNet = 0, totEr = 0;
   for (const ln of lines) {
     const r = ln.result;
@@ -1250,6 +1315,27 @@ async function persistComputedRun(tx, { businessId, payRun, actorId, now, inputH
         r.reimbursementsMinor = (r.reimbursementsMinor || 0) + delta;
         r.netMinor = r.netMinor + delta;
       }
+    }
+
+    // SHARED-FILE EDIT (Feature 31 — FLAGGED): RECONCILE the encashment payout to ONE
+    // locked request set BEFORE stamping. The engine priced the LEAVE_ENCASHMENT taxable
+    // earning at COMPUTE off a non-tx select (ln.leaveEncashmentPayout.requests). We
+    // RE-SELECT under lock (FOR UPDATE) in THIS persist tx and intersect: the authoritative
+    // set is the priced requests that are STILL lockable. We do NOT reprice the taxable
+    // earning post-engine (its TDS/PF/ESI are already baked into the engine result, unlike a
+    // post-tax reimbursement) — we only stamp the intersection, so we never pay a request
+    // that was settled by another run. On a clean recompute the unwind above re-opened this
+    // run's own stamps, so the lock re-select reproduces the priced set exactly (paid ==
+    // the engine figure). A request that dropped out stays APPROVED for the next run.
+    let encReconciled = null;
+    if (ln.leaveEncashmentPayout && ln.leaveEncashmentPayout.requests && ln.leaveEncashmentPayout.requests.length) {
+      const locked = await encashmentPass.selectPayableEncashments(tx, {
+        businessId,
+        employeeId: ln.employeeId,
+        periodEnd: payRun.periodEnd,
+        currentPayRunId: payRun.id,
+      });
+      encReconciled = encashmentPass.reconcilePayout(ln.leaveEncashmentPayout.requests, locked.requests);
     }
 
     const lineRow = await tx.payRunLine.create({
@@ -1358,6 +1444,21 @@ async function persistComputedRun(tx, { businessId, payRun, actorId, now, inputH
         paidAt: now,
         actorId,
         claims: reimbReconciled.claims,
+      });
+    }
+
+    // SHARED-FILE EDIT (Feature 31 — FLAGGED): STAMP the encashment payout on EXACTLY the
+    // reconciled priced∩locked request set (encReconciled), each its OWN snapshot amount
+    // (paid == amount). The lock taken at reconcile is STILL HELD in this tx, so no
+    // concurrent run can settle these requests between the price and this stamp. The unwind
+    // above released this run's own prior stamps, so a clean recompute re-stamps exactly
+    // once. NO leave-balance touch — the balance was already debited at APPROVE.
+    if (encReconciled && encReconciled.requests.length) {
+      await encashmentPass.applyPayout(tx, {
+        businessId,
+        payRunId: payRun.id,
+        paidAt: now,
+        requests: encReconciled.requests,
       });
     }
 
@@ -2730,6 +2831,11 @@ async function cancelRun({ businessId, actorId, payRunId, reason }) {
   // (REIMBURSED → APPROVED, payRunId/paidViaPayrollAmount cleared) so the next regular
   // run pays them. No-op when the run never computed / paid no reimbursements.
   await reimbursementPayout.unwindForRun(prisma, { businessId, payRunId });
+  // Feature 31 (FLAGGED) — release any encashment requests this run stamped PAID
+  // (→ APPROVED, payRunId/paidAmountMinor cleared) so the next regular run pays them.
+  // Does NOT re-credit the leave balance — the surrender stands (debited at APPROVE).
+  // No-op when the run never computed / paid no encashments.
+  await encashmentPass.unwindForRun(prisma, { businessId, payRunId });
   // Feature 27 (FLAGGED) — a cancelled run FULLY releases its injected arrear cycles
   // (→ COMPUTED, un-bound) so a later run can re-approve + pay the arrear; also remove the
   // orphaned PayRunInputItem(kind=ARREAR) rows this run carried. No-op if it had no arrears.
@@ -2780,6 +2886,10 @@ async function reopenRun({ businessId, actorId, payRunId }) {
     // (REIMBURSED → APPROVED, payRunId/paidViaPayrollAmount cleared) so reopening
     // cleanly undoes the payout; a later recompute re-selects the now-APPROVED claims.
     await reimbursementPayout.unwindForRun(tx, { businessId, payRunId });
+    // Feature 31 (FLAGGED) — release any encashment requests this run stamped PAID
+    // (→ APPROVED, payRunId/paidAmountMinor cleared) so reopening cleanly undoes the
+    // payout; a later recompute re-selects the now-APPROVED requests. No leave re-credit.
+    await encashmentPass.unwindForRun(tx, { businessId, payRunId });
     // Feature 27 (FLAGGED) — revert any arrear PAID-stamps this run wrote (→ APPROVED).
     // The cycles stay bound to the run (still INJECT, still payRunId) so a recompute
     // re-stamps them exactly once; a full release only happens on CANCEL.

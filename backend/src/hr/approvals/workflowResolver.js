@@ -70,6 +70,13 @@ const BUILT_IN_DEFAULT = Object.freeze({
   PROFILE_CHANGE: [
     step(1, 'HR', { name: 'HR', slaHours: 72, onTimeoutAction: 'ESCALATE' }),
   ],
+  // Feature 31 — IN-SERVICE leave encashment. Manager green-lights the surrender of
+  // days for cash (it debits the leave balance + queues a TAXABLE payout), escalating
+  // up the chain after 48h. A tenant can override by publishing a real
+  // LEAVE_ENCASHMENT WorkflowDefinition (e.g. add an HR/Finance step).
+  LEAVE_ENCASHMENT: [
+    step(1, 'REPORTING_MANAGER', { name: 'Manager', approverRefId: '1', slaHours: 48, onTimeoutAction: 'ESCALATE' }),
+  ],
 });
 
 // Generic fallback for any module without a bespoke built-in: manager approves,
