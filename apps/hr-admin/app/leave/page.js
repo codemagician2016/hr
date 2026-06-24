@@ -27,6 +27,7 @@ import { get, post } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, employeeLabel, ServerPagination } from '@/lib/ui';
 import { useTenantCountries } from '@/lib/useTenantCountries';
 import { InfoTip } from '@/lib/widgets';
+import EmployeeSearchSelect from '@/components/EmployeeSearchSelect';
 
 const TABS = [
   { key: 'requests', label: 'Requests' },
@@ -57,72 +58,19 @@ function qty(v) {
 
 // ─── Shared employee picker (search → GET /employees?q=) ─────────────────────
 
-function EmployeePicker({ value, onChange, label = 'Employee', placeholder = 'Search by name or code…' }) {
-  const [q, setQ] = useState('');
-  const [results, setResults] = useState([]);
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    if (!q.trim()) {
-      setResults([]);
-      return undefined;
-    }
-    let alive = true;
-    const t = setTimeout(() => {
-      get('/api/hr/employees', { q: q.trim(), pageSize: 8 })
-        .then((res) => {
-          if (alive) setResults(asList(res).slice(0, 8));
-        })
-        .catch(() => {
-          if (alive) setResults([]);
-        });
-    }, 250);
-    return () => {
-      alive = false;
-      clearTimeout(t);
-    };
-  }, [q]);
-
+function EmployeePicker({ value, onChange, label = 'Employee', placeholder = 'Search by name, code or email…' }) {
+  // Thin wrapper over the reusable EmployeeSearchSelect: keeps this page's
+  // { value: employee|null, onChange: (employee|null) } contract while giving
+  // the operator the click-to-browse, filter-as-you-type directory list.
   return (
-    <div className="relative">
-      <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="leave-emp-picker">
-        {label}
-      </label>
-      <input
-        id="leave-emp-picker"
-        type="text"
-        value={value ? employeeLabel(value) : q}
-        onChange={(e) => {
-          onChange(null);
-          setQ(e.target.value);
-          setOpen(true);
-        }}
-        onFocus={() => setOpen(true)}
-        placeholder={placeholder}
-        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm"
-        autoComplete="off"
-      />
-      {open && results.length > 0 && !value && (
-        <ul className="absolute z-10 mt-1 w-full max-h-56 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg text-sm">
-          {results.map((emp) => (
-            <li key={emp.id}>
-              <button
-                type="button"
-                onClick={() => {
-                  onChange(emp);
-                  setOpen(false);
-                  setQ('');
-                }}
-                className="block w-full text-left px-3 py-2 hover:bg-gray-50"
-              >
-                <span className="font-medium text-gray-900">{employeeLabel(emp)}</span>
-                {emp.code && <span className="text-gray-400 ml-2">{emp.code}</span>}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+    <EmployeeSearchSelect
+      label={label}
+      tip="Click to browse the directory, then filter by name, code or work email."
+      value={value?.id || ''}
+      selectedLabel={value ? employeeLabel(value) : ''}
+      onSelect={(emp) => onChange(emp || null)}
+      placeholder={placeholder}
+    />
   );
 }
 

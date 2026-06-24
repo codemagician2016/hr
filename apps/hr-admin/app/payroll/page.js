@@ -28,6 +28,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Spinner, ErrorBanner, PrimaryButton, TextInput, DateField, Modal, ModalActions, formatAdminDate } from '@hr/ui';
 import { get, post, downloadFile } from '@/lib/api';
 import { DataTable, PageHeader, StatusBadge, ActionButton, employeeLabel, moneyish } from '@/lib/ui';
+import EmployeeSearchSelect from '@/components/EmployeeSearchSelect';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
 import { InfoTip } from '@/lib/widgets';
 
@@ -291,52 +292,18 @@ const ONE_TIME_KINDS = [
 ];
 const KIND_LABEL = Object.fromEntries(ONE_TIME_KINDS.map((k) => [k.value, k.label.split(' (')[0]]));
 
-// Compact employee search picker for the one-time editor (debounced).
+// Compact employee search picker for the one-time editor. Click to browse the
+// directory + filter by name/code/email. Thin wrapper over the reusable
+// EmployeeSearchSelect; keeps this editor's { selected, onSelect } contract
+// (onSelect receives the full employee object, or null on clear).
 function MiniEmployeePicker({ selected, onSelect }) {
-  const [q, setQ] = useState('');
-  const [results, setResults] = useState([]);
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    if (!q.trim()) { setResults([]); return undefined; }
-    let alive = true;
-    const t = setTimeout(() => {
-      get('/api/hr/employees', { q: q.trim(), pageSize: 8 })
-        .then((res) => { if (alive) setResults((res?.items || res || []).slice(0, 8)); })
-        .catch(() => { if (alive) setResults([]); });
-    }, 250);
-    return () => { alive = false; clearTimeout(t); };
-  }, [q]);
-
-  if (selected) {
-    return (
-      <div className="flex items-center gap-2">
-        <span className="px-2 py-1 rounded-lg bg-gray-100 text-xs font-medium text-gray-800">{employeeLabel(selected)}</span>
-        <button type="button" onClick={() => onSelect(null)} className="text-xs text-gray-400 hover:text-gray-700">Change</button>
-      </div>
-    );
-  }
   return (
-    <div className="relative">
-      <input
-        value={q}
-        onChange={(e) => { setQ(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
-        placeholder="Search employee…"
-        autoComplete="off"
-        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-      />
-      {open && results.length > 0 && (
-        <ul className="absolute z-20 mt-1 w-full max-h-52 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg text-sm">
-          {results.map((emp) => (
-            <li key={emp.id}>
-              <button type="button" onClick={() => { onSelect(emp); setOpen(false); setQ(''); }}
-                className="w-full text-left px-3 py-2 hover:bg-gray-50">{employeeLabel(emp)}</button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+    <EmployeeSearchSelect
+      value={selected?.id || ''}
+      selectedLabel={selected ? employeeLabel(selected) : ''}
+      onSelect={(emp) => onSelect(emp || null)}
+      placeholder="Search employee by name, code or email…"
+    />
   );
 }
 
