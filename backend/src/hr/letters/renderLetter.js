@@ -115,39 +115,64 @@ async function renderLetter({
 
   const page0 = doc.getPage(0);
 
-  // ── helper: geometry for a page, honouring rotation + MediaBox origin ──────
-  // page.getSize() returns the UN-rotated media box DIMENSIONS only — it discards
-  // the MediaBox lower-left ORIGIN. Real-world letterheads exported from design
-  // tools (Canva/InDesign/Word) frequently carry a non-zero MediaBox origin (e.g.
-  // [50 30 645 872] instead of [0 0 595 842]). The letterhead's OWN printed
-  // content is laid out relative to that origin, but pdf-lib's drawText places our
-  // body in absolute page space — so if we ignore the origin our body lands offset
-  // by (−x0, −y0) and SCATTERS over the stationery (the reported bug). We therefore
-  // read the real MediaBox and translate every drawn rect by (x0, y0).
+  // ── helper: geometry for a page, honouring rotation + the VISIBLE box ───────
+  // Two coordinate spaces matter:
+  //   • MEDIA space — the page's own (unrotated) coordinate system. pdf-lib's
+  //     drawText/drawImage place content here. The MediaBox lower-left ORIGIN is
+  //     frequently non-zero on real design-tool exports (e.g. [50 30 645 872]),
+  //     and a CropBox often insets the visible page further (bleed trim). We read
+  //     the VISIBLE box = CropBox ∩ MediaBox so the writing area maps onto what the
+  //     reader actually sees, not the untrimmed media.
+  //   • VISIBLE space — an upright page exactly as a human sees it: origin at the
+  //     visible bottom-left, +x to the right, +y up, dimensions (visW × visH) with
+  //     width/height SWAPPED for a 90°/270° /Rotate. Our normalized top-left layout
+  //     rects live here.
   //
-  // When a page is rotated 90°/270° its VISUAL width/height swap. We work in the
-  // page's own (unrotated) coordinate space and let the viewer apply the rotation,
-  // so the visible-area dimensions we wrap text to must account for that swap.
+  // The page /Rotate is applied by the viewer to EVERYTHING on the page, our drawn
+  // text included. So we must (a) lay out + wrap in visible space, then (b) map each
+  // visible point back into media space AND draw the glyphs pre-rotated by −R, so
+  // the viewer's +R rotation brings them upright. The previous engine drew text
+  // axis-aligned in media space — on a rotated letterhead the viewer then spun the
+  // body sideways/upside-down, overflowing the page and overlapping the stationery
+  // (the reported "scrambled glyphs scattered over the letterhead" bug).
   function geom(page) {
     const { width: mw, height: mh } = page.getSize();
-    const { x0, y0 } = mediaBoxOrigin(page);
+    const vb = visibleBox(page, mw, mh); // {bx, by, mw, mh} in MEDIA space
     const rot = ((page.getRotation().angle % 360) + 360) % 360;
     const swapped = rot === 90 || rot === 270;
     return {
       page,
-      // MediaBox lower-left origin (absolute page-space offset to add to every draw).
-      x0, y0,
+      // visible box lower-left origin + media dimensions (MEDIA space).
+      bx: vb.bx, by: vb.by, mw: vb.mw, mh: vb.mh,
       // visible (rotation-applied) dimensions used for normalized→absolute math
-      visW: swapped ? mh : mw,
-      visH: swapped ? mw : mh,
+      visW: swapped ? vb.mh : vb.mw,
+      visH: swapped ? vb.mw : vb.mh,
       rot,
     };
   }
 
-  // Convert a normalized top-left rect → absolute bottom-left pdf-lib coords,
-  // translated by the page's MediaBox lower-left origin (g.x0/g.y0) so a non-zero-
-  // origin letterhead still lands the body inside the writing area.
-  // absY_bottomLeft = y0 + visH − (yNorm·visH) − heightPt.   (Gotcha #1)
+  // Map a VISIBLE-space point (vx from visible left, vy from visible bottom — both
+  // in points, y-UP) to the MEDIA-space draw coordinates pdf-lib expects, plus the
+  // text rotation (degrees) that keeps glyphs upright on the page the reader sees.
+  // These four cases are calibrated against the viewer's applied /Rotate (verified
+  // by round-tripping known points through pdf.js' viewport transform); the upright
+  // text angle equals the page rotation R, and the coordinate map inverts R so a
+  // 90°/180°/270° letterhead lands the body upright inside the visible writing area
+  // instead of sideways/upside-down and overflowing (the scramble bug).
+  //   mw/mh are the MEDIA (unrotated) width/height of the visible box.
+  function place(g, vx, vy) {
+    const { bx, by, mw, mh, rot } = g;
+    switch (rot) {
+      case 90:  return { x: bx + (mw - vy), y: by + vx,        angle: 90 };
+      case 180: return { x: bx + (mw - vx), y: by + (mh - vy), angle: 180 };
+      case 270: return { x: bx + vy,        y: by + (mh - vx), angle: 270 };
+      default:  return { x: bx + vx,        y: by + vy,        angle: 0 };
+    }
+  }
+
+  // Convert a normalized top-left rect → a rect in VISIBLE space (origin bottom-left
+  // of the visible page, +y up). x/yBottom/yTop/w/h are all in visible points. The
+  // caller turns these into media-space draws via place().
   function absRect(g, rect) {
     const xN = clamp01(num(rect.x, 0));
     const yN = clamp01(num(rect.y, 0));
@@ -155,21 +180,23 @@ async function renderLetter({
     const hN = clamp01(num(rect.h, 0));
     const wPt = wN * g.visW;
     const hPt = hN * g.visH;
-    const xPt = g.x0 + xN * g.visW;
-    const yTopPt = yN * g.visH;
+    const xPt = xN * g.visW; // from visible left
+    const yTopPt = g.visH - yN * g.visH; // top edge from visible bottom
     return {
       x: xPt,
-      yTop: g.y0 + g.visH - yTopPt, // top edge in bottom-left origin
-      yBottom: g.y0 + g.visH - yTopPt - hPt, // bottom edge in bottom-left origin
+      yTop: yTopPt, // top edge (visible, from bottom)
+      yBottom: yTopPt - hPt, // bottom edge (visible, from bottom)
       w: wPt,
       h: hPt,
     };
   }
 
-  // Draw a single line of text, defensively (drawText throws on unmappable
-  // glyphs in standard fonts; with an embedded TTF subset every codepoint in the
-  // bundle maps, but we still guard align + width).
-  function drawLine(page, text, x, baselineY, size, useFont, align, maxW, color) {
+  // Draw a single line of text in VISIBLE space (x from visible left, baselineY from
+  // visible bottom). We compute the alignment offset, map to media coords, and draw
+  // the glyphs pre-rotated so they read upright on a rotated letterhead. Defensive:
+  // drawText throws on unmappable glyphs in standard fonts; with an embedded TTF
+  // subset every codepoint maps, but we still guard align + width.
+  function drawLine(g, text, x, baselineY, size, useFont, align, maxW, color) {
     const t = String(text == null ? '' : text);
     if (!t) return;
     let drawX = x;
@@ -178,7 +205,12 @@ async function renderLetter({
       if (align === 'right') drawX = x + Math.max(0, maxW - tw);
       else drawX = x + Math.max(0, (maxW - tw) / 2);
     }
-    page.drawText(t, { x: drawX, y: baselineY, size, font: useFont, color: color || rgb(0.1, 0.1, 0.1) });
+    const p = place(g, drawX, baselineY);
+    g.page.drawText(t, {
+      x: p.x, y: p.y, size, font: useFont,
+      color: color || rgb(0.1, 0.1, 0.1),
+      rotate: degrees(p.angle),
+    });
   }
 
   // ── 1) FIELD ANCHORS on page 1 (date / refNo / authority / subject) ────────
@@ -195,7 +227,7 @@ async function renderLetter({
     const align = rect.align || 'left';
     // Anchor text on the rect's first-line baseline (top of rect, minus ascent).
     const baseline = r.yTop - size;
-    drawLine(g.page, value, r.x, baseline, size, useFont, align, r.w);
+    drawLine(g, value, r.x, baseline, size, useFont, align, r.w);
   }
 
   // ── 2) WORD-WRAP + PAGINATE the body within the writing area ───────────────
@@ -226,11 +258,13 @@ async function renderLetter({
       const { width, height } = page0.getSize();
       added = doc.addPage([width, height]);
       added.setRotation(page0.getRotation());
-      // Mirror page 1's MediaBox ORIGIN so the body lands in the same place on a
-      // blank continuation as it does on the stationery (a non-zero-origin
-      // letterhead must not shift the body between pages).
+      // Mirror page 1's MediaBox ORIGIN + CropBox so the body lands in the same
+      // place on a blank continuation as it does on the stationery (a non-zero-
+      // origin / cropped letterhead must not shift the body between pages).
       const { x0, y0 } = mediaBoxOrigin(page0);
       if (x0 || y0) added.setMediaBox(x0, y0, width, height);
+      const crop = readBox(page0, 'CropBox');
+      if (crop) added.setCropBox(crop.llx, crop.lly, crop.urx - crop.llx, crop.ury - crop.lly);
     }
     return added;
   }
@@ -246,25 +280,32 @@ async function renderLetter({
       cursorY = area.yTop - size;
     }
     if (line.text) {
-      drawLine(g.page, line.text, area.x, cursorY, size, font, bodyAlign, area.w);
+      drawLine(g, line.text, area.x, cursorY, size, font, bodyAlign, area.w);
     }
     cursorY -= lineHeight;
   }
 
   // ── 3) WATERMARK (diagonal overlay across every page) ──────────────────────
+  // Anchored + rotated in VISIBLE space so it stays a centred 45° diagonal on the
+  // page the reader sees, even when the letterhead is /Rotate'd. We combine the 45°
+  // watermark tilt with the page rotation so the glyphs are not spun off-axis.
   if (o.watermark) {
     const wmText = String(o.watermark);
     for (const p of doc.getPages()) {
       const gp = geom(p);
       const wmSize = Math.max(28, Math.floor(gp.visW / 9));
       const tw = safeWidth(fontBold, wmText, wmSize);
+      // start point in visible space: left of centre, on the vertical midline.
+      const vx = (gp.visW - tw * 0.7) / 2;
+      const vy = gp.visH / 2;
+      const anchor = place(gp, vx, vy);
       p.drawText(wmText, {
-        x: gp.x0 + (gp.visW - tw * 0.7) / 2,
-        y: gp.y0 + gp.visH / 2,
+        x: anchor.x,
+        y: anchor.y,
         size: wmSize,
         font: fontBold,
         color: rgb(0.85, 0.1, 0.1),
-        rotate: degrees(45),
+        rotate: degrees((anchor.angle + 45) % 360),
         opacity: 0.18,
       });
     }
@@ -284,11 +325,18 @@ async function renderLetter({
       const r = absRect(gp, fieldRects.signature);
       // fit the image inside the box preserving aspect ratio
       const dims = fitInside(png.width, png.height, r.w, r.h);
+      // image bottom-left corner in VISIBLE space (centred inside the box), mapped
+      // to media coords; drawImage rotates about that corner, so the page-rotation
+      // angle keeps the signature upright on a rotated letterhead.
+      const vx = r.x + (r.w - dims.w) / 2;
+      const vy = r.yBottom + (r.h - dims.h) / 2;
+      const a = place(gp, vx, vy);
       sigPage.drawImage(png, {
-        x: r.x + (r.w - dims.w) / 2,
-        y: r.yBottom + (r.h - dims.h) / 2,
+        x: a.x,
+        y: a.y,
         width: dims.w,
         height: dims.h,
+        rotate: degrees(a.angle),
       });
     } catch (_e) {
       // A non-PNG / corrupt signature must not sink the whole letter.
@@ -339,22 +387,49 @@ function wrapBody(bodyText, font, size, maxWidth) {
 }
 
 // ── small utils ───────────────────────────────────────────────────────────────
-// Read a page's MediaBox lower-left ORIGIN (x0, y0). pdf-lib's page.getSize()
-// returns width/height only, so we go to the MediaBox dictionary entry. A page
-// without an explicit MediaBox (inherited) or any read error defaults to (0, 0)
-// — the legacy assumption, kept safe.
-function mediaBoxOrigin(page) {
+// Read a named page box ([llx lly urx ury]) from the page dict. pdf-lib's
+// page.getSize() returns the MediaBox width/height only, so for the ORIGIN and for
+// the CropBox we read the dictionary entries directly. Returns null when absent /
+// unreadable so callers can fall back.
+function readBox(page, name) {
   try {
     const node = page && page.node;
-    const mb = node && typeof node.MediaBox === 'function' ? node.MediaBox() : null;
-    if (mb && typeof mb.asArray === 'function') {
-      const arr = mb.asArray();
-      const x0 = arr[0] && typeof arr[0].asNumber === 'function' ? arr[0].asNumber() : Number(arr[0]) || 0;
-      const y0 = arr[1] && typeof arr[1].asNumber === 'function' ? arr[1].asNumber() : Number(arr[1]) || 0;
-      return { x0: Number.isFinite(x0) ? x0 : 0, y0: Number.isFinite(y0) ? y0 : 0 };
-    }
-  } catch (_e) { /* fall through to origin */ }
+    const accessor = node && typeof node[name] === 'function' ? node[name]() : null;
+    const mb = accessor && typeof accessor.asArray === 'function' ? accessor : null;
+    if (!mb) return null;
+    const arr = mb.asArray();
+    const n = (v) => (v && typeof v.asNumber === 'function' ? v.asNumber() : Number(v));
+    const llx = n(arr[0]); const lly = n(arr[1]); const urx = n(arr[2]); const ury = n(arr[3]);
+    if (![llx, lly, urx, ury].every(Number.isFinite)) return null;
+    return { llx: Math.min(llx, urx), lly: Math.min(lly, ury), urx: Math.max(llx, urx), ury: Math.max(lly, ury) };
+  } catch (_e) { return null; }
+}
+
+// Read a page's MediaBox lower-left ORIGIN (x0, y0). A page without an explicit
+// MediaBox (inherited) or any read error defaults to (0, 0) — kept safe.
+function mediaBoxOrigin(page) {
+  const mb = readBox(page, 'MediaBox');
+  if (mb) return { x0: mb.llx, y0: mb.lly };
   return { x0: 0, y0: 0 };
+}
+
+// The VISIBLE box of a page in MEDIA coords: CropBox clipped to MediaBox when a
+// CropBox is present (real exports inset a bleed-trim CropBox), else the MediaBox.
+// Returns lower-left origin (bx, by) + dimensions (mw, mh). Falls back to the
+// page.getSize() dimensions at origin (0,0) when boxes are unreadable.
+function visibleBox(page, sizeW, sizeH) {
+  const media = readBox(page, 'MediaBox') || { llx: 0, lly: 0, urx: sizeW, ury: sizeH };
+  let box = media;
+  const crop = readBox(page, 'CropBox');
+  if (crop) {
+    // intersect CropBox with MediaBox (PDF spec: CropBox is clipped to MediaBox)
+    const llx = Math.max(crop.llx, media.llx);
+    const lly = Math.max(crop.lly, media.lly);
+    const urx = Math.min(crop.urx, media.urx);
+    const ury = Math.min(crop.ury, media.ury);
+    if (urx > llx && ury > lly) box = { llx, lly, urx, ury };
+  }
+  return { bx: box.llx, by: box.lly, mw: box.urx - box.llx, mh: box.ury - box.lly };
 }
 function toUint8(b) {
   if (b instanceof Uint8Array) return b;
