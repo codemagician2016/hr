@@ -44,8 +44,11 @@ function round2(n) { return Math.round(n * 100) / 100; }
  * Roll up one employee's daily Attendance rows into the AttendancePayInput shape.
  * PURE given the rows (no DB). Exported for unit reuse/tests.
  *
- * H3 — payableDays invariant: payableDays = calendarDays − Σ LOP. This is only
- * SAFE when the employee's working days are defined by attendance rows (a
+ * H3 — payableDays invariant: payableDays = standardDays − Σ LOP, where
+ * standardDays is the basis-specific proration denominator (calendar for
+ * CALENDAR_DAYS, 30 for FIXED_30, calendar−weekoff−holiday for WORKING_DAYS). This
+ * keeps the numerator and denominator the engine prorates over on ONE basis. It is
+ * only SAFE when the employee's working days are defined by attendance rows (a
  * scheduled employee always has a row per day — recompute writes ABSENT for every
  * scheduled no-punch day). An employee with ZERO Attendance rows in the period is
  * open-attendance / no-data: we must NOT silently pay a full month off no signal.
@@ -97,7 +100,7 @@ function rollupEmployee(rows, periodStart, periodEnd, opts = {}) {
   lopDays = round4(lopDays);
   lwpDays = round4(lwpDays);
   absentDays = round4(absentDays);
-  let payableDays = round4(calendarDays - lopDays);
+
   // standardDays = the proration denominator the engine will use. Default to the
   // calendar length (India CALENDAR_DAYS basis); the caller may freeze a different
   // basis (FIXED_30 → 30, WORKING_DAYS → calendar−weekoff−holiday) via opts.basis
@@ -110,14 +113,31 @@ function rollupEmployee(rows, periodStart, periodEnd, opts = {}) {
     standardDays = round4(calendarDays - weeklyOffDays - holidayDays);
   }
 
-  // H3 — no attendance rows at all: open-attendance / no-data. Pay calendar days
-  // (lopDays is already 0 here) but flag it loudly so it isn't a silent full-pay.
+  // F16 review fix (HIGH×2) — payableDays MUST share the SAME basis as standardDays,
+  // i.e. the SAME denominator the engine prorates over. The old code set
+  // payableDays = calendarDays − lopDays UNCONDITIONALLY (a CALENDAR numerator) while
+  // standardDays followed the basis (30 for FIXED_30; calendar−weekoff−holiday for
+  // WORKING_DAYS). A calendar numerator over a smaller denominator made payableDays
+  // ≥ standardDays even WITH LOP, so engine.applyProration's
+  // `if (payable >= standard) return fullMinor` CLAMPED LOP to zero (WORKING_DAYS:
+  // absent employee paid in full, ~15% overpay) or systematically under-charged it
+  // (FIXED_30: prorated 31−lop / 30 instead of 30−lop / 30). Deriving
+  // payableDays = standardDays − lopDays puts numerator and denominator on ONE basis:
+  //   CALENDAR_DAYS → calendarDays − lop  (standardDays == calendarDays; unchanged)
+  //   WORKING_DAYS  → workingDays  − lop  (workingDays = calendar − weekoff − holiday)
+  //   FIXED_30      → 30 − lop            (paise-exact 'paid = 30 − LOP')
+  // Floor at 0 (a full-LOP month pays nothing; never a negative numerator).
+  let payableDays = round4(Math.max(0, standardDays - lopDays));
+
+  // H3 — no attendance rows at all: open-attendance / no-data. Pay the full standard
+  // basis (lopDays is already 0 here) but flag it loudly so it isn't a silent
+  // full-pay. payableDays == standardDays ⇒ no proration applied.
   if (rows.length === 0) {
-    payableDays = round4(calendarDays);
+    payableDays = round4(standardDays);
     anomalies.push({
       code: 'NO_ATTENDANCE_DATA',
       severity: 'WARNING',
-      message: `No Attendance rows in [${utcDay(periodStart).toISOString().slice(0, 10)}, ${utcDay(periodEnd).toISOString().slice(0, 10)}]; payableDays defaulted to calendarDays (${calendarDays}). Verify the employee is open-attendance (no schedule) and not a missed derivation.`,
+      message: `No Attendance rows in [${utcDay(periodStart).toISOString().slice(0, 10)}, ${utcDay(periodEnd).toISOString().slice(0, 10)}]; payableDays defaulted to the standard basis (${round4(standardDays)} day(s)). Verify the employee is open-attendance (no schedule) and not a missed derivation.`,
     });
   }
 
