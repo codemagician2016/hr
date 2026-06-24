@@ -165,3 +165,29 @@ export function submitTrip(id) {
 export function cancelTrip(id) {
   return apiPost(`/api/hr/me/expenses/trips/${id}/cancel`);
 }
+
+// ── Cycle 1 (ESS) — Company Directory ─────────────────────────────────────────
+// A tenant-wide, searchable, paginated colleague directory exposing ONLY safe
+// work/professional fields (name/photo/designation/department/work email/work
+// phone/entity/location/manager). The backend is the privacy boundary — personal
+// email/phone, address, DOB, salary and any HR-gated field are never returned.
+// `query` is a pre-built ?page=&pageSize=&q=&departmentId=&entityId= string.
+export function fetchDirectory(query = '') {
+  return apiGet(`/api/hr/me/directory${query}`);
+}
+// Distinct department / entity / location facets for the filter bar (no PII).
+export function fetchDirectoryFilters() {
+  return apiGet('/api/hr/me/directory/filters');
+}
+// A colleague's safe work profile (reporting line + "in <department>" + F19 org link).
+export function fetchColleague(id) {
+  return apiGet(`/api/hr/me/directory/${id}`);
+}
+// The signed-in employee's OWN directory opt-out state (work-phone sharing).
+export function fetchMyDirectoryPreferences() {
+  return apiGet('/api/hr/me/directory/preferences');
+}
+// Toggle the caller's OWN work-phone opt-out (self-only write).
+export function updateMyDirectoryPreferences(body) {
+  return apiPatch('/api/hr/me/directory/preferences', body);
+}

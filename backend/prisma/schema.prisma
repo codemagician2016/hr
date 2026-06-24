@@ -6649,6 +6649,13 @@ model Employee {
   // `channels` map = router's default cascade. This NEVER bypasses the existing
   // budget/opt-out engine — it only narrows the cascade further (best-effort, additive).
   notifyPrefs   Json?
+  // Cycle 1 — ESS company directory (FLAG: additive). Per-employee opt-out for the
+  // OPTIONAL shareable directory fields (the work/office phone). When true, the
+  // colleague directory hides this employee's office phone from other employees —
+  // never their name/designation/department/work email (those stay visible so the
+  // person is still findable). Defaults to false (work phone shown). This governs
+  // ONLY the directory surface; it never affects HR/operator reads.
+  directoryHidePhone Boolean @default(false)
   isActive      Boolean  @default(true)
   // Lifecycle (denormalized current values; history in EmploymentRecord)
   status        EmployeeStatus @default(PRE_HIRE)

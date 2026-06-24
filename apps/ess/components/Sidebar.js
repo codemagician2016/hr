@@ -48,6 +48,8 @@ const ICONS = {
   support: 'M12 3a9 9 0 100 18 9 9 0 000-18zM12 8a4 4 0 100 8 4 4 0 000-8zM5.6 5.6l3.2 3.2M15.2 15.2l3.2 3.2M18.4 5.6l-3.2 3.2M8.8 15.2l-3.2 3.2',
   // Engagement Cycle 1 — News feed (megaphone)
   news: 'M3 11l14-7v16l-14-7zM3 11v4a2 2 0 002 2h1l1 4',
+  // Cycle 1 — Company Directory: an open address-book / contact card
+  directory: 'M4 19.5A2.5 2.5 0 016.5 17H20M4 4.5A2.5 2.5 0 016.5 2H20v15H6.5A2.5 2.5 0 004 19.5zM12 7a2 2 0 110 4 2 2 0 010-4zM8.5 14a3.5 3.5 0 017 0',
 };
 
 function Icon({ name, className }) {
@@ -67,6 +69,9 @@ const NAV = [
   // badge sourced from /api/hr/me/engagement/feed/unread-count.
   { type: 'item', href: '/feed', label: 'News', icon: 'news', badgeKey: 'news' },
   { type: 'item', href: '/profile', label: 'Personal Information', icon: 'user' },
+  // Cycle 1 — Company Directory (available to every employee; a tenant-wide,
+  // privacy-safe colleague directory).
+  { type: 'item', href: '/directory', label: 'Directory', icon: 'directory' },
   {
     type: 'group',
     key: 'attendance-leaves',
