@@ -194,6 +194,10 @@ export default function Sidebar({ onNavigate }) {
           // upload + Form 12BB. Window-gated server-side; the link is always shown
           // for India (the page explains when the window is open / not configured).
           { href: '/tax/proofs', label: 'Investment proofs', icon: 'doc' },
+          // FLAG (Feature 25): India-only "Flexi Benefits (FBP)" — allocate the CTC
+          // FBP envelope across tax-advantaged heads with a live "tax you save". Shown
+          // for India (the page explains when no plan/window is configured).
+          { href: '/fbp', label: 'Flexi Benefits', icon: 'coin' },
           ...n.children.slice(insertAt),
         ];
         return { ...n, children };

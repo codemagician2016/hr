@@ -726,8 +726,20 @@ async function loadRunRowBundles(businessId, payRun, db = prisma) {
   const bundles = [];
   for (const emp of employees) {
     // Resolve the current compensation revision effective on the period end.
-    const compensation = await resolveCurrentCompensation(businessId, emp.id, periodEnd, db);
+    let compensation = await resolveCurrentCompensation(businessId, emp.id, periodEnd, db);
     if (!compensation) continue; // no pay structure -> skip (not an error)
+
+    // Feature 25 — Seam A: if the employee has a SUBMITTED/LOCKED FBP allocation for
+    // this FY, explode the envelope component into per-head payslip lines + a residual
+    // (Σ === envelope, to the paise). The overlay returns the SAME line shape, so
+    // mapComponentLine + engine.computePayslip are unchanged; non-FBP employees are
+    // untouched (golden parity). LTA (ON_CLAIM) emits no monthly earning. Lazy-required
+    // to avoid the fbpService↔payrollService require cycle.
+    // eslint-disable-next-line global-require
+    const fbpService = require('../compensation/fbpService');
+    compensation = await fbpService.applyFbpOverlay({
+      businessId, compensation, employeeId: emp.id, financialYear: payRun.taxYear, db,
+    });
 
     bundles.push({
       employee: emp,

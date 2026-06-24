@@ -597,6 +597,9 @@ model Business {
   // Form 16 / 24Q (Feature 24) — annual TDS-certificate generation runs + certs.
   form16Batches                Form16Batch[]
   form16Certificates           Form16Certificate[]
+  // Feature 25 — FBP / Flexi Basket.
+  fbpPlans                     FbpPlan[]
+  fbpAllocations               FbpAllocation[]
 }
 
 // BusinessPage — multi-page CMS. Each row is a single sub-page under one
@@ -6765,6 +6768,8 @@ model Employee {
   investmentProofs       InvestmentProof[]
   // Form 16 (Feature 24) — the employee's annual TDS certificates.
   form16Certificates     Form16Certificate[]
+  // Feature 25 — FBP / Flexi Basket allocations.
+  fbpAllocations         FbpAllocation[]
 
   @@unique([businessId, code])
   // FLAG (Feature 17 — review HIGH fix): a PARTIAL unique index backs the
@@ -7108,6 +7113,10 @@ model SalaryComponent {
   // references the pay-head master (Restrict on delete: a component used by a policy
   // cannot be hard-deleted out from under it). Additive; no behaviour change.
   ctcPolicyLines CtcPolicyLine[]
+  // Feature 25 — FBP back-relations. A component can be a plan's envelope and/or a
+  // head's pay-head. Restrict on delete (a component a plan references stays put).
+  fbpEnvelopePlans FbpPlan[]     @relation("FbpEnvelopeComponent")
+  fbpPlanHeads     FbpPlanHead[] @relation("FbpHeadComponent")
 
   @@unique([businessId, code])
   @@index([businessId, entityId, category])
@@ -7522,6 +7531,11 @@ model InvestmentDeclarationWindow {
   business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
   financialYear String   @db.VarChar(7) // "2026-27" (StatutoryProfile.prevEmployerFY format)
   countryCode   String   @default("IN") @db.Char(2)
+  // Feature 25 — purpose discriminator. INVESTMENT_PROOF (default) = the F20
+  // window; FBP_ALLOCATION = the FBP allocation window (its proofDeadline is the
+  // declared→verified flip date for the bill-backed FBP heads). One model, one
+  // resolver, one cron drives both — see DeclWindowPurpose.
+  purpose       DeclWindowPurpose @default(INVESTMENT_PROOF)
   opensAt       DateTime @db.Date // declaration editable / uploads accepted from
   closesAt      DateTime @db.Date // declaration locks (no more edits/uploads after)
   proofDeadline DateTime @db.Date // TDS flips to VERIFIED-only on/after this date (Jan–Feb)
@@ -7533,8 +7547,9 @@ model InvestmentDeclarationWindow {
   updatedAt     DateTime @updatedAt
   version       Int      @default(0)
   proofs        InvestmentProof[]
+  fbpAllocations FbpAllocation[]
 
-  @@unique([businessId, financialYear, countryCode]) // one window per FY per country
+  @@unique([businessId, financialYear, countryCode, purpose]) // one window per FY per country per purpose
   @@index([businessId, status])
   @@index([businessId, proofDeadline])
 }
@@ -7585,6 +7600,150 @@ model InvestmentProof {
   @@index([businessId, employeeId, claimType])
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Feature 25 — Flexible Benefit Plan (FBP / Flexi Basket). India-only, OLD-regime
+// tax-optimised allowances carved from CTC. Four additive models; the WINDOW is
+// REUSED from F20 (InvestmentDeclarationWindow + purpose=FBP_ALLOCATION) and the
+// PROOFS are REUSED from F20 (InvestmentProof + FBP_* claim types). No new payroll
+// math, no second tax engine — the exempt subtraction is one line in the assembler.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The tenant-level FBP plan: the basket DEFINITION (which heads, each head's
+/// statutory cap + proof requirement). India-first; one active plan per entity
+/// per FY. CTC-agnostic (like CtcPolicy) — it defines RULES, not a person's
+/// allocation. The envelope component is the single CTC earning line that funds
+/// the whole basket; the plan's heads allocate within its resolved amount.
+model FbpPlan {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId      String? // NULL = all entities
+  code          String // "FBP-2026"
+  name          String // "Flexi Benefit Plan 2026-27"
+  countryCode   String   @db.Char(2) @default("IN") // server-stamped = tenant country
+  financialYear String   @db.VarChar(7) // "2026-27"
+  // The basket envelope: which CTC earning component carries the total FBP allowance.
+  envelopeComponentId String // FK SalaryComponent (kind SPECIAL_ALLOWANCE | CUSTOM code "FBP")
+  envelopeComponent   SalaryComponent @relation("FbpEnvelopeComponent", fields: [envelopeComponentId], references: [id], onDelete: Restrict)
+  isActive      Boolean  @default(true)
+  heads         FbpPlanHead[]
+  allocations   FbpAllocation[]
+  createdById   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+  version       Int      @default(0)
+
+  @@unique([businessId, code])
+  @@index([businessId, entityId, financialYear, isActive])
+}
+
+/// One head in the basket (LTA, meal, fuel, telephone, books, prof-dev, uniform…).
+/// Carries the statutory cap + the exemption section + whether proof is required.
+model FbpPlanHead {
+  id            String   @id @default(uuid())
+  businessId    String
+  planId        String
+  plan          FbpPlan  @relation(fields: [planId], references: [id], onDelete: Cascade)
+  componentId   String // FK SalaryComponent — the payslip pay-head this head pays as
+  component     SalaryComponent @relation("FbpHeadComponent", fields: [componentId], references: [id], onDelete: Restrict)
+  headType      FbpHeadType // LTA | MEAL_CARD | FUEL_CAR | TELEPHONE_INTERNET | BOOKS_PERIODICALS | PROF_DEV | UNIFORM | OTHER
+  label         String // friendly name shown in ESS
+  taxSection    String?  @db.VarChar(16) // "10(5)" | "3(7)(iii)" | "3(2)" | "3(7)(ix)" | "10(14)"
+  // Caps (annual ₹ unless noted). NULL = no statutory cap beyond the allocation/actuals.
+  annualCapRupees   Decimal? @db.Decimal(15, 2) // e.g. meal 26400; uniform per-policy
+  monthlyCapRupees  Decimal? @db.Decimal(15, 2) // e.g. meal 2200; fuel-slab 1800/2400; driver 900
+  minAllocRupees    Decimal? @db.Decimal(15, 2) // optional floor (0 default)
+  // Exemption + proof behaviour
+  exemptOldRegimeOnly Boolean @default(true) // every head here is OLD-only; NEW pays-but-taxes
+  proofRequired     Boolean  @default(true) // false only for MEAL_CARD (the card is the control)
+  payCadence        FbpPayCadence @default(MONTHLY) // MONTHLY allowance vs ON_CLAIM (LTA reimbursement)
+  claimType         ProofClaimType? // the F20 claim type FBP bills upload as (FBP_LTA, …); NULL for proof-free heads
+  sortOrder         Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  allocations       FbpAllocationLine[]
+
+  @@index([businessId, planId, sortOrder])
+}
+
+/// One employee's FBP declaration for an FY: HEADER row (locks the envelope amount
+/// at declaration time) + child allocation lines. Append-only per (employee, FY,
+/// version) — a re-allocation supersedes (mirrors CompensationRevision discipline).
+model FbpAllocation {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId    String
+  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  planId        String
+  plan          FbpPlan  @relation(fields: [planId], references: [id], onDelete: Restrict)
+  windowId      String? // FK InvestmentDeclarationWindow (purpose FBP_ALLOCATION); NULL = no window (fail-open-provisional)
+  window        InvestmentDeclarationWindow? @relation(fields: [windowId], references: [id], onDelete: SetNull)
+  financialYear String   @db.VarChar(7)
+  // The basket envelope amount RESOLVED for this employee at declaration (annual ₹),
+  // snapshotted from the current CompensationRevision's envelope line. Σ lines must
+  // reconcile to <= this (unallocated balance falls back to fully-taxable special pay).
+  envelopeAnnualRupees Decimal @db.Decimal(15, 2)
+  status        FbpAllocationStatus @default(DRAFT) // DRAFT | SUBMITTED | LOCKED | SUPERSEDED
+  lines         FbpAllocationLine[]
+  submittedAt   DateTime?
+  lockedAt      DateTime?
+  createdById   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+  version       Int      @default(0)
+
+  @@unique([businessId, employeeId, financialYear, version])
+  @@index([businessId, employeeId, financialYear, status])
+}
+
+/// One allocated head inside an employee's FBP declaration. The annual amount the
+/// employee chose for this head (≤ the head's cap and within the envelope). The
+/// EXEMPT vs TAXABLE split is computed (not stored as truth) by the pure aggregator
+/// from (allocation, cap, verified|declared spend) — mirroring proofAggregator.
+model FbpAllocationLine {
+  id            String   @id @default(uuid())
+  businessId    String
+  allocationId  String
+  allocation    FbpAllocation @relation(fields: [allocationId], references: [id], onDelete: Cascade)
+  headId        String
+  head          FbpPlanHead   @relation(fields: [headId], references: [id], onDelete: Restrict)
+  annualAmountRupees Decimal @db.Decimal(15, 2) // chosen allocation for this head (annual)
+  // Year-end VERIFIED spend (LTA/fuel/phone/books): Σ ACCEPTED proof amounts. Drives
+  // the exempt portion after the proof deadline. NULL until a proof is accepted.
+  verifiedSpendRupees Decimal? @db.Decimal(15, 2)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([businessId, allocationId])
+  @@index([businessId, headId])
+}
+
+enum FbpHeadType {
+  LTA
+  MEAL_CARD
+  FUEL_CAR
+  TELEPHONE_INTERNET
+  BOOKS_PERIODICALS
+  PROF_DEV
+  UNIFORM
+  OTHER
+}
+
+enum FbpPayCadence {
+  MONTHLY
+  ON_CLAIM
+}
+
+enum FbpAllocationStatus {
+  DRAFT
+  SUBMITTED
+  LOCKED
+  SUPERSEDED
+}
+
 enum DeclarationWindowStatus {
   DRAFT
   OPEN
@@ -7606,6 +7765,25 @@ enum ProofClaimType {
   SEC_24B_HOME_LOAN
   HRA_RENT
   OTHER_VIA
+  // Feature 25 — FBP / Flexi Basket bill-backed heads. Reuse the F20 proof
+  // pipeline verbatim (same InvestmentProof rows, verify console, SoD, cron).
+  // Meal card is proof-free (the card IS the control) so it has no claim type.
+  FBP_LTA
+  FBP_FUEL
+  FBP_TELEPHONE
+  FBP_BOOKS
+  FBP_PROF_DEV
+  FBP_UNIFORM
+}
+
+// Feature 25 — the discriminator that lets ONE InvestmentDeclarationWindow model
+// (+ resolveWindow + proofWindowRunner cron) drive BOTH the F20 investment-proof
+// window AND the FBP allocation window. Default INVESTMENT_PROOF keeps every
+// existing row + query behaving exactly as before (the F20 unique key gains
+// `purpose` so an FBP window can coexist with the proof window for the same FY).
+enum DeclWindowPurpose {
+  INVESTMENT_PROOF
+  FBP_ALLOCATION
 }
 
 enum INTaxRegime {

@@ -24,7 +24,7 @@ const { resolveWindow } = require('./windowResolver');
 const { shouldUseVerified } = require('./proofAggregator');
 const { renderForm12bbPdf } = require('./form12bbPdf');
 const {
-  isValidClaimType, CLAIM_TYPE_META, HRA_LANDLORD_PAN_THRESHOLD_RUPEES, PAN_RE,
+  isValidClaimType, isFbpClaimType, CLAIM_TYPE_META, HRA_LANDLORD_PAN_THRESHOLD_RUPEES, PAN_RE,
 } = require('./claimTypes');
 
 // ── upload guards (mirror documents.controller — 10MB + PDF/PNG/JPG) ─────────
@@ -101,6 +101,10 @@ function buildRollup(sp, proofs) {
   const rows = [];
   for (const ct of Object.keys(CLAIM_TYPE_META)) {
     const meta = CLAIM_TYPE_META[ct];
+    // Feature 25 — FBP heads have their own ESS surface (/me/fbp) and back an
+    // FbpAllocationLine, not a StatutoryProfile column (spField:null). They never
+    // appear in the F20 investment-proof rollup — keep this view 80C/HRA/24b only.
+    if (meta.fbp) continue;
     const declared = isOld && sp ? toNum(sp[meta.spField]) : 0;
     const mine = proofs.filter((p) => p.claimType === ct);
     let accepted = 0; let pending = 0; let rejected = 0;
@@ -187,7 +191,11 @@ async function uploadProof(req, res, next) {
 
     const fy = typeof body.financialYear === 'string' && /^\d{4}-\d{2}$/.test(body.financialYear)
       ? body.financialYear : currentFy();
-    const window = await resolveWindow({ businessId, financialYear: fy });
+    // Feature 25 — FBP bills (FBP_* claim types) ride the FBP_ALLOCATION window (its
+    // proofDeadline is the declared→verified flip for the basket heads); investment
+    // proofs ride the default INVESTMENT_PROOF window. One model, two purposes.
+    const windowPurpose = isFbpClaimType(claimType) ? 'FBP_ALLOCATION' : 'INVESTMENT_PROOF';
+    const window = await resolveWindow({ businessId, financialYear: fy, purpose: windowPurpose });
     if (!window) {
       return res.status(409).json({ message: 'The declaration window for this year is not configured yet.', code: 'NO_WINDOW' });
     }

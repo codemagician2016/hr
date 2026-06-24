@@ -21,7 +21,7 @@ const prisma = require('../../../core/lib/prisma');
 const s3 = require('../../../core/lib/s3');
 const { scopeWhere } = require('../../lib/scopeResolver');
 const { notifyHrEvent } = require('../../integrations/notifications');
-const { CLAIM_TYPE_META } = require('./claimTypes');
+const { CLAIM_TYPE_META, isFbpClaimType } = require('./claimTypes');
 const { resolveWindow } = require('./windowResolver');
 const { shouldUseVerified } = require('./proofAggregator');
 
@@ -129,11 +129,27 @@ async function listEmployeeProofs(req, res, next) {
     const proofs = await prisma.investmentProof.findMany({ where, orderBy: { createdAt: 'desc' } });
     const sp = await prisma.statutoryProfile.findFirst({ where: { businessId, employeeId } });
 
-    // Group + summarise per claim type (declared from SP, Σaccepted/Σpending from proofs).
+    // Feature 25 — the FBP heads' "declared" comes from the FbpAllocationLine (not the
+    // StatutoryProfile). Load the current allocation so the verify console shows the
+    // employee's allocated amount per FBP claim type as the declared figure.
+    const fbpDeclaredByClaim = {};
+    if (proofs.some((p) => CLAIM_TYPE_META[p.claimType] && CLAIM_TYPE_META[p.claimType].fbp)) {
+      const alloc = await prisma.fbpAllocation.findFirst({
+        where: { businessId, employeeId, ...(fy ? { financialYear: fy } : {}), deletedAt: null, status: { in: ['SUBMITTED', 'LOCKED'] } },
+        orderBy: { version: 'desc' },
+        include: { lines: { include: { head: true } } },
+      });
+      for (const l of (alloc && alloc.lines) || []) {
+        const ct = l.head && l.head.claimType;
+        if (ct) fbpDeclaredByClaim[ct] = (fbpDeclaredByClaim[ct] || 0) + toNum(l.annualAmountRupees);
+      }
+    }
+
+    // Group + summarise per claim type (declared from SP / FBP allocation, Σaccepted/Σpending from proofs).
     const groups = [];
     for (const ct of Object.keys(CLAIM_TYPE_META)) {
       const meta = CLAIM_TYPE_META[ct];
-      const declared = sp ? toNum(sp[meta.spField]) : 0;
+      const declared = meta.fbp ? (fbpDeclaredByClaim[ct] || 0) : (sp ? toNum(sp[meta.spField]) : 0);
       const mine = proofs.filter((p) => p.claimType === ct);
       if (declared <= 0 && mine.length === 0) continue;
       let accepted = 0; let pending = 0;
@@ -187,7 +203,10 @@ async function acceptProof(req, res, next) {
     // verify gate and the TDS math can never diverge. (Reject stays allowed: it can only
     // LOWER the verified Σ, never inflate relief, so it cannot un-freeze in the employee's
     // favour.)
-    const window = await resolveWindow({ businessId, financialYear: proof.financialYear });
+    // Feature 25 — an FBP bill rides the FBP_ALLOCATION window's deadline; an
+    // investment proof rides the default INVESTMENT_PROOF window. Same §201 freeze.
+    const windowPurpose = isFbpClaimType(proof.claimType) ? 'FBP_ALLOCATION' : 'INVESTMENT_PROOF';
+    const window = await resolveWindow({ businessId, financialYear: proof.financialYear, purpose: windowPurpose });
     const asOf = new Date().toISOString().slice(0, 10);
     if (shouldUseVerified(window, asOf)) {
       return res.status(409).json({
