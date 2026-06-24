@@ -191,3 +191,14 @@ export function fetchMyDirectoryPreferences() {
 export function updateMyDirectoryPreferences(body) {
   return apiPatch('/api/hr/me/directory/preferences', body);
 }
+
+// ── Cycle 1 (ESS) — Celebration opt-out (privacy control) ─────────────────────
+// The signed-in employee's OWN celebration opt-out state. When opted out, their
+// birthday/anniversary is hidden from the company celebration feed for everyone.
+export function fetchMyCelebrationPreferences() {
+  return apiGet('/api/hr/me/engagement/celebrations/preferences');
+}
+// Set the caller's OWN celebration opt-out (self-only write).
+export function updateMyCelebrationPreferences(body) {
+  return apiPatch('/api/hr/me/engagement/celebrations/preferences', body);
+}

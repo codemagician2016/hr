@@ -11450,6 +11450,11 @@ model Announcement {
   updatedAt           DateTime                  @updatedAt
   archivedAt          DateTime?
   version             Int                       @default(0)
+  // Idempotency stamp for the notification fan-out. Set the FIRST time an
+  // announcement goes live (DRAFT/ARCHIVED → PUBLISHED while live). A re-save or
+  // re-publish of an already-notified announcement must NOT re-blast its audience,
+  // so the fan-out is guarded on this being null. (NULL = never fanned out.)
+  notifiedAt          DateTime?
 
   reads AnnouncementRead[]
 

@@ -21,5 +21,10 @@ router.post('/feed/:id/read', c.markRead);
 
 // Celebration feed (birthdays + work anniversaries)
 router.get('/celebrations', c.celebrations);
+// Self-service celebration opt-out (the privacy control the feed honours). The static
+// /preferences paths are declared with their own verbs — no `:id` param route here to
+// swallow them, so ordering is unambiguous.
+router.get('/celebrations/preferences', c.getCelebrationPreferences);
+router.patch('/celebrations/preferences', c.updateCelebrationPreferences);
 
 module.exports = router;

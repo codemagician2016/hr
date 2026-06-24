@@ -20,6 +20,7 @@
 const prisma = require('../../../core/lib/prisma');
 const { feedWhereForEmployee, resolveEmployeeSegment } = require('../audience');
 const { buildCelebrations } = require('../celebrations');
+const { isEssVisibleStatus, essOrgPolicy } = require('../../lib/orgVisibility');
 
 // Resolve the session customer's own Employee (mirror of essPerformance.resolveSelf).
 async function resolveSelf(businessId, customer) {
@@ -40,6 +41,13 @@ async function withSelf(req, res) {
   const { businessId } = req.customer;
   const employee = await resolveSelf(businessId, req.customer);
   if (!employee) { res.status(404).json({ message: 'No employee record is linked to your account' }); return null; }
+  // ESS ACTIVE-STATUS LOCKOUT — a terminated/inactive employee retains NO engagement
+  // access (feed / celebrations / mark-read). Same gate the directory/profile apply:
+  // the ESS visible-status whitelist PLUS the isActive flag. Fail-closed → 403.
+  if (employee.isActive === false || !isEssVisibleStatus(employee.status, essOrgPolicy(businessId))) {
+    res.status(403).json({ message: 'Your account is not active' });
+    return null;
+  }
   return { businessId, employee };
 }
 
@@ -172,4 +180,48 @@ async function celebrations(req, res, next) {
   } catch (e) { return next(e); }
 }
 
-module.exports = { feed, unreadCount, markRead, markAllRead, celebrations };
+// GET /me/engagement/celebrations/preferences — the caller's OWN opt-out state.
+// Reads notifyPrefs.celebrationsOptOut so the UI can render the toggle. SELF-ONLY.
+async function getCelebrationPreferences(req, res, next) {
+  try {
+    const ctx = await withSelf(req, res); if (!ctx) return undefined;
+    const { businessId, employee } = ctx;
+    const me = await prisma.employee.findFirst({
+      where: { id: employee.id, businessId }, select: { notifyPrefs: true },
+    });
+    const prefs = (me && me.notifyPrefs && typeof me.notifyPrefs === 'object') ? me.notifyPrefs : {};
+    return res.json({ celebrationsOptOut: prefs.celebrationsOptOut === true });
+  } catch (e) { return next(e); }
+}
+
+// PATCH /me/engagement/celebrations/preferences — set the caller's OWN celebrations
+// opt-out. This is the WRITE path that makes the honored opt-out flag actually settable
+// (the privacy control). SELF-ONLY: the subject is the session employee; no employeeId
+// is accepted. We merge into notifyPrefs so other notification preferences are preserved.
+async function updateCelebrationPreferences(req, res, next) {
+  try {
+    const ctx = await withSelf(req, res); if (!ctx) return undefined;
+    const { businessId, employee } = ctx;
+    const raw = req.body && req.body.celebrationsOptOut;
+    if (typeof raw !== 'boolean') return res.status(400).json({ message: 'celebrationsOptOut must be a boolean' });
+    // Read-merge-write the JSON blob so sibling notifyPrefs keys (e.g. optOut) survive.
+    const me = await prisma.employee.findFirst({
+      where: { id: employee.id, businessId, deletedAt: null }, select: { notifyPrefs: true },
+    });
+    if (!me) return res.status(404).json({ message: 'No employee record is linked to your account' });
+    const base = (me.notifyPrefs && typeof me.notifyPrefs === 'object') ? me.notifyPrefs : {};
+    const nextPrefs = { ...base, celebrationsOptOut: raw };
+    // updateMany with the tenant wall ANDed in (defence-in-depth IDOR guard).
+    const r = await prisma.employee.updateMany({
+      where: { id: employee.id, businessId, deletedAt: null },
+      data: { notifyPrefs: nextPrefs },
+    });
+    if (r.count === 0) return res.status(404).json({ message: 'No employee record is linked to your account' });
+    return res.json({ celebrationsOptOut: raw });
+  } catch (e) { return next(e); }
+}
+
+module.exports = {
+  feed, unreadCount, markRead, markAllRead, celebrations,
+  getCelebrationPreferences, updateCelebrationPreferences,
+};
