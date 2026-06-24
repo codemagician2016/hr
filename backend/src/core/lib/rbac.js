@@ -84,6 +84,12 @@ const PERMISSIONS = Object.freeze({
   // permission (payroll autogen still requires canRunPayroll; auto-publish requires
   // canApprovePayroll) so SoD is NOT weakened by going through import.
   canManageImports:         'Bulk-import & migrate prior-period data (employees, CTC, attendance, payslips, claims)',
+  // Engagement (Cycle 1) — the announcements/news-feed admin key: create/edit/publish/
+  // pin/archive company announcements + target the audience + schedule the go-live.
+  // Reads on the ESS news feed need NO permission (every employee sees their own
+  // in-audience feed via the customer session); this gates only the operator authoring
+  // surface. Seeded true for Owner (all) + HR-Admin below.
+  canManageAnnouncements:   'Create, publish, pin + archive company announcements (news feed)',
 });
 
 const PERMISSION_KEYS = Object.freeze(Object.keys(PERMISSIONS));
@@ -121,6 +127,8 @@ const SYSTEM_ROLES = Object.freeze({
     canManageExpensePolicy: true, canApproveExpense: true,
     // Feature 18 — HR-Admin owns the data-migration / bulk-import center.
     canManageImports: true,
+    // Engagement (Cycle 1) — HR-Admin authors + publishes company announcements.
+    canManageAnnouncements: true,
     // No canEditBilling / canEditDomain / canApprovePayroll — Owner/Finance only
   },
   // Finance — payroll + compensation + statutory + billing.

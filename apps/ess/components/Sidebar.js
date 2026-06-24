@@ -44,6 +44,8 @@ const ICONS = {
   approvals: 'M4 6h10M4 12h7M4 18h10M16 14l2 2 4-4',
   // Feature 13 — My Team (Manager Self-Service): two figures
   team: 'M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75',
+  // Engagement Cycle 1 — News feed (megaphone)
+  news: 'M3 11l14-7v16l-14-7zM3 11v4a2 2 0 002 2h1l1 4',
 };
 
 function Icon({ name, className }) {
@@ -59,6 +61,9 @@ function Icon({ name, className }) {
 // ── nav model — the REAL ess routes (this is the employee's own portal) ──────
 const NAV = [
   { type: 'item', href: '/', label: 'Dashboard', icon: 'dashboard' },
+  // Engagement Cycle 1 — the company news feed (announcements). Carries an unread
+  // badge sourced from /api/hr/me/engagement/feed/unread-count.
+  { type: 'item', href: '/feed', label: 'News', icon: 'news', badgeKey: 'news' },
   { type: 'item', href: '/profile', label: 'Personal Information', icon: 'user' },
   {
     type: 'group',
@@ -127,6 +132,12 @@ export default function Sidebar({ onNavigate }) {
     select: (b) => (Array.isArray(b) ? b : b?.items || b?.tasks || []),
   });
   const hasOnboarding = Array.isArray(tasks) && tasks.some((t) => t.kind === 'ONBOARDING');
+  // Engagement Cycle 1 — unread announcement count → a small badge on the News item.
+  // Best-effort: a 404 / error just omits the badge, never breaks the rail.
+  const { data: newsUnread } = useApi('/api/hr/me/engagement/feed/unread-count', {
+    select: (b) => (typeof b?.unread === 'number' ? b.unread : 0),
+  });
+  const newsBadge = typeof newsUnread === 'number' && newsUnread > 0 ? newsUnread : 0;
   // Feature 10: show the Approvals inbox item only to people who actually have
   // something to approve (the tasks feed includes APPROVAL kinds for approvers).
   const hasApprovals = Array.isArray(tasks) && tasks.some((t) => t.kind === 'APPROVAL');
@@ -258,6 +269,15 @@ export default function Sidebar({ onNavigate }) {
                   >
                     <Icon name={n.icon} className="ess-nav-icon" />
                     <span className="truncate">{n.label}</span>
+                    {n.badgeKey === 'news' && newsBadge > 0 && (
+                      <span
+                        className="ml-auto inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1.5 text-[10px] font-semibold text-white"
+                        style={{ background: 'var(--theme-primary)' }}
+                        aria-label={`${newsBadge} unread announcements`}
+                      >
+                        {newsBadge > 99 ? '99+' : newsBadge}
+                      </span>
+                    )}
                   </Link>
                 </li>
               );

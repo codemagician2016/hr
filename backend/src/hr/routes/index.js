@@ -142,6 +142,18 @@ router.use('/me/approvals', require('./meApprovals.routes'));
 // reporting sub-tree (self excluded for approvals, SoD). A non-manager gets [].
 router.use('/me/team', require('../profile/meTeam.routes'));
 
+// FLAG (Engagement Cycle 1 — NEW mounts): company announcements / news feed +
+// derived celebration feed (birthdays/anniversaries).
+//   /api/hr/announcements        → operator authoring (protect + canManageAnnouncements):
+//                                  create/edit/publish/pin/archive + audience targeting
+//                                  + scheduled publishedAt; fan-out reuses notifyHrEvent.
+//   /api/hr/me/engagement        → ESS (customer session, SELF_ONLY): the in-audience
+//                                  news feed (published + not-expired, pinned-first,
+//                                  paginated) + mark-as-read + unread count + the
+//                                  privacy-aware celebration feed (no DOB-year leak).
+router.use('/announcements', require('../engagement/routes/announcements.routes'));
+router.use('/me/engagement', require('../engagement/routes/meEngagement.routes'));
+
 // Reports / analytics — read-only payroll register, statutory summary,
 // headcount & attrition, leave liability. RBAC: canViewPayrollReports.
 router.use('/reports', require('../reports/reports.routes'));

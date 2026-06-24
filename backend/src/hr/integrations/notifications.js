@@ -37,6 +37,10 @@ const HR_EVENT_TEMPLATES = Object.freeze({
   'approval.pending':  'HR_APPROVAL_PENDING',
   'approval.decided':  'HR_APPROVAL_DECIDED',
   'approval.reminder': 'HR_APPROVAL_REMINDER',
+  // Cycle 1 — engagement: announcements + celebrations.
+  'announcement.published': 'HR_ANNOUNCEMENT_PUBLISHED',
+  'celebration.birthday':   'HR_BIRTHDAY',
+  'celebration.anniversary':'HR_ANNIVERSARY',
 });
 
 // HR template registry. vertical: 'HR' so listTemplates({vertical:'HR'}) scopes
@@ -114,6 +118,34 @@ const HR_TEMPLATES = Object.freeze([
     body: 'Reminder from {BIZ}: a {MODULE} request from {REQUESTER} is still awaiting your approval. Please act: {LINK}',
     variables: ['MODULE', 'REQUESTER', 'BIZ', 'LINK'],
     channels: { sms: true, whatsapp: true, email: true },
+  },
+  // ─── Cycle 1 — engagement: announcements + celebrations (India-first copy) ────
+  {
+    key: 'HR_ANNOUNCEMENT_PUBLISHED',
+    displayName: 'New announcement published',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {NAME}, {BIZ} posted a new announcement: "{TITLE}". Read it on your portal: {LINK}',
+    variables: ['NAME', 'BIZ', 'TITLE', 'LINK'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_BIRTHDAY',
+    displayName: 'Birthday wishes',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Happy Birthday {NAME}! Wishing you a wonderful year ahead. - {BIZ}',
+    variables: ['NAME', 'BIZ'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_ANNIVERSARY',
+    displayName: 'Work anniversary wishes',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Congratulations {NAME} on {YEARS} year(s) with {BIZ}! Thank you for everything you do.',
+    variables: ['NAME', 'YEARS', 'BIZ'],
+    channels: { sms: false, whatsapp: true, email: true },
   },
 ]);
 

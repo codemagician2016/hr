@@ -13,6 +13,7 @@ import AppShell, { useSession } from '@/components/AppShell';
 import { useTenant } from '@/components/TenantProvider';
 import { useApi } from '@/lib/useApi';
 import { money, formatPeriod, formatDate } from '@/lib/format';
+import CelebrationsWidget from '@/components/CelebrationsWidget';
 
 const TILES = [
   { href: '/payslips', title: 'Payslips', sub: 'View & download', icon: 'M6 2h9l5 5v15H6zM15 2v5h5' },
@@ -71,6 +72,13 @@ function DashboardInner() {
   const { data: tasks } = useApi('/api/hr/me/tasks', {
     select: (b) => (Array.isArray(b) ? b : b?.items || b?.tasks || []),
   });
+
+  // Unread announcement count for the "News" card badge (Engagement Cycle 1). A
+  // not-yet-deployed route (404) degrades to 0 so the card stays clean.
+  const { data: unread } = useApi('/api/hr/me/engagement/feed/unread-count', {
+    select: (b) => (typeof b?.unread === 'number' ? b.unread : 0),
+  });
+  const unreadNews = typeof unread === 'number' ? unread : 0;
   const pendingTasks = Array.isArray(tasks) ? tasks : [];
   const pendingCount = pendingTasks.length;
   const onboardingTask = pendingTasks.find((t) => t.kind === 'ONBOARDING') || null;
@@ -116,6 +124,12 @@ function DashboardInner() {
           value={pendingCount > 0 ? `${pendingCount}` : '0'}
           sub={pendingCount > 0 ? 'need your action' : 'all caught up'}
           href={pendingCount > 0 ? tasksHref : undefined}
+        />
+        <StatCard
+          label="News"
+          value={unreadNews > 0 ? `${unreadNews} new` : 'Up to date'}
+          sub={unreadNews > 0 ? 'unread announcements' : 'company feed'}
+          href="/feed"
         />
       </section>
 
@@ -171,6 +185,10 @@ function DashboardInner() {
           </ul>
         </section>
       )}
+
+      {/* Celebration feed — upcoming birthdays + work anniversaries (privacy-aware,
+          no DOB-year leak; renders nothing when empty). */}
+      <CelebrationsWidget windowDays={30} limit={5} />
 
       <section className="space-y-3">
         <h2 className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--theme-muted)' }}>
