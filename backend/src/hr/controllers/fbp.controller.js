@@ -203,9 +203,31 @@ async function lockEmployeeFbp(req, res) {
     }
     const alloc = await prisma.fbpAllocation.findFirst({ where: { id: req.params.id, businessId, employeeId, deletedAt: null } });
     if (!alloc) return res.status(404).json({ message: 'Allocation not found' });
+    // Only a SUBMITTED allocation may be locked. A DRAFT is not yet committed; a
+    // SUPERSEDED row is a stale prior version; a LOCKED row is already locked. Locking
+    // any of those would either commit unfinished work or revive a superseded version
+    // into applyFbpOverlay's SUBMITTED|LOCKED selection ahead of the current one.
+    if (alloc.status !== 'SUBMITTED') {
+      return res.status(409).json({ message: `Only a SUBMITTED allocation can be locked (this one is ${alloc.status}).`, code: 'FBP_NOT_SUBMITTED' });
+    }
+    // Guard the target is the CURRENT (max-version, non-superseded) allocation for this
+    // employee+FY — never an out-of-date version. A SUBMITTED row is already the latest by
+    // construction (saveAllocation supersedes priors), but verify explicitly so a stale id
+    // is rejected rather than locked.
+    const current = await prisma.fbpAllocation.findFirst({
+      where: { businessId, employeeId, financialYear: alloc.financialYear, deletedAt: null, status: { in: ['SUBMITTED', 'LOCKED'] } },
+      orderBy: { version: 'desc' },
+      select: { id: true },
+    });
+    if (!current || current.id !== alloc.id) {
+      return res.status(409).json({ message: 'This allocation is not the current version; refresh and lock the latest.', code: 'FBP_STALE_VERSION' });
+    }
+    // Lock in place: flip status + stamp lockedAt ONLY. Do NOT touch `version` — it is part
+    // of the (businessId, employeeId, financialYear, version) unique key; a blind
+    // {increment:1} collides with an existing version and 500s.
     const updated = await prisma.fbpAllocation.update({
       where: { id: alloc.id },
-      data: { status: 'LOCKED', lockedAt: new Date(), version: { increment: 1 } },
+      data: { status: 'LOCKED', lockedAt: new Date() },
     });
     res.json({ id: updated.id, status: updated.status, lockedAt: updated.lockedAt });
   } catch (err) { handleError(res, err); }

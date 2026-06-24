@@ -18,6 +18,8 @@ const prisma = require('../../../../core/lib/prisma');
 const assembler = require('../../projectionAssembler');
 const fbpService = require('../../../compensation/fbpService');
 const { resolveFbpExempt } = require('../fbpProjection');
+const engine = require('../../../payroll/engine');
+const payrollService = require('../../../payroll/service');
 
 const PREFIX = 'FBPT';
 let passed = 0;
@@ -183,6 +185,107 @@ async function main() {
   ok(sumFbpMonthly === envMonthly - onClaimMonthly, `Σ(exploded monthly FBP lines) === envelope − onClaim (got ₹${sumFbpMonthly / 100}, want ₹${(envMonthly - onClaimMonthly) / 100})`);
   // LTA emits no monthly line in the overlay.
   ok(!fbpLines.find((l) => l._fbpHeadId === headByType.LTA.id), 'LTA (ON_CLAIM) emits no monthly overlay line');
+
+  // ── FBP-3 FIX (END-TO-END): the LIVE run path (engine.computePayslip → india.compute →
+  //   computeTds) must deduct the SAME monthly TDS the projection promises. Post-deadline
+  //   (asOf 2027-03-01): only the meal card is verified (₹26,400 exempt). resolveRunTaxOverride
+  //   threads the projection's post-exemption taxable into the run; without it the run would
+  //   annualise the full FBP-inflated taxable gross and OVER-withhold. ──
+  {
+    const asOfRun = '2027-03-01'; // post FBP proofDeadline (2027-02-15)
+    // The promise: the ESS projection's monthly recoverable (rupees → paise).
+    const stmt = await assembler.buildTaxProjection({ businessId, employeeId: emp.id, asOf: asOfRun });
+    const projMonthlyMinor = Math.round(stmt.monthlyRecoverable * 100);
+    ok(stmt.regime === 'OLD', 'FBP-3: projection is OLD-regime');
+
+    // The override the run consumes (the single computeFbpExempt source path).
+    const override = await assembler.resolveRunTaxOverride({ businessId, employeeId: emp.id, asOf: asOfRun });
+    ok(override && override.annualTaxableOverrideMinor != null, 'FBP-3: run tax override resolved for the OLD-regime FBP employee');
+
+    // The LIVE run: resolve comp, apply the FBP overlay (envelope → head lines, all taxable),
+    // build engine args WITH the override, computePayslip.
+    let comp = await payrollService._internal.resolveCurrentCompensation(businessId, emp.id, '2027-03-31', prisma);
+    comp = await fbpService.applyFbpOverlay({ businessId, compensation: comp, employeeId: emp.id, financialYear: '2026-27' });
+    const empRow = await prisma.employee.findFirst({ where: { id: emp.id }, include: { statutoryProfile: true } });
+    const { engineArgs } = payrollService.buildEmployeePayInput({
+      employee: empRow, compensation: comp, statutory: empRow.statutoryProfile, attendance: null, entity,
+      period: { start: '2027-03-01', end: '2027-03-31', payDate: '2027-03-31', taxYear: '2026-27' },
+      ytd: { taxableGrossMinor: 0, tdsDeductedMinor: 0, monthsElapsed: 0 },
+      taxOverride: override,
+    });
+    const result = engine.computePayslip(engineArgs);
+    const tdsLine = result.employeeDeductions.find((d) => d.code === 'TDS');
+    const runMonthlyTdsMinor = tdsLine ? tdsLine.amountMinor : 0;
+    ok(runMonthlyTdsMinor === projMonthlyMinor,
+      `FBP-3 PARITY: live run TDS === projection monthly recoverable to the paise (run ₹${runMonthlyTdsMinor / 100} vs proj ₹${projMonthlyMinor / 100})`);
+
+    // Prove the override is LOAD-BEARING: re-running the SAME run without it does NOT
+    // reconcile to the projection (it falls back to §192 single-period annualisation of the
+    // FBP-inflated gross). The reconciled figure is reachable ONLY by threading the override.
+    const { engineArgs: argsNoOverride } = payrollService.buildEmployeePayInput({
+      employee: empRow, compensation: comp, statutory: empRow.statutoryProfile, attendance: null, entity,
+      period: { start: '2027-03-01', end: '2027-03-31', payDate: '2027-03-31', taxYear: '2026-27' },
+      ytd: { taxableGrossMinor: 0, tdsDeductedMinor: 0, monthsElapsed: 0 },
+      taxOverride: null,
+    });
+    const resultBug = engine.computePayslip(argsNoOverride);
+    const bugTdsLine = resultBug.employeeDeductions.find((d) => d.code === 'TDS');
+    const bugMonthlyTdsMinor = bugTdsLine ? bugTdsLine.amountMinor : 0;
+    ok(bugMonthlyTdsMinor !== projMonthlyMinor,
+      `FBP-3: WITHOUT the override the run does NOT reconcile to the projection (₹${bugMonthlyTdsMinor / 100} ≠ ₹${projMonthlyMinor / 100}) — the override is load-bearing`);
+  }
+
+  // ── FBP-4 FIX: force-lock guard. The lock must (a) target ONLY a SUBMITTED + current
+  //   (max-version, non-superseded) allocation, and (b) flip status/lockedAt WITHOUT
+  //   touching `version` — a blind {increment:1} collides with the unique
+  //   (businessId, employeeId, financialYear, version) index when a higher version exists.
+  {
+    // eslint-disable-next-line global-require
+    const fbpController = require('../../../controllers/fbp.controller');
+
+    // A tiny res spy.
+    function mkRes() {
+      const r = { statusCode: 200, body: null };
+      r.status = (c) => { r.statusCode = c; return r; };
+      r.json = (b) => { r.body = b; return r; };
+      return r;
+    }
+    // An operator who is NOT the subject (no SoD self-lock collision).
+    const operatorUser = { id: 'op-user-no-employee', businessId };
+
+    // Current state: the valid v0 allocation is SUBMITTED (restored above). Manufacture a
+    // PRIOR SUPERSEDED v0 + a current SUBMITTED v1 to exercise the stale-version guard and
+    // prove the increment-collision is gone.
+    const live = await prisma.fbpAllocation.findFirst({ where: { businessId, employeeId: emp.id, deletedAt: null }, orderBy: { version: 'desc' } });
+    // Bump the existing row to SUPERSEDED v0, and create a fresh SUBMITTED v1 (the current).
+    await prisma.fbpAllocation.update({ where: { id: live.id }, data: { status: 'SUPERSEDED', version: 0 } });
+    const v1 = await prisma.fbpAllocation.create({
+      data: {
+        businessId, employeeId: emp.id, planId: live.planId, financialYear: '2026-27',
+        envelopeAnnualRupees: live.envelopeAnnualRupees, status: 'SUBMITTED', submittedAt: new Date(), version: 1,
+      },
+    });
+
+    // (a) Locking the STALE/SUPERSEDED v0 id is rejected (not SUBMITTED + not current).
+    const resStale = mkRes();
+    await fbpController.lockEmployeeFbp({ user: operatorUser, params: { employeeId: emp.id, id: live.id } }, resStale);
+    ok(resStale.statusCode === 409 && resStale.body && resStale.body.code === 'FBP_NOT_SUBMITTED',
+      `FBP-4: locking a SUPERSEDED allocation is rejected 409 FBP_NOT_SUBMITTED (got ${resStale.statusCode}/${resStale.body && resStale.body.code})`);
+
+    // (b) Locking the CURRENT SUBMITTED v1 succeeds: status LOCKED, version UNCHANGED (no collision).
+    const resOk = mkRes();
+    await fbpController.lockEmployeeFbp({ user: operatorUser, params: { employeeId: emp.id, id: v1.id } }, resOk);
+    ok(resOk.statusCode === 200 && resOk.body && resOk.body.status === 'LOCKED',
+      `FBP-4: locking the current SUBMITTED allocation succeeds → LOCKED (got ${resOk.statusCode}/${resOk.body && resOk.body.status})`);
+    const lockedRow = await prisma.fbpAllocation.findFirst({ where: { id: v1.id } });
+    ok(lockedRow.version === 1, `FBP-4: version is UNCHANGED on lock (still 1, no blind increment) (got ${lockedRow.version})`);
+
+    // (c) Re-locking an already-LOCKED allocation is rejected (idempotent guard).
+    const resReLock = mkRes();
+    await fbpController.lockEmployeeFbp({ user: operatorUser, params: { employeeId: emp.id, id: v1.id } }, resReLock);
+    ok(resReLock.statusCode === 409 && resReLock.body && resReLock.body.code === 'FBP_NOT_SUBMITTED',
+      `FBP-4: re-locking a LOCKED allocation is rejected 409 (got ${resReLock.statusCode}/${resReLock.body && resReLock.body.code})`);
+  }
 
   await cleanup(businessId);
   console.log(`\nFeature 25 FBP live test: ${passed} passed, ${failed} failed.`);

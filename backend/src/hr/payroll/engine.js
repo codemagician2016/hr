@@ -116,6 +116,13 @@ function computePayslip(args) {
     employee = {},
     entity = {},
     currencyCode,
+    // Feature 25 (FBP) / Feature 15 — optional §192 reconciliation overrides. When the
+    // caller has pre-computed the projection's annual TAXABLE income (post-FBP-exemption /
+    // Chapter-VIA) and/or annual GROSS, they are handed straight to the country module's
+    // computeTds so the live monthly TDS equals the ESS projection to the paise (no
+    // over-withholding). Absent → the module annualises periodGross as before (golden parity).
+    annualTaxableOverrideMinor = null,
+    annualProjectionOverrideMinor = null,
   } = args || {};
 
   if (!Array.isArray(components)) {
@@ -240,6 +247,10 @@ function computePayslip(args) {
     period,
     employee,
     entity,
+    // §192 reconciliation overrides (Feature 25 FBP / Feature 15) — forwarded verbatim;
+    // null when the caller did not pre-compute them (default §192 annualisation).
+    annualTaxableOverrideMinor,
+    annualProjectionOverrideMinor,
   }) || {};
 
   const employeeDeductions = [];

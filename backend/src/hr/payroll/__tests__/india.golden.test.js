@@ -1133,6 +1133,72 @@ const {
   check('F15 OLD-regime computeTds monthly -> ₹1,690', R(1690), tds.monthlyTdsMinor);
 }
 
+// --- F25: FBP / Flexi Basket §192 PARITY — the live monthly TDS run must apply the
+//   SAME FBP exemption the projection applies, via the single computeFbpExempt source,
+//   so run TDS === projection TDS to the paise (no over-withholding).
+//   OLD regime. Basic+DA ₹6,00,000 + otherAllowances ₹2,00,000 (Σ gross ₹8,00,000).
+//   FBP basket post-deadline: LTA ₹40,000 verified + MEAL_CARD ₹26,400 (the card,
+//   always-verified) = ₹66,400 exempt. Projection subtracts it:
+//     otherAllowances 2,00,000 − 66,400 = 1,33,600 ; gross-after-exempt 7,33,600 ;
+//     − OLD std 50,000 -> taxable 6,83,600 -> total tax ₹51,188.80 ; /12 -> ₹4,266/mo.
+//   THE BUG (no override): the run annualised the FULL ₹8,00,000 gross (FBP head lines
+//   all isTaxable), only the std deduction subtracted: taxable 7,50,000 ->
+//   2.5-5L@5%=12,500 + 5-7.5L@20%=50,000 = 62,500 + 4% cess = ₹65,000 ; /12 -> ₹5,417/mo.
+//   The fixed run hands computeTds the projection's taxable override and matches ₹4,266.
+{
+  const { computeFbpExempt } = require('../../tax/fbp/fbpAggregator');
+
+  // The FBP exemption — the SINGLE source the run + projection both consume.
+  const fbpHeads = [
+    { id: 'lta', headType: 'LTA', claimType: 'FBP_LTA', annualCapMinor: null, monthlyCapMinor: null, proofRequired: true },
+    { id: 'meal', headType: 'MEAL_CARD', claimType: null, annualCapMinor: R(26400), monthlyCapMinor: R(2200), proofRequired: false },
+  ];
+  const fbpAlloc = [{ headId: 'lta', annualAmountMinor: R(40000) }, { headId: 'meal', annualAmountMinor: R(26400) }];
+  const fbpWindow = { proofDeadline: '2027-02-15' };
+  const fbpProofs = [{ claimType: 'FBP_LTA', status: 'ACCEPTED', verifiedAmount: 40000, deletedAt: null }];
+  const fbp = computeFbpExempt({ heads: fbpHeads, allocation: fbpAlloc, proofs: fbpProofs, window: fbpWindow, asOf: '2027-03-01', regime: 'OLD' });
+  check('F25 FBP exempt total -> ₹66,400 (LTA 40k verified + meal 26.4k card)', R(66400), fbp.totalExemptMinor);
+
+  // The projection — FBP exemption subtracted from otherAllowances (the buildEngineInput seam).
+  const annualEarnings = { basicDaMinor: R(600000), hraReceivedMinor: 0, otherAllowancesMinor: R(200000), residualChoicePayMinor: 0 };
+  const proj = projectAnnualIncomeTax({
+    regime: 'OLD',
+    annualEarnings: { ...annualEarnings, otherAllowancesMinor: Math.max(0, annualEarnings.otherAllowancesMinor - fbp.totalExemptMinor) },
+    hasPan: true,
+  });
+  check('F25 projection taxable (gross-after-FBP 7,33,600 − std 50k) -> ₹6,83,600', R(683600), proj.taxableIncomeMinor);
+  check('F25 projection total tax -> ₹51,188.80', 5118880, proj.totalAnnualTaxMinor);
+
+  const sched = monthlyTaxRecoverable({
+    totalAnnualTaxMinor: proj.totalAnnualTaxMinor, tdsDeductedThisFYMinor: 0, prevEmployerTdsMinor: 0,
+    monthsRemaining: 12, startMonth: '2026-04',
+  });
+
+  // THE FIX: the run hands computeTds the projection's taxable override.
+  const runFixed = computeTds({
+    periodGrossMinor: 0,
+    ytd: { taxableGrossMinor: 0, tdsDeductedMinor: 0, monthsElapsed: 0 },
+    period: { end: '2026-04-30', year: 2026, month: 4 },
+    employee: { hasPan: true, taxRegime: 'OLD' },
+    annualTaxableOverrideMinor: proj.taxableIncomeMinor,
+  });
+  check('F25 PARITY: run annual tax === projection annual tax', proj.totalAnnualTaxMinor, runFixed.annualTaxMinor);
+  check('F25 PARITY: run monthly TDS === projection monthly recoverable', sched.monthlyRecoverableMinor, runFixed.monthlyTdsMinor);
+  check('F25 run monthly TDS -> ₹4,266', R(4266), runFixed.monthlyTdsMinor);
+
+  // THE BUG it fixes: without the override the run annualises the full taxable gross
+  // (FBP head lines included) and OVER-withholds. Asserted so the regression is pinned.
+  const runBug = computeTds({
+    periodGrossMinor: Math.round(R(800000) / 12),
+    ytd: { taxableGrossMinor: 0, tdsDeductedMinor: 0, monthsElapsed: 0 },
+    period: { end: '2026-04-30', year: 2026, month: 4 },
+    employee: { hasPan: true, taxRegime: 'OLD' },
+    annualProjectionOverrideMinor: R(800000),
+  });
+  check('F25 BUG baseline: un-reconciled run over-withholds -> ₹5,417/mo', R(5417), runBug.monthlyTdsMinor);
+  check('F25 fix recovers the over-withholding (₹1,151/mo less)', R(1151), runBug.monthlyTdsMinor - runFixed.monthlyTdsMinor);
+}
+
 // ===========================================================================
 // SECTION L — FEATURE 21: LABOUR WELFARE FUND (computeLwf / resolveLwf)
 //   FLAT rupees/head, EE + ER, fired ONLY in the state's deduction month(s).

@@ -309,6 +309,7 @@ function evaluateReimbursementGuard(result) {
  *   entity:        Entity { countryCode, stateCode, payCurrency, ... },
  *   period:        { start, end, payDate, frequency, taxYear },
  *   ytd:           Object | null,
+ *   taxOverride:   { annualTaxableOverrideMinor, annualProjectionOverrideMinor } | null,
  * }
  * @returns {Object} {
  *   componentsForEngine,  // engine component defs (statutory excluded)
@@ -325,6 +326,11 @@ function buildEmployeePayInput(rows) {
     entity = {},
     period = {},
     ytd = null,
+    // Feature 25 (FBP) / Feature 15 — the projection's pre-computed annual taxable +
+    // gross, resolved impurely in loadRunRowBundles for OLD-regime FBP employees so the
+    // run's §192 TDS reconciles to the ESS projection (no over-withholding). Null for
+    // everyone else (default §192 annualisation — golden parity preserved).
+    taxOverride = null,
   } = rows || {};
 
   // ── Components (engine-evaluated only) ──
@@ -522,6 +528,12 @@ function buildEmployeePayInput(rows) {
     dateOfBirth: isoDate(employee.dateOfBirth),
     // India
     hasPan: sp.pan ? true : sp.pan === null && sp.countryCode === 'IN' ? false : undefined,
+    // Feature 15/25 — the ELECTED tax regime drives computeTds's slab/§87A selection so
+    // the live monthly TDS reconciles to the projection (which is regime-aware). Without
+    // it the run defaults to NEW and an OLD-regime employee's TDS never matches the
+    // projection (and an OLD-regime FBP basket's exemption can't reconcile). Default NEW
+    // (computeTds's own default) when the profile is silent.
+    taxRegime: sp.taxRegime ? String(sp.taxRegime).toUpperCase() : undefined,
     // Feature 21 — LWF managerial/supervisory exclusion flag (null/false => covered;
     // fail-open to charging the flat welfare fee when the role is unknown).
     isManagerial: sp.isManagerial === true,
@@ -560,6 +572,9 @@ function buildEmployeePayInput(rows) {
     employee: employeeArg,
     entity: entityArg,
     currencyCode: entity.payCurrency || undefined,
+    // §192 reconciliation overrides — present only for OLD-regime FBP employees.
+    annualTaxableOverrideMinor: taxOverride ? taxOverride.annualTaxableOverrideMinor : null,
+    annualProjectionOverrideMinor: taxOverride ? taxOverride.annualProjectionOverrideMinor : null,
   };
 
   // M2 — OT hours that no component will consume vanish silently. When otHours>0
@@ -828,9 +843,34 @@ async function loadRunRowBundles(businessId, payRun, db = prisma) {
       businessId, compensation, employeeId: emp.id, financialYear: payRun.taxYear, db,
     });
 
+    // Feature 25 (FBP) / Feature 15 — §192 reconciliation. After the overlay explodes the
+    // FBP envelope into per-head EARNING lines (all isTaxable), the run would otherwise
+    // annualise the FULL taxable gross through computeTds and OVER-withhold relative to the
+    // ESS projection (which subtracts the FBP exemption). For an OLD-regime employee with an
+    // FBP allocation, resolveRunTaxOverride pre-computes the projection's post-exemption
+    // annual taxable via the SAME pure path (the single computeFbpExempt source) so the live
+    // monthly TDS === projection TDS to the paise. Returns null for everyone else (NEW
+    // regime / no allocation / non-IN) — the run keeps its default §192 annualisation, so
+    // non-FBP payslips are byte-identical (golden parity). Lazy-required to avoid the
+    // assembler↔payrollService require cycle. A LIVE/REGULAR-style run only; MIGRATED
+    // historical runs reconcile against their own past projection at as-of = period end.
+    // eslint-disable-next-line global-require
+    const { resolveRunTaxOverride } = require('../tax/projectionAssembler');
+    let taxOverride = null;
+    try {
+      taxOverride = await resolveRunTaxOverride({
+        businessId, employeeId: emp.id, asOf: periodEnd, db,
+      });
+    } catch (_e) {
+      // Fail-open: a projection-resolution hiccup must never block the run — fall back to
+      // the default §192 annualisation rather than failing the payslip.
+      taxOverride = null;
+    }
+
     bundles.push({
       employee: emp,
       compensation,
+      taxOverride,
       statutory: emp.statutoryProfile || null,
       attendance: attendanceByEmp.get(emp.id) || null,
       entity,
