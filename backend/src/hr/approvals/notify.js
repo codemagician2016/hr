@@ -158,6 +158,11 @@ function applyPrefs(recipient) {
 // router for this dedupe token? We encode the token into MessageDelivery.triggeredBy at
 // send time, so a prior row with the same token means "already handled". A FAILED row
 // does NOT count (we allow a genuine retry of a transient provider failure).
+//
+// NOTE: this read-only check is retained for diagnostics/tests, but the LIVE dedupe is
+// now the atomic claimDedupe() below — a check-then-act here is racy (two concurrent
+// sweeps could both observe "not sent" and both fire). claimDedupe makes the gate a
+// single atomic INSERT under a UNIQUE(businessId, token).
 async function alreadySent(businessId, dedupeToken) {
   if (!dedupeToken) return false;
   const row = await prisma.messageDelivery.findFirst({
@@ -171,6 +176,42 @@ async function alreadySent(businessId, dedupeToken) {
   return !!row;
 }
 
+// Atomic send-dedupe: claim the token by INSERTing a HrNotifyDedupe row under the
+// UNIQUE(businessId, token). Returns:
+//   true  → WE claimed it (a new row was inserted); the caller proceeds to dispatch.
+//   false → already claimed → a concurrent/prior send owns it; the caller must skip.
+// A null token can't be deduped, so it proceeds (claimed=true).
+//
+// Implemented with `INSERT … ON CONFLICT DO NOTHING RETURNING id`: a SINGLE atomic
+// statement that the DB serialises on the unique index, so two concurrent sweeps can't
+// both insert — exactly one gets the RETURNING row. Raw SQL (rather than the generated
+// model accessor) keeps this resilient to a shared/contended Prisma client that another
+// worktree may regenerate; the table name is unqualified so it resolves via the
+// connection's search_path (hr_test in tests, public in prod). Best-effort: any
+// unexpected DB error fails OPEN (returns true) so a notification is never silently lost.
+async function claimDedupe(businessId, dedupeToken) {
+  if (!dedupeToken) return true;
+  try {
+    const id = require('crypto').randomUUID();
+    const rows = await prisma.$queryRawUnsafe(
+      'INSERT INTO "HrNotifyDedupe" ("id","businessId","token") VALUES ($1,$2,$3) ON CONFLICT ("businessId","token") DO NOTHING RETURNING "id"',
+      id, businessId, dedupeToken,
+    );
+    return Array.isArray(rows) && rows.length > 0; // row inserted ⇒ we own the claim
+  } catch (_e) {
+    return true; // unexpected error → fail-open (don't drop the notice)
+  }
+}
+
+// Release a previously-claimed token (so a failed/transient dispatch can be retried).
+async function releaseDedupe(businessId, dedupeToken) {
+  if (!dedupeToken) return;
+  await prisma.$executeRawUnsafe(
+    'DELETE FROM "HrNotifyDedupe" WHERE "businessId" = $1 AND "token" = $2',
+    businessId, dedupeToken,
+  ).catch(() => {});
+}
+
 // Core single-recipient send. Resolves contact, applies prefs, dedupes, then calls the
 // existing router via notifyHrEvent. NEVER throws — returns a small summary.
 async function dispatchOne({ businessId, recipient, event, variables, dedupeToken }) {
@@ -180,7 +221,11 @@ async function dispatchOne({ businessId, recipient, event, variables, dedupeToke
     if (pref.suppressed) return { ok: false, reason: 'EMPLOYEE_OPTED_OUT' };
     if (!pref.email && !pref.phone) return { ok: false, reason: 'NO_CONTACT' };
 
-    if (await alreadySent(businessId, dedupeToken)) {
+    // Atomic dedupe: claim the token under a UNIQUE before dispatching. A concurrent send
+    // that lost the race gets claimed:false and skips — two overlapping sweeps can't both
+    // fire the same notice.
+    const claimed = await claimDedupe(businessId, dedupeToken);
+    if (!claimed) {
       return { ok: true, reason: 'ALREADY_SENT', deduped: true };
     }
 
@@ -195,10 +240,20 @@ async function dispatchOne({ businessId, recipient, event, variables, dedupeToke
       // MessageDelivery.triggeredBy, which is exactly what alreadySent() reads back.
       triggeredBy: dedupeToken,
     });
+    // If the dispatch did NOT succeed (e.g. a transient provider outage, or every channel
+    // was blocked/unavailable), RELEASE the claim so a genuine retry can re-send — the
+    // claim must only stick for a delivery that actually left/was-blocked-at the router.
+    if (dedupeToken && !(res && res.ok)) {
+      await releaseDedupe(businessId, dedupeToken);
+    }
     return res || { ok: false, reason: 'NO_RESULT' };
   } catch (e) {
     // Belt-and-braces: notifyHrEvent/router are designed not to throw, but a recipient
-    // lookup or an unexpected error must never bubble into the approval flow.
+    // lookup or an unexpected error must never bubble into the approval flow. Release any
+    // claim so the failed send can be retried.
+    if (dedupeToken) {
+      await releaseDedupe(businessId, dedupeToken);
+    }
     return { ok: false, reason: 'DISPATCH_ERROR', error: e && e.message };
   }
 }
@@ -210,7 +265,7 @@ async function dispatchOne({ businessId, recipient, event, variables, dedupeToke
  * awaits them. Mirrors engine.notifyApprovers' recipient set. IN_APP is written by the
  * engine; this adds email/WhatsApp/push.
  */
-async function fanOutApprovalPending({ businessId, request, approverUserIds, reminder = false }) {
+async function fanOutApprovalPending({ businessId, request, approverUserIds, reminder = false, reminderWindowKey = null }) {
   const summary = { sent: 0, skipped: 0, total: 0 };
   try {
     const ids = [...new Set((approverUserIds || []).filter((u) => u && u !== 'SYSTEM'))];
@@ -231,10 +286,14 @@ async function fanOutApprovalPending({ businessId, request, approverUserIds, rem
         LINK: link,
       };
       // Token: scope by request + step + recipient + kind so a re-activation of the
-      // SAME level for the SAME approver doesn't double-send, but a genuine new SLA
-      // reminder window (escalation bumps the step/level) can re-notify.
+      // SAME level for the SAME approver doesn't double-send. For REMINDERS we ALSO scope
+      // by the reminder window key (the bumped request version supplied by the SLA sweep):
+      // currentStepOrder does NOT change between plain REMIND windows, so keying only on it
+      // meant a single reminder ever left. The window key advances once per due window, so
+      // each window sends exactly once while a same-window double-run still dedupes.
       const kind = reminder ? 'REM' : 'PEND';
-      const token = `HR_${kind}:${request.id}:${request.currentStepOrder}:${uid}`;
+      const windowSuffix = reminder && reminderWindowKey != null ? `:w${reminderWindowKey}` : '';
+      const token = `HR_${kind}:${request.id}:${request.currentStepOrder}${windowSuffix}:${uid}`;
       const r = await dispatchOne({ businessId, recipient, event, variables, dedupeToken: token });
       if (r && r.ok) summary.sent += 1; else summary.skipped += 1;
     }
@@ -282,6 +341,6 @@ module.exports = {
   // exported for tests / reuse
   _internals: {
     appBaseUrl, approvalDeepLink, moduleDeepLink, moduleLabel, displayName,
-    recipientByUserId, recipientByEmployeeId, applyPrefs, alreadySent, dispatchOne,
+    recipientByUserId, recipientByEmployeeId, applyPrefs, alreadySent, claimDedupe, releaseDedupe, dispatchOne,
   },
 };

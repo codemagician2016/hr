@@ -172,7 +172,13 @@ async function sendNotification({
   const country = (recipientCountry || detectCountryFromPhone(recipientPhone) || 'XX').toUpperCase();
   const route = getRoute(country);
 
-  // 3. Opt-out guard (universal across all tenants)
+  // 3. Opt-out guard (universal across all tenants). A universal STOP is a PHONE-CHANNEL
+  // opt-out (TCPA/TRAI) — it must suppress SMS + WhatsApp but NOT email, which is the
+  // always-on fallback. Previously this returned OPTED_OUT immediately, so an approver who
+  // had STOP'd their phone got NOTHING (no SMS AND no email). We now log the phone block
+  // for the audit trail, drop the phone so the SMS/WhatsApp legs are skipped, and FALL
+  // THROUGH so the email leg still fires.
+  let phoneOptedOut = false;
   if (recipientPhone && await isOptedOut(recipientPhone)) {
     await logDelivery({
       businessId,
@@ -186,7 +192,9 @@ async function sendNotification({
       appointmentId,
       orderId,
     });
-    return { ok: false, reason: 'OPTED_OUT', attempts };
+    phoneOptedOut = true;
+    // Suppress every phone channel for this send; email remains eligible.
+    recipientPhone = null;
   }
 
   // 4. Load NotificationConfig + DB-side template (for provider IDs)
@@ -255,6 +263,14 @@ async function sendNotification({
     // SMS / WhatsApp paths share validation
     const isWa = channel === 'whatsapp';
     const isSms = channel === 'sms';
+
+    // 7a0. Phone-channel opt-out (universal STOP) — suppress SMS/WhatsApp but keep walking
+    // so the email leg below can still fire. Attributed explicitly for the audit trail.
+    if (phoneOptedOut) {
+      attempt.skipped = 'PHONE_OPTED_OUT';
+      attempts.push(attempt);
+      continue;
+    }
 
     // 7a. Gate check
     const gateField = isWa ? 'managedWhatsappEnabled' : 'managedSmsEnabled';
