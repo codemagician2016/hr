@@ -22,6 +22,8 @@ const s3 = require('../../../core/lib/s3');
 const { scopeWhere } = require('../../lib/scopeResolver');
 const { notifyHrEvent } = require('../../integrations/notifications');
 const { CLAIM_TYPE_META } = require('./claimTypes');
+const { resolveWindow } = require('./windowResolver');
+const { shouldUseVerified } = require('./proofAggregator');
 
 const PROOF_PUBLIC = [
   'id', 'employeeId', 'windowId', 'financialYear', 'claimType', 'subSection',
@@ -174,6 +176,24 @@ async function acceptProof(req, res, next) {
     if (!proof) return undefined;
     if (proof.status === 'ACCEPTED') {
       return res.status(409).json({ message: 'This proof is already accepted. Reject it first to re-verify.' });
+    }
+
+    // §201 DATE GUARD (authoritative): on/after the proofDeadline the assembler has
+    // FROZEN TDS on the VERIFIED figures. A new ACCEPT here would raise the verified Σ
+    // and CUT the already-frozen TDS — exactly the §201 control being defeated. The DATE
+    // is authoritative, NOT the window status flag: if the lifecycle cron missed its tick
+    // the window may still be flagged OPEN, but the deadline date still froze the math.
+    // We reuse shouldUseVerified — the SAME primitive the assembler flips on — so the
+    // verify gate and the TDS math can never diverge. (Reject stays allowed: it can only
+    // LOWER the verified Σ, never inflate relief, so it cannot un-freeze in the employee's
+    // favour.)
+    const window = await resolveWindow({ businessId, financialYear: proof.financialYear });
+    const asOf = new Date().toISOString().slice(0, 10);
+    if (shouldUseVerified(window, asOf)) {
+      return res.status(409).json({
+        message: `The proof deadline (${String(window.proofDeadline).slice(0, 10)}) has passed; verified TDS is frozen and proofs can no longer be accepted.`,
+        code: 'PROOF_DEADLINE_PASSED',
+      });
     }
 
     // verifiedAmount defaults to the declared amount; HR may trim DOWN, never UP.
