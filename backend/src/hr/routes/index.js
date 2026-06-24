@@ -48,6 +48,12 @@ router.use('/documents', require('./documents.routes'));
 // scoped, SoD on verify). The ESS upload + Form 12BB live under /me/proofs (below).
 router.use('/tax-windows', require('./taxWindow.routes'));
 router.use('/proofs', require('./proofs.routes'));
+// FLAG (Feature 25 — NEW mount): FBP / Flexi Basket. Operator surfaces: the plan
+// builder (canViewCompensation/canManageCompensation) + the allocation roster +
+// per-employee drill-down + force-lock (canViewEmployees/canManagePayroll, F1-scoped).
+// FBP bills reuse the F20 /proofs verify console (FBP_* claim types). ESS allocation
+// lives under /me/fbp (below). The FBP window reuses /tax-windows with purpose=FBP_ALLOCATION.
+router.use('/fbp', require('./fbp.routes'));
 router.use('/assets', require('./assets.routes'));
 router.use('/expenses', require('./expenses.routes'));
 router.use('/loans', require('./loans.routes'));
@@ -149,6 +155,11 @@ router.use('/me/tax-projection', require('./meTaxProjection.routes'));
 // session, SELF_ONLY (subject resolved from the session). Window-OPEN-gated uploads,
 // withdraw-own-PENDING, per-claim declared/verified/pending rollup, Form 12BB PDF.
 router.use('/me/proofs', require('./meProofs.routes'));
+// FLAG (Feature 25 — NEW mount): ESS Flexi-Benefits (FBP). Customer session,
+// SELF_ONLY (subject resolved from the session). Active plan + resolved envelope +
+// allocation, per-head caps + live exempt/taxable, window status, regime gate, and
+// the live "tax you save" preview. Bills upload via /me/proofs with FBP_* claim types.
+router.use('/me/fbp', require('./meFbp.routes'));
 router.use('/me/tasks', require('./meTasks.routes'));
 // FLAG (Feature 11 — shared edit): ESS reimbursement/claims + travel. Customer session,
 // SELF_ONLY (subject resolved from the session). Apply for reimbursement / outdoor duty,

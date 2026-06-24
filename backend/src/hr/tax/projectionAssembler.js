@@ -30,6 +30,11 @@ const { resolveStatutoryCountry } = require('../lib/resolveStatutoryCountry');
 const { resolveWindow } = require('./investmentProof/windowResolver');
 const { amountForSection, shouldUseVerified } = require('./investmentProof/proofAggregator');
 const { CLAIM_TYPE_META } = require('./investmentProof/claimTypes');
+// Feature 25 — the FBP / Flexi Basket exemption. The SINGLE subtraction below
+// (otherAllowancesMinor -= fbp.totalExemptMinor) carries the OLD-regime FBP relief
+// into BOTH the monthly TDS run and the ESS projection atomically (both reconcile
+// through buildTaxProjection). NEW-regime returns 0 (the basket pays but is taxable).
+const { resolveFbpExempt } = require('./fbp/fbpProjection');
 
 const {
   projectAnnualIncomeTax,
@@ -215,14 +220,19 @@ function readDeclaration(sp, ctx = {}) {
 }
 
 // Build the engine input for a chosen regime from earnings + declaration.
-function buildEngineInput({ regime, annualEarnings, decl, prevEmployerCounted }) {
+// Feature 25 — `fbpExemptMinor` (paise) is the regime-appropriate FBP-exempt total
+// (0 under NEW). It is subtracted from otherAllowancesMinor HERE — the single seam
+// (spec §6 Seam B): projectAnnualIncomeTax adds otherAllowancesMinor to gross, so
+// subtracting the exempt basket reduces taxable income by exactly Σ exempt. No change
+// to india.js math. Done inside the fresh copy so each regime gets its own subtraction.
+function buildEngineInput({ regime, annualEarnings, decl, prevEmployerCounted, fbpExemptMinor = 0 }) {
   const isOld = regime === 'OLD';
   return {
     regime,
     annualEarnings: {
       basicDaMinor: annualEarnings.basicDaMinor,
       hraReceivedMinor: annualEarnings.hraReceivedMinor,
-      otherAllowancesMinor: annualEarnings.otherAllowancesMinor,
+      otherAllowancesMinor: Math.max(0, annualEarnings.otherAllowancesMinor - Math.max(0, Math.round(fbpExemptMinor || 0))),
       residualChoicePayMinor: annualEarnings.residualChoicePayMinor,
     },
     perquisitesInput: decl.perq,
@@ -341,11 +351,23 @@ async function buildTaxProjection({ businessId, employeeId, asOf, db = prisma } 
   const electedRegime = decl.regime;
   const otherRegime = electedRegime === 'OLD' ? 'NEW' : 'OLD';
 
+  // Feature 25 — the FBP / Flexi Basket exemption (OLD-regime only). Resolved
+  // per-regime (the OTHER-regime comparison line needs its own value: NEW → 0) and
+  // subtracted from otherAllowancesMinor inside buildEngineInput. Date-authoritative
+  // declared→verified flip (asOf >= the FBP window's proofDeadline) lives in the pure
+  // aggregator, so correctness never depends on the cron firing.
+  const fbpElected = await resolveFbpExempt({
+    businessId, employeeId, financialYear: taxYear, asOf: asOfIso, regime: electedRegime, db,
+  });
+  const fbpOther = await resolveFbpExempt({
+    businessId, employeeId, financialYear: taxYear, asOf: asOfIso, regime: otherRegime, db,
+  });
+
   const electedResult = projectAnnualIncomeTax(
-    buildEngineInput({ regime: electedRegime, annualEarnings, decl, prevEmployerCounted }),
+    buildEngineInput({ regime: electedRegime, annualEarnings, decl, prevEmployerCounted, fbpExemptMinor: fbpElected.totalExemptMinor }),
   );
   const otherResult = projectAnnualIncomeTax(
-    buildEngineInput({ regime: otherRegime, annualEarnings, decl, prevEmployerCounted }),
+    buildEngineInput({ regime: otherRegime, annualEarnings, decl, prevEmployerCounted, fbpExemptMinor: fbpOther.totalExemptMinor }),
   );
 
   // 8. Monthly recoverable schedule (last month absorbs the residual).
@@ -408,6 +430,22 @@ async function buildTaxProjection({ businessId, employeeId, asOf, db = prisma } 
       });
     }
   }
+  // Feature 25 — the FBP unverified anomaly (the same §192(2D)/§201 control for the
+  // bill-backed basket heads). Only OLD-regime + on/after the FBP deadline.
+  if (electedRegime === 'OLD' && fbpElected.hasAllocation && fbpElected.basis === 'VERIFIED') {
+    let fbpUnverifiedMinor = 0;
+    const fbpSections = [];
+    for (const line of fbpElected.lines || []) {
+      if (line.unverifiedMinor > 0) { fbpUnverifiedMinor += line.unverifiedMinor; fbpSections.push(line.label); }
+    }
+    if (fbpUnverifiedMinor > 0) {
+      anomalies.push({
+        code: 'FBP_UNVERIFIED',
+        severity: 'WARN',
+        message: `₹${toRupees(fbpUnverifiedMinor).toLocaleString('en-IN')} of your declared flexi benefits is unverified and excluded — upload bills (${fbpSections.join(', ')}) or your March TDS stays higher.`,
+      });
+    }
+  }
 
   const electedTotalRupees = toRupees(electedResult.totalAnnualTaxMinor);
   const otherTotalRupees = toRupees(otherResult.totalAnnualTaxMinor);
@@ -431,6 +469,30 @@ async function buildTaxProjection({ businessId, employeeId, asOf, db = prisma } 
       residualChoicePay: toRupees(annualEarnings.residualChoicePayMinor),
       grossSalary: toRupees(electedResult.grossSalaryMinor),
     },
+
+    // Feature 25 — the FBP / Flexi Basket exemption block. `totalExempt` is the
+    // "Less: FBP exemptions ₹…" line on the IT computation; `basis` drives the
+    // F20-style "using declared (provisional)" → "using verified" badge after the
+    // deadline. Under NEW the exemption is structurally 0 (the basket pays, taxed).
+    fbp: fbpElected.hasAllocation
+      ? {
+          totalExempt: toRupees(fbpElected.totalExemptMinor),
+          basis: fbpElected.basis,
+          regimeGated: electedRegime !== 'OLD',
+          lines: (fbpElected.lines || []).map((l) => ({
+            headType: l.headType,
+            label: l.label,
+            taxSection: l.taxSection,
+            allocated: toRupees(l.allocatedMinor),
+            cap: l.capMinor == null ? null : toRupees(l.capMinor),
+            verified: toRupees(l.verifiedMinor),
+            exempt: toRupees(l.exemptMinor),
+            unverified: toRupees(l.unverifiedMinor),
+            basis: l.basis,
+            proofRequired: l.proofRequired,
+          })),
+        }
+      : null,
 
     hraExemption: electedRegime === 'OLD' && electedResult.hra
       ? {
