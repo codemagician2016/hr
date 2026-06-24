@@ -10,9 +10,24 @@
  * a new dependency; the xlsx exporter falls back to this when xlsx is unavailable.
  */
 
-/** RFC-4180 cell escaping (quote + double inner quotes when needed). */
+// CSV/XLSX FORMULA-INJECTION neutralisation. A register is handed to outside
+// parties (HR users, labour inspectors) and opened in Excel/LibreOffice/Sheets;
+// a cell whose first char is one of these is evaluated as a formula. Mirrors the
+// F18 import neutraliser (hr/migration/parsers/csv.js neutralizeCell) one-for-one:
+// prefix a single quote so the spreadsheet treats it as literal text. WRITE-SIDE
+// only (the register text is already frozen display text, never re-parsed).
+const FORMULA_LEAD = new Set(['=', '+', '-', '@', '\t', '\r']);
+
+function neutralizeFormula(value) {
+  const s = String(value == null ? '' : value);
+  if (s.length === 0) return s;
+  return FORMULA_LEAD.has(s[0]) ? `'${s}` : s;
+}
+
+/** RFC-4180 cell escaping (quote + double inner quotes when needed), with a
+ *  formula-injection guard applied first (employee-controlled free text). */
 function csvCell(v) {
-  const s = String(v == null ? '' : v);
+  const s = neutralizeFormula(v);
   return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 
@@ -78,4 +93,4 @@ function buildCsv(register, opts = {}) {
   };
 }
 
-module.exports = { buildCsv, csvCell };
+module.exports = { buildCsv, csvCell, neutralizeFormula };

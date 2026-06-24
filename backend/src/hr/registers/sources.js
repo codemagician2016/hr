@@ -73,6 +73,50 @@ function parseFyPeriod(period) {
   };
 }
 
+/**
+ * Parse an ESI half-year contribution period to its 6-month window.
+ * Accepts:
+ *   - "H1-2026" → 1 Apr 2026 .. 30 Sep 2026 (April–September contribution period)
+ *   - "H2-2026" → 1 Oct 2026 .. 31 Mar 2027 (October–March contribution period)
+ *   - "2026-07" (any YYYY-MM) → the half-year that CONTAINS that month (back-compat
+ *     with a month token, so an existing UI passing a month still resolves to the
+ *     correct statutory 6-month window rather than a single month).
+ * Returns { half:'H1'|'H2', label:'H1-2026', start, end }.
+ */
+function parseHalfYearPeriod(period) {
+  const raw = String(period || '').trim().toUpperCase();
+  let half;
+  let year;
+  let mHy = /^(H[12])[-/](\d{4})$/.exec(raw);
+  if (mHy) {
+    half = mHy[1];
+    year = +mHy[2];
+  } else {
+    const mMonth = /^(\d{4})-(\d{2})$/.exec(raw);
+    if (!mMonth || +mMonth[2] < 1 || +mMonth[2] > 12) {
+      const e = new Error(`Invalid half-year "${period}" — expected "H1-YYYY"/"H2-YYYY" or "YYYY-MM"`);
+      e.code = 'BAD_PERIOD';
+      throw e;
+    }
+    year = +mMonth[1];
+    const month = +mMonth[2];
+    // Apr(4)..Sep(9) = H1; Oct(10)..Dec(12) = H2 of this year; Jan(1)..Mar(3) = H2
+    // of the PREVIOUS FY year (the Oct–Mar window belongs to the year it started).
+    if (month >= 4 && month <= 9) {
+      half = 'H1';
+    } else if (month >= 10) {
+      half = 'H2';
+    } else {
+      half = 'H2';
+      year -= 1;
+    }
+  }
+  if (half === 'H1') {
+    return { half, label: `H1-${year}`, start: new Date(Date.UTC(year, 3, 1)), end: new Date(Date.UTC(year, 8, 30)) };
+  }
+  return { half, label: `H2-${year}`, start: new Date(Date.UTC(year, 9, 1)), end: new Date(Date.UTC(year + 1, 2, 31)) };
+}
+
 // ── employee header enrichment (designation, statutory IDs) ───────────────────
 
 function attachDesignation(employee, employmentRecords) {
@@ -200,7 +244,12 @@ async function loadAttendanceBundle({ businessId, entityId, period, scope }) {
   const found = await findFrozenPayRun(businessId, entityId, period);
   if (!found.frozen) return { frozen: false, code: found.code, reason: found.reason };
   const run = found.run;
-  const { start, end, year, month } = parseMonthPeriod(period);
+  const { year, month } = parseMonthPeriod(period);
+  // The muster grid window is the FROZEN pay run's actual period — NOT the raw
+  // calendar month. For a non-calendar cycle (e.g. 26→25) this spans two calendar
+  // months, keeping the daily grid byte-identical to the frozen summary's span.
+  const start = run.periodStart;
+  const end = run.periodEnd;
 
   const apInputs = await prisma.attendancePayInput.findMany({
     where: { businessId, payRunId: run.id, ...scopeWhere(scope, 'employeeId') },
@@ -232,9 +281,12 @@ async function loadAttendanceBundle({ businessId, entityId, period, scope }) {
   }
 
   const empIds = apInputs.map((a) => a.employeeId);
-  // The daily frozen attendance rows for the period (isLocked after freeze).
+  // The daily FROZEN attendance rows over the run period. isLocked:true is the
+  // cardinal invariant — only attendance the freeze locked is authoritative
+  // statutory data; an admin-unlocked correction-in-flight or a post-freeze row
+  // must NEVER surface in the register (it would diverge from the frozen summary).
   const att = await prisma.attendance.findMany({
-    where: { businessId, employeeId: { in: empIds }, date: { gte: start, lte: end } },
+    where: { businessId, employeeId: { in: empIds }, isLocked: true, date: { gte: start, lte: end } },
     select: { employeeId: true, date: true, status: true, lopFraction: true, firstIn: true, lastOut: true, overtimeMinutes: true, workedMinutes: true },
     orderBy: { date: 'asc' },
   });
@@ -262,6 +314,10 @@ async function loadAttendanceBundle({ businessId, entityId, period, scope }) {
     frozen: true,
     workers,
     period: { year, month },
+    // The grid window = the frozen run period (drives one day-column per actual
+    // period day, NOT the calendar month). Carried through so the projector and
+    // the frozen summary share ONE window on non-calendar cycles.
+    window: { start, end },
     sourceRefs: { payRunIds: [run.id], attendanceFrozen: true },
   };
 }
@@ -395,6 +451,68 @@ async function loadAnnualPayrunBundle({ businessId, entityId, fyPeriod, scope })
   return { frozen: true, workers: [...byEmp.values()], sourceRefs: { payRunIds: runIds } };
 }
 
+// ── HALF-YEARLY PAYRUN bundle (ESI contribution register — 6 frozen monthly runs
+// rolled per member over the Apr–Sep / Oct–Mar contribution period) ────────────
+
+async function loadEsiHalfYearBundle({ businessId, entityId, period, scope }) {
+  const { start, end, label } = parseHalfYearPeriod(period);
+  const runs = await prisma.payRun.findMany({
+    where: {
+      businessId, entityId, deletedAt: null,
+      status: { in: FROZEN_PAYRUN_STATUSES },
+      periodStart: { gte: start }, periodEnd: { lte: end },
+    },
+    select: { id: true, periodStart: true },
+  });
+  if (!runs.length) {
+    return { frozen: false, code: 'NOT_FROZEN', reason: `No locked pay runs found in ${label} (ESI half-year).` };
+  }
+  const runIds = runs.map((r) => r.id);
+
+  const lines = await prisma.payRunLine.findMany({
+    where: { businessId, payRunId: { in: runIds }, ...scopeWhere(scope, 'employeeId') },
+    select: {
+      employeeId: true, grossEarnings: true, esiEmployee: true, esiEmployer: true,
+      employee: {
+        select: {
+          ...EMPLOYEE_SELECT,
+          statutoryProfile: { select: STATUTORY_SELECT },
+          employmentRecords: { where: { isCurrent: true }, select: { designation: { select: { title: true } } }, take: 1 },
+        },
+      },
+    },
+  });
+
+  // Roll the (up to) 6 monthly lines into one per member — the half-yearly
+  // contribution is the SUM of the period's monthly frozen figures, not one month.
+  const byEmp = new Map();
+  for (const l of lines) {
+    let agg = byEmp.get(l.employeeId);
+    if (!agg) {
+      const emp = attachDesignation(l.employee, l.employee.employmentRecords);
+      delete emp.employmentRecords;
+      agg = {
+        employee: emp,
+        statutory: l.employee.statutoryProfile || {},
+        line: { grossEarnings: 0, esiEmployee: 0, esiEmployer: 0 },
+      };
+      byEmp.set(l.employeeId, agg);
+    }
+    agg.line.grossEarnings += num(l.grossEarnings);
+    agg.line.esiEmployee += num(l.esiEmployee);
+    agg.line.esiEmployer += num(l.esiEmployer);
+  }
+
+  // Order by employee code for a stable register (the per-member aggregate).
+  const workers = [...byEmp.values()].sort((a, b) => {
+    const ca = (a.employee && a.employee.code) || '';
+    const cb = (b.employee && b.employee.code) || '';
+    return ca < cb ? -1 : ca > cb ? 1 : 0;
+  });
+
+  return { frozen: true, workers, sourceRefs: { payRunIds: runIds, halfYear: label } };
+}
+
 function num(v) {
   if (v == null) return 0;
   if (typeof v === 'object' && typeof v.toNumber === 'function') return v.toNumber();
@@ -405,6 +523,13 @@ function num(v) {
 // ── source dispatch by RegisterSource ─────────────────────────────────────────
 
 async function loadBundleForSource(source, args) {
+  // A HALF_YEARLY register (ESI contribution) reads its OWN multi-month window:
+  // 6 frozen monthly runs rolled per member over Apr–Sep / Oct–Mar, NOT a single
+  // calendar month. We branch on cadence here (no new RegisterSource enum value /
+  // schema migration needed) so a PAYRUN-source ESI form gets the half-year roll.
+  if (args && args.cadence === 'HALF_YEARLY') {
+    return loadEsiHalfYearBundle(args);
+  }
   switch (source) {
     case 'ATTENDANCE':
       return loadAttendanceBundle(args);
@@ -428,6 +553,7 @@ module.exports = {
   FROZEN_PAYRUN_STATUSES,
   parseMonthPeriod,
   parseFyPeriod,
+  parseHalfYearPeriod,
   findFrozenPayRun,
   loadEntityHeader,
   loadPayrunBundle,
@@ -435,5 +561,6 @@ module.exports = {
   loadLeaveBundle,
   loadEmployeeBundle,
   loadAnnualPayrunBundle,
+  loadEsiHalfYearBundle,
   loadBundleForSource,
 };
