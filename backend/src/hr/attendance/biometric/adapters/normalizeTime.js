@@ -18,6 +18,9 @@
  *   '24/06/2026 09:01:33'      → DD/MM/YYYY → ISO
  *   '2026/06/24 09:01:33'      → YYYY/MM/DD → ISO
  *   '24-06-2026 9:01 AM/PM'    → 12h → 24h
+ *   '2026-06-24' (date only)   → null  (a punch with NO clock time is not a usable
+ *                                 attendance event — landing it at 00:00 mis-places
+ *                                 it on the civil-day boundary / prior night session)
  * Returns null on anything unparseable (the core parks the event as ERROR).
  */
 function normalizeLocalTime(raw) {
@@ -48,9 +51,12 @@ function normalizeLocalTime(raw) {
   const di = Number(d);
   if (mi < 1 || mi > 12 || di < 1 || di > 31) return null;
 
-  // ── time: 12h (AM/PM) or 24h; default missing seconds to 00 ──
+  // ── time: 12h (AM/PM) or 24h; missing seconds default to 00 ──
+  // A DATE-ONLY value (no clock) is REJECTED (null): silently landing it at 00:00
+  // mis-places the punch on the civil-day boundary / pre-dawn night-shift window.
   let hh = 0; let mm = 0; let ss = 0;
-  if (timePart) {
+  if (!timePart) return null;
+  {
     const ampm = /\b(AM|PM)\b/i.exec(timePart);
     const tm = /(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(timePart);
     if (!tm) return null;

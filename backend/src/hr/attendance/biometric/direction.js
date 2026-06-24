@@ -21,7 +21,12 @@
  *     by derive.js's shift-end / next-day logic).
  *
  * Input event shape (the core builds these from RawPunchEvent rows for the day):
- *   { id, punchAtMs:Number, rawDirection:String|null }
+ *   { id, punchAtMs:Number, rawDirection:String|null,
+ *     mode?:String, dedupWindowSec?:Number }
+ * Multi-device days: an event MAY carry its OWN `mode`/`dedupWindowSec` (the device
+ * it was captured on). When present these win over the batch-level opts, so a punch
+ * on a TRUST_DEVICE gate keeps its device tokens even when the day's last ingest ran
+ * on a DERIVE gate. Absent → fall back to opts (single-device back-compat unchanged).
  * Output: an ARRAY aligned to the SORTED input, each:
  *   { id, punchType:'IN'|'OUT'|'BREAK_START'|'BREAK_END'|null, duplicate:Boolean }
  * (punchType=null only when duplicate=true — a de-bounced event is not materialised).
@@ -60,9 +65,8 @@ function mapTrustToken(token) {
  * back by `id`.
  */
 function resolveDayDirections(events, opts = {}) {
-  const mode = opts.mode || 'DERIVE';
-  const dedupWindowSec = Number.isFinite(opts.dedupWindowSec) ? opts.dedupWindowSec : 60;
-  const dedupMs = Math.max(0, dedupWindowSec) * 1000;
+  const optMode = opts.mode || 'DERIVE';
+  const optDedupSec = Number.isFinite(opts.dedupWindowSec) ? opts.dedupWindowSec : 60;
 
   const sorted = [...(events || [])].sort((a, b) => {
     if (a.punchAtMs !== b.punchAtMs) return a.punchAtMs - b.punchAtMs;
@@ -76,6 +80,11 @@ function resolveDayDirections(events, opts = {}) {
   let lastKeptMs = null;
 
   for (const ev of sorted) {
+    // Per-event device config (multi-device day) wins over the batch-level opts.
+    const mode = ev.mode || optMode;
+    const dedupWindowSec = Number.isFinite(ev.dedupWindowSec) ? ev.dedupWindowSec : optDedupSec;
+    const dedupMs = Math.max(0, dedupWindowSec) * 1000;
+
     // De-bounce: an event within dedupWindowSec of the LAST KEPT event (same
     // employee-day) is a double-tap → duplicate, not materialised. Applies in every
     // mode (a reader double-read is noise regardless of direction handling).

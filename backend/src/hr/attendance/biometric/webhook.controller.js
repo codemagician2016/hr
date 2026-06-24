@@ -67,8 +67,13 @@ async function ingestPunch(req, res) {
   });
   const device = candidates.find((d) => verifySecret(presented, d.ingestSecretHash)) || null;
   if (!device) {
-    // No raw body stored for an unauthenticated hit (audit line only).
-    await writeAudit({ businessId: candidates[0] ? candidates[0].businessId : null, actorId: 'SYSTEM:BIOMETRIC', action: 'biometric.ingest_rejected', entityType: 'PunchDevice', meta: { serial, reason: 'bad-secret-or-unknown-serial' } });
+    // No raw body stored for an unauthenticated hit (audit line only). NEVER stamp the
+    // owning tenant's businessId on a failed attempt — doing so turns the audit log into
+    // a cross-tenant oracle (a bad-secret hit on a REAL serial would otherwise confirm,
+    // unauthenticated, which tenant owns that serial). businessId stays null and the
+    // response is a CONSTANT 401 whether the serial is unknown or the secret is wrong —
+    // no enumeration signal in either the body or the audit trail.
+    await writeAudit({ businessId: null, actorId: 'SYSTEM:BIOMETRIC', action: 'biometric.ingest_rejected', entityType: 'PunchDevice', meta: { serial, reason: 'bad-secret-or-unknown-serial' } });
     return res.status(401).type('text/plain').send('unauthorized');
   }
 

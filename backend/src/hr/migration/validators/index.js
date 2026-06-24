@@ -221,8 +221,12 @@ function validateReimbursement(row, ctx) {
 // code is NOT an error: it lands as a parked UNMAPPED RawPunchEvent the operator maps
 // + reprocesses (§6.4), so we do not consult ctx.employeeCodes (the device code ≠
 // Employee.code in the common case — it resolves via DeviceEmployeeMap downstream).
-const BIO_TIME_RE = /^\d{4}-\d{2}-\d{2}([ T]\d{1,2}:\d{2}(:\d{2})?(\s*[AP]M)?)?$/i;
-const BIO_DDMM_RE = /^\d{1,2}[-/.]\d{1,2}[-/.]\d{4}([ T]\d{1,2}:\d{2}(:\d{2})?(\s*[AP]M)?)?$/i;
+// The clock time is MANDATORY (the [ T]HH:MM group is no longer optional): a
+// date-only punch is not a usable attendance event — landing it at 00:00 mis-places
+// it on the civil-day boundary / pre-dawn night-shift window. Reject it as a
+// BAD_DATETIME at validation rather than silently materialising a midnight punch.
+const BIO_TIME_RE = /^\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}(:\d{2})?(\s*[AP]M)?$/i;
+const BIO_DDMM_RE = /^\d{1,2}[-/.]\d{1,2}[-/.]\d{4}[ T]\d{1,2}:\d{2}(:\d{2})?(\s*[AP]M)?$/i;
 function validateBiometric(row, _ctx) {
   const f = [];
   const deviceCode = row.deviceCode != null ? String(row.deviceCode).trim() : null;

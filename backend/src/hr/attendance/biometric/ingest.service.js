@@ -53,10 +53,20 @@ function _hhmmInTz(instant, tz) {
   return `${p2(local.getUTCHours())}:${p2(local.getUTCMinutes())}`;
 }
 
-/** sha256(businessId|deviceId|deviceCode|punchAt.toISOString()|rawDirection). */
-function computeDedupKey({ businessId, deviceId, deviceCode, punchAt, rawDirection }) {
+/**
+ * sha256(businessId|deviceId|deviceCode|punchAt.toISOString()|rawDirection|localTimeRaw).
+ *
+ * `localTimeRaw` (the device's full literal timestamp WITH seconds) is part of the
+ * key so two genuine same-minute punches can NEVER collide on the @@unique spine.
+ * punchAt now carries seconds too (zonedWallTimeToUtc accepts :SS), but the raw
+ * string is the belt-and-braces guarantee: even a minute-rounded punchAt cannot
+ * fold two distinct device lines into one row (→ silent MISSING_PUNCH / inverted
+ * IN-OUT). Older callers that omit localTimeRaw get the prior key shape unchanged.
+ */
+function computeDedupKey({ businessId, deviceId, deviceCode, punchAt, rawDirection, localTimeRaw }) {
   const iso = punchAt instanceof Date ? punchAt.toISOString() : new Date(punchAt).toISOString();
   const parts = [businessId, deviceId || '', deviceCode || '', iso, rawDirection == null ? '' : String(rawDirection)];
+  if (localTimeRaw != null && localTimeRaw !== '') parts.push(String(localTimeRaw));
   return crypto.createHash('sha256').update(parts.join('|')).digest('hex');
 }
 
@@ -134,11 +144,13 @@ async function landRawEvents(db, { businessId, device, business, normalised, imp
   for (const n of normalised || []) {
     counts.received += 1;
     // Resolve the local wall-clock → true UTC instant in the device TZ (REUSE tz.js).
+    // Keep FULL precision (HH:MM:SS, slice 0,8) so two genuine same-minute punches
+    // resolve to two distinct instants — never collapsed into one row.
     const lt = n.localTimeRaw || '';
     const dm = /^(\d{4})-(\d{2})-(\d{2})/.exec(lt);
     const tmIdx = lt.indexOf(' ');
-    const hhmm = tmIdx >= 0 ? lt.slice(tmIdx + 1).slice(0, 5) : '';
-    let punchAt = dm && hhmm ? zonedWallTimeToUtc(lt.slice(0, 10), hhmm, tz) : null;
+    const hhmmss = tmIdx >= 0 ? lt.slice(tmIdx + 1).slice(0, 8) : '';
+    let punchAt = dm && hhmmss ? zonedWallTimeToUtc(lt.slice(0, 10), hhmmss, tz) : null;
     if (punchAt && clockOffsetMs) punchAt = new Date(punchAt.getTime() + clockOffsetMs);
 
     if (!punchAt || Number.isNaN(punchAt.getTime()) || !n.deviceCode) {
@@ -156,7 +168,7 @@ async function landRawEvents(db, { businessId, device, business, normalised, imp
       continue;
     }
 
-    const dedupKey = computeDedupKey({ businessId, deviceId: device.id, deviceCode: n.deviceCode, punchAt, rawDirection: n.rawDirection });
+    const dedupKey = computeDedupKey({ businessId, deviceId: device.id, deviceCode: n.deviceCode, punchAt, rawDirection: n.rawDirection, localTimeRaw: lt });
     const employeeId = await resolveEmployeeId(db, businessId, device, n.deviceCode);
     const status = employeeId ? 'MAPPED' : 'UNMAPPED';
     if (!employeeId) counts.unmapped += 1;
@@ -257,8 +269,34 @@ async function materialiseEmployeeDay(db, { businessId, employeeId, device, civi
   });
   if (!dayEvents.length) return { locked: false, materialised: 0, duplicate: 0 };
 
+  // DEVICE-SCOPED resolution: a multi-device site can have one employee punching on
+  // two gates in a day (e.g. a DERIVE main-gate + a TRUST_DEVICE plant-gate). Resolve
+  // and stamp each event under ITS OWN device — never let the single passed-in device
+  // re-label / re-provenance another device's punches. The passed-in `device` is only
+  // the fallback (the event's own deviceId is authoritative; matches the dedup spine).
+  const deviceCache = new Map();
+  if (device && device.id) deviceCache.set(device.id, device);
+  async function deviceForEvent(ev) {
+    const id = ev.deviceId || (device && device.id) || null;
+    if (!id) return device || null;
+    if (deviceCache.has(id)) return deviceCache.get(id);
+    const d = await db.punchDevice.findFirst({ where: { id, businessId } }) || device || null;
+    deviceCache.set(id, d);
+    return d;
+  }
+  // Pre-load each event's device so the resolver can apply per-event mode/dedup window.
+  const evDevices = new Map();
+  for (const ev of dayEvents) evDevices.set(ev.id, await deviceForEvent(ev));
+
   const resolution = resolveDayDirections(
-    dayEvents.map((e) => ({ id: e.id, punchAtMs: new Date(e.punchAt).getTime(), rawDirection: e.rawDirection })),
+    dayEvents.map((e) => {
+      const d = evDevices.get(e.id) || device;
+      return {
+        id: e.id, punchAtMs: new Date(e.punchAt).getTime(), rawDirection: e.rawDirection,
+        mode: d ? d.directionMode : device && device.directionMode,
+        dedupWindowSec: d ? d.dedupWindowSec : device && device.dedupWindowSec,
+      };
+    }),
     { mode: device.directionMode, dedupWindowSec: device.dedupWindowSec },
   );
   const byId = new Map(resolution.map((r) => [r.id, r]));
@@ -267,6 +305,7 @@ async function materialiseEmployeeDay(db, { businessId, employeeId, device, civi
   for (const ev of dayEvents) {
     const r = byId.get(ev.id);
     if (!r) continue;
+    const evDevice = evDevices.get(ev.id) || device; // stamp under the event's OWN device
     if (r.duplicate) {
       // De-bounced: mark DUPLICATE; remove any AttendancePunch it had created.
       if (ev.attendancePunchId) {
@@ -276,11 +315,13 @@ async function materialiseEmployeeDay(db, { businessId, employeeId, device, civi
       duplicate += 1;
       continue;
     }
-    // Create or update the AttendancePunch with the resolved label.
+    // Create or update the AttendancePunch with the resolved label. Provenance/location
+    // come from the EVENT'S device, so a cross-device re-materialise never overwrites
+    // one gate's location/punchDeviceId with another's.
     if (ev.attendancePunchId) {
       await db.attendancePunch.updateMany({
         where: { id: ev.attendancePunchId, businessId },
-        data: { punchType: r.punchType, punchAt: ev.punchAt, locationId: device.locationId || null, punchDeviceId: device.id },
+        data: { punchType: r.punchType, punchAt: ev.punchAt, locationId: (evDevice && evDevice.locationId) || null, punchDeviceId: evDevice ? evDevice.id : null },
       });
       await db.rawPunchEvent.update({ where: { id: ev.id }, data: { status: 'MATERIALISED', resolvedType: r.punchType } });
     } else {
@@ -291,9 +332,9 @@ async function materialiseEmployeeDay(db, { businessId, employeeId, device, civi
           punchType: r.punchType, // IN/OUT/BREAK_* (§6.2)
           source: 'BIOMETRIC', // never trust a client source; this IS a device
           punchAt: ev.punchAt, // true UTC instant
-          locationId: device.locationId || null, // seeds geofence + holiday scope in recompute
-          deviceId: device.serialNumber || null, // existing free-text column (back-compat)
-          punchDeviceId: device.id, // new provenance FK-by-id
+          locationId: (evDevice && evDevice.locationId) || null, // seeds geofence + holiday scope in recompute
+          deviceId: (evDevice && evDevice.serialNumber) || null, // existing free-text column (back-compat)
+          punchDeviceId: evDevice ? evDevice.id : null, // new provenance FK-by-id
           rawPunchEventId: ev.id,
           isManual: false, // counts in recompute immediately
           // geoLat/geoLng left null — a gate device has no per-punch GPS; the geofence

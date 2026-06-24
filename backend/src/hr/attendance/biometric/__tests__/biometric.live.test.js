@@ -255,6 +255,98 @@ async function main() {
     await prisma.importJob.delete({ where: { id: job.id } });
   }
 
+  // ── FIX 1 (HIGH) : two GENUINE same-minute punches → TWO RawPunchEvent rows ──
+  // 09:01:10 and 09:01:55 differ only in seconds. They must NOT collapse on the
+  // @@unique(dedupKey) spine (which previously dropped one → MISSING_PUNCH/inverted).
+  {
+    // A TRUST_DEVICE device with a 0s dedup window so the de-bounce does not mask
+    // the spine behaviour we are testing (this is the spine, not the de-bounce).
+    const secDev = await devicesSvc.createDevice({ businessId, actorId: 'TEST', body: { name: `${PREFIX}-SEC`, vendor: 'ESSL', entityId: entity.id, locationId: location ? location.id : null, serialNumber: `${PREFIX}-SN-SEC`, directionMode: 'TRUST_DEVICE', dedupWindowSec: 0 } });
+    await devicesSvc.createMap({ businessId, actorId: 'TEST', body: { deviceCode: '7001', employeeId: dayEmp.id, deviceId: secDev.id } });
+    const sameMinute = [
+      { deviceCode: '7001', localTimeRaw: '2027-06-13 09:01:10', rawDirection: 'IN', rawPayload: {} },
+      { deviceCode: '7001', localTimeRaw: '2027-06-13 09:01:55', rawDirection: 'OUT', rawPayload: {} },
+    ];
+    const sumS = await ingest.ingestBatch({ businessId, device: await prisma.punchDevice.findUnique({ where: { id: secDev.id } }), normalised: sameMinute });
+    const raws = await prisma.rawPunchEvent.findMany({ where: { businessId, deviceId: secDev.id, deviceCode: '7001' }, orderBy: { punchAt: 'asc' } });
+    check('FIX1: two same-minute punches → 2 RawPunchEvent rows (not collapsed)', raws.length === 2);
+    check('FIX1: the two rows have DISTINCT punchAt (seconds kept)', raws.length === 2 && raws[0].punchAt.getTime() !== raws[1].punchAt.getTime());
+    check('FIX1: punchAt :10 kept seconds (03:31:10Z IST)', raws[0] && raws[0].punchAt.toISOString() === '2027-06-13T03:31:10.000Z');
+    check('FIX1: punchAt :55 kept seconds (03:31:55Z IST)', raws[1] && raws[1].punchAt.toISOString() === '2027-06-13T03:31:55.000Z');
+    check('FIX1: distinct dedupKeys', raws.length === 2 && raws[0].dedupKey !== raws[1].dedupKey);
+    check('FIX1: both materialised as 2 punches (IN + OUT)', sumS.materialised === 2);
+  }
+
+  // ── FIX 2/3 (MED) : multi-device day does NOT cross-contaminate provenance ──
+  // The same employee punches on TWO gates the same day: a DERIVE gate at `location`
+  // and a TRUST_DEVICE gate at NO location. After BOTH ingests run (the 2nd would
+  // previously re-stamp the 1st's punch under its own device/location), each punch
+  // must keep ITS OWN device's punchDeviceId + locationId.
+  {
+    const gateA = await devicesSvc.createDevice({ businessId, actorId: 'TEST', body: { name: `${PREFIX}-GATE-A`, vendor: 'ESSL', entityId: entity.id, locationId: location ? location.id : null, serialNumber: `${PREFIX}-SN-A`, directionMode: 'DERIVE', dedupWindowSec: 60 } });
+    const gateB = await devicesSvc.createDevice({ businessId, actorId: 'TEST', body: { name: `${PREFIX}-GATE-B`, vendor: 'MATRIX', entityId: entity.id, locationId: null, serialNumber: `${PREFIX}-SN-B`, directionMode: 'TRUST_DEVICE', dedupWindowSec: 0 } });
+    await devicesSvc.createMap({ businessId, actorId: 'TEST', body: { deviceCode: '8001', employeeId: dayEmp.id, deviceId: gateA.id } });
+    await devicesSvc.createMap({ businessId, actorId: 'TEST', body: { deviceCode: '8002', employeeId: dayEmp.id, deviceId: gateB.id } });
+    // Gate A: 09:00 IN (DERIVE). Gate B: 18:30 with a device OUT token (TRUST).
+    await ingest.ingestBatch({ businessId, device: await prisma.punchDevice.findUnique({ where: { id: gateA.id } }), normalised: [{ deviceCode: '8001', localTimeRaw: '2027-06-14 09:00:00', rawDirection: null, rawPayload: {} }] });
+    // Gate B ingests LAST → its materialise re-resolves the whole day window. It must
+    // NOT re-stamp gate A's 09:00 punch with gate B's device/location.
+    await ingest.ingestBatch({ businessId, device: await prisma.punchDevice.findUnique({ where: { id: gateB.id } }), normalised: [{ deviceCode: '8002', localTimeRaw: '2027-06-14 18:30:00', rawDirection: 'OUT', rawPayload: {} }] });
+
+    const punches = await prisma.attendancePunch.findMany({ where: { businessId, employeeId: dayEmp.id, punchAt: { gte: day('2027-06-14'), lt: day('2027-06-15') } }, orderBy: { punchAt: 'asc' } });
+    check('FIX2: two punches on the day (one per gate)', punches.length === 2);
+    const pIn = punches[0]; const pOut = punches[1];
+    check('FIX2: gate-A 09:00 punch keeps gate-A provenance', pIn && pIn.punchDeviceId === gateA.id);
+    check('FIX2: gate-A punch keeps gate-A location (not overwritten)', pIn && pIn.locationId === (location ? location.id : null));
+    check('FIX2: gate-B 18:30 punch keeps gate-B provenance', pOut && pOut.punchDeviceId === gateB.id);
+    check('FIX2: gate-B punch keeps gate-B (null) location', pOut && pOut.locationId === null);
+    // Per-event mode honoured: gate-B's TRUST OUT token stayed OUT despite the day's
+    // alternation starting with gate-A's DERIVE IN.
+    check('FIX2: gate-A IN / gate-B device-OUT labels per-event', pIn && pOut && pIn.punchType === 'IN' && pOut.punchType === 'OUT');
+  }
+
+  // ── FIX 4a (LOW) : a DATE-ONLY punch is FLAGGED (ERROR), never landed at 00:00 ──
+  {
+    const dateOnlyDev = await devicesSvc.createDevice({ businessId, actorId: 'TEST', body: { name: `${PREFIX}-DO`, vendor: 'ESSL', entityId: entity.id, locationId: location ? location.id : null, serialNumber: `${PREFIX}-SN-DO`, directionMode: 'DERIVE' } });
+    await devicesSvc.createMap({ businessId, actorId: 'TEST', body: { deviceCode: '6001', employeeId: dayEmp.id, deviceId: dateOnlyDev.id } });
+    const sumD = await ingest.ingestBatch({ businessId, device: await prisma.punchDevice.findUnique({ where: { id: dateOnlyDev.id } }), normalised: [{ deviceCode: '6001', localTimeRaw: '2027-06-15', rawDirection: null, rawPayload: {} }] });
+    check('FIX4a: date-only punch parked ERROR (not materialised)', sumD.error === 1 && sumD.materialised === 0);
+    const doRow = await prisma.rawPunchEvent.findFirst({ where: { businessId, deviceId: dateOnlyDev.id, deviceCode: '6001' } });
+    check('FIX4a: date-only landed as ERROR status', doRow && doRow.status === 'ERROR');
+    // The epoch sentinel punchAt is used for an unparseable row — NOT a local-midnight punch.
+    check('FIX4a: no AttendancePunch at local 00:00 created', doRow && doRow.attendancePunchId === null);
+    const midnightPunch = await prisma.attendancePunch.findFirst({ where: { businessId, employeeId: dayEmp.id, punchAt: { gte: day('2027-06-15'), lt: day('2027-06-16') } } });
+    check('FIX4a: no midnight AttendancePunch on the target civil day', midnightPunch === null);
+  }
+
+  // ── FIX 4b (LOW) : webhook gives a CONSTANT 401 + no tenant oracle in the audit ──
+  {
+    // Unknown serial (no device anywhere) and a real serial with a BAD secret must
+    // both return an identical 401 body, and NEITHER may write the owning tenant's
+    // businessId into the audit log (the cross-tenant enumeration oracle).
+    const zkSerial = `${PREFIX}-SN-ZK`; // real serial from test 4 (owned by `businessId`)
+    const before = await prisma.auditLog.count({ where: { action: 'biometric.ingest_rejected', businessId } });
+
+    const resUnknown = fakeRes();
+    await webhook.ingestPunch(fakeReq({ params: { deviceSerial: `${PREFIX}-NOPE-XYZ` }, headers: { 'X-Device-Secret': 'whatever' }, body: '1\t2027-06-16 09:00:00\t0\n' }), resUnknown);
+    const resBad = fakeRes();
+    await webhook.ingestPunch(fakeReq({ params: { deviceSerial: zkSerial }, headers: { 'X-Device-Secret': 'definitely-wrong' }, body: '1\t2027-06-16 09:00:00\t0\n' }), resBad);
+
+    check('FIX4b: unknown-serial → 401', resUnknown.statusCode === 401);
+    check('FIX4b: bad-secret-real-serial → 401', resBad.statusCode === 401);
+    check('FIX4b: CONSTANT body (unknown == bad-secret)', resUnknown.body === resBad.body && resUnknown.body === 'unauthorized');
+    // No new audit row carries the owning tenant's businessId (oracle closed).
+    const afterOwner = await prisma.auditLog.count({ where: { action: 'biometric.ingest_rejected', businessId } });
+    check('FIX4b: no audit row stamped with owning tenant businessId', afterOwner === before);
+    // The reject IS still audited — but with businessId null (no tenant leak).
+    const nullAudits = await prisma.auditLog.findMany({ where: { action: 'biometric.ingest_rejected', businessId: null }, orderBy: { createdAt: 'desc' }, take: 10 });
+    const forZk = nullAudits.filter((a) => a.meta && a.meta.serial === zkSerial);
+    check('FIX4b: bad-secret reject audited with businessId=null', forZk.length >= 1);
+    // cleanup the audit rows this block created (null-tenant rejects for our serials)
+    const mine = nullAudits.filter((a) => a.meta && typeof a.meta.serial === 'string' && a.meta.serial.startsWith(PREFIX)).map((a) => a.id);
+    if (mine.length) await prisma.auditLog.deleteMany({ where: { id: { in: mine } } });
+  }
+
   await cleanup(businessId);
   if (otherBusinessId) await cleanup(otherBusinessId);
 
