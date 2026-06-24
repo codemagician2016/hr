@@ -350,6 +350,9 @@ function buildEmployeePayInput(rows) {
     dateOfBirth: isoDate(employee.dateOfBirth),
     // India
     hasPan: sp.pan ? true : sp.pan === null && sp.countryCode === 'IN' ? false : undefined,
+    // Feature 21 — LWF managerial/supervisory exclusion flag (null/false => covered;
+    // fail-open to charging the flat welfare fee when the role is unknown).
+    isManagerial: sp.isManagerial === true,
     // New Zealand
     taxCode: sp.taxCode || undefined,
     kiwiSaver: buildKiwiSaverContext(sp),
@@ -366,6 +369,9 @@ function buildEmployeePayInput(rows) {
   const entityArg = {
     countryCode: entity.countryCode,
     stateCode: sp.ptStateCode || employee.stateCode || entity.stateCode || undefined,
+    // Feature 21 — LWF follows the PT/work-state precedence unless an explicit LWF
+    // state override is set (the rare case the LWF jurisdiction ≠ the PT state).
+    lwfStateCode: sp.lwfStateCode || undefined,
     pfApplicable: sp.uan != null || sp.pfMemberId != null ? true : entity.countryCode === 'IN',
     esiApplicable: sp.esiApplicable === true,
     pfOnFullWage: sp.pfOptIn === true,
@@ -995,6 +1001,10 @@ function statutoryRollups(r) {
     esiEmployee: pick('ESI', 'ESI_EE'),
     esiEmployer: pick('ESI_ER'),
     pt: pick('PT'),
+    // Feature 21 — Labour Welfare Fund EE deduction + ER contribution (period-incident;
+    // null/absent in non-deduction months, exactly like a no-PT state yields null pt).
+    lwfEmployee: pick('LWF', 'LWF_EE'),
+    lwfEmployer: pick('LWF_ER'),
     tds: pick('TDS'),
     paye: pick('PAYE'),
     kiwiSaverEmployee: pick('KIWISAVER', 'KIWISAVER_EE'),
@@ -2007,6 +2017,11 @@ const FILING_PLAN = Object.freeze({
     { kind: 'IN_PF', fileKind: 'ecr', dueDom: 15, periodGranularity: 'month' },
     { kind: 'IN_ESI', fileKind: 'esic', dueDom: 15, periodGranularity: 'month' },
     { kind: 'IN_PT', fileKind: null, dueDom: 20, periodGranularity: 'month' },
+    // Feature 21 — Labour Welfare Fund. NOT monthly-uniform: due-date/taxPeriod
+    // depend on the state frequency (half-yearly/annual/monthly), resolved by the
+    // 'lwf' branch below. Conditional: only fires (and is required to close) in the
+    // state's prescribed deduction month(s); skipped when the run has 0 LWF incidence.
+    { kind: 'IN_LWF', fileKind: null, periodGranularity: 'lwf', conditional: true },
     { kind: 'IN_FORM24Q', fileKind: 'form24q', dueDom: 31, periodGranularity: 'quarter' },
   ],
   NZ: [
@@ -2032,12 +2047,38 @@ function resolveFilingPlan(country) {
   return plan;
 }
 
+/**
+ * Feature 21 — resolve the LWF frequency for a run's state (the run's entity
+ * state via the india read model). Half-yearly/annual/monthly drive the LWF
+ * due-date and taxPeriod. Falls back to MONTHLY if the state is unmapped (the
+ * row is only written when LWF actually fired, so this is a safe default).
+ */
+function lwfFrequencyForRun(payRun) {
+  const stateCode = payRun.lwfStateCode
+    || (payRun.entity && payRun.entity.stateCode)
+    || null;
+  if (!stateCode) return 'MONTHLY';
+  const r = india.resolveLwf(stateCode, isoDate(payRun.periodEnd));
+  return (r && r.configured && r.frequency) ? r.frequency : 'MONTHLY';
+}
+
 /** Compute a due date (Date) for a remittance kind from the run period. */
 function remittanceDueDate(plan, payRun) {
   const end = new Date(isoDate(payRun.periodEnd) + 'T00:00:00Z');
   if (plan.periodGranularity === 'quarter') {
     // 24Q: filed by end of the month following the quarter (simplify: +31 days).
     return new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, plan.dueDom || 31));
+  }
+  if (plan.periodGranularity === 'lwf') {
+    // LWF: half-yearly states remit by the 15th of the month after the half just
+    // closed (15 Jul for the Jun run / 15 Jan for the Dec run); annual by 15 Jan;
+    // monthly by the 15th of the next month. End-month already encodes the half.
+    const freq = lwfFrequencyForRun(payRun);
+    if (freq === 'HALF_YEARLY' || freq === 'ANNUAL') {
+      // Jun (month 5, 0-based) → 15 Jul; Dec (month 11) → 15 Jan next year.
+      return new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 15));
+    }
+    return new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 15));
   }
   if (plan.dueWorkingDays != null) {
     const d = new Date(isoDate(payRun.payDate) + 'T00:00:00Z');
@@ -2048,10 +2089,20 @@ function remittanceDueDate(plan, payRun) {
   return new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, plan.dueDom || 15));
 }
 
-/** taxPeriod string for a remittance: "YYYY-MM" or "YYYY-Qn". */
+/** taxPeriod string for a remittance: "YYYY-MM", "YYYY-Qn", or an LWF label. */
 function remittanceTaxPeriod(plan, payRun) {
   if (plan.periodGranularity === 'quarter') {
     return `${payRun.taxYear}-${indianQuarter(payRun.periodEnd)}`;
+  }
+  if (plan.periodGranularity === 'lwf') {
+    // Half-yearly => "YYYY-H1"/"YYYY-H2"; annual => "YYYY"; monthly => "YYYY-MM".
+    const freq = lwfFrequencyForRun(payRun);
+    const end = new Date(isoDate(payRun.periodEnd) + 'T00:00:00Z');
+    const y = end.getUTCFullYear();
+    const m = end.getUTCMonth() + 1; // 1..12
+    if (freq === 'HALF_YEARLY') return `${y}-${m <= 6 ? 'H1' : 'H2'}`;
+    if (freq === 'ANNUAL') return `${y}`;
+    return isoDate(payRun.periodStart).slice(0, 7);
   }
   return isoDate(payRun.periodStart).slice(0, 7);
 }
@@ -2074,6 +2125,7 @@ async function fileRun({ businessId, actorId, payRunId }) {
       case 'IN_PF': return sumDec('pfEmployee') + sumDec('pfEmployer');
       case 'IN_ESI': return sumDec('esiEmployee') + sumDec('esiEmployer');
       case 'IN_PT': return sumDec('pt');
+      case 'IN_LWF': return sumDec('lwfEmployee') + sumDec('lwfEmployer');
       case 'IN_FORM24Q': return sumDec('tds');
       case 'NZ_PAYE': return sumDec('paye') + sumDec('esct');
       case 'NZ_PAYDAY_FILING': return sumDec('paye') + sumDec('kiwiSaverEmployee') + sumDec('kiwiSaverEmployer');
@@ -2088,8 +2140,12 @@ async function fileRun({ businessId, actorId, payRunId }) {
   await prisma.$transaction(async (tx) => {
     await persistTransition({ prisma: tx, payRunId, from: STATE.PAID, to: STATE.FILED, ctx: { actorId } });
     for (const p of plan) {
-      const taxPeriod = remittanceTaxPeriod(p, payRun);
       const amountMinor = amountForKind(p.kind);
+      // Feature 21 — zero-incidence skip: a CONDITIONAL plan entry (LWF) is only
+      // written in a deduction month with real incidence. Don't pollute the
+      // compliance calendar (or trip closeRun's guard) with a phantom ₹0 LWF row.
+      if (p.conditional && amountMinor === 0) continue;
+      const taxPeriod = remittanceTaxPeriod(p, payRun);
       const existing = await tx.statutoryRemittance.findFirst({
         where: { businessId, entityId: payRun.entityId, kind: p.kind, taxPeriod },
       });
@@ -2132,7 +2188,27 @@ async function closeRun({ businessId, actorId, payRunId }) {
   const plan = resolveFilingPlan(country);
   const remittances = await prisma.statutoryRemittance.findMany({ where: { businessId, payRunId } });
   const haveKinds = new Set(remittances.map((r) => r.kind));
-  const missing = plan.map((p) => p.kind).filter((k) => !haveKinds.has(k));
+  // Feature 21 — a CONDITIONAL plan entry (LWF) is only required to exist when the
+  // run had real incidence in a deduction month. A non-deduction-month run (₹0 LWF)
+  // legitimately writes no IN_LWF row and must still close clean; only enforce the
+  // conditional kind when its summed amount is non-zero.
+  let lwfIncidenceMinor = null;
+  const condIncidence = async (kind) => {
+    if (kind !== 'IN_LWF') return 0;
+    if (lwfIncidenceMinor == null) {
+      const lines = await prisma.payRunLine.findMany({ where: { businessId, payRunId } });
+      lwfIncidenceMinor = lines.reduce(
+        (s, l) => s + decimalToMinor(l.lwfEmployee) + decimalToMinor(l.lwfEmployer), 0,
+      );
+    }
+    return lwfIncidenceMinor;
+  };
+  const missing = [];
+  for (const p of plan) {
+    if (haveKinds.has(p.kind)) continue;
+    if (p.conditional && (await condIncidence(p.kind)) === 0) continue; // no incidence → not required
+    missing.push(p.kind);
+  }
   if (missing.length) {
     throw badRequest('CLOSE_BLOCKED', `Cannot close — missing remittances: ${missing.join(', ')}. File the run first.`);
   }

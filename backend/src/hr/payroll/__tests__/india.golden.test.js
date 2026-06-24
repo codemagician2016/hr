@@ -35,6 +35,11 @@ const {
   computeTds,
   annualTaxNewRegime,
   computeGratuity,
+  // Feature 21 — Labour Welfare Fund
+  computeLwf,
+  resolveLwf,
+  // Feature 22 — Payment of Bonus Act rule resolver
+  resolveBonusRule,
 } = IN._internals;
 
 // ---- tiny harness ---------------------------------------------------------
@@ -1073,6 +1078,120 @@ const {
   check('F15 OLD-regime projection total -> ₹20,280', R(20280), proj.totalAnnualTaxMinor);
   check('F15 OLD-regime computeTds annual === projection (PARITY)', proj.totalAnnualTaxMinor, tds.annualTaxMinor);
   check('F15 OLD-regime computeTds monthly -> ₹1,690', R(1690), tds.monthlyTdsMinor);
+}
+
+// ===========================================================================
+// SECTION L — FEATURE 21: LABOUR WELFARE FUND (computeLwf / resolveLwf)
+//   FLAT rupees/head, EE + ER, fired ONLY in the state's deduction month(s).
+//   Hand-derived from docs/features/21-lwf.md §1.3 rate table (verified 2026-06-24):
+//     MH 25/75 half-yearly (Jun,Dec); KA 50/100 annual (Dec, eff. 2025) was 20/40;
+//     DL 0.75/2.25 half-yearly (paise-exact); GJ 6/12 half-yearly, mgr-excl > ₹3,500;
+//     TN 20/40 annual (Dec); HR 31/62 monthly. Unmapped (UP) => nil.
+// ===========================================================================
+
+// --- L1 (21 §8.1 deduction-month gating): MH fires in June (₹25 EE / ₹75 ER).
+{
+  const r = computeLwf({ stateCode: 'MH', month: 6, asOf: '2026-06-30' });
+  check('L1 MH June LWF EE -> ₹25', R(25), r.eeMinor);
+  check('L1 MH June LWF ER -> ₹75', R(75), r.erMinor);
+  check('L1 MH June fires', true, r.fires);
+  check('L1 MH frequency HALF_YEARLY', 'HALF_YEARLY', r.frequency);
+}
+// --- L2 (21 §8.1): MH does NOT fire in May (non-deduction month => ₹0, fires:false).
+{
+  const r = computeLwf({ stateCode: 'MH', month: 5, asOf: '2026-05-31' });
+  check('L2 MH May LWF EE -> ₹0', 0, r.eeMinor);
+  check('L2 MH May fires:false', false, r.fires);
+  check('L2 MH May still configured', true, r.configured);
+}
+// --- L3 (21 §8.3 effective-dating): Karnataka ₹20→₹50 eff. 2025. Dec-2024 uses ₹20.
+{
+  const r = computeLwf({ stateCode: 'KA', month: 12, asOf: '2024-12-31' });
+  check('L3 KA Dec-2024 LWF EE -> ₹20 (old version)', R(20), r.eeMinor);
+  check('L3 KA Dec-2024 LWF ER -> ₹40 (old version)', R(40), r.erMinor);
+}
+// --- L4 (21 §8.3): Karnataka Dec-2025 uses the new ₹50/₹100 (2024 Act, eff. 2025).
+{
+  const r = computeLwf({ stateCode: 'KA', month: 12, asOf: '2025-12-31' });
+  check('L4 KA Dec-2025 LWF EE -> ₹50 (new version)', R(50), r.eeMinor);
+  check('L4 KA Dec-2025 LWF ER -> ₹100 (new version)', R(100), r.erMinor);
+  check('L4 KA frequency ANNUAL', 'ANNUAL', r.frequency);
+}
+// --- L5 (21 §8.1): Karnataka annual fires only in Dec, NOT June.
+{
+  const r = computeLwf({ stateCode: 'KA', month: 6, asOf: '2025-06-30' });
+  check('L5 KA June (annual) fires:false', false, r.fires);
+  check('L5 KA June EE -> ₹0', 0, r.eeMinor);
+}
+// --- L6 (21 §8.4 sub-rupee paise-exact): Delhi ₹0.75 EE / ₹2.25 ER = 75 / 225 paise.
+{
+  const r = computeLwf({ stateCode: 'DL', month: 12, asOf: '2026-12-31' });
+  check('L6 DL Dec LWF EE -> 75 paise (₹0.75, NOT rounded to ₹1)', 75, r.eeMinor);
+  check('L6 DL Dec LWF ER -> 225 paise (₹2.25, NOT rounded to ₹2)', 225, r.erMinor);
+}
+// --- L7 (21 §8.5 managerial exclusion): GJ excludes managerial > ₹3,500/mo.
+//   Managerial earning ₹5,000 -> exempt; managerial earning ₹3,000 -> covered.
+{
+  const exempt = computeLwf({ stateCode: 'GJ', month: 6, asOf: '2026-06-30', monthlyGrossRupees: 5000, isManagerial: true });
+  check('L7 GJ managerial > ₹3,500 -> exempt (EE ₹0)', 0, exempt.eeMinor);
+  check('L7 GJ managerial exempt reason', 'MANAGERIAL_ABOVE_CEILING', exempt.exemptReason);
+  const covered = computeLwf({ stateCode: 'GJ', month: 6, asOf: '2026-06-30', monthlyGrossRupees: 3000, isManagerial: true });
+  check('L7 GJ managerial <= ₹3,500 -> covered (EE ₹6)', R(6), covered.eeMinor);
+  // Non-managerial above ceiling stays covered (exclusion is managerial-only).
+  const worker = computeLwf({ stateCode: 'GJ', month: 6, asOf: '2026-06-30', monthlyGrossRupees: 50000, isManagerial: false });
+  check('L7 GJ non-managerial above ceiling -> covered (EE ₹6)', R(6), worker.eeMinor);
+}
+// --- L8 (21 §8.6 no-LWF state): unmapped UP => nil, configured:false, no throw.
+{
+  const r = computeLwf({ stateCode: 'UP', month: 6, asOf: '2026-06-30' });
+  check('L8 UP unmapped EE -> ₹0', 0, r.eeMinor);
+  check('L8 UP unmapped configured:false', false, r.configured);
+  check('L8 UP unmapped frequency NONE', 'NONE', r.frequency);
+}
+// --- L9 (21 §8.1): TN annual fires only in Dec (₹20/₹40), not other months.
+{
+  const dec = computeLwf({ stateCode: 'TN', month: 12, asOf: '2026-12-31' });
+  check('L9 TN Dec LWF EE -> ₹20', R(20), dec.eeMinor);
+  check('L9 TN Dec LWF ER -> ₹40', R(40), dec.erMinor);
+  const jun = computeLwf({ stateCode: 'TN', month: 6, asOf: '2026-06-30' });
+  check('L9 TN June (annual) fires:false', false, jun.fires);
+}
+// --- L10 (21 §1.3): Haryana monthly LWF fires EVERY month (₹31/₹62).
+{
+  const may = computeLwf({ stateCode: 'HR', month: 5, asOf: '2026-05-31' });
+  check('L10 HR May (monthly) LWF EE -> ₹31', R(31), may.eeMinor);
+  check('L10 HR May LWF ER -> ₹62', R(62), may.erMinor);
+  check('L10 HR fires every month', true, may.fires);
+}
+// --- L11 (21 §6.2 read model): resolveLwf surfaces the resolved per-state figures.
+{
+  const r = resolveLwf('MH', '2026-06-30');
+  check('L11 resolveLwf MH configured', true, r.configured);
+  check('L11 resolveLwf MH eeRupees 25', 25, r.eeRupees);
+  check('L11 resolveLwf MH frequency', 'HALF_YEARLY', r.frequency);
+  const up = resolveLwf('UP', '2026-06-30');
+  check('L11 resolveLwf UP configured:false', false, up.configured);
+}
+
+// ===========================================================================
+// SECTION M — FEATURE 22: PAYMENT OF BONUS ACT rule resolver (resolveBonusRule)
+//   Effective-dated ceilings: FY2014-15+ => ₹21,000 eligibility / ₹7,000 calc;
+//   pre-2015 (≤ 2014-03-31) => ₹10,000 / ₹3,500. (docs/features/22 §2/§5.1.)
+//   The capped-base/rate arithmetic lives in bonus.golden.test.js (the new pure
+//   payroll/bonus.js core); here we pin the rule version boundary to the paise.
+// ===========================================================================
+{
+  const post = resolveBonusRule('2026-03-31');
+  check('M1 bonus FY2025-26 eligibility ceiling -> ₹21,000', R(21000), post.eligibilityCeilingMinor);
+  check('M1 bonus FY2025-26 calc ceiling -> ₹7,000', R(7000), post.calcCeilingMinor);
+  check('M1 bonus min rate 833bp (8.33%)', 833, post.minRateNum);
+  check('M1 bonus max rate 2000bp (20%)', 2000, post.maxRateNum);
+  const pre = resolveBonusRule('2013-03-31');
+  check('M2 bonus pre-2015 eligibility ceiling -> ₹10,000', R(10000), pre.eligibilityCeilingMinor);
+  check('M2 bonus pre-2015 calc ceiling -> ₹3,500', R(3500), pre.calcCeilingMinor);
+  // Boundary: 2014-03-31 is the last pre-amendment day; 2014-04-01 the first new day.
+  check('M3 bonus boundary 2014-03-31 -> ₹10,000', R(10000), resolveBonusRule('2014-03-31').eligibilityCeilingMinor);
+  check('M3 bonus boundary 2014-04-01 -> ₹21,000', R(21000), resolveBonusRule('2014-04-01').eligibilityCeilingMinor);
 }
 
 // ===========================================================================

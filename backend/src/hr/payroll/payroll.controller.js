@@ -12,6 +12,7 @@
 const crypto = require('crypto');
 const prisma = require('../../core/lib/prisma');
 const service = require('./service');
+const india = require('./compliance/india'); // Feature 21 — LWF statutory read model
 const { renderPayslipPdf } = require('./payslipPdf');
 // Feature 15 — operator read-only mirror of the ESS India tax projection.
 const taxProjectionAssembler = require('../tax/projectionAssembler');
@@ -371,6 +372,24 @@ async function getMyPayslipPdf(req, res) {
   } catch (err) { handleError(res, err); }
 }
 
+// Feature 21 — GET /payroll/statutory/lwf?stateCode=MH&asOf=YYYY-MM-DD — the resolved
+// per-state LWF read model for the admin "Labour Welfare Fund" panel. India-only
+// (404 for non-IN tenants); pure read from india.resolveLwf (effective-dated).
+async function getLwfFramework(req, res) {
+  try {
+    const { businessId } = req.user;
+    const biz = await prisma.business.findUnique({ where: { id: businessId }, select: { hrCountry: true } });
+    if (biz && biz.hrCountry && biz.hrCountry !== 'IN') {
+      return res.status(404).json({ message: 'Labour Welfare Fund is India-only', reason: 'NOT_INDIA_TENANT' });
+    }
+    const stateCode = req.query.stateCode || null;
+    if (!stateCode) return res.status(400).json({ message: 'stateCode is required', code: 'MISSING_FIELDS' });
+    const asOf = req.query.asOf || new Date().toISOString().slice(0, 10);
+    const lwf = india._internals.resolveLwf(String(stateCode).toUpperCase(), asOf);
+    res.json(lwf);
+  } catch (err) { handleError(res, err); }
+}
+
 module.exports = {
   createRun,
   computeRun,
@@ -388,6 +407,8 @@ module.exports = {
   getMyPayslips,
   getMyPayslip,
   getMyPayslipPdf,
+  // Feature 21 — LWF statutory framework read (India-only, effective-dated)
+  getLwfFramework,
   // Feature 7 — run orchestration / lifecycle
   listRunEntities,
   getInputsChecklist,

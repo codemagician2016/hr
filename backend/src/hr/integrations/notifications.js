@@ -46,6 +46,9 @@ const HR_EVENT_TEMPLATES = Object.freeze({
   'announcement.published': 'HR_ANNOUNCEMENT_PUBLISHED',
   'celebration.birthday':   'HR_BIRTHDAY',
   'celebration.anniversary':'HR_ANNIVERSARY',
+  // Feature 22 — Statutory Bonus fan-out (operator on compute, employee on publish).
+  'bonus.computed':  'HR_BONUS_COMPUTED',   // → operator when a cycle's awards are computed
+  'bonus.published': 'HR_BONUS_PUBLISHED',  // → employee when their bonus slip is published
 });
 
 // HR template registry. vertical: 'HR' so listTemplates({vertical:'HR'}) scopes
@@ -94,6 +97,25 @@ const HR_TEMPLATES = Object.freeze([
     vertical: 'HR',
     body: 'Hi {NAME}, {BIZ} has sent you an offer for {ROLE}. Review + accept by {EXPIRY}: {LINK}',
     variables: ['NAME', 'BIZ', 'ROLE', 'EXPIRY', 'LINK'],
+    channels: { sms: true, whatsapp: true, email: true },
+  },
+  // ─── Feature 22 — Statutory Bonus ───
+  {
+    key: 'HR_BONUS_COMPUTED',
+    displayName: 'Statutory bonus computed (operator)',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: '{BIZ}: Statutory bonus for {YEAR} computed. {COUNT} eligible, total {AMT}. Review + approve: {LINK}',
+    variables: ['BIZ', 'YEAR', 'COUNT', 'AMT', 'LINK'],
+    channels: { sms: true, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_BONUS_PUBLISHED',
+    displayName: 'Statutory bonus published (employee)',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {NAME}, your statutory bonus for {YEAR} is {AMT}. View your bonus slip: {LINK} - {BIZ}',
+    variables: ['NAME', 'YEAR', 'AMT', 'LINK', 'BIZ'],
     channels: { sms: true, whatsapp: true, email: true },
   },
   // ─── Cycle 0 — approval engine + SLA fan-out (India-first copy) ───────────

@@ -41,6 +41,9 @@ router.get('/runs/:id/files/:kind', requirePermission('canViewPayrollReports'), 
 //   file / close → finance (canViewPayrollReports). Maker-checker SoD is enforced
 //   in the service (approver ≠ preparer/submitter), not by RBAC alone.
 router.get('/entities', requirePermission('canRunPayroll'), c.listRunEntities);
+// Feature 21 — LWF statutory framework read (per-state EE/ER/frequency/exclusion),
+// India-only. Any payroll.read role (HR_ADMIN/PAYROLL_MANAGER/FINANCE_VIEWER).
+router.get('/statutory/lwf', requirePermission('canViewPayrollReports'), c.getLwfFramework);
 router.get('/runs/:id/inputs-checklist', requirePermission('canRunPayroll'), c.getInputsChecklist);
 router.post('/runs/:id/inputs/one-time', requirePermission('canRunPayroll'), c.upsertOneTimeInput);
 router.get('/runs/:id/variance', requirePermission('canViewPayrollReports'), c.getVariance);

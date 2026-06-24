@@ -532,6 +532,71 @@ const rules = {
     },
   },
 
+  // ===========================================================================
+  // §LWF Labour Welfare Fund — per state, FLAT rupees/head, effective-dated.
+  // The 4th statutory pillar alongside EPF/ESI/PT/TDS (Feature 21). FLAT amounts
+  // (NOT %-of-salary), with an EMPLOYER part, fired ONLY in the state's prescribed
+  // deduction month(s). Allow-list: an unmapped state => nil (exactly like
+  // professionalTax returning configured:false for a no-PT state). Mirrors
+  // professionalTax.states: same `{ effectiveFrom, effectiveTo, versions[] }`
+  // shape, same `resolveVersion(asOf=periodEnd)` resolution.
+  //
+  //   frequency:         'MONTHLY' | 'HALF_YEARLY' | 'ANNUAL'
+  //   deductionMonths:   calendar months (1..12) the contribution is taken
+  //                      (MONTHLY => 1..12; HALF_YEARLY => [6,12]; ANNUAL => [12])
+  //   eeRupees/erRupees  FLAT per-head contribution for the period (may be sub-rupee
+  //                      — Delhi ₹0.75/₹2.25 — so computeLwf uses Math.round(r*PAISE),
+  //                      NOT rupees() which Math.rounds the rupee first).
+  //   mgrExclusionRupees employees in a managerial/supervisory capacity earning
+  //                      ABOVE this MONTHLY wage are EXEMPT (null => no exclusion).
+  // There is NO national cap (unlike PT's ₹2,500 Art. 276): the total is simply Σ
+  // of the (1..12) incident flat amounts. Amounts verified 2026-06-24 (spec §1.3).
+  labourWelfareFund: {
+    states: {
+      MH: {
+        frequency: 'HALF_YEARLY', deductionMonths: [6, 12],
+        versions: [
+          { effectiveFrom: '2000-01-01', effectiveTo: '2024-02-29', eeRupees: 12, erRupees: 36, mgrExclusionRupees: null },
+          { effectiveFrom: '2024-03-01', eeRupees: 25, erRupees: 75, mgrExclusionRupees: null }, // Amendment Mar-2024
+        ],
+      },
+      KA: {
+        frequency: 'ANNUAL', deductionMonths: [12],
+        versions: [
+          { effectiveFrom: '2000-01-01', effectiveTo: '2024-12-31', eeRupees: 20, erRupees: 40, mgrExclusionRupees: null },
+          { effectiveFrom: '2025-01-01', eeRupees: 50, erRupees: 100, mgrExclusionRupees: null }, // 2024 Act, eff. 2025
+        ],
+      },
+      GJ: { frequency: 'HALF_YEARLY', deductionMonths: [6, 12],
+        versions: [{ effectiveFrom: '2000-01-01', eeRupees: 6, erRupees: 12, mgrExclusionRupees: 3500 }] },
+      TN: { frequency: 'ANNUAL', deductionMonths: [12],
+        versions: [{ effectiveFrom: '2000-01-01', eeRupees: 20, erRupees: 40, mgrExclusionRupees: 15000 }] },
+      MP: { frequency: 'HALF_YEARLY', deductionMonths: [6, 12],
+        versions: [{ effectiveFrom: '2000-01-01', eeRupees: 10, erRupees: 30, mgrExclusionRupees: 10000 }] },
+      CG: { frequency: 'HALF_YEARLY', deductionMonths: [6, 12],
+        versions: [{ effectiveFrom: '2000-01-01', eeRupees: 15, erRupees: 45, mgrExclusionRupees: 10000 }] },
+      WB: { frequency: 'HALF_YEARLY', deductionMonths: [6, 12],
+        versions: [{ effectiveFrom: '2000-01-01', eeRupees: 3, erRupees: 15, mgrExclusionRupees: 1600 }] },
+      AP: { frequency: 'ANNUAL', deductionMonths: [12],
+        versions: [{ effectiveFrom: '2000-01-01', eeRupees: 30, erRupees: 70, mgrExclusionRupees: null }] },
+      TS: { frequency: 'ANNUAL', deductionMonths: [12],
+        versions: [{ effectiveFrom: '2000-01-01', eeRupees: 2, erRupees: 5, mgrExclusionRupees: 1600 }] },
+      GA: { frequency: 'HALF_YEARLY', deductionMonths: [6, 12],
+        versions: [{ effectiveFrom: '2000-01-01', eeRupees: 60, erRupees: 180, mgrExclusionRupees: 1600 }] },
+      HR: { frequency: 'MONTHLY', deductionMonths: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        versions: [{ effectiveFrom: '2000-01-01', eeRupees: 31, erRupees: 62, mgrExclusionRupees: null }] },
+      PB: { frequency: 'MONTHLY', deductionMonths: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        versions: [{ effectiveFrom: '2000-01-01', eeRupees: 5, erRupees: 20, mgrExclusionRupees: null }] },
+      KL: { frequency: 'MONTHLY', deductionMonths: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        versions: [{ effectiveFrom: '2000-01-01', eeRupees: 20, erRupees: 20, mgrExclusionRupees: null }] },
+      DL: { frequency: 'HALF_YEARLY', deductionMonths: [6, 12],
+        // Delhi rupee-and-paise amounts — paise-exact via fractional rupees.
+        versions: [{ effectiveFrom: '2000-01-01', eeRupees: 0.75, erRupees: 2.25, mgrExclusionRupees: 2500 }] },
+      OR: { frequency: 'HALF_YEARLY', deductionMonths: [6, 12],
+        versions: [{ effectiveFrom: '2000-01-01', eeRupees: 10, erRupees: 20, mgrExclusionRupees: 1600 }] },
+    },
+  },
+
   // §8.1 / §3 Code-on-Wages uniform "wages": Basic+DA must be >= 50% of total
   // remuneration; excess exclusions added back. Effective with the Labour Codes.
   wageDefinition: {
@@ -548,6 +613,30 @@ const rules = {
     factorDen: 26,
     eligibilityYears: 5,
     taxExemptCapRupees: 2000000,
+  },
+
+  // ===========================================================================
+  // Payment of Bonus Act 1965 (+ 2015 amendment, eff. retrospective 2014-04-01).
+  // Feature 22 — the ANNUAL statutory-bonus obligation. Effective-dated exactly
+  // like professionalTax/gratuity (resolved as-of the accounting-year END via
+  // resolveVersion), so recomputing a pre-2015 FY correctly uses the ₹10,000
+  // ceiling / ₹3,500 calc-base that was law then.
+  //
+  //   eligibilityCeilingRupees  monthly Basic+DA ceiling: ≤ this => eligible (§2(13)).
+  //   calcCeilingRupees         capped-base ceiling: bonus computed on
+  //                             min(Basic+DA, max(calcCeiling, minWage)) (§12).
+  //   minRateNum/maxRateNum     rate band in basis points over rateDen=10000:
+  //                             833 = 8.33% minimum (§10), 2000 = 20% maximum (§11).
+  //   minWorkedDays             ≥ this many days worked in the FY to be eligible (§8).
+  bonus: {
+    versions: [
+      { effectiveFrom: '2000-01-01', effectiveTo: '2014-03-31',
+        eligibilityCeilingRupees: 10000, calcCeilingRupees: 3500,
+        minRateNum: 833, maxRateNum: 2000, rateDen: 10000, minWorkedDays: 30 },
+      { effectiveFrom: '2014-04-01', // 2015 amendment (eff. retrospective 2014-04-01)
+        eligibilityCeilingRupees: 21000, calcCeilingRupees: 7000,
+        minRateNum: 833, maxRateNum: 2000, rateDen: 10000, minWorkedDays: 30 },
+    ],
   },
 
   // Feature 16 — India statutory LEAVE framework (govt-rule floors).
@@ -891,6 +980,116 @@ function computeProfessionalTax({ stateCode, ptGrossMinor, gender, month, asOf }
     frequency: cfg.frequency,
     configured: true,
     annualCapMinor: rupees(cfg.annualCapRupees),
+  };
+}
+
+// ===========================================================================
+// 4b. LABOUR WELFARE FUND (LWF) — Feature 21. State-specific, FLAT rupees/head,
+// with an EMPLOYER part, fired ONLY in the state's prescribed deduction month(s).
+// Mirrors computeProfessionalTax: allow-list state lookup, effective-dated via
+// resolveVersion(asOf=periodEnd), nil for an unmapped/unconfigured state.
+// ===========================================================================
+
+/** Sub-rupee-safe rupees -> paise (Delhi LWF is ₹0.75/₹2.25). Unlike rupees(),
+ * which Math.rounds the rupee FIRST (and would yield ₹1/₹2), this keeps the
+ * paise: Math.round(0.75 * 100) = 75. Used ONLY for LWF flat amounts. */
+function lwfRupeesToPaise(r) {
+  return Math.round(r * PAISE);
+}
+
+/**
+ * Resolve LWF for one period. State-aware, effective-dated, FLAT amount, with an
+ * employer part. Fires ONLY in the state's prescribed deduction month(s). Honours
+ * the managerial-exclusion wage ceiling. Allow-list: an unmapped state => nil.
+ *
+ * @param stateCode            'MH'|'KA'|… (unmapped => not configured)
+ * @param month                1..12 calendar month (does LWF fire this month?)
+ * @param asOf                 period end date 'YYYY-MM-DD' (version resolution)
+ * @param monthlyGrossRupees   employee monthly wage (for the mgr-exclusion test)
+ * @param isManagerial         true if the employee is in a managerial/supervisory role
+ * @returns { eeMinor, erMinor, frequency, configured, fires, exemptReason? }
+ */
+function computeLwf({ stateCode, month, asOf, monthlyGrossRupees = null, isManagerial = false }) {
+  const cfg = rules.labourWelfareFund.states[stateCode];
+  if (!cfg) return { eeMinor: 0, erMinor: 0, frequency: 'NONE', configured: false, fires: false };
+  const version = resolveVersion(cfg.versions, asOf);
+  if (!version) return { eeMinor: 0, erMinor: 0, frequency: cfg.frequency, configured: false, fires: false };
+
+  // Managerial exclusion: ABOVE the ceiling AND in a managerial role => exempt.
+  // Fail-OPEN to charging when the role/wage is unknown (safer to over-collect a
+  // ₹2–₹60 welfare contribution than under-remit) — only exempt when BOTH the flag
+  // is set AND the wage is known to exceed the ceiling.
+  if (
+    version.mgrExclusionRupees != null && isManagerial &&
+    monthlyGrossRupees != null && monthlyGrossRupees > version.mgrExclusionRupees
+  ) {
+    return {
+      eeMinor: 0, erMinor: 0, frequency: cfg.frequency, configured: true, fires: false,
+      exemptReason: 'MANAGERIAL_ABOVE_CEILING',
+    };
+  }
+
+  // Does LWF fire THIS calendar month? (HALF_YEARLY => Jun/Dec; ANNUAL => Dec;
+  // MONTHLY => every month.) NO proration — flat per head per period.
+  const fires = cfg.deductionMonths.includes(month);
+  if (!fires) {
+    return { eeMinor: 0, erMinor: 0, frequency: cfg.frequency, configured: true, fires: false };
+  }
+
+  return {
+    eeMinor: lwfRupeesToPaise(version.eeRupees),
+    erMinor: lwfRupeesToPaise(version.erRupees),
+    frequency: cfg.frequency,
+    configured: true,
+    fires: true,
+  };
+}
+
+/**
+ * resolveLwf(stateCode, asOf) → the resolved per-state LWF read model for the
+ * admin "Labour Welfare Fund" panel / GET /statutory/lwf read endpoint. Pure
+ * read; India-only (the caller 404s for non-IN tenants). Unmapped => configured:false.
+ */
+function resolveLwf(stateCode, asOf) {
+  const when = asOf ? String(asOf) : new Date().toISOString().slice(0, 10);
+  const cfg = rules.labourWelfareFund.states[stateCode];
+  if (!cfg) return { stateCode, configured: false };
+  const version = resolveVersion(cfg.versions, when);
+  if (!version) return { stateCode, configured: false, frequency: cfg.frequency };
+  return {
+    stateCode,
+    configured: true,
+    frequency: cfg.frequency,
+    deductionMonths: cfg.deductionMonths.slice(),
+    eeRupees: version.eeRupees,
+    erRupees: version.erRupees,
+    eeMinor: lwfRupeesToPaise(version.eeRupees),
+    erMinor: lwfRupeesToPaise(version.erRupees),
+    mgrExclusionRupees: version.mgrExclusionRupees,
+    effectiveFrom: version.effectiveFrom,
+  };
+}
+
+/**
+ * resolveBonusRule(asOf) — the effective-dated Payment of Bonus Act version for
+ * an accounting year ending on `asOf`. Mirrors resolveLeaveFloor: a pre-2015 FY
+ * (asOf ≤ 2014-03-31) resolves to ₹10,000/₹3,500; FY2014-15 onward to ₹21,000/₹7,000.
+ * Returns paise-normalised ceilings so callers can stay in minor units.
+ * @param asOf  accounting-year END date 'YYYY-MM-DD'
+ * @returns { eligibilityCeilingMinor, calcCeilingMinor, minRateNum, maxRateNum, rateDen, minWorkedDays, effectiveFrom } | null
+ */
+function resolveBonusRule(asOf) {
+  const when = asOf ? String(asOf) : new Date().toISOString().slice(0, 10);
+  const version = resolveVersion(rules.bonus.versions, when);
+  if (!version) return null;
+  return {
+    eligibilityCeilingMinor: rupees(version.eligibilityCeilingRupees),
+    calcCeilingMinor: rupees(version.calcCeilingRupees),
+    minRateNum: version.minRateNum,
+    maxRateNum: version.maxRateNum,
+    rateDen: version.rateDen,
+    minWorkedDays: version.minWorkedDays,
+    effectiveFrom: version.effectiveFrom,
   };
 }
 
@@ -1724,6 +1923,40 @@ function compute(ctx = {}) {
     }
   }
 
+  // ----- 4b. Labour Welfare Fund (LWF) — FLAT EE+ER, fires only in deduction months
+  // POST-TAX statutory deduction (does NOT reduce taxable income for §192 TDS),
+  // so it sits AFTER PT and BEFORE the TDS projection. Income-independent (flat
+  // per head), so it touches no wage base. Reuses the PT state precedence
+  // (entity.stateCode) unless an explicit lwfStateCode override is supplied.
+  const lwfStateCode = entity.lwfStateCode || stateCode;
+  if (lwfStateCode) {
+    const lwf = computeLwf({
+      stateCode: lwfStateCode,
+      month,
+      asOf,
+      monthlyGrossRupees: periodGrossMinor / PAISE,
+      isManagerial: employee.isManagerial === true,
+    });
+    if (lwf.configured && lwf.fires) {
+      if (lwf.eeMinor > 0) {
+        employeeDeductions.push({
+          code: 'LWF',
+          label: `Labour Welfare Fund (${lwfStateCode})`,
+          amountMinor: lwf.eeMinor,
+          explain: `${lwfStateCode} LWF employee share (${lwf.frequency.toLowerCase()}), deducted in month ${month}`,
+        });
+      }
+      if (lwf.erMinor > 0) {
+        employerContributions.push({
+          code: 'LWF_ER',
+          label: `Labour Welfare Fund — employer (${lwfStateCode})`,
+          amountMinor: lwf.erMinor,
+          explain: `${lwfStateCode} LWF employer share (${lwf.frequency.toLowerCase()})`,
+        });
+      }
+    }
+  }
+
   // ----- 5. TDS (§192 annualised) ------------------------------------------
   const tds = computeTds({
     periodGrossMinor,
@@ -1766,12 +1999,20 @@ module.exports = {
   // Feature 16 — India statutory leave-floor resolvers (effective-dated, per state).
   resolveLeaveFloor,
   resolveLeaveFramework,
+  // Feature 21 — Labour Welfare Fund read model (effective-dated, per state).
+  resolveLwf,
+  // Feature 22 — Payment of Bonus Act effective-dated rule resolver.
+  resolveBonusRule,
   // Pure pillar helpers (testable in isolation; same integer-paise semantics):
   _internals: {
     computeStatutoryWages,
     computeEpf,
     computeEsi,
     computeProfessionalTax,
+    computeLwf,
+    lwfRupeesToPaise,
+    resolveLwf,
+    resolveBonusRule,
     computeTds,
     annualTaxNewRegime,
     computeGratuity,
@@ -1783,6 +2024,8 @@ module.exports = {
     projectAnnualIncomeTax,
     monthlyTaxRecoverable,
     rupees,
+    // Feature 22 — exact integer-math percentage, reused by payroll/bonus.js.
+    pctExact,
     roundToRupeeNearest,
     roundToRupeeUp,
     resolveVersion,
