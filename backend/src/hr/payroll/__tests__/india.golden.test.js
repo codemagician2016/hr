@@ -484,27 +484,42 @@ function amt(arr, code) {
 }
 
 //   NEW ₹1,00,00,010 (>₹1cr, 15% band):
-//     slab tax at 1cr = ₹25,80,000; +30%×₹10 = ₹3 -> tax 25,80,003 (258000300p).
-//     taxAtThreshold (NEW @1cr) = 25,80,000 (258000000p); excess ₹10 (1000p);
-//     cap = 258001000p. surcharge = 258001000 − 258000300 = 700p (₹7).
-//     tax+sur = 258001000; cess 4% = 10,32,004 (10320040p);
-//     total = 268321040p = ₹26,83,210.40. (Without relief: ₹30,85,683.)
+//     slab tax at 1cr+10 = ₹25,80,003 (258000300p; ₹25,80,000 + 30%×₹10).
+//     taxAtThreshold = FULL liability @1cr = income-tax 25,80,000 + the 10%-band
+//     surcharge ALREADY due at the ₹1cr edge (2,58,000) = ₹28,38,000 (283800000p).
+//     [The 10%-band surcharge at exactly ₹1cr carries no marginal relief — ₹1cr is
+//      not strictly above the 1cr edge, so it sits in the 10% band and the relief
+//      proviso for THAT band is anchored at ₹50L where surcharge=0; recursion ends.]
+//     excess income ₹10 (1000p); cap = 283800000 + 1000 = 283801000p.
+//     raw 15% surcharge = 38,70,004.50 -> relief binds: surcharge = cap − tax =
+//       283801000 − 258000300 = 25800700p (₹2,58,007).
+//     tax+sur = 283801000; cess 4% = 11,35,204 (11352040p);
+//     total = 295153040p = ₹29,51,530.40.
+//     MONOTONIC: @1cr total ₹29,51,520.00 -> @1cr+10 ₹29,51,530.40 (RISES by the
+//     marginal ₹10.40). [The earlier income-tax-ONLY threshold under-capped to
+//     ₹26,83,210.40 — a ₹2.68L backwards DROP for ₹10 more income.]
 {
   const t = annualTaxNewRegime(10000010);
-  check('Marginal relief NEW ₹1,00,00,010 surcharge -> ₹7', 700, t.surchargeMinor);
-  check('Marginal relief NEW ₹1,00,00,010 total -> ₹26,83,210.40', 268321040, t.totalAnnualTaxMinor);
+  check('Marginal relief NEW ₹1,00,00,010 surcharge -> ₹2,58,007', 25800700, t.surchargeMinor);
+  check('Marginal relief NEW ₹1,00,00,010 total -> ₹29,51,530.40', 295153040, t.totalAnnualTaxMinor);
 }
 
 //   NEW ₹2,00,00,010 (>₹2cr, 25%-capped band):
-//     slab tax at 2cr = ₹55,80,000; +30%×₹10 = ₹3 -> tax 55,80,003 (558000300p).
-//     taxAtThreshold (NEW @2cr) = 55,80,000 (558000000p); excess ₹10 (1000p);
-//     cap = 558001000p. surcharge = 558001000 − 558000300 = 700p (₹7).
-//     tax+sur = 558001000; cess 4% = 22,32,004 (22320040p);
-//     total = 580321040p = ₹58,03,210.40. (Without relief: ₹72,54,003.)
+//     slab tax at 2cr+10 = ₹55,80,003 (558000300p; ₹55,80,000 + 30%×₹10).
+//     taxAtThreshold = FULL liability @2cr = income-tax 55,80,000 + the 15%-band
+//     surcharge ALREADY due at the ₹2cr edge (8,37,000) = ₹64,17,000 (641700000p).
+//     excess income ₹10 (1000p); cap = 641700000 + 1000 = 641701000p.
+//     raw 25% surcharge = 1,39,50,000.75 -> relief binds: surcharge = cap − tax =
+//       641701000 − 558000300 = 83700700p (₹8,37,007).
+//     tax+sur = 641701000; cess 4% = 25,66,804 (25668040p);
+//     total = 667369040p = ₹66,73,690.40.
+//     MONOTONIC: @2cr total ₹66,73,680.00 -> @2cr+10 ₹66,73,690.40 (RISES by the
+//     marginal ₹10.40). [The earlier income-tax-ONLY threshold under-capped to
+//     ₹58,03,210.40 — a ₹8.70L backwards DROP for ₹10 more income.]
 {
   const t = annualTaxNewRegime(20000010);
-  check('Marginal relief NEW ₹2,00,00,010 surcharge -> ₹7', 700, t.surchargeMinor);
-  check('Marginal relief NEW ₹2,00,00,010 total -> ₹58,03,210.40', 580321040, t.totalAnnualTaxMinor);
+  check('Marginal relief NEW ₹2,00,00,010 surcharge -> ₹8,37,007', 83700700, t.surchargeMinor);
+  check('Marginal relief NEW ₹2,00,00,010 total -> ₹66,73,690.40', 667369040, t.totalAnnualTaxMinor);
 }
 
 // --- TDS monthly via compute() with explicit annual projection override.
@@ -751,27 +766,84 @@ const {
 }
 
 //   OLD ₹1,00,00,010 (>₹1cr, 15% band):
-//     slab tax at 1cr = ₹28,12,500; +30%×₹10 = ₹3 -> tax 28,12,503 (281250300p).
-//     taxAtThreshold (OLD @1cr) = 28,12,500 (281250000p); excess ₹10 (1000p);
-//     cap = 281251000p. surcharge = 281251000 − 281250300 = 700p (₹7).
-//     tax+sur = 281251000; cess 4% = 11,25,004 (11250040p);
-//     total = 292501040p = ₹29,25,010.40. (Without relief: ₹33,63,753.)
+//     slab tax at 1cr+10 = ₹28,12,503 (281250300p; ₹28,12,500 + 30%×₹10).
+//     taxAtThreshold = FULL liability @1cr = income-tax 28,12,500 + the 10%-band
+//     surcharge ALREADY due at the ₹1cr edge (2,81,250) = ₹30,93,750 (309375000p).
+//     excess income ₹10 (1000p); cap = 309375000 + 1000 = 309376000p.
+//     raw 15% surcharge = 42,18,754.50 -> relief binds: surcharge = cap − tax =
+//       309376000 − 281250300 = 28125700p (₹2,81,257).
+//     tax+sur = 309376000; cess 4% = 12,37,504 (12375040p);
+//     total = 321751040p = ₹32,17,510.40.
+//     MONOTONIC: @1cr total ₹32,17,500.00 -> @1cr+10 ₹32,17,510.40 (RISES ₹10.40).
 {
   const t = annualTaxOldRegime(10000010);
-  check('F3b marginal relief OLD ₹1,00,00,010 surcharge -> ₹7', 700, t.surchargeMinor);
-  check('F3b marginal relief OLD ₹1,00,00,010 total -> ₹29,25,010.40', 292501040, t.totalAnnualTaxMinor);
+  check('F3b marginal relief OLD ₹1,00,00,010 surcharge -> ₹2,81,257', 28125700, t.surchargeMinor);
+  check('F3b marginal relief OLD ₹1,00,00,010 total -> ₹32,17,510.40', 321751040, t.totalAnnualTaxMinor);
 }
 
 //   OLD ₹2,00,00,010 (>₹2cr, 25%-capped band):
-//     slab tax at 2cr = ₹58,12,500; +30%×₹10 = ₹3 -> tax 58,12,503 (581250300p).
-//     taxAtThreshold (OLD @2cr) = 58,12,500 (581250000p); excess ₹10 (1000p);
-//     cap = 581251000p. surcharge = 581251000 − 581250300 = 700p (₹7).
-//     tax+sur = 581251000; cess 4% = 23,25,004 (23250040p);
-//     total = 604501040p = ₹60,45,010.40. (Without relief: ₹75,56,253.)
+//     slab tax at 2cr+10 = ₹58,12,503 (581250300p; ₹58,12,500 + 30%×₹10).
+//     taxAtThreshold = FULL liability @2cr = income-tax 58,12,500 + the 15%-band
+//     surcharge ALREADY due at the ₹2cr edge (8,71,875) = ₹66,84,375 (668437500p).
+//     excess income ₹10 (1000p); cap = 668437500 + 1000 = 668438500p.
+//     raw 25% surcharge = 1,45,31,257.50 -> relief binds: surcharge = cap − tax =
+//       668438500 − 581250300 = 87188200p (₹8,71,882).
+//     tax+sur = 668438500; cess 4% = 26,73,754 (26737540p);
+//     total = 695176040p = ₹69,51,760.40.
+//     MONOTONIC: @2cr total ₹69,51,750.00 -> @2cr+10 ₹69,51,760.40 (RISES ₹10.40).
 {
   const t = annualTaxOldRegime(20000010);
-  check('F3b marginal relief OLD ₹2,00,00,010 surcharge -> ₹7', 700, t.surchargeMinor);
-  check('F3b marginal relief OLD ₹2,00,00,010 total -> ₹60,45,010.40', 604501040, t.totalAnnualTaxMinor);
+  check('F3b marginal relief OLD ₹2,00,00,010 surcharge -> ₹8,71,882', 87188200, t.surchargeMinor);
+  check('F3b marginal relief OLD ₹2,00,00,010 total -> ₹69,51,760.40', 695176040, t.totalAnnualTaxMinor);
+}
+
+// --- F3c: SURCHARGE-EDGE MONOTONICITY (regression lock for the 1cr/2cr cliff).
+//   Statutory invariant: total annual tax must be NON-DECREASING in income across
+//   EVERY surcharge band edge — ₹50L, ₹1cr, ₹2cr (and ₹5cr, well inside the
+//   25%-capped top band) — for BOTH regimes. The original F15 fix wired the
+//   marginal-relief cap to income-tax ONLY (omitting the surcharge already due at
+//   the ₹1cr/₹2cr edge), which made total tax DROP by lakhs for ₹10 more income —
+//   a backwards cliff. These assertions sweep a fine ladder across each edge and
+//   require strict monotonicity, so the cliff can never silently return.
+//   (At ₹50L surcharge genuinely starts at 0, so the marginal-relief recursion
+//   bottoms out there; ₹5cr sits inside the capped 25% band — no separate edge.)
+{
+  // Income ladder in RUPEES: just below / at / just above each edge, plus a span
+  // climbing into each band and the ₹5cr capped-band sample. Strictly increasing.
+  const ladder = [
+    4999990, 5000000, 5000010, 6000000, 7500000,           // around / above ₹50L
+    9999990, 10000000, 10000010, 15000000,                 // around / above ₹1cr
+    19999990, 20000000, 20000010, 30000000, 50000000,      // around / above ₹2cr, incl ₹5cr
+  ];
+  for (const regimeName of ['NEW', 'OLD']) {
+    const fn = regimeName === 'NEW' ? annualTaxNewRegime : annualTaxOldRegime;
+    let prevIncome = null;
+    let prevTotal = -1;
+    let monotone = true;
+    let firstBreak = null;
+    for (const income of ladder) {
+      const total = fn(income).totalAnnualTaxMinor;
+      if (total < prevTotal) {
+        monotone = false;
+        if (!firstBreak) {
+          firstBreak = `${regimeName} ₹${prevIncome}->₹${income}: total ${prevTotal}p DROPPED to ${total}p`;
+        }
+      }
+      prevIncome = income;
+      prevTotal = total;
+    }
+    check(`F3c monotonic total tax across surcharge edges (${regimeName})` +
+      (firstBreak ? ` — ${firstBreak}` : ''), true, monotone);
+  }
+  // Pin the cliff direction explicitly at the two edges the bug inverted: a ₹10
+  // step OVER each edge must cost MORE, never less (strict, both regimes).
+  for (const regimeName of ['NEW', 'OLD']) {
+    const fn = regimeName === 'NEW' ? annualTaxNewRegime : annualTaxOldRegime;
+    check(`F3c ${regimeName} 1cr edge: +₹10 over costs more (no cliff)`,
+      true, fn(10000010).totalAnnualTaxMinor > fn(10000000).totalAnnualTaxMinor);
+    check(`F3c ${regimeName} 2cr edge: +₹10 over costs more (no cliff)`,
+      true, fn(20000010).totalAnnualTaxMinor > fn(20000000).totalAnnualTaxMinor);
+  }
 }
 
 // --- F4: HRA exemption least-of-three (§10(13A)).

@@ -909,16 +909,21 @@ function computeProfessionalTax({ stateCode, ptGrossMinor, gender, month, asOf }
  *
  *   (taxAfterRelief + surcharge)  ≤  taxAtThreshold + (taxableRupees − threshold)
  *
- * where taxAtThreshold = income-tax (after §87A rebate/relief, BEFORE surcharge)
- * on income equal to the band's lower threshold. Surcharge is reduced (never
- * below 0) to honour the cap. Without relief a ₹10 step over a band edge would
- * impose a surcharge of lakhs — a tax cliff that flips regime advice. Surcharge
- * is rounded to whole paise at the statutory point (after relief), matching the
- * cess base.
+ * where taxAtThreshold = the FULL liability at the band's lower threshold, i.e.
+ * income-tax (after §87A rebate/relief) PLUS the surcharge already due at that
+ * edge (the immediately-lower band's surcharge — 0 at ₹50L, ~10% of edge-tax at
+ * ₹1cr, ~15% at ₹2cr). It is NOT income-tax-only: at the ₹1cr/₹2cr edges the
+ * lower band's surcharge is already payable, so omitting it under-caps the
+ * surcharge and re-opens a BACKWARDS cliff (total tax DROPS as income crosses the
+ * edge). Surcharge is reduced (never below 0) to honour the cap. Without relief a
+ * ₹10 step over a band edge would impose a surcharge of lakhs — a tax cliff that
+ * flips regime advice. Surcharge is rounded to whole paise at the statutory point
+ * (after relief), matching the cess base.
  *
  * @param taxableRupees       total taxable income (RUPEES) — drives the band pick
  * @param taxAfterReliefMinor income-tax after §87A (PAISE), pre-surcharge
- * @param thresholdTaxFn      (rupees) -> income-tax after §87A at that income (PAISE)
+ * @param thresholdTaxFn      (rupees) -> FULL liability at that income (PAISE):
+ *                            income-tax after §87A + surcharge already due there
  * @returns surcharge in whole PAISE (relief applied), 0 if no band matches
  */
 function surchargeWithMarginalRelief(taxableRupees, taxAfterReliefMinor, thresholdTaxFn) {
@@ -979,12 +984,19 @@ function annualTaxNewRegime(taxableRupees) {
 
   // 6./9. surcharge (new regime, capped 25%) on income-tax, WITH marginal relief
   // at each band threshold (₹50L/₹1cr/₹2cr): (tax+surcharge) is capped at
-  // taxAtThreshold + (income − threshold). Threshold-tax = NEW-regime income-tax
-  // after §87A at the band edge (surcharge 0 there, so no recursion).
+  // taxAtThreshold + (income − threshold). Threshold-tax must be the FULL
+  // liability at the band edge — income-tax AFTER §87A *plus the surcharge already
+  // due there* (the immediately-lower band's surcharge). At ₹50L surcharge is 0,
+  // so the recursion bottoms out one band down (₹2cr→₹1cr→₹50L) and terminates.
+  // Omitting the edge surcharge under-caps and re-opens a backwards tax cliff at
+  // ₹1cr/₹2cr (total tax DROPS as income crosses the edge).
   const surchargeMinor = surchargeWithMarginalRelief(
     taxableRupees,
     taxMinor,
-    (r) => annualTaxNewRegime(r).taxAfterReliefMinor,
+    (r) => {
+      const x = annualTaxNewRegime(r);
+      return x.taxAfterReliefMinor + x.surchargeMinor;
+    },
   );
 
   const taxPlusSurchargeMinor = taxMinor + surchargeMinor;
@@ -1155,12 +1167,19 @@ function annualTaxOldRegime(taxableRupees) {
 
   // surcharge (regime-independent bands) on income-tax, pre-cess, WITH marginal
   // relief at each band threshold (₹50L/₹1cr/₹2cr): (tax+surcharge) capped at
-  // taxAtThreshold + (income − threshold). Threshold-tax = OLD-regime income-tax
-  // after §87A at the band edge (surcharge 0 there, so no recursion).
+  // taxAtThreshold + (income − threshold). Threshold-tax must be the FULL
+  // liability at the band edge — income-tax AFTER §87A *plus the surcharge already
+  // due there* (the immediately-lower band's surcharge). At ₹50L surcharge is 0,
+  // so the recursion bottoms out one band down (₹2cr→₹1cr→₹50L) and terminates.
+  // Omitting the edge surcharge under-caps and re-opens a backwards tax cliff at
+  // ₹1cr/₹2cr (total tax DROPS as income crosses the edge).
   const surchargeMinor = surchargeWithMarginalRelief(
     taxableRupees,
     taxMinor,
-    (r) => annualTaxOldRegime(r).taxAfterReliefMinor,
+    (r) => {
+      const x = annualTaxOldRegime(r);
+      return x.taxAfterReliefMinor + x.surchargeMinor;
+    },
   );
 
   const taxPlusSurchargeMinor = taxMinor + surchargeMinor;
