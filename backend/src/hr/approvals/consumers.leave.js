@@ -34,6 +34,10 @@ const consumers = require('./consumers');
 // day even if the nightly derive never runs). Lives behind a single guard in the
 // SHARED decision core so BOTH the engine path and the legacy direct path bridge.
 const { stampLeaveAttendanceOnApproval } = require('../leave/leaveToAttendance');
+// Cycle 0 — notify the REQUESTER of the decision on a real channel (email/WhatsApp/
+// push) with a deep-link. Fire-and-forget + OUTSIDE the engine tx (the helper uses the
+// default prisma client), so a notify failure can never roll back the balance move.
+const notify = require('./notify');
 
 // pendingApproval can never go below zero — floor the release so a duplicated
 // decision (or a stale hold) cannot over-state `available` (leave finding #3).
@@ -122,6 +126,7 @@ async function onApprove(approvalRequest, tx) {
       };
     },
   });
+  notify.fanOutApprovalDecided({ businessId: approvalRequest.businessId, request: approvalRequest, outcome: 'APPROVED' }).catch(() => {});
 }
 
 // onReject — PENDING → REJECTED. Release the hold (floored); no units consumed.
@@ -134,6 +139,7 @@ async function onReject(approvalRequest, tx) {
     txn, toStatus: 'REJECTED', fromStatuses: ['PENDING'], decidedBy,
     balanceMove: (bal) => ({ pendingApproval: { decrement: flooredRelease(bal.pendingApproval, heldQty) } }),
   });
+  notify.fanOutApprovalDecided({ businessId: approvalRequest.businessId, request: approvalRequest, outcome: 'REJECTED' }).catch(() => {});
 }
 
 // onCancel — requester cancel/withdraw of an OPEN request: PENDING → CANCELLED,

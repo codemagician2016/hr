@@ -34,6 +34,9 @@ const { matches } = require('./conditions');
 const { resolveDefinition } = require('./workflowResolver');
 const { resolveStepApprovers } = require('./approverResolver');
 const consumers = require('./consumers');
+// Cycle 0 — real-channel notification fan-out (email/WhatsApp/push) for approvers.
+// Lazy-required and fire-and-forget so it can NEVER affect the approval transaction.
+const notify = require('./notify');
 
 // ── errors ──────────────────────────────────────────────────────────────────────
 function err(code, message, status) {
@@ -448,6 +451,11 @@ async function notifyApprovers(bizId, request, userIds, t) {
       });
     } catch (_e) { /* best-effort; notification schema enum mismatch must not break flow */ }
   }
+  // Real-channel fan-out (email/WhatsApp/push) WITH a deep-link. Fire-and-forget +
+  // OUTSIDE the engine tx (uses the default prisma client) so a notify failure can
+  // never roll back the approval transition. The in-app rows above are the source of
+  // truth and are written regardless.
+  notify.fanOutApprovalPending({ businessId: bizId, request, approverUserIds: recipients }).catch(() => {});
 }
 
 // ── previewChain (PURE — reads only, no writes) ──────────────────────────────────

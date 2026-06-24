@@ -219,6 +219,33 @@ const TEMPLATES = Object.freeze([
 ]);
 
 // =============================================================================
+// Extension registry — vertical template packs (e.g. HR) register their
+// templates HERE so the smart router's getTemplate()/render() resolve them
+// WITHOUT forking the router. Keyed by templateKey; a core template always
+// wins over an extension with the same key (core is the source of truth).
+// =============================================================================
+
+const EXTENSION_TEMPLATES = new Map();
+
+// Register (idempotent) additional templates into the registry the router reads.
+// Each template uses the same shape as a core TEMPLATES entry. Re-registering the
+// same key overwrites it (so seeding/boot can run repeatedly). Returns the count.
+function registerTemplates(list) {
+  let n = 0;
+  for (const t of list || []) {
+    if (!t || !t.key) continue;
+    EXTENSION_TEMPLATES.set(t.key, t);
+    n += 1;
+  }
+  return n;
+}
+
+// Resolve a template object by key — core first, then extensions.
+function resolveTemplate(key) {
+  return TEMPLATES.find((t) => t.key === key) || EXTENSION_TEMPLATES.get(key) || null;
+}
+
+// =============================================================================
 // Pure rendering — no DB
 // =============================================================================
 
@@ -229,7 +256,7 @@ const TEMPLATES = Object.freeze([
 //   render({key: 'BOOKING_CONFIRMED', vars: { STAFF: 'Dr Singh', DATE: 'Apr 30', TIME: '10:30 AM', LINK: '...', BIZ: 'Bright Smile Dental' }})
 //   → "Booked! Your appointment with Dr Singh on Apr 30 at 10:30 AM. Manage: ... - Bright Smile Dental"
 function render({ key, vars = {} }) {
-  const tpl = TEMPLATES.find((t) => t.key === key);
+  const tpl = resolveTemplate(key);
   if (!tpl) {
     const err = new Error(`Unknown template key: ${key}`);
     err.code = 'UNKNOWN_TEMPLATE';
@@ -252,15 +279,15 @@ function render({ key, vars = {} }) {
 }
 
 // Get a template's metadata by key (without rendering). Used by the smart
-// router to validate channel support before sending.
+// router to validate channel support before sending. Resolves core + extensions.
 function getTemplate(key) {
-  return TEMPLATES.find((t) => t.key === key) || null;
+  return resolveTemplate(key);
 }
 
 // List templates filtered by vertical and/or category. Used by admin UI
-// to show which templates are available to a given tenant.
+// to show which templates are available to a given tenant. Includes extensions.
 function listTemplates({ vertical, category } = {}) {
-  return TEMPLATES.filter((t) => {
+  return [...TEMPLATES, ...EXTENSION_TEMPLATES.values()].filter((t) => {
     if (vertical && t.vertical !== 'ALL' && t.vertical !== vertical) return false;
     if (category && t.category !== category) return false;
     return true;
@@ -322,4 +349,8 @@ module.exports = {
   getTemplate,
   listTemplates,
   seedTemplates,
+  // Extension API — vertical packs (HR) register additional templates so the
+  // router resolves them without forking. See src/hr/integrations/notifications.js.
+  registerTemplates,
+  resolveTemplate,
 };

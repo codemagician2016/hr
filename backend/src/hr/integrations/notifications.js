@@ -21,7 +21,7 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
-const { render } = require('../../core/lib/notifications/templates');
+const { render, registerTemplates } = require('../../core/lib/notifications/templates');
 const { sendNotification } = require('../../core/lib/notifications/router');
 
 // Domain event name → template key. The webhook/event layer emits these event
@@ -33,6 +33,10 @@ const HR_EVENT_TEMPLATES = Object.freeze({
   'payrun.computed':   'HR_PAYRUN_COMPUTED',
   'filing.due':        'HR_FILING_DUE',
   'offer.sent':        'HR_OFFER_SENT',
+  // Cycle 0 — approval/SLA fan-out events.
+  'approval.pending':  'HR_APPROVAL_PENDING',
+  'approval.decided':  'HR_APPROVAL_DECIDED',
+  'approval.reminder': 'HR_APPROVAL_REMINDER',
 });
 
 // HR template registry. vertical: 'HR' so listTemplates({vertical:'HR'}) scopes
@@ -83,7 +87,42 @@ const HR_TEMPLATES = Object.freeze([
     variables: ['NAME', 'BIZ', 'ROLE', 'EXPIRY', 'LINK'],
     channels: { sms: true, whatsapp: true, email: true },
   },
+  // ─── Cycle 0 — approval engine + SLA fan-out (India-first copy) ───────────
+  {
+    key: 'HR_APPROVAL_PENDING',
+    displayName: 'Approval pending (to approver)',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {NAME}, a {MODULE} request from {REQUESTER} is awaiting your approval on {BIZ}. Review + decide: {LINK}',
+    variables: ['NAME', 'MODULE', 'REQUESTER', 'BIZ', 'LINK'],
+    channels: { sms: true, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_APPROVAL_DECIDED',
+    displayName: 'Approval decided (to requester)',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {NAME}, your {MODULE} request has been {OUTCOME} by {DECIDER} on {BIZ}. Details: {LINK}',
+    variables: ['NAME', 'MODULE', 'OUTCOME', 'DECIDER', 'BIZ', 'LINK'],
+    channels: { sms: true, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_APPROVAL_REMINDER',
+    displayName: 'Approval SLA reminder (to approver)',
+    category: 'SERVICE',
+    vertical: 'HR',
+    body: 'Reminder from {BIZ}: a {MODULE} request from {REQUESTER} is still awaiting your approval. Please act: {LINK}',
+    variables: ['MODULE', 'REQUESTER', 'BIZ', 'LINK'],
+    channels: { sms: true, whatsapp: true, email: true },
+  },
 ]);
+
+// Register HR templates into the SHARED core registry so the router's
+// getTemplate()/render() resolve HR keys (without forking the router). Idempotent —
+// safe to run at every module load. This is the single fix that lets ANY HR templated
+// notification (the original 5 + the 3 new approval ones) actually leave the router
+// instead of failing UNKNOWN_TEMPLATE.
+registerTemplates(HR_TEMPLATES);
 
 // ---------------------------------------------------------------------------
 //  DB sync — same shape/semantics as core seedTemplates(), HR-scoped.

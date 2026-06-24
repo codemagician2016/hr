@@ -6632,6 +6632,14 @@ model Employee {
   officePhone       String?
   // Reused-auth columns (conceptually from Customer, per reuse-map §12.2)
   preferredLanguage String? // BCP-47; payslip/letter locale
+  // Cycle 0 — notification fan-out. Per-employee channel preferences + opt-out for
+  // HR-event notifications (approval-pending/decided, SLA reminders). Shape:
+  //   { "optOut": false, "channels": { "email": true, "whatsapp": true, "sms": false } }
+  // NULL = tenant/router defaults apply. `optOut: true` suppresses real-channel fan-out
+  // entirely (IN_APP is still written so the in-app inbox stays complete). A missing
+  // `channels` map = router's default cascade. This NEVER bypasses the existing
+  // budget/opt-out engine — it only narrows the cascade further (best-effort, additive).
+  notifyPrefs   Json?
   isActive      Boolean  @default(true)
   // Lifecycle (denormalized current values; history in EmploymentRecord)
   status        EmployeeStatus @default(PRE_HIRE)

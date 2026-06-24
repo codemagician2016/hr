@@ -54,6 +54,15 @@ function runStartupTasks() {
       console.error('[templates] seed failed:', err.message);
     });
 
+  // Cycle 0 — seed the HR templates (incl. the approval-pending/decided + SLA reminder
+  // templates) into MessageTemplate so the admin template console + DLT/Twilio provider
+  // IDs can attach to them. Idempotent; preserves admin-set approval/provider state.
+  require('../../hr/integrations/notifications')
+    .seedHrTemplates()
+    .catch((err) => {
+      console.error('[hr-templates] seed failed:', err.message);
+    });
+
   repairTaxFixyPagesIfNeeded();
 }
 
