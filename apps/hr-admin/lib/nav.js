@@ -64,6 +64,9 @@ export const NAV_ITEMS = [
   // Labour Welfare Fund read panel (tab inside the page). Gated on canRunPayroll; the
   // server is the real boundary (India-only, RBAC per route).
   { key: 'bonus', label: 'Statutory Bonus', href: '/payroll/bonus', feature: 'payroll', permission: 'canRunPayroll', icon: 'coin' },
+  // Feature 27 — Auto-Arrear engine (retro salary revision). India-only. Gated on
+  // canRunPayroll; the server enforces maker-checker on approve + India-gate per route.
+  { key: 'arrears', label: 'Arrears', href: '/payroll/arrears', feature: 'payroll', permission: 'canRunPayroll', icon: 'coin' },
   // Feature 24 — Year-end Form 16 (Part A + Part B) + Form 24Q. India-only. Read =
   // canViewPayrollReports; the server enforces maker-checker on approve + canManageLetters
   // on issue (the issue path is the letters engine). Mounted under /payroll/form16.
@@ -146,7 +149,7 @@ export const NAV_GROUPS = [
   { key: 'people-org', label: 'People & Org', icon: 'people', items: ['people', 'org', 'profile-changes', 'profile-policy', 'helpdesk', 'announcements'] },
   { key: 'talent', label: 'Talent', icon: 'onboarding', items: ['recruitment', 'onboarding', 'separations', 'performance'] },
   { key: 'time', label: 'Time', icon: 'calendar', items: ['leave', 'attendance'] },
-  { key: 'pay', label: 'Pay', icon: 'wallet', items: ['compensation', 'ctc-policies', 'fbp-plans', 'fbp-allocations', 'payroll', 'bonus', 'form16', 'tax-declaration-window', 'tax-proof-verification', 'expenses', 'travel', 'loans', 'reports'] },
+  { key: 'pay', label: 'Pay', icon: 'wallet', items: ['compensation', 'ctc-policies', 'fbp-plans', 'fbp-allocations', 'payroll', 'bonus', 'arrears', 'form16', 'tax-declaration-window', 'tax-proof-verification', 'expenses', 'travel', 'loans', 'reports'] },
   // FLAG FOR MERGE: new Feature 10 group — approval chains + RBAC + reporting tree.
   { key: 'approvals-access', label: 'Approvals & Access', icon: 'approvals', items: ['approvals', 'access-roles', 'access-hierarchy'] },
 ];
