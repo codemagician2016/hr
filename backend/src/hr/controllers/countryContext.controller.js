@@ -41,17 +41,15 @@ async function setupCountry(req, res, next) {
       select: { id: true, hrCountrySetAt: true, hrCountry: true },
     });
     if (!b) return res.status(404).json({ message: 'Tenant not found' });
-    // Locked-once: immutable after the first successful setup.
-    if (b.hrCountrySetAt != null) {
-      return res.status(409).json({
-        message: 'Your business country is already set and cannot be changed',
-        code: 'HR_COUNTRY_LOCKED',
-        country: b.hrCountry || null,
-      });
-    }
     const currency = payCurrencyFor(country);
-    await prisma.business.update({
-      where: { id: businessId },
+    // Locked-once, ATOMICALLY. The previous read-then-write left a TOCTOU window
+    // where two concurrent setup requests could both pass the null check before
+    // either wrote. A conditional updateMany (hrCountrySetAt:null in the WHERE)
+    // makes "claim the unset slot" a single atomic DB op — exactly one racer's
+    // update affects a row; the loser sees count 0 → 409 (locked). Benign while
+    // REGISTRABLE is frozen to ['IN'], but correct once NZ ships.
+    const { count } = await prisma.business.updateMany({
+      where: { id: businessId, hrCountrySetAt: null },
       data: {
         hrCountry: country,
         hrCurrency: currency,
@@ -60,6 +58,19 @@ async function setupCountry(req, res, next) {
         hrCountryAmbiguous: false,
       },
     });
+    if (count === 0) {
+      // Lost the race (or already locked from a prior call). Re-read for the
+      // existing country so the 409 still reports it.
+      const cur = await prisma.business.findUnique({
+        where: { id: businessId },
+        select: { hrCountry: true },
+      });
+      return res.status(409).json({
+        message: 'Your business country is already set and cannot be changed',
+        code: 'HR_COUNTRY_LOCKED',
+        country: (cur && cur.hrCountry) || b.hrCountry || null,
+      });
+    }
     return res.json({ country, currency, capabilities: countryCapabilities(country) });
   } catch (e) { return next(e); }
 }

@@ -16,6 +16,33 @@
 
 const prisma = require('../../core/lib/prisma');
 const { writeAudit } = require('../../core/lib/audit');
+// Feature 14 — single-country: holiday reads/imports are pinned to the tenant
+// country (Business.hrCountry) so an off-country row can neither be imported nor
+// surfaced to the leave/pay math. Fail-closed (a pre-setup / ambiguous tenant
+// throws → 409) rather than defaulting to a market.
+const { tenantCountry, assertCountry } = require('../tenant/countryContext');
+
+function resolveBusinessId(req) {
+  return (req.user && req.user.businessId) || req.businessId || (req.customer && req.customer.businessId) || null;
+}
+
+// Map the fail-closed CountryError codes onto HTTP. Mirrors the write-guard
+// middleware so the read paths answer with the same contract.
+function mapCountryError(e, res, next) {
+  if (e && e.code === 'COUNTRY_MISMATCH') {
+    return res.status(422).json({ message: 'This field does not match your business country', code: 'COUNTRY_MISMATCH', detail: e.detail });
+  }
+  if (e && e.code === 'HR_NOT_SET_UP') {
+    return res.status(409).json({ message: 'Finish HR setup (set your business country) first', code: 'HR_NOT_SET_UP' });
+  }
+  if (e && e.code === 'HR_COUNTRY_AMBIGUOUS') {
+    return res.status(409).json({ message: 'Your tenant country needs admin review', code: 'HR_COUNTRY_AMBIGUOUS' });
+  }
+  if (e && e.code === 'TENANT_NOT_FOUND') {
+    return res.status(404).json({ message: 'Tenant not found', code: 'TENANT_NOT_FOUND' });
+  }
+  return next(e);
+}
 
 const HOLIDAY_TYPES = ['PUBLIC', 'NATIONAL', 'REGIONAL', 'COMPANY', 'RESTRICTED_OPTIONAL'];
 
@@ -39,10 +66,17 @@ function utcDate(value) {
 // GET /holidays?countryCode&entityId&locationId&year
 async function listHolidays(req, res, next) {
   try {
-    const { businessId } = req.user;
+    const businessId = resolveBusinessId(req);
     const { countryCode, entityId, locationId, year } = req.query;
-    const where = { businessId };
-    if (countryCode) where.countryCode = countryCode;
+    // F14 read-side tripwire: pin the calendar to the tenant country so an
+    // off-country row (import hole / bad backfill / legacy data) is invisible.
+    // Fail-closed if the tenant country is unset/ambiguous. A client-supplied
+    // countryCode may only NARROW within the tenant country, never widen it.
+    const tCountry = await tenantCountry(businessId);
+    if (countryCode && String(countryCode).toUpperCase() !== tCountry) {
+      return res.status(422).json({ message: 'This field does not match your business country', code: 'COUNTRY_MISMATCH', detail: { expected: tCountry, got: countryCode } });
+    }
+    const where = { businessId, countryCode: tCountry };
     if (entityId) where.entityId = entityId;
     if (locationId) where.locationId = locationId;
     if (year) {
@@ -53,7 +87,7 @@ async function listHolidays(req, res, next) {
     }
     const items = await prisma.holiday.findMany({ where, orderBy: { date: 'asc' } });
     res.json({ items, total: items.length });
-  } catch (e) { next(e); }
+  } catch (e) { mapCountryError(e, res, next); }
 }
 
 // POST /holidays  { date, name, type, countryCode, entityId?, locationId?, isPaid?, isRestricted? }
@@ -285,13 +319,19 @@ function mondayNearest(year, month, day) {
 // POST /holidays/import  { countryCode, year, entityId? }
 async function importHolidays(req, res, next) {
   try {
-    const { businessId } = req.user;
+    const businessId = resolveBusinessId(req);
     const { countryCode, year, entityId } = req.body;
-    const cc = String(countryCode || '').toUpperCase();
+    const bodyCc = String(countryCode || '').toUpperCase();
     const y = parseInt(year, 10);
-    if (!cc || !Number.isFinite(y)) {
+    if (!bodyCc || !Number.isFinite(y)) {
       return res.status(400).json({ message: 'countryCode and year are required' });
     }
+    // F14 HIGH (belt-and-braces): the statutory set is keyed off `cc`, so resolve
+    // it from the TENANT country (Business.hrCountry) and assert the body value
+    // equals it — making `cc==='NZ'` unreachable for an IN tenant even if the
+    // route-level write-guard were removed/reordered. Throws COUNTRY_MISMATCH
+    // (→ 422) on an off-country body, fail-closed on unset/ambiguous.
+    const cc = await assertCountry(businessId, bodyCc);
     // L4 — bound the year so a typo/overflow can't generate a runaway statutory set.
     if (y < 2000 || y > 2100) {
       return res.status(400).json({ message: 'year must be between 2000 and 2100' });
@@ -351,7 +391,7 @@ async function importHolidays(req, res, next) {
     });
 
     res.status(201).json({ countryCode: cc, year: y, entityId: scopeEntityId, total: set.length, created, updated, warnings });
-  } catch (e) { next(e); }
+  } catch (e) { mapCountryError(e, res, next); }
 }
 
 module.exports = {

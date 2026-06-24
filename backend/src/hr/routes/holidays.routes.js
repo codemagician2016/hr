@@ -14,7 +14,10 @@ router.use(protect);
 
 router.get('/', c.listHolidays);
 router.post('/', requirePermission('canManageAttendance'), assertTenantCountryWrite('body.countryCode'), c.createHoliday);
-router.post('/import', requirePermission('canManageAttendance'), c.importHolidays);
+// F14 HIGH: the statutory-import set is selected from the body countryCode, so it
+// must be gated to the tenant country exactly like the per-row create (absent →
+// stamped; off-country → 422). Without this an IN tenant could import the NZ set.
+router.post('/import', requirePermission('canManageAttendance'), assertTenantCountryWrite('body.countryCode'), c.importHolidays);
 router.patch('/:id', requirePermission('canManageAttendance'), c.updateHoliday);
 router.delete('/:id', requirePermission('canManageAttendance'), c.removeHoliday);
 

@@ -292,11 +292,17 @@ async function main() {
     }
 
     /* ── L4 — holiday import year bound ───────────────────────────────────── */
+    // FLAG (F14 single-country shared-test edit): importHolidays now resolves the
+    // statutory set from the TENANT country (demo = IN) and asserts the body
+    // countryCode matches it, so an off-country body (NZ) is rejected 422 BEFORE
+    // the year check. Use the tenant's own country here so this case still
+    // exercises the year-bound guard; the off-country rejection is covered by
+    // tenant/__tests__/singleCountryF14.test.js.
     log('L4 — holiday import rejects out-of-range years:');
     {
-      const bad = await callController(holidays.importHolidays, { user: hrAdmin, body: { countryCode: 'NZ', year: 99999 } });
+      const bad = await callController(holidays.importHolidays, { user: hrAdmin, body: { countryCode: 'IN', year: 99999 } });
       assert(bad.statusCode === 400, 'year=99999 → 400');
-      const bad2 = await callController(holidays.importHolidays, { user: hrAdmin, body: { countryCode: 'NZ', year: 1900 } });
+      const bad2 = await callController(holidays.importHolidays, { user: hrAdmin, body: { countryCode: 'IN', year: 1900 } });
       assert(bad2.statusCode === 400, 'year=1900 → 400');
     }
 
