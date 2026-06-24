@@ -940,21 +940,44 @@ async function persistComputedRun(tx, { businessId, payRun, actorId, now, inputH
     // Cycle-0 — STAMP the loan recovery off the engine's ACTUAL recovered figure.
     // The engine has already applied the net-floor cap to the LOAN_REPAYMENT line;
     // we read what it actually deducted (not what we asked for) so a capped/partial
-    // recovery defers correctly. applyRecovery marks the fully-covered installments
-    // PAID (payRunId + paidAt), increments Loan.amountRepaid / decrements outstanding,
-    // and closes a fully-recovered loan — all in THIS run transaction.
+    // recovery is credited to the paise and the residual defers. applyRecovery credits
+    // the loan EXACTLY this figure (debit == credit == installment recoveredAmount),
+    // marks fully-covered installments PAID and leaves a net-capped trailing one
+    // PENDING with a partial recoveredAmount, increments Loan.amountRepaid / decrements
+    // outstanding, and closes a fully-recovered loan — all in THIS run transaction.
+    //
+    // CONCURRENCY: we RE-SELECT the due installments INSIDE this persist tx with a
+    // row lock (selectDuePending → SELECT … FOR UPDATE SKIP LOCKED). The default
+    // compute path selected them earlier on the non-tx client (lock not held), so a
+    // racing run could otherwise stamp the same PENDING installment. Re-selecting
+    // under lock here is the authoritative set: a row a concurrent run already PAID is
+    // now excluded (status <> PAID) / skip-locked, so we never double-recover. The
+    // unwind above already reset THIS run's own prior stamps, so the lock re-select
+    // reproduces the original set on a clean recompute.
     if (ln.loanRecovery && ln.loanRecovery.installments && ln.loanRecovery.installments.length) {
       const recoveredMinor = (r.employeeDeductions || [])
         .filter((d) => d.code === 'LOAN_REPAYMENT')
         .reduce((acc, d) => acc + (d.amountMinor || 0), 0);
       if (recoveredMinor > 0) {
-        await loanRecovery.applyRecovery(tx, {
+        const locked = await loanRecovery.selectDuePending(tx, {
           businessId,
-          payRunId: payRun.id,
-          paidAt: now,
-          installments: ln.loanRecovery.installments,
-          recoveredMinor,
+          employeeId: ln.employeeId,
+          periodEnd: payRun.periodEnd,
+          currentPayRunId: payRun.id,
         });
+        // Credit the engine-recovered figure across the LOCKED set, but never beyond
+        // what is actually recoverable under the lock (a concurrent run may have taken
+        // some). recoveredMinor (the debit) == the credit in the normal, race-free case.
+        const creditable = Math.min(recoveredMinor, locked.totalDueMinor);
+        if (creditable > 0) {
+          await loanRecovery.applyRecovery(tx, {
+            businessId,
+            payRunId: payRun.id,
+            paidAt: now,
+            installments: locked.installments,
+            recoveredMinor: creditable,
+          });
+        }
       }
     }
 
