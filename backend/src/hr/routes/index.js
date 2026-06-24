@@ -45,6 +45,9 @@ router.use('/documents', require('./documents.routes'));
 router.use('/assets', require('./assets.routes'));
 router.use('/expenses', require('./expenses.routes'));
 router.use('/loans', require('./loans.routes'));
+// Feature 18 — Data Migration / Bulk Import (CSV-Excel) + back-dated autogen.
+// FLAG: new router mount. canManageImports-gated; payroll autogen also needs canRunPayroll.
+router.use('/imports', require('../migration/imports.routes'));
 router.use('/letters/templates', require('../letters/routes/templates.routes'));
 
 // Employee lifecycle (Feature 4) — onboarding pipeline + checklist tasks. RBAC:

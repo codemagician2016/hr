@@ -78,6 +78,12 @@ const PERMISSIONS = Object.freeze({
   // category CRUD — HR-Admin config, not a per-claim action.
   canApproveExpense:        'Approve/reject/reimburse expense claims + travel requests (scoped + SoD)',
   canManageExpensePolicy:   'Build the travel & expense policy (per-diem, hotel matrix, transport, city tiers)',
+  // Data Migration / Bulk Import (Feature 18) — the import-subsystem admin key:
+  // upload/parse/validate/dry-run/commit CSV-Excel for employees, CTC, attendance,
+  // payroll history + reimbursements. The DOWNSTREAM side-effects keep THEIR own
+  // permission (payroll autogen still requires canRunPayroll; auto-publish requires
+  // canApprovePayroll) so SoD is NOT weakened by going through import.
+  canManageImports:         'Bulk-import & migrate prior-period data (employees, CTC, attendance, payslips, claims)',
 });
 
 const PERMISSION_KEYS = Object.freeze(Object.keys(PERMISSIONS));
@@ -113,6 +119,8 @@ const SYSTEM_ROLES = Object.freeze({
     canManageHiring: true, canViewHiring: true, canScoreInterview: true,
     // Feature 11 — HR-Admin owns the travel & expense policy builder + can approve.
     canManageExpensePolicy: true, canApproveExpense: true,
+    // Feature 18 — HR-Admin owns the data-migration / bulk-import center.
+    canManageImports: true,
     // No canEditBilling / canEditDomain / canApprovePayroll — Owner/Finance only
   },
   // Finance — payroll + compensation + statutory + billing.
