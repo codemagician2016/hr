@@ -54,6 +54,10 @@ export const NAV_ITEMS = [
   // super-set. The server is the real boundary; this just hides the nav link.
   { key: 'recruitment', label: 'Recruitment', href: '/recruitment', feature: 'hr', anyPermission: ['canViewHiring', 'canManageHiring', 'canManageEmployees'], icon: 'people' },
   { key: 'payroll', label: 'Payroll', href: '/payroll', feature: 'payroll', permission: 'canRunPayroll', icon: 'wallet' },
+  // Feature 22 — Statutory Bonus (annual Payment of Bonus Act cycles) + the Feature 21
+  // Labour Welfare Fund read panel (tab inside the page). Gated on canRunPayroll; the
+  // server is the real boundary (India-only, RBAC per route).
+  { key: 'bonus', label: 'Statutory Bonus', href: '/payroll/bonus', feature: 'payroll', permission: 'canRunPayroll', icon: 'coin' },
   { key: 'reports', label: 'Reports', href: '/reports', feature: 'payroll', permission: 'canViewPayrollReports', icon: 'report' },
   // Letters & Communication (Feature 9). The group header is gated on EITHER key:
   // canGenerateLetters (the maker/issue key) OR canManageLetters (the config/
@@ -122,7 +126,7 @@ export const NAV_GROUPS = [
   { key: 'people-org', label: 'People & Org', icon: 'people', items: ['people', 'org', 'profile-changes', 'profile-policy', 'helpdesk', 'announcements'] },
   { key: 'talent', label: 'Talent', icon: 'onboarding', items: ['recruitment', 'onboarding', 'separations', 'performance'] },
   { key: 'time', label: 'Time', icon: 'calendar', items: ['leave', 'attendance'] },
-  { key: 'pay', label: 'Pay', icon: 'wallet', items: ['compensation', 'ctc-policies', 'payroll', 'expenses', 'travel', 'loans', 'reports'] },
+  { key: 'pay', label: 'Pay', icon: 'wallet', items: ['compensation', 'ctc-policies', 'payroll', 'bonus', 'expenses', 'travel', 'loans', 'reports'] },
   // FLAG FOR MERGE: new Feature 10 group — approval chains + RBAC + reporting tree.
   { key: 'approvals-access', label: 'Approvals & Access', icon: 'approvals', items: ['approvals', 'access-roles', 'access-hierarchy'] },
 ];

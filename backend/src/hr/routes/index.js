@@ -99,6 +99,9 @@ router.use('/profile', require('../profile/profile.routes'));
 // /me/payslips router uses the customer-auth middleware internally.
 router.use('/payroll', require('../payroll/payroll.routes'));
 router.use('/me/payslips', require('../payroll/mePayslips.routes'));
+// Feature 22 — Statutory Bonus (operator) + ESS self-view. India-gated in service.
+router.use('/bonus', require('../payroll/bonus.routes'));
+router.use('/me/bonus', require('../payroll/meBonus.routes'));
 // ESS profile/country surface — the authoritative country source for the ESS app
 // (tax declaration, payslip currency, separation labels gate by it; fail-closed).
 router.use('/me/profile', require('../lifecycle/routes/meProfile.routes'));
