@@ -43,6 +43,10 @@ const SCOPE_DEFAULTS = Object.freeze({
   // Cycle 1 — HR Helpdesk tickets carry a human reference HD-000219 (padding 6 to
   // match the schema-doc example). Tenant-wide, non-resetting (periodKey: null).
   HD: { prefix: 'HD-', padding: 6 },
+  // Feature 24 — Form 16 TDS certificate numbers. Per-(entity, FY) resetting
+  // (periodKey = financialYear). The orchestrator passes an explicit TAN-derived
+  // prefix (FORM16/<TAN>/<FY>/) + padding 4 → FORM16/BLRX12345A/2026-27/0001.
+  FORM16: { prefix: 'FORM16-', padding: 4 },
 });
 
 function format(prefix, value, padding) {

@@ -82,4 +82,9 @@ router.get(
   c.getEmployeeTaxProjectionPdf,
 );
 
+// FLAG (Feature 24 — NEW mount): Year-end Form 16 (Part A + Part B) + Form 24Q.
+// India-gated in the service; F1-scoped reads; maker-checker SoD on approve; issue
+// rides the existing letters engine. Paths: /payroll/form16/* + /payroll/form24q/*.
+router.use('/', require('../tax/form16/form16.routes'));
+
 module.exports = router;

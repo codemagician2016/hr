@@ -594,6 +594,9 @@ model Business {
   // Investment-proof workflow (Feature 20) — year-end §192(2D)/Rule 26C/Form 12BB.
   investmentDeclarationWindows InvestmentDeclarationWindow[]
   investmentProofs             InvestmentProof[]
+  // Form 16 / 24Q (Feature 24) — annual TDS-certificate generation runs + certs.
+  form16Batches                Form16Batch[]
+  form16Certificates           Form16Certificate[]
 }
 
 // BusinessPage — multi-page CMS. Each row is a single sub-page under one
@@ -6471,6 +6474,7 @@ model Entity {
   complianceObligations ComplianceObligation[]
   compensations CompensationRevision[]
   importJobs    ImportJob[]
+  form16Batches Form16Batch[]
 
   @@unique([businessId, code])
   @@index([businessId, countryCode, status])
@@ -6753,6 +6757,8 @@ model Employee {
   portalInvites          EmployeeInvite[]
   // Investment-proof workflow (Feature 20) — the employee's uploaded year-end proofs.
   investmentProofs       InvestmentProof[]
+  // Form 16 (Feature 24) — the employee's annual TDS certificates.
+  form16Certificates     Form16Certificate[]
 
   @@unique([businessId, code])
   // FLAG (Feature 17 — review HIGH fix): a PARTIAL unique index backs the
@@ -8110,6 +8116,120 @@ model BonusAward {
 
   @@unique([businessId, bonusCycleId, employeeId])
   @@index([businessId, bonusCycleId, eligible])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §24  FORM 16 (TDS certificate) + Form 24Q — Feature 24. India-only.
+//   One Form16Batch = (entity, financial year); a maker-checker generation run
+//   mirroring BonusCycle (DRAFT → COMPUTED → APPROVED (SoD) → ISSUED). Per-employee
+//   Form16Certificate rows freeze the paise-exact partAJson (TRACES-style quarter-
+//   wise TDS deposited) + partBJson (the F15 annual projection at FY-end), then
+//   bulk-issue through the EXISTING letters + e-sign engines (IssuedLetter +
+//   EmployeeDocument EMPLOYEE_VISIBLE → the ESS vault). NO new tax math, NO new
+//   challan model (Part A reads the existing StatutoryRemittance IN_TDS rows), NO
+//   fork of the FVU generator (24Q reuses filing/india.js generate24Q).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The annual Form-16 generation run for one entity + financial year. Mirrors
+/// BonusCycle: DRAFT → COMPUTED → APPROVED (SoD) → ISSUED. India-only.
+model Form16Batch {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId      String
+  entity        Entity   @relation(fields: [entityId], references: [id], onDelete: Restrict)
+  financialYear String // "2026-27" (Apr–Mar)
+  formKind      RemittanceKind @default(IN_FORM16) // IN_FORM16 | IN_FORM130 (FY ≥ 2026-27, effective-dated §11)
+
+  status        Form16BatchStatus @default(DRAFT)
+  // Deductor identity SNAPSHOT at generate (so a later Entity edit can't alter an issued cert).
+  deductorPan   String?  @db.Char(10)
+  deductorTan   String?  @db.Char(10)
+  deductorName  String?
+  // Reconciliation roll-up (computed at COMPUTED).
+  headcount              Int     @default(0)
+  totalTdsDeductedMinor  BigInt  @default(0) // Σ certificate TDS (paise)
+  totalTdsDepositedMinor BigInt  @default(0) // Σ challan-matched deposited (paise)
+  reconciledOk           Boolean @default(false) // deducted == deposited within tolerance
+  // Maker-checker actors (SoD — approver ≠ computedBy).
+  computedAt    DateTime?
+  computedBy    String?
+  approvedAt    DateTime?
+  approvedBy    String?
+  issuedAt      DateTime?
+  issuedBy      String?
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+  version       Int      @default(0)
+
+  certificates  Form16Certificate[]
+
+  @@unique([businessId, entityId, financialYear]) // exactly one batch per entity+FY
+  @@index([businessId, status])
+}
+
+enum Form16BatchStatus {
+  DRAFT
+  COMPUTED
+  APPROVED
+  ISSUED
+  CANCELLED
+}
+
+/// One employee's Form-16 for the batch's FY. partAJson + partBJson are the
+/// FROZEN, paise-exact certificate content (the immutable truth at generate);
+/// the issued PDF + ESS vault doc link to the IssuedLetter (reuse, no fork).
+model Form16Certificate {
+  id            String      @id @default(uuid())
+  businessId    String
+  business      Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  batchId       String
+  batch         Form16Batch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  employeeId    String
+  employee      Employee    @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  financialYear String
+  // Unique TDS certificate number. Deterministic per (entity, FY) via
+  // allocateCode(scope='FORM16', periodKey=FY) — burned, never reused. The TRACES
+  // authenticated number can be pasted into tracesCertNo before issue (optional).
+  certificateNo String
+  tracesCertNo  String? // optional: the TRACES Part-A unique number, if downloaded
+
+  regime        INTaxRegime
+  // Frozen content (the certificate as issued):
+  partAJson     Json // deductor/deductee identity, employment period, quarter-wise TDS summary + challans
+  partBJson     Json // the F15 annual computation (salary→exemptions→ChVIA→tax→TDS)
+  // Money roll-ups (paise) for quick filter/reconcile + the register:
+  grossSalaryMinor  BigInt @default(0)
+  totalTaxableMinor BigInt @default(0)
+  totalTaxMinor     BigInt @default(0) // tax+surcharge+cess after rebate/relief
+  tdsDeductedMinor  BigInt @default(0) // Σ TDS on this FY's payslips
+  tdsDepositedMinor BigInt @default(0) // Σ challan-matched
+  // Anomalies surfaced on the cert (e.g. MISSING_PAN, TDS_GAP, NO_PAYSLIPS).
+  anomaliesJson Json?
+  // Issue linkage (reuse letters): set when bulk-issued.
+  issuedLetterId      String? // → IssuedLetter (ref-no, PDF, e-sign envelope)
+  employeeDocumentId  String? // → the ESS vault doc (mirror of IssuedLetter.employeeDocumentId)
+  fileHash            String? // sha256 of the issued PDF (tamper anchor)
+  signatureEnvelopeId String? // when the batch issues signed
+  status        Form16CertStatus @default(PENDING)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  version       Int      @default(0)
+
+  @@unique([businessId, batchId, employeeId]) // one cert per employee per batch
+  @@unique([businessId, certificateNo]) // certificate number is unique per tenant
+  @@index([businessId, employeeId, financialYear])
+  @@index([businessId, status])
+}
+
+enum Form16CertStatus {
+  PENDING // computed, not yet issued
+  ISSUED // PDF minted + in the employee's vault (unsigned or signed-complete)
+  PENDING_SIGNATURE // issued into an e-sign envelope, awaiting signer(s)
+  VOIDED // superseded by a re-generate (the IssuedLetter is revoked)
 }
 
 /// Employer filing/payment obligations generated from a pay run.
