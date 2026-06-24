@@ -18,8 +18,9 @@ const manrope = Manrope({
 // DriftHR is shown as the default product identity.
 
 export const metadata = {
-  title: { default: 'DriftHR', template: '%s · DriftHR' },
-  description: 'Effortless HR & payroll.',
+  // Neutral build-time default — runtime TenantProvider swaps in the tenant brand.
+  title: { default: 'Employee Portal', template: '%s · Employee Portal' },
+  description: 'Your workplace, in one place.',
   icons: {
     icon: [
       { url: '/favicon.svg', type: 'image/svg+xml' },
@@ -30,11 +31,10 @@ export const metadata = {
     apple: [{ url: '/apple-touch-icon.png', sizes: '180x180' }],
   },
   openGraph: {
-    title: 'DriftHR',
-    description: 'Effortless HR & payroll.',
-    siteName: 'DriftHR',
+    title: 'Employee Portal',
+    description: 'Your workplace, in one place.',
+    siteName: 'Employee Portal',
     type: 'website',
-    images: [{ url: '/drifthr-social-1200x630.png' }],
   },
 };
 

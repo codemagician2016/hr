@@ -11,8 +11,11 @@ const manrope = Manrope({
 });
 
 export const metadata = {
-  title: { default: 'DriftHR', template: '%s · DriftHR' },
-  description: 'Effortless HR & payroll.',
+  // Neutral, non-vendor build-time default — the runtime TenantProvider swaps in
+  // the tenant's own brand name + favicon. The vendor name (DriftHR) must never
+  // appear on a tenant portal, including the pre-hydration tab title.
+  title: { default: 'HR Console', template: '%s · HR Console' },
+  description: 'HR & payroll workspace.',
   icons: {
     icon: [
       { url: '/favicon.svg', type: 'image/svg+xml' },
@@ -23,11 +26,10 @@ export const metadata = {
     apple: [{ url: '/apple-touch-icon.png', sizes: '180x180' }],
   },
   openGraph: {
-    title: 'DriftHR',
-    description: 'Effortless HR & payroll.',
-    siteName: 'DriftHR',
+    title: 'HR Console',
+    description: 'HR & payroll workspace.',
+    siteName: 'HR Console',
     type: 'website',
-    images: [{ url: '/drifthr-social-1200x630.png' }],
   },
 };
 
