@@ -118,14 +118,32 @@ async function publish({ businessId, id, now = new Date() }) {
   const existing = await prisma.announcement.findFirst({ where: { id, businessId } });
   if (!existing) return { notFound: true };
   const publishedAt = existing.publishedAt || now;
+
+  // IDEMPOTENCY — fan out ONLY on the first time this announcement goes live, i.e. the
+  // DRAFT/ARCHIVED → PUBLISHED transition AND it has never been notified before. A
+  // re-save / re-publish of an already-PUBLISHED (or already-notified) announcement must
+  // NOT re-blast its audience. We decide on the PRIOR row state (before this update) so a
+  // re-publish — even one that was previously interrupted — never double-sends.
+  const firstPublish = existing.status !== 'PUBLISHED' && existing.notifiedAt == null;
+  const isLiveNow = publishedAt <= now && (!existing.expiresAt || existing.expiresAt > now);
+  const willNotify = firstPublish && isLiveNow;
+
   const ann = await prisma.announcement.update({
     where: { id: existing.id },
-    data: { status: 'PUBLISHED', publishedAt, archivedAt: null, version: { increment: 1 } },
+    data: {
+      status: 'PUBLISHED',
+      publishedAt,
+      archivedAt: null,
+      version: { increment: 1 },
+      // Stamp the notify time as part of the SAME write that flips status, so a concurrent
+      // re-publish observing PUBLISHED|notifiedAt can never fan out a second time.
+      ...(willNotify ? { notifiedAt: now } : {}),
+    },
   });
   // Notify only when LIVE now (a future-scheduled publishedAt surfaces silently in the
   // feed at its time). Best-effort, fire-and-forget — never blocks/throws the publish.
   let notified = 0;
-  if (publishedAt <= now && (!ann.expiresAt || ann.expiresAt > now)) {
+  if (willNotify) {
     notified = await fanOutAnnouncement(ann).catch(() => 0);
   }
   return { announcement: ann, notified };

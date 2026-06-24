@@ -153,13 +153,21 @@ function toCard(e) {
   };
 }
 
-// Resolve { businessId, selfId } for the caller. selfId may be null when the customer
-// has no linked Employee (rare); the listing still works (tenant-scoped), self just
-// isn't flagged/excludable.
+// Resolve { businessId, selfId, callerActive } for the caller. selfId may be null when
+// the customer has no linked Employee (rare); the listing still works (tenant-scoped),
+// self just isn't flagged/excludable. callerActive reflects the CALLER's own ESS active
+// status (isActive flag + visible-status whitelist) — a terminated/inactive caller must
+// not be served the active roster (work emails are a phishing list). When the customer
+// has no linked Employee we treat them as active (the listing has no PII to leak via
+// their absence, and other surfaces already 404 such accounts).
 async function callerContext(req) {
   const businessId = req.customer && req.customer.businessId;
   const { employee } = await resolveCustomerActor(req.customer);
-  return { businessId, selfId: employee ? employee.id : null };
+  const policy = essOrgPolicy(businessId);
+  const callerActive = employee
+    ? (employee.isActive !== false && isEssVisibleStatus(employee.status, policy))
+    : true;
+  return { businessId, selfId: employee ? employee.id : null, callerActive };
 }
 
 // Build the tenant-scoped, active-only WHERE for a directory listing. Search spans
@@ -199,8 +207,9 @@ function buildWhere(businessId, policy, { q, departmentId, entityId, locationId 
 // ── GET /me/directory — searchable, paginated, tenant-wide colleague list ──────────
 async function list(req, res, next) {
   try {
-    const { businessId, selfId } = await callerContext(req);
+    const { businessId, selfId, callerActive } = await callerContext(req);
     if (!businessId) return res.status(401).json({ message: 'Not authenticated' });
+    if (!callerActive) return res.status(403).json({ message: 'Your account is not active' });
     const policy = essOrgPolicy(businessId);
 
     const page = clampInt(req.query.page, 1, 1, 1e9);
@@ -238,8 +247,9 @@ async function list(req, res, next) {
 // Only org-placement facets (never PII). Scoped to the tenant's active population.
 async function filters(req, res, next) {
   try {
-    const { businessId } = await callerContext(req);
+    const { businessId, callerActive } = await callerContext(req);
     if (!businessId) return res.status(401).json({ message: 'Not authenticated' });
+    if (!callerActive) return res.status(403).json({ message: 'Your account is not active' });
     const policy = essOrgPolicy(businessId);
     const statusIn = policy.showInactive ? undefined : [...ESS_ACTIVE_STATUSES];
     const recWhere = {
@@ -312,8 +322,9 @@ async function updatePreferences(req, res, next) {
 // no PII. Carries a link hint to the F19 org chart rooted at that person.
 async function detail(req, res, next) {
   try {
-    const { businessId } = await callerContext(req);
+    const { businessId, callerActive } = await callerContext(req);
     if (!businessId) return res.status(401).json({ message: 'Not authenticated' });
+    if (!callerActive) return res.status(403).json({ message: 'Your account is not active' });
     const policy = essOrgPolicy(businessId);
     const row = await prisma.employee.findFirst({
       where: { id: req.params.id, businessId, deletedAt: null },
