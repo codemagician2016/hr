@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Spinner, ErrorBanner, Empty, PrimaryButton, TextInput, Modal, ModalActions } from '@hr/ui';
-import { get, post, patch, request } from '@/lib/api';
+import { get, post, request } from '@/lib/api';
 import { PageHeader, Tabs } from '@/lib/ui';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
 import { InfoTip, FieldLabel, SectionTitle, usePagination, Pagination } from '@/lib/widgets';
@@ -114,14 +114,15 @@ function PresetCard({ role, catalog, onAssign, onClone }) {
 }
 
 function AssignModal({ role, users, employees, onClose, onAssigned }) {
-  // Operators are assigned via /api/business/users/:id/role (the existing F1 path).
-  // Employees with a linked portal user can be assigned via rbac assign-role.
+  // People are assigned by employeeId via POST /api/hr/rbac/employees/:id/assign-role
+  // (canManageRoles-gated) — the path a delegated HR-Admin can actually call. `users`
+  // are the org-tree people ({ id: employeeId, name, code, businessRoleId }).
   const [savingId, setSavingId] = useState(null);
   const [rowError, setRowError] = useState({});
   const [q, setQ] = useState('');
   const list = useMemo(() => {
     const ql = q.trim().toLowerCase();
-    return (users || []).filter((u) => !ql || (u.name || '').toLowerCase().includes(ql) || (u.email || '').toLowerCase().includes(ql));
+    return (users || []).filter((u) => !ql || (u.name || '').toLowerCase().includes(ql) || (u.code || '').toLowerCase().includes(ql));
   }, [users, q]);
   const pager = usePagination(list, { initialPageSize: 6 });
 
@@ -129,7 +130,7 @@ function AssignModal({ role, users, employees, onClose, onAssigned }) {
     setSavingId(u.id);
     setRowError((m) => ({ ...m, [u.id]: '' }));
     try {
-      await patch(`/api/business/users/${u.id}/role`, { businessRoleId: role.id });
+      await post(`/api/hr/rbac/employees/${u.id}/assign-role`, { businessRoleId: role.id });
       onAssigned?.(u.id, role.id);
     } catch (err) {
       setRowError((m) => ({ ...m, [u.id]: err.data?.message || err.message || 'Failed to assign.' }));
@@ -147,7 +148,7 @@ function AssignModal({ role, users, employees, onClose, onAssigned }) {
       <input
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder="Search by name or email…"
+        placeholder="Search by name or employee code…"
         className="mb-3 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
       />
       {list.length === 0 ? (
@@ -157,9 +158,9 @@ function AssignModal({ role, users, employees, onClose, onAssigned }) {
           {pager.pageItems.map((u) => (
             <li key={u.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
               <div className="min-w-0">
-                <div className="truncate text-sm font-medium text-gray-900">{u.name || u.email}</div>
+                <div className="truncate text-sm font-medium text-gray-900">{u.name || u.code}</div>
                 <div className="truncate text-xs text-gray-500">
-                  {u.email}{u.businessRoleId === role.id ? ' · already has this role' : ''}
+                  {u.code}{u.businessRoleId === role.id ? ' · already has this role' : ''}
                 </div>
                 {rowError[u.id] && <div className="text-xs text-red-600">{rowError[u.id]}</div>}
               </div>
@@ -190,6 +191,7 @@ function GrantsEditor({ role, catalog, onChanged }) {
   const [entityId, setEntityId] = useState('');
   const [expiresAt, setExpiresAt] = useState('');
   const [saving, setSaving] = useState(false);
+  const [removingId, setRemovingId] = useState(null);
   const [error, setError] = useState('');
   const grants = role.hrPermissionGrants || [];
 
@@ -209,17 +211,42 @@ function GrantsEditor({ role, catalog, onChanged }) {
     } finally { setSaving(false); }
   }
 
+  // Revoke a scoped/time-bound grant early (DELETE /rbac/roles/:id/grants/:grantId)
+  // instead of waiting on its auto-expiry (entity-scoped grants with no expiry never
+  // clear on their own).
+  async function remove(grantId) {
+    setRemovingId(grantId); setError('');
+    try {
+      await request(`/api/hr/rbac/roles/${role.id}/grants/${grantId}`, { method: 'DELETE' });
+      onChanged?.();
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Failed to remove grant.');
+    } finally { setRemovingId(null); }
+  }
+
   return (
     <div className="rounded-xl border border-gray-200 p-3">
-      <SectionTitle tip="A temporary or department-scoped extra permission, on top of the role — e.g. ‘acting Finance approver for Mumbai until 31 Aug’. It expires on its own; no need to remember to undo it.">
+      <SectionTitle tip="A temporary or department-scoped extra permission, on top of the role — e.g. ‘acting Finance approver for Mumbai until 31 Aug’. It expires on its own; no need to remember to undo it — or remove it early with ✕.">
         Temporary / scoped grants
       </SectionTitle>
       {grants.length > 0 && (
         <ul className="mt-2 space-y-1">
           {grants.map((g) => (
-            <li key={g.id} className="flex items-center justify-between rounded-md bg-gray-50 px-2 py-1 text-xs text-gray-600">
-              <span>{catalog[g.permissionKey] || g.permissionKey}{g.entityId ? ` · scoped` : ''}</span>
-              <span className="text-gray-400">{g.expiresAt ? `until ${new Date(g.expiresAt).toLocaleDateString()}` : 'no expiry'}</span>
+            <li key={g.id} className="flex items-center justify-between gap-2 rounded-md bg-gray-50 px-2 py-1 text-xs text-gray-600">
+              <span className="min-w-0 truncate">{catalog[g.permissionKey] || g.permissionKey}{g.entityId ? ` · scoped` : ''}</span>
+              <span className="flex shrink-0 items-center gap-2">
+                <span className="text-gray-400">{g.expiresAt ? `until ${new Date(g.expiresAt).toLocaleDateString()}` : 'no expiry'}</span>
+                <button
+                  type="button"
+                  onClick={() => remove(g.id)}
+                  disabled={removingId === g.id}
+                  title="Remove this grant"
+                  aria-label={`Remove grant ${catalog[g.permissionKey] || g.permissionKey}`}
+                  className="rounded px-1 font-semibold text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                >
+                  {removingId === g.id ? '…' : '✕'}
+                </button>
+              </span>
             </li>
           ))}
         </ul>
@@ -371,15 +398,17 @@ function AssignmentsTab({ users, roles, onReload }) {
   const [q, setQ] = useState('');
   const list = useMemo(() => {
     const ql = q.trim().toLowerCase();
-    return (users || []).filter((u) => !ql || (u.name || '').toLowerCase().includes(ql) || (u.email || '').toLowerCase().includes(ql));
+    return (users || []).filter((u) => !ql || (u.name || '').toLowerCase().includes(ql) || (u.code || '').toLowerCase().includes(ql));
   }, [users, q]);
   const pager = usePagination(list, { initialPageSize: 10 });
 
+  // Assign by employeeId through the canManageRoles-gated rbac endpoint (works for a
+  // delegated HR-Admin); passing null clears the role back to the person's default.
   async function assign(u, businessRoleId) {
     setSavingId(u.id);
     setRowError((m) => ({ ...m, [u.id]: '' }));
     try {
-      await patch(`/api/business/users/${u.id}/role`, { businessRoleId: businessRoleId || null });
+      await post(`/api/hr/rbac/employees/${u.id}/assign-role`, { businessRoleId: businessRoleId || null });
       onReload?.();
     } catch (err) {
       setRowError((m) => ({ ...m, [u.id]: err.data?.message || err.message || 'Failed to assign.' }));
@@ -390,9 +419,9 @@ function AssignmentsTab({ users, roles, onReload }) {
     <div>
       <p className="mb-3 flex items-center text-sm text-gray-500">
         Give each person a role. Changes take effect on their next action — no re-login.
-        <InfoTip text="The ‘Account role’ column is the person’s base login type. The role you pick here layers their day-to-day permissions + data access on top." />
+        <InfoTip text="The role you pick here layers a person’s day-to-day permissions + data access on top of their default access. Pick ‘Default’ to remove it." />
       </p>
-      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search people…" className="mb-3 w-72 rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name or employee code…" className="mb-3 w-72 rounded-lg border border-gray-300 px-3 py-2 text-sm" />
       {list.length === 0 ? (
         <Empty text="No people yet." />
       ) : (
@@ -401,7 +430,7 @@ function AssignmentsTab({ users, roles, onReload }) {
             <thead>
               <tr className="border-b border-gray-100 text-left text-xs uppercase tracking-wide text-gray-500">
                 <th className="px-4 py-3 font-medium">Person</th>
-                <th className="px-4 py-3 font-medium">Account role</th>
+                <th className="px-4 py-3 font-medium">Employee</th>
                 <th className="px-4 py-3 font-medium">Assigned role</th>
               </tr>
             </thead>
@@ -409,10 +438,9 @@ function AssignmentsTab({ users, roles, onReload }) {
               {pager.pageItems.map((u) => (
                 <tr key={u.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50">
                   <td className="px-4 py-3">
-                    <div className="font-medium text-gray-900">{u.name || u.email}</div>
-                    {u.name && <div className="text-xs text-gray-500">{u.email}</div>}
+                    <div className="font-medium text-gray-900">{u.name || u.code}</div>
                   </td>
-                  <td className="px-4 py-3 text-gray-600">{u.role}</td>
+                  <td className="px-4 py-3 text-gray-600">{u.code || '—'}</td>
                   <td className="px-4 py-3">
                     <select
                       value={u.businessRoleId || ''}
@@ -420,7 +448,7 @@ function AssignmentsTab({ users, roles, onReload }) {
                       disabled={savingId === u.id}
                       className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm disabled:opacity-50"
                     >
-                      <option value="">— Default ({u.role})</option>
+                      <option value="">— Default access</option>
                       {roles.map((r) => (<option key={r.id} value={r.id}>{r.name}{r.isSystem ? '' : ' (custom)'}</option>))}
                     </select>
                     {rowError[u.id] && <p className="mt-1 text-xs text-red-600">{rowError[u.id]}</p>}
@@ -453,10 +481,15 @@ export default function RoleManagerPage() {
   const load = useCallback(async () => {
     setError('');
     try {
-      const [r, p, u, tree, me] = await Promise.all([
+      // The people list + role-assignment now run through canManageRoles/canViewEmployees-
+      // gated HR endpoints (org-tree + /rbac/employees/:id/assign-role), keyed by
+      // employeeId — NOT /api/business/users (BUSINESS_ADMIN-only), which 403'd for a
+      // delegated HR-Admin and left every modal empty. The org tree carries every person
+      // (id=employeeId, name, code, status + their current businessRoleId), which is all
+      // the assign modal + the "who has which role" tab need.
+      const [r, p, tree, me] = await Promise.all([
         get('/api/hr/rbac/roles'),
         get('/api/hr/rbac/permissions'),
-        get('/api/business/users').catch(() => ({ users: [] })),
         get('/api/hr/rbac/org-tree').catch(() => ({ nodes: [], orphans: [] })),
         get('/api/auth/me').catch(() => null),
       ]);
@@ -465,9 +498,19 @@ export default function RoleManagerPage() {
       const cat = {};
       for (const it of (p?.items || [])) cat[it.key] = it.description || it.key;
       setCatalog(cat);
-      setUsers(Array.isArray(u?.users) ? u.users : (u?.items || []));
+      // People = the org tree (every node carries the employeeId + current businessRoleId).
+      // Both the assign modal and the "who has which role" tab render + assign against this,
+      // by employeeId — so a delegated (non-owner) HR-Admin can see + assign everyone.
       const nodes = [...(tree?.nodes || []), ...(tree?.orphans || [])];
-      setEmployees(nodes);
+      const people = nodes.map((n) => ({
+        id: n.id,                              // employeeId — the assign-role key
+        name: n.name,
+        code: n.code,
+        status: n.status,
+        businessRoleId: n.businessRoleId || null,
+      }));
+      setEmployees(people);
+      setUsers(people);
       const session = me?.user || me;
       if (session) setCanManage(hasPermission(permissionsFromSession(session), 'canManageRoles'));
     } catch (err) {
