@@ -786,6 +786,27 @@ function periodMonth(period) {
   return Number(asOf.slice(5, 7));
 }
 
+// Run types that own the FULL-PERIOD primary monthly payroll — the one (and only)
+// run per period that carries the flat, income-independent LWF deduction. REGULAR
+// is the live primary run; MIGRATED reconstructs a historical primary period.
+const LWF_BEARING_RUN_TYPES = new Set(['REGULAR', 'MIGRATED']);
+
+/**
+ * periodIsPrimaryRun — true when this run should carry the FLAT, once-per-period
+ * statutory charges (LWF). The flat LWF is owed ONCE per deduction period and
+ * belongs to the primary/regular monthly run; OFF_CYCLE / ARREAR / SUPPLEMENTARY
+ * / BONUS / FNF / CORRECTION runs in the SAME month must NOT re-charge it (that
+ * would double-deduct the flat EE+ER welfare fee). The run type is plumbed in via
+ * `period.runType`. FAIL-OPEN: when the run type is unknown/absent (the pure
+ * unit-test path, or a caller that doesn't tag the run), treat it as primary so
+ * the historical single-run behaviour is preserved.
+ */
+function periodIsPrimaryRun(period) {
+  const t = period && period.runType != null ? String(period.runType).toUpperCase() : null;
+  if (t == null || t === '') return true; // unknown → primary (back-compat / unit tests)
+  return LWF_BEARING_RUN_TYPES.has(t);
+}
+
 // ===========================================================================
 // 1. WAGE DEFINITION (Code on Wages §2(y), 50% rule) — docs/05 §3, §8.1
 // ===========================================================================
@@ -1928,8 +1949,13 @@ function compute(ctx = {}) {
   // so it sits AFTER PT and BEFORE the TDS projection. Income-independent (flat
   // per head), so it touches no wage base. Reuses the PT state precedence
   // (entity.stateCode) unless an explicit lwfStateCode override is supplied.
+  // LWF is a FLAT, income-independent fee owed ONCE per deduction period. It must
+  // ride ONLY the primary/regular monthly run — an OFF_CYCLE/ARREAR/SUPPLEMENTARY/
+  // BONUS/FNF/CORRECTION run in the SAME month would otherwise double-charge the
+  // flat EE+ER welfare fee. Gate on the run type (period.runType); fail-open when
+  // the run type is unknown (pure unit-test / untagged caller).
   const lwfStateCode = entity.lwfStateCode || stateCode;
-  if (lwfStateCode) {
+  if (lwfStateCode && periodIsPrimaryRun(period)) {
     const lwf = computeLwf({
       stateCode: lwfStateCode,
       month,
@@ -2011,6 +2037,8 @@ module.exports = {
     computeProfessionalTax,
     computeLwf,
     lwfRupeesToPaise,
+    // Feature 21 — once-per-period LWF run-gate (true = primary/regular run).
+    periodIsPrimaryRun,
     resolveLwf,
     resolveBonusRule,
     computeTds,

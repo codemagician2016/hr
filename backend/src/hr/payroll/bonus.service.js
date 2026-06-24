@@ -156,14 +156,19 @@ async function computeBonusCycle({ businessId, actorId, bonusCycleId, advances =
     const comp = await resolveCurrentCompensation(businessId, empId, fyEndIso);
     const monthlyBasicDaMinor = monthlyBasicDaMinorFromComp(comp);
     // Worked/eligible days from attendance pay inputs for the FY (deemed-worked days
-    // already netted at freeze: payableDays). Fall back to a full year when no
-    // attendance was frozen for the period (a salaried employee present all year).
+    // — paid leave/maternity/lay-off/injury — already netted at freeze: payableDays).
+    // CRITICAL: distinguish "no data" from a genuine ZERO. Aggregate BOTH the sum AND
+    // the row COUNT: a count of 0 means attendance was never frozen (salaried-default
+    // fallback to the calendar window); a count > 0 with sum 0 is a REAL zero — a
+    // full-year LWP/AWOL employee — who must FAIL the §8 ≥30-day gate and earn ₹0.
     const attn = await prisma.attendancePayInput.aggregate({
       where: { businessId, employeeId: empId, periodStart: { gte: startDate }, periodEnd: { lte: endDate } },
       _sum: { payableDays: true },
+      _count: { _all: true },
     });
-    let workedDays = attn && attn._sum && attn._sum.payableDays != null ? Math.round(Number(attn._sum.payableDays)) : 0;
-    // Resolve the employee's active window within the FY for proration (§13).
+    const hasAttendance = !!(attn && attn._count && Number(attn._count._all) > 0);
+    const frozenWorkedDays = attn && attn._sum && attn._sum.payableDays != null ? Math.round(Number(attn._sum.payableDays)) : 0;
+    // Resolve the employee's active employment window within the FY (the §13 ceiling).
     const emp = employments.filter((e) => e.employeeId === empId);
     const winStart = emp.reduce((min, e) => {
       const f = e.effectiveFrom > startDate ? e.effectiveFrom : startDate;
@@ -175,9 +180,20 @@ async function computeBonusCycle({ businessId, actorId, bonusCycleId, advances =
     }, null) || endDate;
     const totalFyDays = Math.round((endDate - startDate) / 86400000) + 1;
     const activeDays = Math.round((winEnd - winStart) / 86400000) + 1;
-    const eligibleMonths = Math.round((activeDays / totalFyDays) * 12 * 100) / 100; // 2dp
-    // If no attendance frozen, treat the active window as worked (salaried default).
-    if (workedDays === 0) workedDays = activeDays;
+
+    // §8 worked-days + §13 proration basis:
+    //   • attendance frozen → trust the REAL summed worked/deemed days (a genuine 0
+    //     stays 0 → §8 fails, eligibleMonths = 0; LWP/AWOL correctly cuts the payout).
+    //   • no attendance frozen → salaried default: the active employment window is
+    //     deemed worked (a present-all-year employee).
+    const workedDays = hasAttendance ? frozenWorkedDays : activeDays;
+    // §13 must prorate on actual worked + deemed days, NOT the raw employment calendar
+    // window — so LWP/AWOL reduces the payout. Denominator is the full FY day-count;
+    // a mid-year joiner's worked days already cap at their active window. Cap at the
+    // active window's months so deemed-day rounding can't exceed the employed period.
+    const activeMonths = Math.round((activeDays / totalFyDays) * 12 * 100) / 100; // 2dp
+    const workedMonths = Math.round((workedDays / totalFyDays) * 12 * 100) / 100; // 2dp
+    const eligibleMonths = Math.min(workedMonths, activeMonths);
 
     empInputs.push({
       employeeId: empId,
@@ -259,7 +275,9 @@ async function approveBonusCycle({ businessId, actorId, bonusCycleId }) {
   const totalDeductionsMinor = awards.reduce((s, a) => s + Number(a.advancePaidMinor), 0);
   const netMinor = awards.reduce((s, a) => s + Number(a.netBonusMinor), 0);
 
-  const out = await prisma.$transaction(async (tx) => {
+  let out;
+  try {
+    out = await prisma.$transaction(async (tx) => {
     const code = await allocateCode(tx, { businessId, entityId: cycle.entityId, scope: 'BONUS', prefix: 'BON-', padding: 6 });
     const payRun = await tx.payRun.create({
       data: {
@@ -304,12 +322,45 @@ async function approveBonusCycle({ businessId, actorId, bonusCycleId }) {
       }
       await tx.payRunLineComponent.createMany({ data: comps });
     }
-    const updated = await tx.bonusCycle.update({
-      where: { id: bonusCycleId },
+    // ── Atomic single-mint guard (concurrency-safe) ──────────────────────────
+    // The pre-tx status/payRunId checks above are advisory ONLY — two concurrent
+    // approves both read COMPUTED + payRunId=null and would EACH mint a PayRun,
+    // paying the bonus TWICE. Commit the transition with a CONDITIONAL updateMany
+    // keyed on {status:'COMPUTED', payRunId:null}: the row lock serialises the two
+    // transactions, so exactly ONE matches 1 row and commits its minted PayRun;
+    // the loser matches 0 rows and we throw → its whole tx (PayRun + lines) rolls
+    // back. Net effect: a second concurrent approve is a no-op, never a double-mint.
+    const claim = await tx.bonusCycle.updateMany({
+      where: { id: bonusCycleId, businessId, status: 'COMPUTED', payRunId: null },
       data: { status: 'APPROVED', approvedAt: new Date(), approvedBy: actorId, payRunId: payRun.id, version: { increment: 1 } },
     });
+    if (claim.count !== 1) {
+      throw new BonusError('ALREADY_MINTED', 'Cycle already minted a bonus PayRun (lost the concurrent approve race)', 409);
+    }
+    const updated = await tx.bonusCycle.findFirst({ where: { id: bonusCycleId, businessId } });
     return { payRun, cycle: updated };
-  });
+    });
+  } catch (e) {
+    // Map every concurrent-approve LOSS to the SAME benign 409. The winner mints
+    // exactly one PayRun; the loser can trip one of THREE guards, all of which
+    // roll its tx back with NO PayRun persisted:
+    //   • our conditional-update guard (BonusError ALREADY_MINTED), or
+    //   • the PayRun unique (businessId,entityId,code) constraint on allocateCode
+    //     racing the same next sequence (P2002), or
+    //   • a serialization / write-conflict / deadlock (P2034) on the row lock.
+    // Re-read: if the cycle is now minted by the winner, surface ALREADY_MINTED;
+    // otherwise it's a genuine failure → rethrow.
+    const isConcurrencyLoss =
+      (e instanceof BonusError && e.code === 'ALREADY_MINTED') ||
+      (e && (e.code === 'P2002' || e.code === 'P2034'));
+    if (isConcurrencyLoss) {
+      const now = await prisma.bonusCycle.findFirst({ where: { id: bonusCycleId, businessId }, select: { payRunId: true } });
+      if (now && now.payRunId) {
+        throw new BonusError('ALREADY_MINTED', 'Cycle already minted a bonus PayRun (lost the concurrent approve race)', 409);
+      }
+    }
+    throw e;
+  }
 
   await writeAudit({ businessId, actorId, action: 'bonus.cycle.approve', entityType: 'BonusCycle', entityId: bonusCycleId, meta: { payRunId: out.payRun.id, headcount: awards.length, netMinor } });
   return getBonusCycle({ businessId, bonusCycleId });
