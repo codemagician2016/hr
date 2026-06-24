@@ -257,6 +257,10 @@ async function voidActiveCredit(req, res, next) {
     const { businessId } = req.user;
     const credit = await prisma.compOffCredit.findFirst({ where: { id: req.params.id, businessId } });
     if (!credit) return res.status(404).json({ message: 'Comp-off credit not found' });
+    // Finding #6 — void must respect the same F1 sub-tree scope as approve/reject. An
+    // out-of-scope employee's credit is invisible (404, IDOR-safe), so a canManageOrg
+    // operator scoped to a sub-tree can't burn comp-off outside it.
+    if (!scopeAllows(req.scope, credit.employeeId)) return res.status(404).json({ message: 'Comp-off credit not found' });
     const decidedBy = req.user.id || req.user.userId || null;
     const typeCtx = await resolveCompOffType(businessId);
     const leaveTypeId = typeCtx && typeCtx.leaveType ? typeCtx.leaveType.id : null;

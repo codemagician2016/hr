@@ -138,7 +138,10 @@ async function onApprove(approvalRequest, tx) {
   // per-credit expiry ledger stays consistent with the aggregate balance. No-op for
   // every other leave type.
   if (txn.leaveType && isCompOffCategory(txn.leaveType.category)) {
-    await debitLotsOnApprove(tx, { businessId: approvalRequest.businessId, employeeId: txn.employeeId, units: heldQty });
+    await debitLotsOnApprove(tx, {
+      businessId: approvalRequest.businessId, employeeId: txn.employeeId, units: heldQty,
+      leaveTransactionId: txn.id, // finding #5 — persist which lots THIS application debits
+    });
   }
   notify.fanOutApprovalDecided({ businessId: approvalRequest.businessId, request: approvalRequest, outcome: 'APPROVED' }).catch(() => {});
 }

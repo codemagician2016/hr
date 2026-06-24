@@ -107,6 +107,65 @@ function lot(id, qty, consumed, expiresOn, earnedOn) {
   eq(L.sumActiveRemaining(lots), 1.25, 'sumActiveRemaining = 0.75 + 0.5 + 0 = 1.25');
 }
 
+// ── reCreditAllocations: EXACT-lot re-credit + forfeit expired (findings #1/#5) ─
+{
+  // Withdraw debited L1 (now expired) for 1.0 and L2 (live) for 0.5. Re-credit must
+  // restore L2 EXACTLY (not arbitrary reverse-FIFO) and FORFEIT the 1.0 from expired L1.
+  const asOf = '2026-07-10';
+  const byId = new Map([
+    ['L1', lot('L1', 1, 1, '2026-06-01')],   // EXPIRED, was fully consumed → forfeit
+    ['L2', lot('L2', 1, 0.5, '2026-09-01')], // live → re-credit exactly its 0.5
+  ]);
+  const allocs = [{ lotId: 'L1', units: 1 }, { lotId: 'L2', units: 0.5 }];
+  const { moves, forfeited } = L.reCreditAllocations(allocs, byId, { asOf });
+  eq(forfeited, 1, 'reCreditAllocations: the 1.0 from the EXPIRED lot L1 is forfeited (finding #1)');
+  eq(moves.length, 1, 'reCreditAllocations: only the live lot L2 is re-credited');
+  eq(moves[0].lotId === 'L2', true, 'reCreditAllocations: re-credits the EXACT debited lot L2 (finding #5)');
+  eq(moves[0].newConsumed, 0, 'reCreditAllocations: L2 consumed back to 0');
+  eq(moves[0].reactivates, true, 'reCreditAllocations: a fully-consumed lot dropping below qty reactivates → ACTIVE');
+}
+{
+  // Cross-credit guard: an allocation must only touch its OWN lots. Even if a newer
+  // lot (L3) has consumption from a DIFFERENT leave, reCreditAllocations never touches
+  // it — it only un-burns the lotIds in `allocs`.
+  const byId = new Map([
+    ['L_mine', lot('L_mine', 1, 1, '2026-12-01')],
+    ['L_other', lot('L_other', 1, 1, '2026-12-01')], // belongs to another leave
+  ]);
+  const { moves } = L.reCreditAllocations([{ lotId: 'L_mine', units: 1 }], byId, { asOf: '2026-06-01' });
+  eq(moves.length, 1, 'cross-credit: only my lot is touched');
+  eq(moves[0].lotId === 'L_mine', true, 'cross-credit: never restores another leave\'s lot (finding #5)');
+}
+
+// ── firstDayPastExpiry: per-day FIFO catches a span that expires MID-span (#4) ──
+{
+  // One 2.0-unit lot expiring 2026-08-13. A 3-day span 08-12..08-14 (2 working days
+  // 08-12 + 08-14, with 08-13 a non-working day) — the START (08-12) is fine but the
+  // LAST charged day 08-14 falls AFTER the lot's 08-13 expiry → must be flagged.
+  const lots = [lot('E', 2, 0, '2026-08-13')];
+  const days = [
+    { date: '2026-08-12', fraction: 1 },
+    { date: '2026-08-14', fraction: 1 },
+  ];
+  eqStr(L.firstDayPastExpiry(lots, days), '2026-08-14', 'per-day gate: flags 08-14 (after the 08-13 expiry) — finding #4');
+  // The START-only check would have PASSED this (start 08-12 <= 08-13). Sanity:
+  eqStr(L.earliestExpiryForUnits(lots, 2), '2026-08-13', 'start-only gate would see needed-expiry 08-13 (start 08-12 passes — the missed case)');
+}
+{
+  // Whole span on/before expiry → no day flagged.
+  const lots = [lot('E', 2, 0, '2026-08-20')];
+  const days = [{ date: '2026-08-12', fraction: 1 }, { date: '2026-08-13', fraction: 1 }];
+  eq(L.firstDayPastExpiry(lots, days), null, 'per-day gate: every day on/before expiry → null (allowed)');
+}
+{
+  // Two lots: a soon-expiring 1.0 (08-13) covers day1 FIFO; the later 1.0 (09-01)
+  // covers day2. Day2 (08-20) is past the FIRST lot but its covering lot (09-01) is
+  // still live → allowed. Proves the check follows FIFO allocation, not blanket min.
+  const lots = [lot('S', 1, 0, '2026-08-13'), lot('L', 1, 0, '2026-09-01')];
+  const days = [{ date: '2026-08-10', fraction: 1 }, { date: '2026-08-20', fraction: 1 }];
+  eq(L.firstDayPastExpiry(lots, days), null, 'per-day gate FIFO: day2 covered by the later live lot → allowed');
+}
+
 console.log(`\ncompOffLots.test: ${passed} passed, ${failed} failed`);
 if (failed) { fails.forEach((f) => console.log('  FAIL ', f)); process.exit(1); }
 console.log('=== ALL compOffLots PURE CHECKS PASSED ===');

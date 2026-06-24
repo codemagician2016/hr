@@ -333,8 +333,11 @@ async function createRequest(req, res, next) {
       asOf,
       isAdvance,
       // Feature 30 — comp-off lots feed the COMP_OFF_WOULD_BE_EXPIRED gate (null for
-      // every other type, so the gate is inert).
+      // every other type, so the gate is inert). The per-day breakdown drives the
+      // per-day FIFO expiry check (finding #4) so a multi-day span can't avail a lot
+      // that expires mid-span.
       compOffLots: ctx.compOffLots,
+      compOffDays: ctx.leaveType.category === 'COMP_OFF' ? netted.dayBreakdown : null,
     });
     if (!verdict.ok) {
       const first = verdict.errors[0];
@@ -993,22 +996,49 @@ async function withdrawRequest(req, res, next) {
           status: 'APPROVED', appliedAt: new Date(), decidedAt: new Date(), decidedBy,
         },
       });
+      // Feature 30 — comp-off re-credit seam (edge case 8 + findings #1/#5). For a
+      // COMP_OFF leave only, un-burn the EXACT lots THIS application debited (loaded
+      // from CompOffConsumption). Units whose source lot has since EXPIRED are
+      // `forfeited` — they're not returned to any lot (invariant 6) AND must NOT be
+      // credited back to the aggregate either (finding #1: closing must never exceed
+      // Σ active-lot remaining). We run this BEFORE the balance move so we know how
+      // much to actually credit back. No-op for every other type.
+      let forfeited = 0;
+      if (txn.leaveType && isCompOffCategory(txn.leaveType.category)) {
+        const rc = await reCreditLotsOnWithdraw(tx, { businessId, leaveTransactionId: txn.id });
+        forfeited = Number(rc.forfeited) || 0;
+      }
+      const creditBack = Math.max(0, units - forfeited);
       if (txn.leaveBalanceId) {
         // version optimistic-lock — a concurrent move bubbles P2025 → 409 retry.
         const bal = await tx.leaveBalance.findUnique({ where: { id: txn.leaveBalanceId }, select: { id: true, version: true } });
         if (bal) {
           await tx.leaveBalance.update({
             where: { id: bal.id, version: bal.version },
-            data: { taken: { decrement: units }, closing: { increment: units }, version: { increment: 1 } },
+            data: {
+              taken: { decrement: units },
+              closing: { increment: creditBack },
+              // Forfeited units lapse on the aggregate (their source lot is gone) — keeps
+              // the ledger reconciled with the compensating LAPSE row posted below.
+              ...(forfeited > 0 ? { lapsed: { increment: forfeited } } : {}),
+              version: { increment: 1 },
+            },
           });
+          // Compensating LAPSE so the append-only ledger reconstruction matches the
+          // partial credit-back (the WITHDRAWN flip restores +units; this removes the
+          // forfeited portion → net closing change = units − forfeited).
+          if (forfeited > 0) {
+            await tx.leaveTransaction.create({
+              data: {
+                businessId, employeeId: txn.employeeId, leaveTypeId: txn.leaveTypeId,
+                leaveBalanceId: txn.leaveBalanceId,
+                txnType: 'LAPSE', unit: txn.unit, quantity: -forfeited,
+                reason: `Comp-off forfeited on withdrawal of ${txn.id} (source credit expired)`,
+                status: 'APPROVED', appliedAt: new Date(), decidedAt: new Date(), decidedBy,
+              },
+            });
+          }
         }
-      }
-      // Feature 30 — comp-off re-credit seam (edge case 8). For a COMP_OFF leave only,
-      // mirror the balance credit-back into the LOTS: un-burn `units` from the lots
-      // they came from, but only ones not yet expired (an expired lot's residual must
-      // never become spendable again — invariant 6). No-op for every other type.
-      if (txn.leaveType && isCompOffCategory(txn.leaveType.category)) {
-        await reCreditLotsOnWithdraw(tx, { businessId, employeeId: txn.employeeId, units });
       }
       return tx.leaveTransaction.findUnique({ where: { id: txn.id } });
     });

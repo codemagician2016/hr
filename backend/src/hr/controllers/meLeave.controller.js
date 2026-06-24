@@ -198,8 +198,11 @@ async function applyForLeave(req, res, next) {
       asOf,
       isAdvance,
       // Feature 30 — comp-off lots feed the COMP_OFF_WOULD_BE_EXPIRED gate (null for
-      // every other type, so the gate is inert).
+      // every other type, so the gate is inert). The per-day breakdown drives the
+      // per-day FIFO expiry check (finding #4) so a multi-day span can't avail a lot
+      // that expires mid-span.
       compOffLots: ctx.compOffLots,
+      compOffDays: ctx.leaveType.category === 'COMP_OFF' ? netted.dayBreakdown : null,
     });
     if (!verdict.ok) {
       const first = verdict.errors[0];
