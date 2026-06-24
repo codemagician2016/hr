@@ -195,13 +195,20 @@ async function publish(req, res, next) {
     const pop = await resolvePopulation(businessId, req.scope, req.body || {});
     const empIds = pop.map((e) => e.id);
     if (!empIds.length) return res.json({ published: 0 });
-    const upd = await prisma.rosterDay.updateMany({
-      where: { businessId, employeeId: { in: empIds }, status: 'DRAFT', date: { gte: utcDay(from), lte: utcDay(to) } },
-      data: { status: 'PUBLISHED' },
+    // Atomic publish: the DRAFT→PUBLISHED flip and the re-derive of the published
+    // window must commit together. If any recompute throws, the whole transaction
+    // rolls back so we never leave cells PUBLISHED-but-stale (attendance/pay reading
+    // the pre-publish derivation). Mirrors the swap consumer's in-tx recompute, which
+    // passes the tx to recompute(...) (consumers.shiftSwap.onApprove).
+    const published = await prisma.$transaction(async (tx) => {
+      const upd = await tx.rosterDay.updateMany({
+        where: { businessId, employeeId: { in: empIds }, status: 'DRAFT', date: { gte: utcDay(from), lte: utcDay(to) } },
+        data: { status: 'PUBLISHED' },
+      });
+      for (const id of empIds) await recompute(businessId, id, utcDay(from), utcDay(to), tx);
+      return upd.count;
     });
-    // Re-derive the published window so the daily Attendance rollup reflects the roster.
-    for (const id of empIds) await recompute(businessId, id, utcDay(from), utcDay(to));
-    res.json({ published: upd.count });
+    res.json({ published });
   } catch (e) { next(e); }
 }
 
@@ -387,6 +394,23 @@ async function rejectSwap(req, res, next) {
   return decideSwap(req, res, next, 'REJECTED');
 }
 
+// Separation of duties (F29 swap review): the deciding manager may NEVER act on a
+// swap they are a PARTY to — neither the requester nor the counterparty. The F1
+// sub-tree scope check in decideSwap is an OR over BOTH parties, so a manager who is
+// one party still PASSES it because the OTHER party (their subordinate) is in scope;
+// and the engine's own maker≠checker SoD is deliberately bypassed by systemActor:true.
+// So we fail-closed HERE on the actor's own Employee id, exactly like leave's
+// blockSelfDecision. Blocks BOTH parties (a swap mutates both rosters). Returns true
+// when blocked (and has sent the 404 — IDOR-safe, mirror the scope 404, don't reveal).
+function blockSelfDecision(req, res, swap) {
+  const actorEmp = req.user && req.user.employeeId;
+  if (actorEmp && (actorEmp === swap.requesterEmployeeId || actorEmp === swap.counterpartyEmployeeId)) {
+    res.status(404).json({ message: 'Swap not found' });
+    return true;
+  }
+  return false;
+}
+
 async function decideSwap(req, res, next, decision) {
   try {
     const { businessId } = req.user;
@@ -396,6 +420,9 @@ async function decideSwap(req, res, next, decision) {
     if (!scopeAllows(req.scope, swap.requesterEmployeeId) && !scopeAllows(req.scope, swap.counterpartyEmployeeId)) {
       return res.status(404).json({ message: 'Swap not found' });
     }
+    // SoD: a manager who is a PARTY to the swap may never decide it (engine SoD is
+    // bypassed by systemActor:true below, so this is the authoritative self-block).
+    if (blockSelfDecision(req, res, swap)) return;
     if (swap.status !== 'PENDING') return res.status(409).json({ message: `Swap is already ${swap.status}` });
     if (decision === 'APPROVED' && swap.counterpartyConsent !== 'ACCEPTED') {
       return res.status(409).json({ message: 'Counterparty has not accepted this swap yet' });
