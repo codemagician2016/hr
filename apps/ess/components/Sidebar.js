@@ -79,6 +79,8 @@ const NAV = [
     icon: 'calendar',
     children: [
       { href: '/attendance', label: 'Attendance', icon: 'clock' },
+      // FLAG (Feature 29 — shared edit): my published shift roster + swap requests.
+      { href: '/shifts', label: 'My Shifts', icon: 'clock' },
       { href: '/leave', label: 'Leave', icon: 'leaf' },
       { href: '/comp-off', label: 'Comp-off', icon: 'calendar' },
     ],

@@ -329,7 +329,7 @@ async function recompute(businessId, employeeId, fromDate, toDate, tx) {
     ? { OR: [{ entityId: employee.entityId }, { entityId: null }] }
     : { entityId: null };
 
-  const [assignments, defaultPatterns, leaveTxns, regs, holidays, otRules, lockedRows] = await Promise.all([
+  const [assignments, defaultPatterns, leaveTxns, regs, holidays, otRules, lockedRows, rosterRows] = await Promise.all([
     db.shiftAssignment.findMany({
       where: { businessId, employeeId, effectiveFrom: { lt: winEnd } },
       include: { shiftPattern: true },
@@ -366,9 +366,21 @@ async function recompute(businessId, employeeId, fromDate, toDate, tx) {
       where: { businessId, employeeId, date: { gte: from, lte: to }, isLocked: true },
       select: { date: true },
     }),
+    // Feature 29 — the per-day roster cells for this window. ONLY PUBLISHED rows
+    // reach derive (a DRAFT plan never affects attendance/pay — invariant I4); a day
+    // with no PUBLISHED cell resolves to undefined below and falls back to the
+    // ShiftAssignment/default exactly as today (byte-identical for a no-roster tenant).
+    db.rosterDay.findMany({
+      where: { businessId, employeeId, status: 'PUBLISHED', date: { gte: from, lte: to } },
+      include: { shiftPattern: true },
+    }),
   ]);
 
   const lockedKeys = new Set(lockedRows.map((r) => dayKey(r.date)));
+  // Index the PUBLISHED roster cells by civil-day key so the per-day loop hands the
+  // matching cell (or undefined) to resolveSchedule. A WORK cell drives the day's
+  // shift; an OFF cell surfaces as weeklyOff (the existing WEEKLY_OFF path).
+  const rosterByDay = new Map((rosterRows || []).map((r) => [dayKey(r.date), r]));
   // The entity/location default = first matching active pattern (prefer entity-specific).
   const defaultPattern = defaultPatterns.sort((a, b) => {
     const rank = (p) => (p.entityId === employee.entityId ? 1 : 0);
@@ -384,7 +396,15 @@ async function recompute(businessId, employeeId, fromDate, toDate, tx) {
     const key = dayKey(day);
     if (lockedKeys.has(key)) { skippedLocked += 1; continue; }
 
-    const schedule = resolveSchedule(day, assignments, defaultPattern);
+    // Feature 29 — a PUBLISHED roster cell for THIS day wins (precedence over the
+    // covering ShiftAssignment). resolveSchedule returns the { __off:true } sentinel
+    // for an OFF cell; we collapse it to schedule=null + rosterOff=true so the day
+    // flows through the EXISTING isWeeklyOff → WEEKLY_OFF path. When no roster cell
+    // exists, rosterDay is undefined and resolveSchedule is byte-identical to v1.
+    const rosterDay = rosterByDay.get(key);
+    const resolved = resolveSchedule(day, assignments, defaultPattern, rosterDay);
+    const rosterOff = !!(resolved && resolved.__off);
+    const schedule = rosterOff ? null : resolved;
     // C1 — the shift's working INSTANT window for THIS day, in the employee tz.
     // A night shift's window runs up to the NEXT day's local startTime so its
     // post-midnight OUT pairs with THIS day and is excluded from D+1's window.
@@ -425,7 +445,9 @@ async function recompute(businessId, employeeId, fromDate, toDate, tx) {
     }
 
     const holiday = isHoliday(employee, day, holidays, null);
-    const weeklyOff = schedule ? isWeeklyOff(day, schedule.weeklyOffDays) : false;
+    // A roster OFF cell is a weekly-off for THIS day (rotating weekly-off, F29);
+    // otherwise fall back to the pattern's weekly-off CSV exactly as before.
+    const weeklyOff = rosterOff || (schedule ? isWeeklyOff(day, schedule.weeklyOffDays) : false);
     const leave = resolveLeaveForDay(key, leaveTxns);
     const presence = resolvePresenceForDay(day, regs);
 

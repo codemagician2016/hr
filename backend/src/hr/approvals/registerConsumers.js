@@ -25,6 +25,11 @@ const { registerTravelConsumer } = require('./consumers.travel');
 // finalizeCredit / void). Self-registers on load like the others; wired here too so
 // the explicit boot path stays the single source of truth.
 const { registerCompOffConsumer } = require('./consumers.compOff');
+// FLAG (Feature 29 — shared edit): the SHIFT_SWAP consumer (roster-cell trade on
+// manager approval → atomic versioned swap + re-derive both days). Self-registers on
+// load like the others; wired here too so the explicit boot path stays the single
+// source of truth.
+const { registerShiftSwapConsumer } = require('./consumers.shiftSwap');
 
 let done = false;
 
@@ -35,6 +40,7 @@ function registerConsumers() {
   registerProfileChangeConsumer();
   registerTravelConsumer();
   registerCompOffConsumer();
+  registerShiftSwapConsumer();
   done = true;
 }
 
