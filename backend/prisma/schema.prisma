@@ -484,6 +484,7 @@ model Business {
   attendancePayInputs      AttendancePayInput[]
   payslips                 Payslip[]
   statutoryRemittances     StatutoryRemittance[]
+  complianceObligations    ComplianceObligation[]
   payRunInputItems         PayRunInputItem[]
   varianceThreshold        VarianceThreshold?
   // Leave
@@ -6443,6 +6444,7 @@ model Entity {
   payRuns       PayRun[]
   bonusCycles   BonusCycle[]
   remittances   StatutoryRemittance[]
+  complianceObligations ComplianceObligation[]
   compensations CompensationRevision[]
   importJobs    ImportJob[]
 
@@ -7997,12 +7999,29 @@ model StatutoryRemittance {
   status       RemittanceStatus @default(PENDING)
   fileUrl      String?          @db.Text // ECR txt / Form 24Q / payday CSV
   meta         Json?
+  // ── Feature 23 — Statutory Compliance Calendar (ADDITIVE, all nullable so the
+  //    existing fileRun() writer's rows stay valid). The calendar OWNS the
+  //    definition (ComplianceObligation); the INSTANCE row is shared with payroll.
+  obligationId    String? // FK → ComplianceObligation (NULL for legacy/payroll-only rows)
+  obligation      ComplianceObligation? @relation(fields: [obligationId], references: [id], onDelete: SetNull)
+  stateCode       String? // mirror for PT/LWF per-state instances (NULL = entity-wide)
+  // proof of filing (mark-filed action):
+  proofUrl        String?   @db.Text // uploaded challan / receipt
+  proofUploadedAt DateTime?
+  filedByUserId   String? // who marked it filed (audit + SoD)
+  // reminder bookkeeping (idempotent nudges — never spam):
+  lastReminderAt  DateTime?
+  remindersSent   Int       @default(0)
+  reminderStage   String? // "T-7" | "T-3" | "T-1" | "DUE" | "OVERDUE" — last stage nudged
+  // waiver / not-applicable for a period:
+  waivedReason    String?
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
   version      Int              @default(0)
 
   @@index([businessId, entityId, kind, taxPeriod])
   @@index([businessId, status, dueDate])
+  @@index([businessId, obligationId])
 }
 
 enum RemittanceKind {
@@ -8014,6 +8033,15 @@ enum RemittanceKind {
   IN_FORM24Q
   IN_FORM16
   IN_BONUS
+  // Feature 23 — Statutory Compliance Calendar additions (additive only). The
+  // Income Tax Act 2025 successors are effective-dated DATA, not a code branch:
+  //   IN_FORM24Q → IN_FORM138 (TDS-salary quarterly return, txns ≥ 2026-04-01)
+  //   IN_FORM16  → IN_FORM130 (TDS-salary annual certificate, FY ≥ 2026-27)
+  IN_FORM138    // 24Q successor (Income Tax Act 2025)
+  IN_FORM130    // Form 16 successor (Income Tax Act 2025)
+  IN_ESI_RETURN // ESI half-yearly return (11 Apr / 11 Oct)
+  IN_PF_ANNUAL  // optional EPF annual tracker
+  IN_GRATUITY   // event-driven (separation + 30d); off the recurring calendar
 
   NZ_PAYE
   NZ_PAYDAY_FILING
@@ -8030,6 +8058,63 @@ enum RemittanceStatus {
   PAID
   OVERDUE
   WAIVED
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §23  STATUTORY COMPLIANCE CALENDAR — Feature 23.
+//   ComplianceObligation is the per-tenant rule SCHEDULE (the definition of WHAT
+//   this entity owes and on WHAT cadence), effective-dated so the Income Tax Act
+//   2025 succession (24Q→138, Form16→130 from 1-Apr-2026) is DATA not a branch.
+//   The per-period INSTANCE row is the EXISTING StatutoryRemittance (extended
+//   above); the generator + fileRun() both write it, idempotent on the natural
+//   key (businessId, entityId, kind, taxPeriod[, stateCode]).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The per-tenant statutory-obligation rule schedule. One row per
+/// (entity, kind, [stateCode], effectiveFrom) the tenant is liable for, seeded
+/// from StatutoryRegistration on entity/registration change and editable by HR.
+model ComplianceObligation {
+  id         String   @id @default(uuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId   String
+  entity     Entity   @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  kind      RemittanceKind // reuse the SAME enum as the instance row
+  stateCode String? // PT / LWF: per-state; NULL = entity-wide
+  cadence   ComplianceCadence // MONTHLY | QUARTERLY | HALF_YEARLY | ANNUAL | EVENT
+
+  // Due-date rule (interpreted by the pure engine — compliance/india.calendar.js):
+  dueDom       Int? // day-of-month the filing is due
+  dueMonths    Int[]    @default([]) // HALF_YEARLY/ANNUAL: calendar months it lands in ([4,10] ESI return; [6] Form16)
+  offsetMonths Int      @default(1) // months after period end the due date lands (TDS=1, 24Q≈1)
+  specialRules Json? // e.g. {"marchDueDom":30,"marchDueMonth":4} for TDS; {"ptPeriodicity":"MONTHLY"}
+
+  // Effective-dating (24Q→138, 16→130 succession). Same shape as StatutoryRegistration.
+  effectiveFrom DateTime  @db.Date
+  effectiveTo   DateTime? @db.Date // when superseded (e.g. 24Q effectiveTo 2026-03-31)
+  supersededBy  String? // optional successor-kind label for the UX ("becomes Form 138")
+
+  isActive      Boolean @default(true)
+  autoGenerate  Boolean @default(true) // generator materialises future instances for this
+  reminderDays  Int[]   @default([7, 3, 1, 0]) // T-minus days to nudge HR (0 = due day)
+  meta          Json? // penaltyHint, label, govtPortalUrl, form name
+
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+  version     Int                    @default(0)
+  remittances StatutoryRemittance[]
+
+  @@unique([businessId, entityId, kind, stateCode, effectiveFrom])
+  @@index([businessId, entityId, isActive])
+}
+
+enum ComplianceCadence {
+  MONTHLY
+  QUARTERLY
+  HALF_YEARLY
+  ANNUAL
+  EVENT
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

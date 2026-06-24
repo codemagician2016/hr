@@ -32,6 +32,9 @@ const HR_EVENT_TEMPLATES = Object.freeze({
   'leave.approved':    'HR_LEAVE_APPROVED',
   'payrun.computed':   'HR_PAYRUN_COMPUTED',
   'filing.due':        'HR_FILING_DUE',
+  // Feature 23 — Statutory Compliance Calendar reminder cron (beside filing.due).
+  'compliance.reminder': 'HR_COMPLIANCE_REMINDER', // T-7/T-3/T-1/due nudges
+  'compliance.overdue':  'HR_COMPLIANCE_OVERDUE',  // past-due escalation
   'offer.sent':        'HR_OFFER_SENT',
   // Cycle 0 — approval/SLA fan-out events.
   'approval.pending':  'HR_APPROVAL_PENDING',
@@ -90,6 +93,25 @@ const HR_TEMPLATES = Object.freeze([
     vertical: 'HR',
     body: '{BIZ}: {FILING} filing for {PERIOD} is due on {DUE}. Generate + file: {LINK}',
     variables: ['BIZ', 'FILING', 'PERIOD', 'DUE', 'LINK'],
+    channels: { sms: true, whatsapp: true, email: true },
+  },
+  // ─── Feature 23 — Statutory Compliance Calendar reminder cron ───
+  {
+    key: 'HR_COMPLIANCE_REMINDER',
+    displayName: 'Statutory compliance reminder (T-minus)',
+    category: 'SERVICE',
+    vertical: 'HR',
+    body: '{BIZ}: {FORM} for {PERIOD} is due on {DUE} ({DAYS} day(s) left). Mark filed: {LINK}',
+    variables: ['BIZ', 'FORM', 'PERIOD', 'DUE', 'DAYS', 'LINK'],
+    channels: { sms: true, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_COMPLIANCE_OVERDUE',
+    displayName: 'Statutory compliance OVERDUE',
+    category: 'SERVICE',
+    vertical: 'HR',
+    body: '{BIZ}: {FORM} for {PERIOD} is OVERDUE (was due {DUE}). Interest/penalty accrues. File now: {LINK}',
+    variables: ['BIZ', 'FORM', 'PERIOD', 'DUE', 'LINK'],
     channels: { sms: true, whatsapp: true, email: true },
   },
   {

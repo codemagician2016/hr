@@ -102,6 +102,11 @@ router.use('/me/payslips', require('../payroll/mePayslips.routes'));
 // Feature 22 — Statutory Bonus (operator) + ESS self-view. India-gated in service.
 router.use('/bonus', require('../payroll/bonus.routes'));
 router.use('/me/bonus', require('../payroll/meBonus.routes'));
+// FLAG (Feature 23 — NEW mount): Statutory Compliance Calendar + reminder cron.
+// Read = canViewPayrollReports; mark-filed/proof/waive/obligations/seed/sweep =
+// canManageStatutory. Reuses the StatutoryRemittance instance row (extended) +
+// StatutoryRegistration applicability + notifyHrEvent + scheduler.js cron.
+router.use('/compliance', require('../payroll/compliance/compliance.routes'));
 // ESS profile/country surface — the authoritative country source for the ESS app
 // (tax declaration, payslip currency, separation labels gate by it; fail-closed).
 router.use('/me/profile', require('../lifecycle/routes/meProfile.routes'));
