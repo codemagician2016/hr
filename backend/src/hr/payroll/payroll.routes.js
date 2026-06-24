@@ -14,7 +14,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { protect, requirePermission } = require('../../core/middleware/auth.middleware');
+const { protect, requirePermission, requireAnyPermission } = require('../../core/middleware/auth.middleware');
 const { payrollMutationLimiter } = require('../../core/middleware/abuse.middleware');
 const { attachSelfEmployee, withEmployeeScope } = require('../middleware/scope.middleware');
 const c = require('./payroll.controller');
@@ -56,7 +56,17 @@ router.get('/runs/:id/files/:kind', requirePermission('canViewPayrollReports'), 
 //   submit → maker; send-back / approve / publish / pay → checker (canApprovePayroll);
 //   file / close → finance (canViewPayrollReports). Maker-checker SoD is enforced
 //   in the service (approver ≠ preparer/submitter), not by RBAC alone.
-router.get('/entities', requirePermission('canRunPayroll'), c.listRunEntities);
+// FLAG (shared edit — entity picker reachable by several payroll personas):
+// the entity list is a read-only lookup used by the run pickers AND by the
+// reports-/statutory-only pages (registers, compliance calendar, comp/structures).
+// Gate on ANY of run-payroll / view-reports / manage-statutory so a legitimate
+// reports- or compliance-only role can populate the dropdown instead of dead-ending
+// on a silent 403. The data returned is non-sensitive (entity code/name/state).
+router.get(
+  '/entities',
+  requireAnyPermission(['canRunPayroll', 'canViewPayrollReports', 'canManageStatutory']),
+  c.listRunEntities,
+);
 // Feature 21 — LWF statutory framework read (per-state EE/ER/frequency/exclusion),
 // India-only. Any payroll.read role (HR_ADMIN/PAYROLL_MANAGER/FINANCE_VIEWER).
 router.get('/statutory/lwf', requirePermission('canViewPayrollReports'), c.getLwfFramework);

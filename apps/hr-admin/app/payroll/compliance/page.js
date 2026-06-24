@@ -77,7 +77,7 @@ function CalendarView() {
   const [waiveTarget, setWaiveTarget] = useState(null);
 
   useEffect(() => {
-    get('/api/hr/payroll/entities').then((r) => setEntities(Array.isArray(r) ? r : (r.items || []))).catch(() => {});
+    get('/api/hr/payroll/entities').then((r) => setEntities(Array.isArray(r) ? r : (r.items || []))).catch((e) => setError(e.data?.message || e.message || 'Could not load entities — you may be missing a payroll permission.'));
   }, []);
 
   const load = useCallback(() => {
@@ -379,7 +379,7 @@ function ScheduleSettings() {
       const list = Array.isArray(r) ? r : (r.items || []);
       setEntities(list);
       if (list[0]) setEntityId(list[0].id);
-    }).catch(() => {});
+    }).catch((e) => setError(e.data?.message || e.message || 'Could not load entities — you may be missing a payroll permission.'));
   }, []);
 
   const load = useCallback(() => {

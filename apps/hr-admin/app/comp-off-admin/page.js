@@ -36,7 +36,7 @@ export default function CompOffAdminPage() {
   const loadQueue = useCallback(() => {
     setQueueLoading(true);
     get('/api/hr/comp-off/queue')
-      .then((res) => setQueue(asList(res) || (res && res.credits) || []))
+      .then((res) => setQueue((res && res.credits) || asList(res) || []))
       .catch((e) => setError(e.message))
       .finally(() => setQueueLoading(false));
   }, []);

@@ -331,6 +331,23 @@ function requirePermission(key) {
   };
 }
 
+// OR-semantics gate: allow the request if the caller holds ANY of `keys`.
+// Used for shared read endpoints reachable by several personas (e.g. the payroll
+// entity picker, needed by run-payroll AND reports/statutory-only roles).
+function requireAnyPermission(keys) {
+  const list = Array.isArray(keys) ? keys : [keys];
+  return function (req, res, next) {
+    if (!req.user) return res.status(401).json({ message: 'Not authenticated' });
+    if (req.user.role === ROLES.SUPER_ADMIN) return next();
+    const perms = effectivePermissions(req.user);
+    if (perms && list.some((k) => perms[k])) return next();
+    return res.status(403).json({
+      message: `Forbidden: missing permission (one of "${list.join('", "')}")`,
+      missingPermission: list,
+    });
+  };
+}
+
 // ECOMMERCE Path B (2026-05-01) — relational permission middleware.
 //
 // Reads from the EcomRolePermissionGrant table (24-permission catalog,
@@ -480,6 +497,7 @@ module.exports = {
   requireStaff,
   requireCustomer,
   requirePermission,
+  requireAnyPermission,
   requireEcomPermission,
   requireAppointmentAdmin,
   requireEcomManager,
