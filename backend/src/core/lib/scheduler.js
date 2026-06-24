@@ -1137,6 +1137,24 @@ function initScheduler() {
     }
   });
 
+  // HR Investment-Proof Workflow (Feature 20) — daily 09:00 window lifecycle +
+  // reminders. Idempotent + tenant-safe. Moves DRAFT→OPEN→CLOSED→LOCKED on the
+  // configured dates and fans out notifications (open nudge, T-14/T-3 reminders,
+  // deadline "unverified excluded" warning). The TDS DECLARED→VERIFIED switch itself
+  // is DATE-DRIVEN in the assembler (asOf >= proofDeadline), so a missed tick never
+  // affects correctness — this cron only drives status + notifications.
+  cron.schedule('0 9 * * *', async () => {
+    try {
+      const { runProofWindowSweep } = require('../../hr/tax/investmentProof/proofWindowRunner');
+      const r = await runProofWindowSweep({ asOf: new Date() });
+      if (r.opened + r.closed + r.locked + r.remindersSent + r.errors > 0) {
+        console.log(`[Scheduler] investment-proof window sweep: ${JSON.stringify(r)}`);
+      }
+    } catch (err) {
+      console.error('[Scheduler] investment-proof window sweep failed:', err.message);
+    }
+  });
+
   // HR Approvals (Feature 10 §5.5) — SLA escalation sweep. The engine's whole
   // SLA / auto-decision feature (REMIND / ESCALATE / AUTO_APPROVE / AUTO_REJECT)
   // is dead in prod until this is scheduled. Every 10 min: scan PENDING requests

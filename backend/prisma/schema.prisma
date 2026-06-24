@@ -589,6 +589,9 @@ model Business {
   // Engagement (Cycle 1) — company announcements / news feed + read receipts.
   announcements            Announcement[]
   announcementReads        AnnouncementRead[]
+  // Investment-proof workflow (Feature 20) — year-end §192(2D)/Rule 26C/Form 12BB.
+  investmentDeclarationWindows InvestmentDeclarationWindow[]
+  investmentProofs             InvestmentProof[]
 }
 
 // BusinessPage — multi-page CMS. Each row is a single sub-page under one
@@ -6725,6 +6728,8 @@ model Employee {
   // Portal-invitation flow — the welcome/set-password tokens minted for this
   // employee's ESS (Customer) login. Single-use, expiring, hashed-at-rest.
   portalInvites          EmployeeInvite[]
+  // Investment-proof workflow (Feature 20) — the employee's uploaded year-end proofs.
+  investmentProofs       InvestmentProof[]
 
   @@unique([businessId, code])
   // FLAG (Feature 17 — review HIGH fix): a PARTIAL unique index backs the
@@ -7459,6 +7464,107 @@ model StatutoryProfile {
   @@index([businessId, countryCode])
   @@index([businessId, uan])
   @@index([businessId, irdNumber])
+}
+
+// ── Feature 20 — Investment-Proof Submission + HR Verification ───────────────
+// Year-end half of the F15 declaration loop (§192(2D)/Rule 26C/Form 12BB). The
+// declared figures stay on StatutoryProfile; these two models carry the EVIDENCE
+// (uploaded proofs) + the VERIFIED truth + the per-FY window that locks the TDS
+// switch. Additive — nothing on StatutoryProfile changes.
+
+// The per-FY declaration window for a tenant. Admin (HR/Finance) sets open/close
+// + proof deadline; the proofDeadline is the date the TDS engine flips to
+// verified-only. Resolved as-of the FY in the assembler (asOf >= proofDeadline).
+model InvestmentDeclarationWindow {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  financialYear String   @db.VarChar(7) // "2026-27" (StatutoryProfile.prevEmployerFY format)
+  countryCode   String   @default("IN") @db.Char(2)
+  opensAt       DateTime @db.Date // declaration editable / uploads accepted from
+  closesAt      DateTime @db.Date // declaration locks (no more edits/uploads after)
+  proofDeadline DateTime @db.Date // TDS flips to VERIFIED-only on/after this date (Jan–Feb)
+  status        DeclarationWindowStatus @default(DRAFT) // DRAFT|OPEN|CLOSED|LOCKED
+  notes         String?  @db.Text
+  createdBy     String?
+  updatedBy     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  version       Int      @default(0)
+  proofs        InvestmentProof[]
+
+  @@unique([businessId, financialYear, countryCode]) // one window per FY per country
+  @@index([businessId, status])
+  @@index([businessId, proofDeadline])
+}
+
+// One uploaded proof for one claim line, with its verify verdict + verified amount.
+// The "declared amount" stays on StatutoryProfile; this row is the EVIDENCE + the
+// VERIFIED truth. A claim can have many proofs (12 rent receipts; 3 LIC + 1 PPF for
+// the 80C bucket); each carries its own file, verdict and verified amount.
+model InvestmentProof {
+  id            String   @id @default(uuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId    String
+  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  windowId      String
+  window        InvestmentDeclarationWindow @relation(fields: [windowId], references: [id], onDelete: Cascade)
+  financialYear String   @db.VarChar(7)
+
+  claimType      ProofClaimType // SEC_80C | SEC_80D | SEC_80CCD1B | SEC_80TTA | SEC_24B_HOME_LOAN | HRA_RENT | OTHER_VIA
+  subSection     String?  @db.VarChar(16) // e.g. "LIC","PPF","ELSS" — for the 80C bucket breakdown
+  declaredAmount Decimal  @db.Decimal(15, 2) // what this proof CLAIMS to support (annual ₹)
+  verifiedAmount Decimal? @db.Decimal(15, 2) // what HR ACCEPTS (≤ declared; capped by HR). NULL until verified.
+
+  // The evidence file — same storage contract as EmployeeDocument (S3/R2 key + SHA-256).
+  fileUrl      String  @db.Text
+  fileHash     String? // SHA-256 of decoded bytes (server-computed, integrity anchor)
+  mimeType     String?
+  sizeBytes    Int?
+  originalName String?
+
+  // HRA-only evidence (Rule 26C: landlord PAN required when annual rent > ₹1,00,000).
+  landlordName      String?
+  landlordPan       String? @db.Char(10)
+  rentMonthsCovered Int?
+
+  status       ProofStatus @default(PENDING) // PENDING | ACCEPTED | REJECTED
+  rejectReason String?  @db.Text // mandatory when REJECTED ("blurred","amount mismatch","wrong FY")
+  verifiedById String? // operator User id (SoD: ≠ a self-verify)
+  verifiedAt   DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // soft-delete (re-upload supersedes)
+  version   Int       @default(0)
+
+  @@index([businessId, employeeId, financialYear])
+  @@index([businessId, windowId, status])
+  @@index([businessId, employeeId, claimType])
+}
+
+enum DeclarationWindowStatus {
+  DRAFT
+  OPEN
+  CLOSED
+  LOCKED
+}
+
+enum ProofStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+enum ProofClaimType {
+  SEC_80C
+  SEC_80D
+  SEC_80CCD1B
+  SEC_80TTA
+  SEC_24B_HOME_LOAN
+  HRA_RENT
+  OTHER_VIA
 }
 
 enum INTaxRegime {

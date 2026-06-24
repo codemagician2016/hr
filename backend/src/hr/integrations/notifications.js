@@ -51,6 +51,12 @@ const HR_EVENT_TEMPLATES = Object.freeze({
   'bonus.published': 'HR_BONUS_PUBLISHED',  // → employee when their bonus slip is published
   // Feature 4 — Employee portal invitation (welcome + set-password link).
   'portal.invite':   'HR_PORTAL_INVITE',    // → new hire to claim their ESS login
+  // Feature 20 — Investment-proof workflow fan-out (window lifecycle + verdicts + reminders).
+  'proof.window-open': 'HR_PROOF_WINDOW_OPEN',   // → OLD-regime employees when the window opens
+  'proof.reminder':    'HR_PROOF_REMINDER',      // → employees with PENDING/missing proofs (T-14/T-3)
+  'proof.deadline':    'HR_PROOF_DEADLINE',      // → employees with verified<declared at the deadline
+  'proof.accepted':    'HR_PROOF_ACCEPTED',      // → employee when HR accepts a proof
+  'proof.rejected':    'HR_PROOF_REJECTED',      // → employee when HR rejects a proof
 });
 
 // HR template registry. vertical: 'HR' so listTemplates({vertical:'HR'}) scopes
@@ -224,6 +230,52 @@ const HR_TEMPLATES = Object.freeze([
     vertical: 'HR',
     body: 'Welcome to {BIZ}, {NAME}! Set your password to access your employee portal: {LINK} — Your login is {EMAIL}. This link expires on {EXPIRY}.',
     variables: ['NAME', 'BIZ', 'EMAIL', 'LINK', 'EXPIRY'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  // ─── Feature 20 — Investment-proof workflow ───
+  {
+    key: 'HR_PROOF_WINDOW_OPEN',
+    displayName: 'Investment-proof window open',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {NAME}, the investment-proof window for FY {FY} is now open at {BIZ}. Upload your 80C/HRA/home-loan proofs by {DEADLINE}: {LINK}',
+    variables: ['NAME', 'FY', 'BIZ', 'DEADLINE', 'LINK'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_PROOF_REMINDER',
+    displayName: 'Investment-proof reminder',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Reminder {NAME}: submit your investment proofs for FY {FY} by {DEADLINE}. Unverified investments will be excluded from your TDS. {LINK} — {BIZ}',
+    variables: ['NAME', 'FY', 'DEADLINE', 'LINK', 'BIZ'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_PROOF_DEADLINE',
+    displayName: 'Investment-proof deadline passed',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {NAME}, the proof deadline for FY {FY} has passed. Only HR-verified investments now reduce your TDS — {AMOUNT} of declared investments remains unverified and is excluded. Your March salary may have higher tax. {BIZ}',
+    variables: ['NAME', 'FY', 'AMOUNT', 'BIZ'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_PROOF_ACCEPTED',
+    displayName: 'Investment proof accepted',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {NAME}, your {CLAIM} proof for FY {FY} was verified by HR for {AMOUNT}. {BIZ}',
+    variables: ['NAME', 'CLAIM', 'FY', 'AMOUNT', 'BIZ'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_PROOF_REJECTED',
+    displayName: 'Investment proof rejected',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {NAME}, your {CLAIM} proof for FY {FY} was not accepted: {REASON}. Please re-upload before the deadline so it counts toward your TDS. {LINK} — {BIZ}',
+    variables: ['NAME', 'CLAIM', 'FY', 'REASON', 'LINK', 'BIZ'],
     channels: { sms: false, whatsapp: true, email: true },
   },
 ]);

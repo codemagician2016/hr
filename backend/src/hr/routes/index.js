@@ -42,6 +42,12 @@ router.use('/ctc-policies', require('./ctcPolicy.routes'));
 // (buildHireRevisionLines) so a direct hire matches an ATS hire to the paise.
 router.use('/onboard', require('./onboard.routes'));
 router.use('/documents', require('./documents.routes'));
+// FLAG (Feature 20 — NEW mount): Investment-proof workflow (India year-end §192(2D)/
+// Rule 26C/Form 12BB). Operator surfaces: the per-FY declaration WINDOW admin
+// (canManageStatutory) + the HR proof-VERIFICATION console (canManageEmployees, F1-
+// scoped, SoD on verify). The ESS upload + Form 12BB live under /me/proofs (below).
+router.use('/tax-windows', require('./taxWindow.routes'));
+router.use('/proofs', require('./proofs.routes'));
 router.use('/assets', require('./assets.routes'));
 router.use('/expenses', require('./expenses.routes'));
 router.use('/loans', require('./loans.routes'));
@@ -134,6 +140,10 @@ router.use('/me/tax-declaration', require('./meTax.routes'));
 // statement + monthly TDS projection + PDF). Customer session, SELF_ONLY (subject
 // resolved from the session). India-only — the assembler 422s for non-IN tenants.
 router.use('/me/tax-projection', require('./meTaxProjection.routes'));
+// FLAG (Feature 20 — new mount): ESS investment-PROOF upload + Form 12BB. Customer
+// session, SELF_ONLY (subject resolved from the session). Window-OPEN-gated uploads,
+// withdraw-own-PENDING, per-claim declared/verified/pending rollup, Form 12BB PDF.
+router.use('/me/proofs', require('./meProofs.routes'));
 router.use('/me/tasks', require('./meTasks.routes'));
 // FLAG (Feature 11 — shared edit): ESS reimbursement/claims + travel. Customer session,
 // SELF_ONLY (subject resolved from the session). Apply for reimbursement / outdoor duty,

@@ -918,6 +918,58 @@ const {
   check('F7 OLD total tax -> ₹20,280', R(20280), out.totalAnnualTaxMinor);
 }
 
+// --- F20: Feature 20 — the DECLARED→VERIFIED TDS switch drives the engine.
+//   The pure aggregator (amountForSection) computes the section amount; the SAME
+//   engine consumes it. We prove: declared 80C ₹1.5L (fully relieved) vs verified
+//   ₹90k (only ₹90k relieved) → taxable rises by exactly ₹60,000 → tax rises by the
+//   exact 20%+cess slab delta (₹12,480), and the run TDS == projection to the paise.
+//   Worked by hand: gross 18L, OLD regime, std 50k, 80C the only deduction.
+//     declared:  taxable = 18L − 50k − 1.5L = 16,00,000
+//     verified:  taxable = 18L − 50k − 0.9L = 16,60,000  (Δ +60,000)
+//   Both sit in the 20% slab (₹5L–₹10L 20% then ₹10L+ 30% under OLD) — the ₹60,000
+//   delta is fully in the 30% band, so Δtax = 60,000×30%×1.04(cess) = ₹18,720.
+{
+  const { amountForSection } = require('../../tax/investmentProof/proofAggregator');
+  const earnings = { basicDaMinor: R(1200000), hraReceivedMinor: 0, otherAllowancesMinor: R(600000), residualChoicePayMinor: 0 };
+  const declaredMinor = R(150000);
+  const acceptedProofs = [{ claimType: 'SEC_80C', status: 'ACCEPTED', verifiedAmount: 90000, deletedAt: null }];
+
+  // Pre-deadline (useVerified=false) → used == declared 1.5L.
+  const pre = amountForSection({ declaredMinor, proofs: acceptedProofs, claimType: 'SEC_80C', useVerified: false });
+  check('F20 pre-deadline 80C used = declared 1.5L', R(150000), pre.usedMinor);
+  check('F20 pre-deadline basis DECLARED', 'DECLARED', pre.basis);
+
+  // Post-deadline (useVerified=true) → used == min(1.5L, Σ90k) = 90k.
+  const post = amountForSection({ declaredMinor, proofs: acceptedProofs, claimType: 'SEC_80C', useVerified: true });
+  check('F20 post-deadline 80C used = verified 90k', R(90000), post.usedMinor);
+  check('F20 post-deadline basis VERIFIED', 'VERIFIED', post.basis);
+
+  const declaredOut = projectAnnualIncomeTax({ regime: 'OLD', annualEarnings: earnings, chapterVIAInput: { sec80cGrossMinor: pre.usedMinor }, hasPan: true });
+  const verifiedOut = projectAnnualIncomeTax({ regime: 'OLD', annualEarnings: earnings, chapterVIAInput: { sec80cGrossMinor: post.usedMinor }, hasPan: true });
+
+  check('F20 declared taxable -> ₹16,00,000', R(1600000), declaredOut.taxableIncomeMinor);
+  check('F20 verified taxable -> ₹16,60,000 (+60k)', R(1660000), verifiedOut.taxableIncomeMinor);
+  check('F20 taxable rises by exactly ₹60,000', R(60000), verifiedOut.taxableIncomeMinor - declaredOut.taxableIncomeMinor);
+  // ₹60,000 of extra taxable in the 30% slab → 18,000 tax + 4% cess = ₹18,720 more.
+  check('F20 tax rises by the exact slab delta (₹18,720)', R(18720), verifiedOut.totalAnnualTaxMinor - declaredOut.totalAnnualTaxMinor);
+
+  // PARITY: the run TDS (computeTds with the verified taxable override) == the
+  // projection's monthly recoverable, to the paise — the §201 control biting cleanly.
+  const tds = computeTds({
+    periodGrossMinor: R(150000),
+    ytd: { taxableGrossMinor: 0, tdsDeductedMinor: 0, monthsElapsed: 0 },
+    period: { end: '2026-04-30', year: 2026, month: 4 },
+    employee: { hasPan: true, taxRegime: 'OLD' },
+    annualProjectionOverrideMinor: R(1800000),
+    annualTaxableOverrideMinor: verifiedOut.taxableIncomeMinor,
+  });
+  const sched = monthlyTaxRecoverable({
+    totalAnnualTaxMinor: verifiedOut.totalAnnualTaxMinor,
+    tdsDeductedThisFYMinor: 0, prevEmployerTdsMinor: 0, monthsRemaining: 12, startMonth: '2026-04',
+  });
+  check('F20 PARITY: run TDS === projection monthly (post-deadline verified)', tds.monthlyTdsMinor, sched.monthlyRecoverableMinor);
+}
+
 // --- F8: projectAnnualIncomeTax NEW-regime parity with the doc T1 (gross 18L).
 //   std ded 75k -> taxable 17.25L -> annual tax ₹1,50,800 (docs/05 §2.6).
 {
