@@ -10,8 +10,12 @@
  */
 
 const crypto = require('crypto');
+const prisma = require('../../core/lib/prisma');
 const service = require('./service');
 const { renderPayslipPdf } = require('./payslipPdf');
+// Feature 15 — operator read-only mirror of the ESS India tax projection.
+const taxProjectionAssembler = require('../tax/projectionAssembler');
+const { renderTaxProjectionPdf } = require('../tax/taxProjectionPdf');
 
 /** Translate a thrown error into an HTTP response (PayRunError carries a code). */
 function handleError(res, err) {
@@ -47,6 +51,9 @@ const CODE_STATUS = {
   IMMUTABLE_RUN_VIOLATION: 409,
   UNKNOWN_FILE_KIND: 400,
   COUNTRY_MISMATCH: 400,
+  COUNTRY_UNSUPPORTED: 422, // Feature 15 — tax projection is India-only
+  HR_NOT_SET_UP: 422,
+  HR_COUNTRY_AMBIGUOUS: 422,
   MISSING_BANK_DETAILS: 422,
   BANK_FIELD_TOO_LONG: 422,
 };
@@ -261,6 +268,44 @@ async function getPayslipPdf(req, res) {
   } catch (err) { handleError(res, err); }
 }
 
+/**
+ * getEmployeeTaxProjection — Feature 15 operator read-only mirror of the ESS
+ * India income-tax projection (for payroll-desk queries: "why is my TDS this
+ * much?"). Behind canViewPayrollReports + F1 scope: the route's withEmployeeScope
+ * 404s an out-of-scope employeeId BEFORE this runs, so the handler only computes
+ * for in-scope, tenant-scoped employees. Read-only — never writes.
+ */
+async function getEmployeeTaxProjection(req, res) {
+  try {
+    const { businessId } = req.user;
+    const asOf = typeof req.query.asOf === 'string' ? req.query.asOf : undefined;
+    const statement = await taxProjectionAssembler.buildTaxProjection({
+      businessId, employeeId: req.params.employeeId, asOf,
+    });
+    res.json(statement);
+  } catch (err) { handleError(res, err); }
+}
+
+/** getEmployeeTaxProjectionPdf — same statement as a branded PDF (operator view). */
+async function getEmployeeTaxProjectionPdf(req, res) {
+  try {
+    const { businessId } = req.user;
+    const statement = await taxProjectionAssembler.buildTaxProjection({
+      businessId, employeeId: req.params.employeeId,
+    });
+    const business = await prisma.business.findUnique({
+      where: { id: businessId },
+      select: { id: true, name: true },
+    });
+    const pdf = await renderTaxProjectionPdf({ statement, business });
+    const fileName = `tax-projection-${statement.employeeCode || 'employee'}-${statement.taxYear}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+    res.setHeader('Content-Length', pdf.length);
+    res.status(200).send(pdf);
+  } catch (err) { handleError(res, err); }
+}
+
 async function getFile(req, res) {
   try {
     const { businessId } = req.user;
@@ -336,6 +381,9 @@ module.exports = {
   getRunPayslips,
   getPayslip,
   getPayslipPdf,
+  // Feature 15 — operator read-only tax-projection mirror (F1-scoped).
+  getEmployeeTaxProjection,
+  getEmployeeTaxProjectionPdf,
   getFile,
   getMyPayslips,
   getMyPayslip,

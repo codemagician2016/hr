@@ -16,6 +16,7 @@ const express = require('express');
 const router = express.Router();
 const { protect, requirePermission } = require('../../core/middleware/auth.middleware');
 const { payrollMutationLimiter } = require('../../core/middleware/abuse.middleware');
+const { attachSelfEmployee, withEmployeeScope } = require('../middleware/scope.middleware');
 const c = require('./payroll.controller');
 
 // Every payroll route requires an authenticated operator. `protect` runs first
@@ -58,5 +59,24 @@ router.get('/payslips/:id', requirePermission('canViewPayrollReports'), c.getPay
 // Operator payslip PDF — the "View" target. Renders the SAME branded PDF as ESS
 // from the frozen snapshot (finding #23), tenant-scoped behind reports RBAC.
 router.get('/payslips/:id/pdf', requirePermission('canViewPayrollReports'), c.getPayslipPdf);
+
+// ── Feature 15 — operator read-only tax-projection mirror (payroll desk) ──
+// Behind canViewPayrollReports + F1 scope: withEmployeeScope 404s an employeeId
+// outside the caller's accessible set BEFORE the handler computes (no IDOR, no
+// "forbidden" leak). India-only (the assembler 422s for non-IN). Read-only.
+router.get(
+  '/employees/:employeeId/tax-projection',
+  requirePermission('canViewPayrollReports'),
+  attachSelfEmployee,
+  withEmployeeScope('canViewPayrollReports', { idParam: 'employeeId' }),
+  c.getEmployeeTaxProjection,
+);
+router.get(
+  '/employees/:employeeId/tax-projection/pdf',
+  requirePermission('canViewPayrollReports'),
+  attachSelfEmployee,
+  withEmployeeScope('canViewPayrollReports', { idParam: 'employeeId' }),
+  c.getEmployeeTaxProjectionPdf,
+);
 
 module.exports = router;
