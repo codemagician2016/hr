@@ -27,6 +27,9 @@ router.use('/employees', require('./employee.routes'));
 router.use('/company-profile', require('./companyProfile.routes'));
 router.use('/org', require('./org.routes'));
 router.use('/leave', require('./leave.routes'));
+// FLAG (Feature 30 — NEW mount): operator comp-off admin (earn grant/queue/ledger/
+// approve/void + ops run triggers). AVAIL stays on /leave (the engine-routed path).
+router.use('/comp-off', require('./compOff.routes'));
 router.use('/attendance', require('./attendance.routes'));
 router.use('/compensation', require('./compensation.routes'));
 // FLAG (Feature 17 — NEW mount): the friendly CTC-policy builder (reusable,
@@ -143,6 +146,9 @@ router.use('/me/compensation', require('./meCompensation.routes'));
 // employee server-side, fixing the ESS pages that 401'd against the operator API.
 router.use('/me/attendance', require('./meAttendance.routes'));
 router.use('/me/leave', require('./meLeave.routes'));
+// FLAG (Feature 30 — NEW mount): ESS comp-off (my lots + balance). Customer session,
+// SELF_ONLY. AVAIL reuses the existing Apply-Leave form (COMP_OFF leave type).
+router.use('/me/comp-off', require('./meCompOff.routes'));
 // FLAG (Cycle 1 — NEW mount): ESS HR Helpdesk. Customer session, SELF_ONLY (subject
 // resolved from the session). Raise a ticket / list "My tickets" / view thread / reply
 // / reopen / rate. Internal HR notes are never returned on this surface.

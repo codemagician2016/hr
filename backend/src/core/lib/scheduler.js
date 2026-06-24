@@ -1206,6 +1206,50 @@ function initScheduler() {
     }
   });
 
+  // HR Comp-off (Feature 30) — nightly EARN runner. Runs at 01:45, AFTER the
+  // attendance sweep (01:30) has materialised the HOLIDAY_WORKED rows that are the
+  // canonical earn signal. Scans those rows per tenant and mints a CompOffCredit per
+  // worked rest-day (idempotent on the @@unique guard; tenant-safe; per-row failures
+  // skipped). When requireApproval, opens a COMP_OFF approval request; else finalizes
+  // the credit immediately. Guarded against overlap with an in-process flag.
+  let compOffEarnRunning = false;
+  cron.schedule('45 1 * * *', async () => {
+    if (compOffEarnRunning) { console.log('[Scheduler] comp-off earn still running — skipping tick'); return; }
+    compOffEarnRunning = true;
+    try {
+      const { runCompOffEarn } = require('../../hr/leave/compoff/compOffEarnRunner');
+      const r = await runCompOffEarn({ asOf: new Date() });
+      if (r.minted > 0 || r.errors > 0) {
+        console.log(`[Scheduler] comp-off earn: ${JSON.stringify(r)}`);
+      }
+    } catch (err) {
+      console.error('[Scheduler] comp-off earn failed:', err.message);
+    } finally {
+      compOffEarnRunning = false;
+    }
+  });
+
+  // HR Comp-off (Feature 30) — nightly EXPIRY/LAPSE runner. Runs at 03:00. Lapses
+  // ACTIVE comp-off lots whose per-credit expiresOn has passed (append-only LAPSE +
+  // aggregate-balance drop, version-locked, idempotent), expires PENDING-past-expiry
+  // credits, and fans out "expiring soon" reminders. Tenant-safe; in-process guard.
+  let compOffExpiryRunning = false;
+  cron.schedule('0 3 * * *', async () => {
+    if (compOffExpiryRunning) { console.log('[Scheduler] comp-off expiry still running — skipping tick'); return; }
+    compOffExpiryRunning = true;
+    try {
+      const { runCompOffExpiry } = require('../../hr/leave/compoff/compOffExpiryRunner');
+      const r = await runCompOffExpiry({ asOf: new Date() });
+      if (r.lapsed > 0 || r.remindersSent > 0 || r.errors > 0) {
+        console.log(`[Scheduler] comp-off expiry: ${JSON.stringify(r)}`);
+      }
+    } catch (err) {
+      console.error('[Scheduler] comp-off expiry failed:', err.message);
+    } finally {
+      compOffExpiryRunning = false;
+    }
+  });
+
   // HR Statutory Compliance (Feature 23) — daily 07:00 UTC (≈12:30 IST). One block,
   // three steps: (1) generate upcoming obligation stubs from each tenant's active
   // ComplianceObligation × StatutoryRegistration, (2) advance PENDING→DUE / →OVERDUE,

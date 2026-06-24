@@ -19,6 +19,8 @@ const ledger = require('../leave/ledger');
 const { buildHistory, groupReconciliation } = require('../leave/history');
 const { loadApplyContext } = require('../leave/leaveContext');
 const { runCarryForward } = require('../leave/accrualRunner');
+// Feature 30 — comp-off withdraw re-credit seam (category-gated; inert for all other types).
+const { isCompOffCategory, reCreditLotsOnWithdraw } = require('../leave/compoff/compOffSeam');
 // Feature 10 slice 10c — leave now routes its terminal decisions through the
 // approval-workflow engine. createRequest opens an engine request after the
 // soft-hold; approve/reject/cancel drive engine.recordDecision/engine.cancel, which
@@ -326,6 +328,9 @@ async function createRequest(req, res, next) {
       overlapping: ctx.overlapping,
       asOf,
       isAdvance,
+      // Feature 30 — comp-off lots feed the COMP_OFF_WOULD_BE_EXPIRED gate (null for
+      // every other type, so the gate is inert).
+      compOffLots: ctx.compOffLots,
     });
     if (!verdict.ok) {
       const first = verdict.errors[0];
@@ -931,6 +936,7 @@ async function withdrawRequest(req, res, next) {
     const { businessId } = req.user;
     const txn = await prisma.leaveTransaction.findFirst({
       where: { id: req.params.id, businessId, txnType: 'APPLICATION' },
+      include: { leaveType: { select: { category: true } } },
     });
     if (!txn) return res.status(404).json({ message: 'Leave request not found' });
     // self OR in-scope approver may withdraw; out-of-scope → 404 (IDOR-safe).
@@ -992,6 +998,13 @@ async function withdrawRequest(req, res, next) {
             data: { taken: { decrement: units }, closing: { increment: units }, version: { increment: 1 } },
           });
         }
+      }
+      // Feature 30 — comp-off re-credit seam (edge case 8). For a COMP_OFF leave only,
+      // mirror the balance credit-back into the LOTS: un-burn `units` from the lots
+      // they came from, but only ones not yet expired (an expired lot's residual must
+      // never become spendable again — invariant 6). No-op for every other type.
+      if (txn.leaveType && isCompOffCategory(txn.leaveType.category)) {
+        await reCreditLotsOnWithdraw(tx, { businessId, employeeId: txn.employeeId, units });
       }
       return tx.leaveTransaction.findUnique({ where: { id: txn.id } });
     });

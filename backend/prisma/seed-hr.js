@@ -535,6 +535,17 @@ async function main() {
       unit: 'WEEKS', isPaid: true, isStatutory: true, nzPayBasis: 'AWE_8PCT', color: '#6366f1',
     },
   });
+  // Feature 30 — Comp-off: paid, no LOP, fed ONLY by earned credits (the balance's
+  // accrualMethod is NONE so the nightly accrual runner never auto-grants it).
+  const ltCompOff = await prisma.leaveType.upsert({
+    where: { businessId_code: { businessId, code: 'COMP_OFF' } },
+    update: {},
+    create: {
+      businessId, code: 'COMP_OFF', name: 'Comp-off', countryCode: 'IN', category: 'COMP_OFF',
+      unit: 'DAYS', isPaid: true, isStatutory: false, affectsLOP: false, isEncashable: false,
+      color: '#0ea5e9',
+    },
+  });
 
   const polEL = await prisma.leavePolicy.upsert({
     where: { businessId_code: { businessId, code: 'EL-STD' } },
@@ -584,7 +595,23 @@ async function main() {
       minTenureMonths: 12, isActive: true,
     },
   });
-  console.log('✓ Leave types (EL/SL/CL/LWP/ANNUAL) + policies (incl. Feature 16 LWP NONE-accrual)');
+  // Feature 30 — Comp-off policy: accrualMethod=NONE (the balance is fed ONLY by
+  // earned credits; the accrual runner skips NONE). compOffConfig carries the knobs
+  // (60-day India expiry, manager approval, auto-earn on, half-day allowed).
+  await prisma.leavePolicy.upsert({
+    where: { businessId_code: { businessId, code: 'COMP_OFF_POLICY' } },
+    update: {},
+    create: {
+      businessId, leaveTypeId: ltCompOff.id, entityId: inEntity.id, code: 'COMP_OFF_POLICY', name: 'Comp-off policy',
+      accrualMethod: 'NONE', accrualFrequency: 'ANNUAL', accrualProrateOnJoin: false, isActive: true,
+      compOffConfig: {
+        expiryDays: 60, requireApproval: true, autoEarn: true,
+        minWorkedMinutesForCredit: 240, fullDayMinutes: 480, allowHalfDay: true,
+        allowEncash: false, earnFromWeeklyOff: true, earnFromHoliday: true, expiryReminderDays: 7,
+      },
+    },
+  });
+  console.log('✓ Leave types (EL/SL/CL/LWP/ANNUAL/COMP_OFF) + policies (incl. Feature 30 comp-off NONE-accrual)');
 
   // ═════════════════════════════════════════════════════════════════════════
   // 7. PAY RUNS (DRAFT) — one per entity, so AttendancePayInputs attach and a

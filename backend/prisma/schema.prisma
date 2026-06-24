@@ -447,151 +447,152 @@ model Business {
   // are the inverse sides of those relations. Grouped by subsystem.
   // ════════════════════════════════════════════════════════════════════
   // Org
-  hrEntities               Entity[]
-  hrLocations              Location[]
-  hrDepartments            Department[]
-  hrDesignations           Designation[]
-  hrGrades                 Grade[]
-  hrBands                  Band[]
+  hrEntities                   Entity[]
+  hrLocations                  Location[]
+  hrDepartments                Department[]
+  hrDesignations               Designation[]
+  hrGrades                     Grade[]
+  hrBands                      Band[]
   // People
-  employees                Employee[]
-  employeeInvites          EmployeeInvite[]
-  employmentRecords        EmploymentRecord[]
-  bankAccounts             BankAccount[]
-  emergencyContacts        EmergencyContact[]
-  dependants               Dependant[]
-  employeeEducations       EmployeeEducation[]
-  employeeAddresses        EmployeeAddress[]
-  statutoryProfiles        StatutoryProfile[]
-  statutoryRegistrations   StatutoryRegistration[]
+  employees                    Employee[]
+  employeeInvites              EmployeeInvite[]
+  employmentRecords            EmploymentRecord[]
+  bankAccounts                 BankAccount[]
+  emergencyContacts            EmergencyContact[]
+  dependants                   Dependant[]
+  employeeEducations           EmployeeEducation[]
+  employeeAddresses            EmployeeAddress[]
+  statutoryProfiles            StatutoryProfile[]
+  statutoryRegistrations       StatutoryRegistration[]
   // Compensation
-  salaryComponents         SalaryComponent[]
-  salaryStructures         SalaryStructure[]
-  salaryComponentLines     SalaryComponentLine[]
-  compensationRevisions    CompensationRevision[]
+  salaryComponents             SalaryComponent[]
+  salaryStructures             SalaryStructure[]
+  salaryComponentLines         SalaryComponentLine[]
+  compensationRevisions        CompensationRevision[]
   // Feature 17 — friendly CTC-policy templates (rules-only; compile to structures)
-  ctcPolicies              CtcPolicy[]
-  ctcPolicyLines           CtcPolicyLine[]
+  ctcPolicies                  CtcPolicy[]
+  ctcPolicyLines               CtcPolicyLine[]
   // Feature 5 — increment cycles
-  incrementCycles          IncrementCycle[]
-  incrementProposals       IncrementProposal[]
+  incrementCycles              IncrementCycle[]
+  incrementProposals           IncrementProposal[]
   // Payroll
-  payCalendars             PayCalendar[]
-  payRuns                  PayRun[]
-  payRunLines              PayRunLine[]
-  payRunLineComponents     PayRunLineComponent[]
-  bonusCycles              BonusCycle[]
-  bonusAwards              BonusAward[]
-  arrearCycles             ArrearCycle[]
-  attendancePayInputs      AttendancePayInput[]
-  payslips                 Payslip[]
-  statutoryRemittances     StatutoryRemittance[]
-  complianceObligations    ComplianceObligation[]
-  payRunInputItems         PayRunInputItem[]
-  varianceThreshold        VarianceThreshold?
+  payCalendars                 PayCalendar[]
+  payRuns                      PayRun[]
+  payRunLines                  PayRunLine[]
+  payRunLineComponents         PayRunLineComponent[]
+  bonusCycles                  BonusCycle[]
+  bonusAwards                  BonusAward[]
+  arrearCycles                 ArrearCycle[]
+  attendancePayInputs          AttendancePayInput[]
+  payslips                     Payslip[]
+  statutoryRemittances         StatutoryRemittance[]
+  complianceObligations        ComplianceObligation[]
+  payRunInputItems             PayRunInputItem[]
+  varianceThreshold            VarianceThreshold?
   // Leave
-  leaveTypes               LeaveType[]
-  leavePolicies            LeavePolicy[]
-  leavePolicyAssignments   LeavePolicyAssignment[]
-  leaveBalances            LeaveBalance[]
-  leaveTransactions        LeaveTransaction[]
+  leaveTypes                   LeaveType[]
+  leavePolicies                LeavePolicy[]
+  leavePolicyAssignments       LeavePolicyAssignment[]
+  leaveBalances                LeaveBalance[]
+  leaveTransactions            LeaveTransaction[]
+  compOffCredits               CompOffCredit[] // Feature 30 — comp-off expiry lots
   // Attendance / time
-  shiftPatterns            ShiftPattern[]
-  shiftAssignments         ShiftAssignment[]
-  hrHolidays               Holiday[]
-  attendancePunches        AttendancePunch[]
-  attendances              Attendance[]
-  overtimeRules            OvertimeRule[]
-  timesheets               Timesheet[]
+  shiftPatterns                ShiftPattern[]
+  shiftAssignments             ShiftAssignment[]
+  hrHolidays                   Holiday[]
+  attendancePunches            AttendancePunch[]
+  attendances                  Attendance[]
+  overtimeRules                OvertimeRule[]
+  timesheets                   Timesheet[]
   // Expense / loan
-  expenseCategories        ExpenseCategory[]
-  expensePolicies          ExpensePolicy[]
-  expenseClaims            ExpenseClaim[]
-  expenseClaimLines        ExpenseClaimLine[]
+  expenseCategories            ExpenseCategory[]
+  expensePolicies              ExpensePolicy[]
+  expenseClaims                ExpenseClaim[]
+  expenseClaimLines            ExpenseClaimLine[]
   // Feature 11 — travel & policy engine
-  cityTiers                CityTier[]
-  travelPolicies           TravelPolicy[]
-  travelRequests           TravelRequest[]
-  loanSchemes              LoanScheme[]
-  loans                    Loan[]
-  loanInstallments         LoanInstallment[]
+  cityTiers                    CityTier[]
+  travelPolicies               TravelPolicy[]
+  travelRequests               TravelRequest[]
+  loanSchemes                  LoanScheme[]
+  loans                        Loan[]
+  loanInstallments             LoanInstallment[]
   // Separation
-  separationCases          SeparationCase[]
+  separationCases              SeparationCase[]
   // Employee lifecycle (Feature 4: onboarding/offboarding journeys + built-in e-sign)
-  lifecycleTemplates       LifecycleTemplate[]
-  lifecycleJourneys        LifecycleJourney[]
-  signatureEnvelopes       SignatureEnvelope[]
+  lifecycleTemplates           LifecycleTemplate[]
+  lifecycleJourneys            LifecycleJourney[]
+  signatureEnvelopes           SignatureEnvelope[]
   // Company Profile (HR) — India-first legal/registration profile, kept in one
   // additive JSON column rather than ~8 new Business columns. Shape (all optional):
   //   { legalName, tradeName, registrationNo (CIN), gstin, pan, tan,
   //     registeredAddressLine1, registeredAddressLine2, registeredCity,
   //     registeredState, registeredPostalCode, registeredCountry,
   //     contactName, contactEmail, contactPhone, incorporationDate }
-  companyProfile           Json?
+  companyProfile               Json?
   // Documents / assets
-  employeeDocuments        EmployeeDocument[]
-  documentTemplates        DocumentTemplate[]
+  employeeDocuments            EmployeeDocument[]
+  documentTemplates            DocumentTemplate[]
   // Company-level document vault (business licences, tax reports, financials,
   // registration/GST certificates) — optional, additive (Company Profile).
-  businessDocuments        BusinessDocument[]
-  assets                   Asset[]
-  assetAssignments         AssetAssignment[]
+  businessDocuments            BusinessDocument[]
+  assets                       Asset[]
+  assetAssignments             AssetAssignment[]
   // ESS requests
-  profileChangeRequests    ProfileChangeRequest[]
-  documentRequests         DocumentRequest[]
-  regularizationRequests   AttendanceRegularizationRequest[]
+  profileChangeRequests        ProfileChangeRequest[]
+  documentRequests             DocumentRequest[]
+  regularizationRequests       AttendanceRegularizationRequest[]
   // Performance
-  reviewCycles             ReviewCycle[]
-  performanceReviews       PerformanceReview[]
-  goals                    Goal[]
-  employeeSkills           EmployeeSkill[]
+  reviewCycles                 ReviewCycle[]
+  performanceReviews           PerformanceReview[]
+  goals                        Goal[]
+  employeeSkills               EmployeeSkill[]
   // Performance — Feature 8
-  objectives               Objective[]
-  reviewTemplates          ReviewTemplate[]
-  ratingScales             RatingScale[]
-  oneOnOnes                OneOnOne[]
-  meritRecommendations     MeritRecommendation[]
+  objectives                   Objective[]
+  reviewTemplates              ReviewTemplate[]
+  ratingScales                 RatingScale[]
+  oneOnOnes                    OneOnOne[]
+  meritRecommendations         MeritRecommendation[]
   // Recruitment
-  jobs                     Job[]
-  jobStages                JobStage[]
-  candidates               Candidate[]
-  applications             Application[]
-  interviews               Interview[]
-  offers                   Offer[]
+  jobs                         Job[]
+  jobStages                    JobStage[]
+  candidates                   Candidate[]
+  applications                 Application[]
+  interviews                   Interview[]
+  offers                       Offer[]
   // Recruitment / ATS — Feature 12 (configurable scoring + merit list)
-  screeningQuestions       ScreeningQuestion[]
-  scorecardTemplates       ScorecardTemplate[]
+  screeningQuestions           ScreeningQuestion[]
+  scorecardTemplates           ScorecardTemplate[]
   // Helpdesk
-  helpdeskCategories       HelpdeskCategory[]
-  helpdeskTickets          HelpdeskTicket[]
-  helpdeskMessages         HelpdeskMessage[]
+  helpdeskCategories           HelpdeskCategory[]
+  helpdeskTickets              HelpdeskTicket[]
+  helpdeskMessages             HelpdeskMessage[]
   // Workflow / approval
-  workflowDefinitions      WorkflowDefinition[]
-  workflowSteps            WorkflowStep[]
-  approvalRequests         ApprovalRequest[]
-  approvalActions          ApprovalAction[]
-  approvalDelegations      ApprovalDelegation[]
+  workflowDefinitions          WorkflowDefinition[]
+  workflowSteps                WorkflowStep[]
+  approvalRequests             ApprovalRequest[]
+  approvalActions              ApprovalAction[]
+  approvalDelegations          ApprovalDelegation[]
   // Child/line tables that carry the mandatory tenant FK (§1.2) and so need
   // a reciprocal collection here even though they are owned via a parent row.
-  statutoryElectionHistory StatutoryElectionHistory[]
-  accrualRules             AccrualRule[]
-  timesheetEntries         TimesheetEntry[]
+  statutoryElectionHistory     StatutoryElectionHistory[]
+  accrualRules                 AccrualRule[]
+  timesheetEntries             TimesheetEntry[]
   // Audit / notify / sequence  (AuditLog.businessId is nullable, no FK)
-  hrNotifications          Notification[]
-  numberSequences          NumberSequence[]
+  hrNotifications              Notification[]
+  numberSequences              NumberSequence[]
   // Tenant brand + HR RBAC
-  tenantBrands             TenantBrand[]
-  hrRolePermissionGrants   HrRolePermissionGrant[]
+  tenantBrands                 TenantBrand[]
+  hrRolePermissionGrants       HrRolePermissionGrant[]
   // Letters & Communication (Feature 9)
-  letterheads              CompanyLetterhead[]
-  letterTemplates          LetterTemplate[]
-  issuedLetters            IssuedLetter[]
+  letterheads                  CompanyLetterhead[]
+  letterTemplates              LetterTemplate[]
+  issuedLetters                IssuedLetter[]
   // Data Migration / Bulk Import (Feature 18)
-  importJobs               ImportJob[]
-  importRows               ImportRow[]
+  importJobs                   ImportJob[]
+  importRows                   ImportRow[]
   // Engagement (Cycle 1) — company announcements / news feed + read receipts.
-  announcements            Announcement[]
-  announcementReads        AnnouncementRead[]
+  announcements                Announcement[]
+  announcementReads            AnnouncementRead[]
   // Investment-proof workflow (Feature 20) — year-end §192(2D)/Rule 26C/Form 12BB.
   investmentDeclarationWindows InvestmentDeclarationWindow[]
   investmentProofs             InvestmentProof[]
@@ -6428,64 +6429,64 @@ model QaIssueComment {
 /// pay-currency boundary. Founder #4: one tenant → many entities/pay-groups.
 /// `countryCode` selects the compliance module (IN vs NZ).
 model Entity {
-  id                String           @id @default(uuid())
-  businessId        String
-  business          Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  code              String // human: "IN-HQ", "NZ-AKL"
-  legalName         String // @pii:identity — registered legal name
-  tradeName         String?
-  countryCode       String           @db.Char(2) // "IN" | "NZ"
-  payCurrency       String           @db.Char(3) // "INR" | "NZD"
-  timezone          String // IANA, e.g. "Asia/Kolkata", "Pacific/Auckland"
-  taxYearStartMonth Int              @default(4) // Apr in both markets
+  id                          String                     @id @default(uuid())
+  businessId                  String
+  business                    Business                   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  code                        String // human: "IN-HQ", "NZ-AKL"
+  legalName                   String // @pii:identity — registered legal name
+  tradeName                   String?
+  countryCode                 String                     @db.Char(2) // "IN" | "NZ"
+  payCurrency                 String                     @db.Char(3) // "INR" | "NZD"
+  timezone                    String // IANA, e.g. "Asia/Kolkata", "Pacific/Auckland"
+  taxYearStartMonth           Int                        @default(4) // Apr in both markets
   // Registered (statutory) address — distinct from work-site Location
-  addressLine1      String?
-  addressLine2      String?
-  city              String?
-  stateCode         String? // IN state (drives PT slab) / NZ region
-  postalCode        String?
+  addressLine1                String?
+  addressLine2                String?
+  city                        String?
+  stateCode                   String? // IN state (drives PT slab) / NZ region
+  postalCode                  String?
   // IN extensions (NULL for NZ) — @pii:identity, @retain:statutory
-  pan               String?          @db.Char(10)
-  tan               String?          @db.Char(10) // TDS account no. (Form 24Q)
-  gstin             String?          @db.VarChar(15)
-  cin               String? // company identification no.
+  pan                         String?                    @db.Char(10)
+  tan                         String?                    @db.Char(10) // TDS account no. (Form 24Q)
+  gstin                       String?                    @db.VarChar(15)
+  cin                         String? // company identification no.
   // NZ extensions (NULL for IN)
-  nzbn              String? // NZ Business Number
-  irdEntityNumber   String?          @db.VarChar(11) // employer IRD number @pii:identity
+  nzbn                        String? // NZ Business Number
+  irdEntityNumber             String?                    @db.VarChar(11) // employer IRD number @pii:identity
   // Lifecycle
-  status            EntityStatus     @default(ACTIVE)
-  activeFrom        DateTime
-  activeTo          DateTime?
+  status                      EntityStatus               @default(ACTIVE)
+  activeFrom                  DateTime
+  activeTo                    DateTime?
   // Feature 16 — the salary-proration denominator policy for this entity
   // (what "standardDays" payroll prorates a monthly salary against). India
   // default = CALENDAR_DAYS (per-month length); FIXED_30 / WORKING_DAYS are the
   // other industry conventions. Frozen into the AttendancePayInput at run time so
   // the denominator is immutable + auditable (part of inputHash). NULL = engine
   // default (CALENDAR_DAYS).
-  prorationBasis    ProrationMethod?
+  prorationBasis              ProrationMethod?
   // Feature 26 — the tenant/entity DEFAULT reimbursement payout channel, applied to
   // a new claim at submit when no per-claim override is set. PAY_SEPARATELY (today's
   // out-of-band manual reimburse) keeps existing behaviour; an employer that always
   // settles via payroll flips this to PAY_VIA_PAYROLL so every approved claim rides
   // the next run. A per-claim override always wins over this default.
   reimbursementDefaultChannel ReimbursementPayoutChannel @default(PAY_SEPARATELY)
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
-  deletedAt         DateTime?
-  version           Int              @default(0)
+  createdAt                   DateTime                   @default(now())
+  updatedAt                   DateTime                   @updatedAt
+  deletedAt                   DateTime?
+  version                     Int                        @default(0)
 
-  locations     Location[]
-  registrations StatutoryRegistration[]
-  payCalendars  PayCalendar[]
-  employments   EmploymentRecord[]
-  payRuns       PayRun[]
-  bonusCycles   BonusCycle[]
-  arrearCycles  ArrearCycle[]
-  remittances   StatutoryRemittance[]
+  locations             Location[]
+  registrations         StatutoryRegistration[]
+  payCalendars          PayCalendar[]
+  employments           EmploymentRecord[]
+  payRuns               PayRun[]
+  bonusCycles           BonusCycle[]
+  arrearCycles          ArrearCycle[]
+  remittances           StatutoryRemittance[]
   complianceObligations ComplianceObligation[]
-  compensations CompensationRevision[]
-  importJobs    ImportJob[]
-  form16Batches Form16Batch[]
+  compensations         CompensationRevision[]
+  importJobs            ImportJob[]
+  form16Batches         Form16Batch[]
 
   @@unique([businessId, code])
   @@index([businessId, countryCode, status])
@@ -6727,6 +6728,7 @@ model Employee {
   dependants             Dependant[]
   leaveBalances          LeaveBalance[]
   leaveTxns              LeaveTransaction[]
+  compOffCredits         CompOffCredit[] // Feature 30 — comp-off expiry lots
   punches                AttendancePunch[]
   shiftAssignments       ShiftAssignment[]
   timesheets             Timesheet[]
@@ -6914,6 +6916,7 @@ enum WorkerCategory {
   STAFF
   WORKER
 }
+
 // IN Industrial Relations Code distinction
 enum EmploymentChangeReason {
   HIRE
@@ -7111,15 +7114,15 @@ model SalaryComponent {
   deletedAt           DateTime?
   version             Int                 @default(0)
 
-  structureLines SalaryComponentLine[]
+  structureLines   SalaryComponentLine[]
   // Feature 17 — back-relation for the friendly CTC-policy builder. A policy line
   // references the pay-head master (Restrict on delete: a component used by a policy
   // cannot be hard-deleted out from under it). Additive; no behaviour change.
-  ctcPolicyLines CtcPolicyLine[]
+  ctcPolicyLines   CtcPolicyLine[]
   // Feature 25 — FBP back-relations. A component can be a plan's envelope and/or a
   // head's pay-head. Restrict on delete (a component a plan references stays put).
-  fbpEnvelopePlans FbpPlan[]     @relation("FbpEnvelopeComponent")
-  fbpPlanHeads     FbpPlanHead[] @relation("FbpHeadComponent")
+  fbpEnvelopePlans FbpPlan[]             @relation("FbpEnvelopeComponent")
+  fbpPlanHeads     FbpPlanHead[]         @relation("FbpHeadComponent")
 
   @@unique([businessId, code])
   @@index([businessId, entityId, category])
@@ -7529,27 +7532,27 @@ model StatutoryProfile {
 // + proof deadline; the proofDeadline is the date the TDS engine flips to
 // verified-only. Resolved as-of the FY in the assembler (asOf >= proofDeadline).
 model InvestmentDeclarationWindow {
-  id            String   @id @default(uuid())
-  businessId    String
-  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  financialYear String   @db.VarChar(7) // "2026-27" (StatutoryProfile.prevEmployerFY format)
-  countryCode   String   @default("IN") @db.Char(2)
+  id             String                  @id @default(uuid())
+  businessId     String
+  business       Business                @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  financialYear  String                  @db.VarChar(7) // "2026-27" (StatutoryProfile.prevEmployerFY format)
+  countryCode    String                  @default("IN") @db.Char(2)
   // Feature 25 — purpose discriminator. INVESTMENT_PROOF (default) = the F20
   // window; FBP_ALLOCATION = the FBP allocation window (its proofDeadline is the
   // declared→verified flip date for the bill-backed FBP heads). One model, one
   // resolver, one cron drives both — see DeclWindowPurpose.
-  purpose       DeclWindowPurpose @default(INVESTMENT_PROOF)
-  opensAt       DateTime @db.Date // declaration editable / uploads accepted from
-  closesAt      DateTime @db.Date // declaration locks (no more edits/uploads after)
-  proofDeadline DateTime @db.Date // TDS flips to VERIFIED-only on/after this date (Jan–Feb)
-  status        DeclarationWindowStatus @default(DRAFT) // DRAFT|OPEN|CLOSED|LOCKED
-  notes         String?  @db.Text
-  createdBy     String?
-  updatedBy     String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  version       Int      @default(0)
-  proofs        InvestmentProof[]
+  purpose        DeclWindowPurpose       @default(INVESTMENT_PROOF)
+  opensAt        DateTime                @db.Date // declaration editable / uploads accepted from
+  closesAt       DateTime                @db.Date // declaration locks (no more edits/uploads after)
+  proofDeadline  DateTime                @db.Date // TDS flips to VERIFIED-only on/after this date (Jan–Feb)
+  status         DeclarationWindowStatus @default(DRAFT) // DRAFT|OPEN|CLOSED|LOCKED
+  notes          String?                 @db.Text
+  createdBy      String?
+  updatedBy      String?
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+  version        Int                     @default(0)
+  proofs         InvestmentProof[]
   fbpAllocations FbpAllocation[]
 
   @@unique([businessId, financialYear, countryCode, purpose]) // one window per FY per country per purpose
@@ -7562,19 +7565,19 @@ model InvestmentDeclarationWindow {
 // VERIFIED truth. A claim can have many proofs (12 rent receipts; 3 LIC + 1 PPF for
 // the 80C bucket); each carries its own file, verdict and verified amount.
 model InvestmentProof {
-  id            String   @id @default(uuid())
+  id            String                      @id @default(uuid())
   businessId    String
-  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business      Business                    @relation(fields: [businessId], references: [id], onDelete: Cascade)
   employeeId    String
-  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee      Employee                    @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   windowId      String
   window        InvestmentDeclarationWindow @relation(fields: [windowId], references: [id], onDelete: Cascade)
-  financialYear String   @db.VarChar(7)
+  financialYear String                      @db.VarChar(7)
 
   claimType      ProofClaimType // SEC_80C | SEC_80D | SEC_80CCD1B | SEC_80TTA | SEC_24B_HOME_LOAN | HRA_RENT | OTHER_VIA
-  subSection     String?  @db.VarChar(16) // e.g. "LIC","PPF","ELSS" — for the 80C bucket breakdown
-  declaredAmount Decimal  @db.Decimal(15, 2) // what this proof CLAIMS to support (annual ₹)
-  verifiedAmount Decimal? @db.Decimal(15, 2) // what HR ACCEPTS (≤ declared; capped by HR). NULL until verified.
+  subSection     String?        @db.VarChar(16) // e.g. "LIC","PPF","ELSS" — for the 80C bucket breakdown
+  declaredAmount Decimal        @db.Decimal(15, 2) // what this proof CLAIMS to support (annual ₹)
+  verifiedAmount Decimal?       @db.Decimal(15, 2) // what HR ACCEPTS (≤ declared; capped by HR). NULL until verified.
 
   // The evidence file — same storage contract as EmployeeDocument (S3/R2 key + SHA-256).
   fileUrl      String  @db.Text
@@ -7589,7 +7592,7 @@ model InvestmentProof {
   rentMonthsCovered Int?
 
   status       ProofStatus @default(PENDING) // PENDING | ACCEPTED | REJECTED
-  rejectReason String?  @db.Text // mandatory when REJECTED ("blurred","amount mismatch","wrong FY")
+  rejectReason String?     @db.Text // mandatory when REJECTED ("blurred","amount mismatch","wrong FY")
   verifiedById String? // operator User id (SoD: ≠ a self-verify)
   verifiedAt   DateTime?
 
@@ -7617,25 +7620,25 @@ model InvestmentProof {
 /// allocation. The envelope component is the single CTC earning line that funds
 /// the whole basket; the plan's heads allocate within its resolved amount.
 model FbpPlan {
-  id            String   @id @default(uuid())
-  businessId    String
-  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  entityId      String? // NULL = all entities
-  code          String // "FBP-2026"
-  name          String // "Flexi Benefit Plan 2026-27"
-  countryCode   String   @db.Char(2) @default("IN") // server-stamped = tenant country
-  financialYear String   @db.VarChar(7) // "2026-27"
+  id                  String          @id @default(uuid())
+  businessId          String
+  business            Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId            String? // NULL = all entities
+  code                String // "FBP-2026"
+  name                String // "Flexi Benefit Plan 2026-27"
+  countryCode         String          @default("IN") @db.Char(2) // server-stamped = tenant country
+  financialYear       String          @db.VarChar(7) // "2026-27"
   // The basket envelope: which CTC earning component carries the total FBP allowance.
   envelopeComponentId String // FK SalaryComponent (kind SPECIAL_ALLOWANCE | CUSTOM code "FBP")
   envelopeComponent   SalaryComponent @relation("FbpEnvelopeComponent", fields: [envelopeComponentId], references: [id], onDelete: Restrict)
-  isActive      Boolean  @default(true)
-  heads         FbpPlanHead[]
-  allocations   FbpAllocation[]
-  createdById   String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  deletedAt     DateTime?
-  version       Int      @default(0)
+  isActive            Boolean         @default(true)
+  heads               FbpPlanHead[]
+  allocations         FbpAllocation[]
+  createdById         String?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  deletedAt           DateTime?
+  version             Int             @default(0)
 
   @@unique([businessId, code])
   @@index([businessId, entityId, financialYear, isActive])
@@ -7644,28 +7647,28 @@ model FbpPlan {
 /// One head in the basket (LTA, meal, fuel, telephone, books, prof-dev, uniform…).
 /// Carries the statutory cap + the exemption section + whether proof is required.
 model FbpPlanHead {
-  id            String   @id @default(uuid())
-  businessId    String
-  planId        String
-  plan          FbpPlan  @relation(fields: [planId], references: [id], onDelete: Cascade)
-  componentId   String // FK SalaryComponent — the payslip pay-head this head pays as
-  component     SalaryComponent @relation("FbpHeadComponent", fields: [componentId], references: [id], onDelete: Restrict)
-  headType      FbpHeadType // LTA | MEAL_CARD | FUEL_CAR | TELEPHONE_INTERNET | BOOKS_PERIODICALS | PROF_DEV | UNIFORM | OTHER
-  label         String // friendly name shown in ESS
-  taxSection    String?  @db.VarChar(16) // "10(5)" | "3(7)(iii)" | "3(2)" | "3(7)(ix)" | "10(14)"
+  id                  String              @id @default(uuid())
+  businessId          String
+  planId              String
+  plan                FbpPlan             @relation(fields: [planId], references: [id], onDelete: Cascade)
+  componentId         String // FK SalaryComponent — the payslip pay-head this head pays as
+  component           SalaryComponent     @relation("FbpHeadComponent", fields: [componentId], references: [id], onDelete: Restrict)
+  headType            FbpHeadType // LTA | MEAL_CARD | FUEL_CAR | TELEPHONE_INTERNET | BOOKS_PERIODICALS | PROF_DEV | UNIFORM | OTHER
+  label               String // friendly name shown in ESS
+  taxSection          String?             @db.VarChar(16) // "10(5)" | "3(7)(iii)" | "3(2)" | "3(7)(ix)" | "10(14)"
   // Caps (annual ₹ unless noted). NULL = no statutory cap beyond the allocation/actuals.
-  annualCapRupees   Decimal? @db.Decimal(15, 2) // e.g. meal 26400; uniform per-policy
-  monthlyCapRupees  Decimal? @db.Decimal(15, 2) // e.g. meal 2200; fuel-slab 1800/2400; driver 900
-  minAllocRupees    Decimal? @db.Decimal(15, 2) // optional floor (0 default)
+  annualCapRupees     Decimal?            @db.Decimal(15, 2) // e.g. meal 26400; uniform per-policy
+  monthlyCapRupees    Decimal?            @db.Decimal(15, 2) // e.g. meal 2200; fuel-slab 1800/2400; driver 900
+  minAllocRupees      Decimal?            @db.Decimal(15, 2) // optional floor (0 default)
   // Exemption + proof behaviour
-  exemptOldRegimeOnly Boolean @default(true) // every head here is OLD-only; NEW pays-but-taxes
-  proofRequired     Boolean  @default(true) // false only for MEAL_CARD (the card is the control)
-  payCadence        FbpPayCadence @default(MONTHLY) // MONTHLY allowance vs ON_CLAIM (LTA reimbursement)
-  claimType         ProofClaimType? // the F20 claim type FBP bills upload as (FBP_LTA, …); NULL for proof-free heads
-  sortOrder         Int      @default(0)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  allocations       FbpAllocationLine[]
+  exemptOldRegimeOnly Boolean             @default(true) // every head here is OLD-only; NEW pays-but-taxes
+  proofRequired       Boolean             @default(true) // false only for MEAL_CARD (the card is the control)
+  payCadence          FbpPayCadence       @default(MONTHLY) // MONTHLY allowance vs ON_CLAIM (LTA reimbursement)
+  claimType           ProofClaimType? // the F20 claim type FBP bills upload as (FBP_LTA, …); NULL for proof-free heads
+  sortOrder           Int                 @default(0)
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  allocations         FbpAllocationLine[]
 
   @@index([businessId, planId, sortOrder])
 }
@@ -7674,29 +7677,29 @@ model FbpPlanHead {
 /// at declaration time) + child allocation lines. Append-only per (employee, FY,
 /// version) — a re-allocation supersedes (mirrors CompensationRevision discipline).
 model FbpAllocation {
-  id            String   @id @default(uuid())
-  businessId    String
-  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  employeeId    String
-  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  planId        String
-  plan          FbpPlan  @relation(fields: [planId], references: [id], onDelete: Restrict)
-  windowId      String? // FK InvestmentDeclarationWindow (purpose FBP_ALLOCATION); NULL = no window (fail-open-provisional)
-  window        InvestmentDeclarationWindow? @relation(fields: [windowId], references: [id], onDelete: SetNull)
-  financialYear String   @db.VarChar(7)
+  id                   String                       @id @default(uuid())
+  businessId           String
+  business             Business                     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId           String
+  employee             Employee                     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  planId               String
+  plan                 FbpPlan                      @relation(fields: [planId], references: [id], onDelete: Restrict)
+  windowId             String? // FK InvestmentDeclarationWindow (purpose FBP_ALLOCATION); NULL = no window (fail-open-provisional)
+  window               InvestmentDeclarationWindow? @relation(fields: [windowId], references: [id], onDelete: SetNull)
+  financialYear        String                       @db.VarChar(7)
   // The basket envelope amount RESOLVED for this employee at declaration (annual ₹),
   // snapshotted from the current CompensationRevision's envelope line. Σ lines must
   // reconcile to <= this (unallocated balance falls back to fully-taxable special pay).
-  envelopeAnnualRupees Decimal @db.Decimal(15, 2)
-  status        FbpAllocationStatus @default(DRAFT) // DRAFT | SUBMITTED | LOCKED | SUPERSEDED
-  lines         FbpAllocationLine[]
-  submittedAt   DateTime?
-  lockedAt      DateTime?
-  createdById   String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  deletedAt     DateTime?
-  version       Int      @default(0)
+  envelopeAnnualRupees Decimal                      @db.Decimal(15, 2)
+  status               FbpAllocationStatus          @default(DRAFT) // DRAFT | SUBMITTED | LOCKED | SUPERSEDED
+  lines                FbpAllocationLine[]
+  submittedAt          DateTime?
+  lockedAt             DateTime?
+  createdById          String?
+  createdAt            DateTime                     @default(now())
+  updatedAt            DateTime                     @updatedAt
+  deletedAt            DateTime?
+  version              Int                          @default(0)
 
   @@unique([businessId, employeeId, financialYear, version])
   @@index([businessId, employeeId, financialYear, status])
@@ -7707,18 +7710,18 @@ model FbpAllocation {
 /// EXEMPT vs TAXABLE split is computed (not stored as truth) by the pure aggregator
 /// from (allocation, cap, verified|declared spend) — mirroring proofAggregator.
 model FbpAllocationLine {
-  id            String   @id @default(uuid())
-  businessId    String
-  allocationId  String
-  allocation    FbpAllocation @relation(fields: [allocationId], references: [id], onDelete: Cascade)
-  headId        String
-  head          FbpPlanHead   @relation(fields: [headId], references: [id], onDelete: Restrict)
-  annualAmountRupees Decimal @db.Decimal(15, 2) // chosen allocation for this head (annual)
+  id                  String        @id @default(uuid())
+  businessId          String
+  allocationId        String
+  allocation          FbpAllocation @relation(fields: [allocationId], references: [id], onDelete: Cascade)
+  headId              String
+  head                FbpPlanHead   @relation(fields: [headId], references: [id], onDelete: Restrict)
+  annualAmountRupees  Decimal       @db.Decimal(15, 2) // chosen allocation for this head (annual)
   // Year-end VERIFIED spend (LTA/fuel/phone/books): Σ ACCEPTED proof amounts. Drives
   // the exempt portion after the proof deadline. NULL until a proof is accepted.
-  verifiedSpendRupees Decimal? @db.Decimal(15, 2)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  verifiedSpendRupees Decimal?      @db.Decimal(15, 2)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
 
   @@index([businessId, allocationId])
   @@index([businessId, headId])
@@ -8322,27 +8325,27 @@ model BonusAward {
 /// (businessId, compensationRevisionId): a revision yields ONE cycle (the @@unique
 /// is the idempotency guard that prevents a second cycle / double-pay).
 model ArrearCycle {
-  id                     String       @id @default(uuid())
+  id                     String             @id @default(uuid())
   businessId             String
-  business               Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business               Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
   entityId               String
-  entity                 Entity       @relation(fields: [entityId], references: [id], onDelete: Restrict)
+  entity                 Entity             @relation(fields: [entityId], references: [id], onDelete: Restrict)
   employeeId             String // arrears are per-employee (one revision = one employee)
-  employee               Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee               Employee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   compensationRevisionId String // the retro revision that triggered this
   revisionReason         CompRevisionReason // drives the ESI-on-arrears gate (§2)
-  effectiveFrom          DateTime     @db.Date // revision retro date
+  effectiveFrom          DateTime           @db.Date // revision retro date
   detectedInPeriod       String // "YYYY-MM" — the open period it was detected in
   taxYear                String // receipt FY, e.g. "2026-27" (drives Form 10E vs 39)
-  esiOnArrears           Boolean      @default(true) // resolved from reason; operator-overridable
-  status                 ArrearStatus @default(DRAFT)
+  esiOnArrears           Boolean            @default(true) // resolved from reason; operator-overridable
+  status                 ArrearStatus       @default(DRAFT)
   targetMode             String? // 'INJECT' | 'MINT' (set at approve)
   // Totals (paise) — filled at compute.
-  grossArrearMinor       BigInt       @default(0)
-  pfArrearEeMinor        BigInt       @default(0)
-  pfArrearErMinor        BigInt       @default(0)
-  esiArrearEeMinor       BigInt       @default(0)
-  esiArrearErMinor       BigInt       @default(0)
+  grossArrearMinor       BigInt             @default(0)
+  pfArrearEeMinor        BigInt             @default(0)
+  pfArrearErMinor        BigInt             @default(0)
+  esiArrearEeMinor       BigInt             @default(0)
+  esiArrearErMinor       BigInt             @default(0)
   // Section 89(1) relief data point (paise; null until computed).
   s89ReliefMinor         BigInt?
   s89DatapointJson       Json? // per-source-year slices + the 6-step arithmetic
@@ -8354,10 +8357,10 @@ model ArrearCycle {
   approvedAt             DateTime?
   approvedBy             String?
   notes                  String?
-  createdAt              DateTime     @default(now())
-  updatedAt              DateTime     @updatedAt
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
   deletedAt              DateTime?
-  version                Int          @default(0)
+  version                Int                @default(0)
 
   months ArrearMonth[]
 
@@ -8424,38 +8427,38 @@ enum ArrearStatus {
 /// The annual Form-16 generation run for one entity + financial year. Mirrors
 /// BonusCycle: DRAFT → COMPUTED → APPROVED (SoD) → ISSUED. India-only.
 model Form16Batch {
-  id            String   @id @default(uuid())
+  id            String         @id @default(uuid())
   businessId    String
-  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business      Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
   entityId      String
-  entity        Entity   @relation(fields: [entityId], references: [id], onDelete: Restrict)
+  entity        Entity         @relation(fields: [entityId], references: [id], onDelete: Restrict)
   financialYear String // "2026-27" (Apr–Mar)
   formKind      RemittanceKind @default(IN_FORM16) // IN_FORM16 | IN_FORM130 (FY ≥ 2026-27, effective-dated §11)
 
-  status        Form16BatchStatus @default(DRAFT)
+  status                 Form16BatchStatus @default(DRAFT)
   // Deductor identity SNAPSHOT at generate (so a later Entity edit can't alter an issued cert).
-  deductorPan   String?  @db.Char(10)
-  deductorTan   String?  @db.Char(10)
-  deductorName  String?
+  deductorPan            String?           @db.Char(10)
+  deductorTan            String?           @db.Char(10)
+  deductorName           String?
   // Reconciliation roll-up (computed at COMPUTED).
-  headcount              Int     @default(0)
-  totalTdsDeductedMinor  BigInt  @default(0) // Σ certificate TDS (paise)
-  totalTdsDepositedMinor BigInt  @default(0) // Σ challan-matched deposited (paise)
-  reconciledOk           Boolean @default(false) // deducted == deposited within tolerance
+  headcount              Int               @default(0)
+  totalTdsDeductedMinor  BigInt            @default(0) // Σ certificate TDS (paise)
+  totalTdsDepositedMinor BigInt            @default(0) // Σ challan-matched deposited (paise)
+  reconciledOk           Boolean           @default(false) // deducted == deposited within tolerance
   // Maker-checker actors (SoD — approver ≠ computedBy).
-  computedAt    DateTime?
-  computedBy    String?
-  approvedAt    DateTime?
-  approvedBy    String?
-  issuedAt      DateTime?
-  issuedBy      String?
-  notes         String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  deletedAt     DateTime?
-  version       Int      @default(0)
+  computedAt             DateTime?
+  computedBy             String?
+  approvedAt             DateTime?
+  approvedBy             String?
+  issuedAt               DateTime?
+  issuedBy               String?
+  notes                  String?
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+  deletedAt              DateTime?
+  version                Int               @default(0)
 
-  certificates  Form16Certificate[]
+  certificates Form16Certificate[]
 
   @@unique([businessId, entityId, financialYear]) // exactly one batch per entity+FY
   @@index([businessId, status])
@@ -8473,13 +8476,13 @@ enum Form16BatchStatus {
 /// FROZEN, paise-exact certificate content (the immutable truth at generate);
 /// the issued PDF + ESS vault doc link to the IssuedLetter (reuse, no fork).
 model Form16Certificate {
-  id            String      @id @default(uuid())
-  businessId    String
-  business      Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  batchId       String
-  batch         Form16Batch @relation(fields: [batchId], references: [id], onDelete: Cascade)
-  employeeId    String
-  employee      Employee    @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  id         String      @id @default(uuid())
+  businessId String
+  business   Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  batchId    String
+  batch      Form16Batch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  employeeId String
+  employee   Employee    @relation(fields: [employeeId], references: [id], onDelete: Restrict)
 
   financialYear String
   // Unique TDS certificate number. Deterministic per (entity, FY) via
@@ -8488,27 +8491,27 @@ model Form16Certificate {
   certificateNo String
   tracesCertNo  String? // optional: the TRACES Part-A unique number, if downloaded
 
-  regime        INTaxRegime
+  regime              INTaxRegime
   // Frozen content (the certificate as issued):
-  partAJson     Json // deductor/deductee identity, employment period, quarter-wise TDS summary + challans
-  partBJson     Json // the F15 annual computation (salary→exemptions→ChVIA→tax→TDS)
+  partAJson           Json // deductor/deductee identity, employment period, quarter-wise TDS summary + challans
+  partBJson           Json // the F15 annual computation (salary→exemptions→ChVIA→tax→TDS)
   // Money roll-ups (paise) for quick filter/reconcile + the register:
-  grossSalaryMinor  BigInt @default(0)
-  totalTaxableMinor BigInt @default(0)
-  totalTaxMinor     BigInt @default(0) // tax+surcharge+cess after rebate/relief
-  tdsDeductedMinor  BigInt @default(0) // Σ TDS on this FY's payslips
-  tdsDepositedMinor BigInt @default(0) // Σ challan-matched
+  grossSalaryMinor    BigInt           @default(0)
+  totalTaxableMinor   BigInt           @default(0)
+  totalTaxMinor       BigInt           @default(0) // tax+surcharge+cess after rebate/relief
+  tdsDeductedMinor    BigInt           @default(0) // Σ TDS on this FY's payslips
+  tdsDepositedMinor   BigInt           @default(0) // Σ challan-matched
   // Anomalies surfaced on the cert (e.g. MISSING_PAN, TDS_GAP, NO_PAYSLIPS).
-  anomaliesJson Json?
+  anomaliesJson       Json?
   // Issue linkage (reuse letters): set when bulk-issued.
   issuedLetterId      String? // → IssuedLetter (ref-no, PDF, e-sign envelope)
   employeeDocumentId  String? // → the ESS vault doc (mirror of IssuedLetter.employeeDocumentId)
   fileHash            String? // sha256 of the issued PDF (tamper anchor)
   signatureEnvelopeId String? // when the batch issues signed
-  status        Form16CertStatus @default(PENDING)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  version       Int      @default(0)
+  status              Form16CertStatus @default(PENDING)
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  version             Int              @default(0)
 
   @@unique([businessId, batchId, employeeId]) // one cert per employee per batch
   @@unique([businessId, certificateNo]) // certificate number is unique per tenant
@@ -8525,24 +8528,24 @@ enum Form16CertStatus {
 
 /// Employer filing/payment obligations generated from a pay run.
 model StatutoryRemittance {
-  id           String           @id @default(uuid())
-  businessId   String
-  business     Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  entityId     String
-  entity       Entity           @relation(fields: [entityId], references: [id], onDelete: Restrict)
-  payRunId     String?
-  payRun       PayRun?          @relation(fields: [payRunId], references: [id], onDelete: SetNull)
-  kind         RemittanceKind
-  taxPeriod    String // "2026-04" or "2026-Q1"
-  amount       Decimal          @db.Decimal(18, 2)
-  currencyCode String           @db.Char(3)
-  dueDate      DateTime         @db.Date
-  filedDate    DateTime?
-  paidDate     DateTime?
-  challanRef   String? // CRN/challan/IRD ref
-  status       RemittanceStatus @default(PENDING)
-  fileUrl      String?          @db.Text // ECR txt / Form 24Q / payday CSV
-  meta         Json?
+  id              String                @id @default(uuid())
+  businessId      String
+  business        Business              @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId        String
+  entity          Entity                @relation(fields: [entityId], references: [id], onDelete: Restrict)
+  payRunId        String?
+  payRun          PayRun?               @relation(fields: [payRunId], references: [id], onDelete: SetNull)
+  kind            RemittanceKind
+  taxPeriod       String // "2026-04" or "2026-Q1"
+  amount          Decimal               @db.Decimal(18, 2)
+  currencyCode    String                @db.Char(3)
+  dueDate         DateTime              @db.Date
+  filedDate       DateTime?
+  paidDate        DateTime?
+  challanRef      String? // CRN/challan/IRD ref
+  status          RemittanceStatus      @default(PENDING)
+  fileUrl         String?               @db.Text // ECR txt / Form 24Q / payday CSV
+  meta            Json?
   // ── Feature 23 — Statutory Compliance Calendar (ADDITIVE, all nullable so the
   //    existing fileRun() writer's rows stay valid). The calendar OWNS the
   //    definition (ComplianceObligation); the INSTANCE row is shared with payroll.
@@ -8550,18 +8553,18 @@ model StatutoryRemittance {
   obligation      ComplianceObligation? @relation(fields: [obligationId], references: [id], onDelete: SetNull)
   stateCode       String? // mirror for PT/LWF per-state instances (NULL = entity-wide)
   // proof of filing (mark-filed action):
-  proofUrl        String?   @db.Text // uploaded challan / receipt
+  proofUrl        String?               @db.Text // uploaded challan / receipt
   proofUploadedAt DateTime?
   filedByUserId   String? // who marked it filed (audit + SoD)
   // reminder bookkeeping (idempotent nudges — never spam):
   lastReminderAt  DateTime?
-  remindersSent   Int       @default(0)
+  remindersSent   Int                   @default(0)
   reminderStage   String? // "T-7" | "T-3" | "T-1" | "DUE" | "OVERDUE" — last stage nudged
   // waiver / not-applicable for a period:
   waivedReason    String?
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
-  version      Int              @default(0)
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  version         Int                   @default(0)
 
   // Natural-key uniqueness for the per-period INSTANCE row shared by fileRun() and
   // the compliance generator (calendarRunner upsertStub). Without it the P2002
@@ -8588,11 +8591,11 @@ enum RemittanceKind {
   // Income Tax Act 2025 successors are effective-dated DATA, not a code branch:
   //   IN_FORM24Q → IN_FORM138 (TDS-salary quarterly return, txns ≥ 2026-04-01)
   //   IN_FORM16  → IN_FORM130 (TDS-salary annual certificate, FY ≥ 2026-27)
-  IN_FORM138    // 24Q successor (Income Tax Act 2025)
-  IN_FORM130    // Form 16 successor (Income Tax Act 2025)
+  IN_FORM138 // 24Q successor (Income Tax Act 2025)
+  IN_FORM130 // Form 16 successor (Income Tax Act 2025)
   IN_ESI_RETURN // ESI half-yearly return (11 Apr / 11 Oct)
-  IN_PF_ANNUAL  // optional EPF annual tracker
-  IN_GRATUITY   // event-driven (separation + 30d); off the recurring calendar
+  IN_PF_ANNUAL // optional EPF annual tracker
+  IN_GRATUITY // event-driven (separation + 30d); off the recurring calendar
 
   NZ_PAYE
   NZ_PAYDAY_FILING
@@ -8637,8 +8640,8 @@ model ComplianceObligation {
 
   // Due-date rule (interpreted by the pure engine — compliance/india.calendar.js):
   dueDom       Int? // day-of-month the filing is due
-  dueMonths    Int[]    @default([]) // HALF_YEARLY/ANNUAL: calendar months it lands in ([4,10] ESI return; [6] Form16)
-  offsetMonths Int      @default(1) // months after period end the due date lands (TDS=1, 24Q≈1)
+  dueMonths    Int[] @default([]) // HALF_YEARLY/ANNUAL: calendar months it lands in ([4,10] ESI return; [6] Form16)
+  offsetMonths Int   @default(1) // months after period end the due date lands (TDS=1, 24Q≈1)
   specialRules Json? // e.g. {"marchDueDom":30,"marchDueMonth":4} for TDS; {"ptPeriodicity":"MONTHLY"}
 
   // Effective-dating (24Q→138, 16→130 succession). Same shape as StatutoryRegistration.
@@ -8646,14 +8649,14 @@ model ComplianceObligation {
   effectiveTo   DateTime? @db.Date // when superseded (e.g. 24Q effectiveTo 2026-03-31)
   supersededBy  String? // optional successor-kind label for the UX ("becomes Form 138")
 
-  isActive      Boolean @default(true)
-  autoGenerate  Boolean @default(true) // generator materialises future instances for this
-  reminderDays  Int[]   @default([7, 3, 1, 0]) // T-minus days to nudge HR (0 = due day)
-  meta          Json? // penaltyHint, label, govtPortalUrl, form name
+  isActive     Boolean @default(true)
+  autoGenerate Boolean @default(true) // generator materialises future instances for this
+  reminderDays Int[]   @default([7, 3, 1, 0]) // T-minus days to nudge HR (0 = due day)
+  meta         Json? // penaltyHint, label, govtPortalUrl, form name
 
-  createdAt   DateTime               @default(now())
-  updatedAt   DateTime               @updatedAt
-  version     Int                    @default(0)
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+  version     Int                   @default(0)
   remittances StatutoryRemittance[]
 
   @@unique([businessId, entityId, kind, stateCode, effectiveFrom])
@@ -8778,6 +8781,11 @@ model LeavePolicy {
   encashOnExit             Boolean                 @default(false)
   encashFormula            String?
   maxEncashCap             Decimal?                @db.Decimal(8, 4) // cap encashable units (Feature 6 §3.2); NULL = unbounded
+  // Feature 30 — comp-off knobs (only meaningful for a COMP_OFF-type policy).
+  // { expiryDays:60, requireApproval:true, autoEarn:true, minWorkedMinutesForCredit:240,
+  //   fullDayMinutes:480, allowHalfDay:true, allowEncash:false,
+  //   earnFromWeeklyOff:true, earnFromHoliday:true, expiryReminderDays:7 }
+  compOffConfig            Json?
   workflowDefinitionId     String?
   isActive                 Boolean                 @default(true)
   createdAt                DateTime                @default(now())
@@ -8944,6 +8952,64 @@ enum LeaveTxnStatus {
 enum DayHalf {
   FIRST_HALF
   SECOND_HALF
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Feature 30 — COMP-OFF (compensatory off) expiry lot.
+//
+// A comp-off credit is the per-credit expiry "lot" that the flat aggregate
+// LeaveBalance cannot express. The aggregate COMP_OFF LeaveBalance.closing is kept
+// in lockstep (== Σ remaining over ACTIVE lots) so every existing balance/ledger/
+// reconcile/FnF path works unchanged. `remaining` is DERIVED (quantity − consumed),
+// never stored — mirroring how LeaveBalance.closing is derived from the ledger.
+// ─────────────────────────────────────────────────────────────────────────────
+model CompOffCredit {
+  id                String              @id @default(uuid())
+  businessId        String
+  business          Business            @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId        String
+  employee          Employee            @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  // Provenance — the worked-on-off-day that earned this credit (NULL for HR_GRANT).
+  sourceDate        DateTime            @db.Date
+  sourceKind        CompOffSourceKind
+  attendanceId      String? // the HOLIDAY_WORKED Attendance row, when auto-detected
+  // Quantity in DAYS (0.5 / 1.0). worked >= fullDayMinutes → 1.0; >= min → 0.5.
+  quantity          Decimal             @db.Decimal(6, 4)
+  consumed          Decimal             @default(0) @db.Decimal(6, 4) // units availed/encashed from THIS lot
+  // Expiry clock — per credit. earnedOn + policy.expiryDays.
+  earnedOn          DateTime            @db.Date
+  expiresOn         DateTime            @db.Date
+  status            CompOffCreditStatus @default(PENDING)
+  // Workflow (earn approval) — mirrors LeaveTransaction.approvalRequestId.
+  approvalRequestId String?
+  grantedBy         String? // HR userId for HR_GRANT / manual
+  reason            String?
+  // Bridge to the leave ledger: the ACCRUAL-equivalent LeaveTransaction that
+  // credited the aggregate LeaveBalance when this lot was finalized.
+  creditTxnId       String?
+  leaveBalanceId    String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  version           Int                 @default(0)
+
+  @@unique([businessId, employeeId, sourceDate, sourceKind]) // one credit per worked rest-day (idempotent earn)
+  @@index([businessId, employeeId, status, expiresOn]) // FIFO consume + ESS list
+  @@index([businessId, status, expiresOn]) // expiry-runner scan
+}
+
+enum CompOffSourceKind {
+  WEEKLY_OFF
+  HOLIDAY
+  EXTRA_HOURS // factory: beyond statutory weekly hours (v2; behind a policy flag)
+  HR_GRANT // manual HR grant, no attendance source
+}
+
+enum CompOffCreditStatus {
+  PENDING // earned, awaiting manager/HR approval (if requireApproval)
+  ACTIVE // approved, available to avail; consumed < quantity
+  EXHAUSTED // consumed == quantity
+  EXPIRED // expiresOn passed with remaining > 0 → residual lapsed
+  VOIDED // earn rejected / attendance reversed / HR void
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -9224,38 +9290,38 @@ model ExpensePolicy {
 }
 
 model ExpenseClaim {
-  id                 String             @id @default(uuid())
-  businessId         String
-  business           Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  employeeId         String
-  employee           Employee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  categoryId         String?
-  category           ExpenseCategory?   @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  claimNumber        String? // human-friendly reference
-  amount             Decimal            @db.Decimal(15, 2)
-  currencyCode       String             @default("INR")
-  description        String?
-  receiptUrl         String?
-  expenseDate        DateTime?          @db.Date
-  status             ExpenseClaimStatus @default(DRAFT)
+  id                   String                     @id @default(uuid())
+  businessId           String
+  business             Business                   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId           String
+  employee             Employee                   @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  categoryId           String?
+  category             ExpenseCategory?           @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  claimNumber          String? // human-friendly reference
+  amount               Decimal                    @db.Decimal(15, 2)
+  currencyCode         String                     @default("INR")
+  description          String?
+  receiptUrl           String?
+  expenseDate          DateTime?                  @db.Date
+  status               ExpenseClaimStatus         @default(DRAFT)
   // Workflow stamps
-  submittedAt        DateTime?
-  decidedAt          DateTime?
-  decidedBy          String? // operator userId who approved/rejected
-  rejectReason       String?
-  reimbursedAt       DateTime?
-  reimbursedBy       String?
-  paymentRef         String? // bank/payout reference once reimbursed
-  payRunId           String? // when settled through payroll
+  submittedAt          DateTime?
+  decidedAt            DateTime?
+  decidedBy            String? // operator userId who approved/rejected
+  rejectReason         String?
+  reimbursedAt         DateTime?
+  reimbursedBy         String?
+  paymentRef           String? // bank/payout reference once reimbursed
+  payRunId             String? // when settled through payroll
   // Feature 11 — claims + travel + policy engine (additive, all nullable/defaulted).
-  claimType          ClaimType          @default(REIMBURSEMENT) // REIMBURSEMENT (standalone) | TRAVEL (bills vs a trip)
-  travelRequestId    String? // links bills to the travel ID (TRV-####)
-  travelRequest      TravelRequest?     @relation(fields: [travelRequestId], references: [id], onDelete: SetNull)
-  approvalRequestId  String? // the EXPENSE ApprovalRequest driving the chain
-  policyVerdict      PolicyVerdict      @default(NO_POLICY) // rollup of the worst line verdict
-  policyId           String? // active TravelPolicy snapshot ref applied at submit
-  policySnapshotJson Json? // immutable copy of the rules applied at submit (audit)
-  importJobId        String? // Feature 18 — set when this claim was bulk-imported (back-dated history); NULL for live claims
+  claimType            ClaimType                  @default(REIMBURSEMENT) // REIMBURSEMENT (standalone) | TRAVEL (bills vs a trip)
+  travelRequestId      String? // links bills to the travel ID (TRV-####)
+  travelRequest        TravelRequest?             @relation(fields: [travelRequestId], references: [id], onDelete: SetNull)
+  approvalRequestId    String? // the EXPENSE ApprovalRequest driving the chain
+  policyVerdict        PolicyVerdict              @default(NO_POLICY) // rollup of the worst line verdict
+  policyId             String? // active TravelPolicy snapshot ref applied at submit
+  policySnapshotJson   Json? // immutable copy of the rules applied at submit (audit)
+  importJobId          String? // Feature 18 — set when this claim was bulk-imported (back-dated history); NULL for live claims
   // Feature 26 — reimbursement paid via payroll (additive, all nullable/defaulted).
   // The per-claim channel choice: settle out-of-band (today's manual Finance
   // reimburse) or ride the next pay run's payslip as a non-taxable post-tax line.
@@ -9270,11 +9336,11 @@ model ExpenseClaim {
   // split — so this is sufficient (the net-floor guard blocks, never partial-pays).
   paidViaPayrollAmount Decimal?                   @db.Decimal(15, 2)
   // payRunId (above) doubles as the owning-run stamp for the payroll payout pass.
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
-  deletedAt          DateTime?
-  version            Int                @default(0)
-  lines              ExpenseClaimLine[]
+  createdAt            DateTime                   @default(now())
+  updatedAt            DateTime                   @updatedAt
+  deletedAt            DateTime?
+  version              Int                        @default(0)
+  lines                ExpenseClaimLine[]
 
   // claimNumber (EXP-####) is a human-facing reference used on payment refs / payslips,
   // so it MUST be unique per tenant — the DB backstop the legacy P2002 retry relied on
@@ -11439,6 +11505,7 @@ enum WorkflowModule {
   ASSET
   DOCUMENT_SIGN
   PAYRUN
+  COMP_OFF // Feature 30 — comp-off EARN approval (manager green-lights a credit)
 }
 
 model WorkflowStep {

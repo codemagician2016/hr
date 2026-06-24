@@ -197,6 +197,9 @@ async function applyForLeave(req, res, next) {
       overlapping: ctx.overlapping,
       asOf,
       isAdvance,
+      // Feature 30 — comp-off lots feed the COMP_OFF_WOULD_BE_EXPIRED gate (null for
+      // every other type, so the gate is inert).
+      compOffLots: ctx.compOffLots,
     });
     if (!verdict.ok) {
       const first = verdict.errors[0];
@@ -236,6 +239,27 @@ async function applyForLeave(req, res, next) {
           where: { id: balance.id, version: balance.version },
           data: { pendingApproval: { increment: units }, version: { increment: 1 } },
         });
+      }
+      // Feature 30 — a COMP_OFF avail MUST route through the approval engine so the
+      // comp-off seam (consumers.leave#onApprove) debits the FIFO lots on approval.
+      // Category-gated: zero behaviour change for every other ESS leave type (which
+      // keep their existing simplified self-apply path). Mirrors the operator
+      // createRequest engine.openRequest call shape exactly.
+      if (ctx.leaveType.category === 'COMP_OFF') {
+        const engine = require('../approvals/engine');
+        await engine.openRequest({
+          businessId,
+          module: 'LEAVE',
+          entityType: 'LeaveTransaction',
+          entityId: created.id,
+          requesterEmployeeId: created.employeeId,
+          payload: { leaveType: ctx.leaveType.code, leaveTypeId, startDate, endDate, days: units, reason: (req.body && req.body.reason) || null },
+          ctx: {
+            entityId: created.id, days: units,
+            departmentId: (ctx.employee && ctx.employee.departmentId) || null,
+            employeeLevel: (ctx.employee && ctx.employee.gradeId) || null,
+          },
+        }, tx);
       }
       return created;
     });

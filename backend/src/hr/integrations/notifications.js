@@ -60,6 +60,11 @@ const HR_EVENT_TEMPLATES = Object.freeze({
   'proof.deadline':    'HR_PROOF_DEADLINE',      // → employees with verified<declared at the deadline
   'proof.accepted':    'HR_PROOF_ACCEPTED',      // → employee when HR accepts a proof
   'proof.rejected':    'HR_PROOF_REJECTED',      // → employee when HR rejects a proof
+  // Feature 30 — Comp-off lifecycle fan-out.
+  'comp-off.earned':        'HR_COMP_OFF_EARNED',        // → employee when a credit becomes ACTIVE
+  'comp-off.earn-pending':  'HR_COMP_OFF_EARN_PENDING',  // → manager when a credit awaits approval
+  'comp-off.expiring-soon': 'HR_COMP_OFF_EXPIRING_SOON', // → employee N days before a credit lapses
+  'comp-off.lapsed':        'HR_COMP_OFF_LAPSED',        // → employee when a credit expires unused
 });
 
 // HR template registry. vertical: 'HR' so listTemplates({vertical:'HR'}) scopes
@@ -298,6 +303,43 @@ const HR_TEMPLATES = Object.freeze([
     vertical: 'HR',
     body: 'Hi {NAME}, your {CLAIM} proof for FY {FY} was not accepted: {REASON}. Please re-upload before the deadline so it counts toward your TDS. {LINK} — {BIZ}',
     variables: ['NAME', 'CLAIM', 'FY', 'REASON', 'LINK', 'BIZ'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  // ─── Feature 30 — Comp-off lifecycle ───
+  {
+    key: 'HR_COMP_OFF_EARNED',
+    displayName: 'Comp-off earned',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {NAME}, you earned {DAYS} comp-off day(s) for working {SOURCE} on {DATE}. Use them by {EXPIRES}. — {BIZ}',
+    variables: ['NAME', 'DAYS', 'SOURCE', 'DATE', 'EXPIRES', 'BIZ'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_COMP_OFF_EARN_PENDING',
+    displayName: 'Comp-off awaiting approval (manager)',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: '{BIZ}: {EMP} worked {SOURCE} on {DATE} and a {DAYS}-day comp-off credit awaits your approval. Review: {LINK}',
+    variables: ['BIZ', 'EMP', 'SOURCE', 'DATE', 'DAYS', 'LINK'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_COMP_OFF_EXPIRING_SOON',
+    displayName: 'Comp-off expiring soon',
+    category: 'SERVICE',
+    vertical: 'HR',
+    body: 'Hi {NAME}, {DAYS} comp-off day(s) expire on {EXPIRES} ({LEFT} day(s) left). Apply soon so you do not lose them. — {BIZ}',
+    variables: ['NAME', 'DAYS', 'EXPIRES', 'LEFT', 'BIZ'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_COMP_OFF_LAPSED',
+    displayName: 'Comp-off lapsed',
+    category: 'SERVICE',
+    vertical: 'HR',
+    body: 'Hi {NAME}, {DAYS} unused comp-off day(s) lapsed on {EXPIRES}. — {BIZ}',
+    variables: ['NAME', 'DAYS', 'EXPIRES', 'BIZ'],
     channels: { sms: false, whatsapp: true, email: true },
   },
 ]);
