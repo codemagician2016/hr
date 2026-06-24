@@ -45,6 +45,10 @@ const notifications = require('../integrations/notifications');
 
 const india = require('./compliance/india');
 const newzealand = require('./compliance/newzealand');
+// Feature 23 — the SAME effective-dated kind resolver the compliance generator
+// uses, so fileRun() and calendarRunner emit ONE row per period (no 24Q-vs-138
+// duplicate). DEFAULT_SUCCESSOR carries the Income Tax Act 2025 boundaries.
+const { resolveKindForPeriod, DEFAULT_SUCCESSOR } = require('./compliance/india.calendar');
 
 // Attendance freeze bridge (Feature 2). Opt-in from computeRun so existing
 // seed-driven pay runs (which pre-seed AttendancePayInput) are untouched.
@@ -2045,14 +2049,20 @@ async function disburseRun({ businessId, actorId, payRunId }) {
 /** Map a country to the StatutoryRemittance rows + due dates its filings write. */
 const FILING_PLAN = Object.freeze({
   IN: [
+    // Monthly TDS deposit (Challan ITNS-281). The compliance generator emits a
+    // monthly IN_TDS stub from the TAN obligation; without a matching fileRun
+    // writer the stub was never reconciled and went auto-OVERDUE every month
+    // (reminder spam). fileRun now stamps the run's TDS so the stub is reconciled
+    // (real amount + DUE) on the SAME (entity, IN_TDS, "YYYY-MM") natural key.
+    { kind: 'IN_TDS', fileKind: null, dueDom: 7, periodGranularity: 'month', tdsMarchSpecial: true },
     { kind: 'IN_PF', fileKind: 'ecr', dueDom: 15, periodGranularity: 'month' },
     { kind: 'IN_ESI', fileKind: 'esic', dueDom: 15, periodGranularity: 'month' },
-    { kind: 'IN_PT', fileKind: null, dueDom: 20, periodGranularity: 'month' },
+    { kind: 'IN_PT', fileKind: null, dueDom: 20, periodGranularity: 'month', perState: 'pt' },
     // Feature 21 — Labour Welfare Fund. NOT monthly-uniform: due-date/taxPeriod
     // depend on the state frequency (half-yearly/annual/monthly), resolved by the
     // 'lwf' branch below. Conditional: only fires (and is required to close) in the
     // state's prescribed deduction month(s); skipped when the run has 0 LWF incidence.
-    { kind: 'IN_LWF', fileKind: null, periodGranularity: 'lwf', conditional: true },
+    { kind: 'IN_LWF', fileKind: null, periodGranularity: 'lwf', conditional: true, perState: 'lwf' },
     { kind: 'IN_FORM24Q', fileKind: 'form24q', dueDom: 31, periodGranularity: 'quarter' },
   ],
   NZ: [
@@ -2097,8 +2107,14 @@ function lwfFrequencyForRun(payRun) {
 function remittanceDueDate(plan, payRun) {
   const end = new Date(isoDate(payRun.periodEnd) + 'T00:00:00Z');
   if (plan.periodGranularity === 'quarter') {
-    // 24Q: filed by end of the month following the quarter (simplify: +31 days).
-    return new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, plan.dueDom || 31));
+    // 24Q/138: filed `offset` months after the fiscal quarter's LAST month.
+    //   Q1-Q3 → +1 month (e.g. Q1 ends Jun → 31 Jul).
+    //   Q4    → +2 months (ends 31 Mar → 31 MAY, NOT 31 Apr). A +1 month with
+    //           dueDom 31 overflowed into 1-May → a premature OVERDUE and a
+    //           divergence from the compliance generator's 31-May. Match it here.
+    const isQ4 = end.getUTCMonth() + 1 === 3; // fiscal Q4 ends in March
+    const offsetMonths = isQ4 ? 2 : 1;
+    return new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + offsetMonths, plan.dueDom || 31));
   }
   if (plan.periodGranularity === 'lwf') {
     // LWF: half-yearly states remit by the 15th of the month after the half just
@@ -2115,6 +2131,12 @@ function remittanceDueDate(plan, payRun) {
     const d = new Date(isoDate(payRun.payDate) + 'T00:00:00Z');
     d.setUTCDate(d.getUTCDate() + plan.dueWorkingDays + 2); // pad weekends
     return d;
+  }
+  // Monthly TDS March-wage special: TDS for the MARCH wage month is due 30 Apr
+  // (one extra month vs the usual 7th), matching the generator's specialRules
+  // {marchDueDom:30}. Without it the March stub diverged + went early-OVERDUE.
+  if (plan.tdsMarchSpecial && end.getUTCMonth() + 1 === 3) {
+    return new Date(Date.UTC(end.getUTCFullYear(), 3 /* Apr, 0-based */, 30));
   }
   // Monthly: dueDom of the month FOLLOWING the period.
   return new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, plan.dueDom || 15));
@@ -2139,8 +2161,41 @@ function remittanceTaxPeriod(plan, payRun) {
 }
 
 /**
+ * remittanceKind — the EFFECTIVE remittance kind for the run's period, applying
+ * the Income Tax Act 2025 succession (IN_FORM24Q → IN_FORM138 for periods ENDING
+ * on/after 2026-04-01) via the SAME resolver the compliance generator uses. This
+ * is what keeps fileRun() and calendarRunner on ONE natural key — without it the
+ * generator wrote IN_FORM138 while fileRun wrote IN_FORM24Q for the same quarter,
+ * leaving a permanent duplicate + perpetual false-overdue. Kinds with no successor
+ * (PF/ESI/PT/LWF/TDS) pass through unchanged.
+ */
+function remittanceKind(plan, payRun) {
+  const succ = DEFAULT_SUCCESSOR[plan.kind];
+  if (!succ) return plan.kind;
+  const ob = { kind: plan.kind, specialRules: { successorKind: succ.kind, successorFrom: succ.from } };
+  return resolveKindForPeriod(ob, new Date(isoDate(payRun.periodEnd) + 'T00:00:00Z'));
+}
+
+/**
+ * remittanceStateCode — the per-state code a PT/LWF row is keyed on, so fileRun's
+ * row shares the natural key with the generator's per-state stub (no duplicate).
+ * PT keys on the run/entity PT state; LWF on the run's LWF state. Entity-wide
+ * kinds (PF/ESI/TDS/24Q) have no stateCode.
+ */
+function remittanceStateCode(plan, payRun) {
+  if (plan.perState === 'pt') {
+    return payRun.ptStateCode || (payRun.entity && payRun.entity.stateCode) || null;
+  }
+  if (plan.perState === 'lwf') {
+    return payRun.lwfStateCode || (payRun.entity && payRun.entity.stateCode) || null;
+  }
+  return null;
+}
+
+/**
  * fileRun — PAID→FILED; write a StatutoryRemittance row per country filing
- * obligation (idempotent on (entityId, kind, taxPeriod)). Uses persistTransition.
+ * obligation, idempotent on the natural key (businessId, entityId, kind,
+ * taxPeriod, stateCode). Uses persistTransition.
  */
 async function fileRun({ businessId, actorId, payRunId }) {
   const payRun = await loadRun(businessId, payRunId, true);
@@ -2157,7 +2212,9 @@ async function fileRun({ businessId, actorId, payRunId }) {
       case 'IN_ESI': return sumDec('esiEmployee') + sumDec('esiEmployer');
       case 'IN_PT': return sumDec('pt');
       case 'IN_LWF': return sumDec('lwfEmployee') + sumDec('lwfEmployer');
+      case 'IN_TDS': return sumDec('tds');
       case 'IN_FORM24Q': return sumDec('tds');
+      case 'IN_FORM138': return sumDec('tds'); // 24Q successor (same TDS-salary base)
       case 'NZ_PAYE': return sumDec('paye') + sumDec('esct');
       case 'NZ_PAYDAY_FILING': return sumDec('paye') + sumDec('kiwiSaverEmployee') + sumDec('kiwiSaverEmployer');
       default: return 0;
@@ -2176,23 +2233,28 @@ async function fileRun({ businessId, actorId, payRunId }) {
       // written in a deduction month with real incidence. Don't pollute the
       // compliance calendar (or trip closeRun's guard) with a phantom ₹0 LWF row.
       if (p.conditional && amountMinor === 0) continue;
+      // Resolve the EFFECTIVE kind (24Q→138 succession) + per-state code so the row
+      // shares the EXACT natural key the compliance generator writes — one row per
+      // (entity, kind, taxPeriod, stateCode), never a duplicate vs the calendar.
+      const kind = remittanceKind(p, payRun);
       const taxPeriod = remittanceTaxPeriod(p, payRun);
+      const stateCode = remittanceStateCode(p, payRun);
       const existing = await tx.statutoryRemittance.findFirst({
-        where: { businessId, entityId: payRun.entityId, kind: p.kind, taxPeriod },
+        where: { businessId, entityId: payRun.entityId, kind, taxPeriod, stateCode },
       });
       const fileUrl = p.fileKind ? `/api/hr/payroll/runs/${payRunId}/files/${p.fileKind}` : null;
       const data = {
         businessId, entityId: payRun.entityId, payRunId,
-        kind: p.kind, taxPeriod, amount: toDec(amountMinor), currencyCode: payRun.currencyCode,
+        kind, taxPeriod, stateCode, amount: toDec(amountMinor), currencyCode: payRun.currencyCode,
         dueDate: remittanceDueDate(p, payRun), status: 'DUE', fileUrl,
         meta: { fileKind: p.fileKind, granularity: p.periodGranularity, runCode: payRun.code },
       };
       if (existing) {
         await tx.statutoryRemittance.update({ where: { id: existing.id }, data: { ...data, version: { increment: 1 } } });
-        written.push({ kind: p.kind, taxPeriod, id: existing.id });
+        written.push({ kind, taxPeriod, id: existing.id });
       } else {
         const row = await tx.statutoryRemittance.create({ data });
-        written.push({ kind: p.kind, taxPeriod, id: row.id });
+        written.push({ kind, taxPeriod, id: row.id });
       }
     }
   });
@@ -2236,9 +2298,12 @@ async function closeRun({ businessId, actorId, payRunId }) {
   };
   const missing = [];
   for (const p of plan) {
-    if (haveKinds.has(p.kind)) continue;
+    // fileRun writes the EFFECTIVE kind (24Q→138 succession) — check for THAT, not
+    // the static plan family, or a post-2026 run would falsely look "missing 24Q".
+    const effKind = remittanceKind(p, payRun);
+    if (haveKinds.has(effKind)) continue;
     if (p.conditional && (await condIncidence(p.kind)) === 0) continue; // no incidence → not required
-    missing.push(p.kind);
+    missing.push(effKind);
   }
   if (missing.length) {
     throw badRequest('CLOSE_BLOCKED', `Cannot close — missing remittances: ${missing.join(', ')}. File the run first.`);
@@ -2535,7 +2600,7 @@ module.exports = {
   _internal: {
     taxYearFor, buildFilingAggregate, statutoryRollups, buildPayslipSnapshot,
     resolveCurrentCompensation, resolveBalancingTarget, varianceLineFromRow,
-    totalsHashOf, remittanceDueDate, remittanceTaxPeriod, FILING_PLAN,
+    totalsHashOf, remittanceDueDate, remittanceTaxPeriod, remittanceKind, remittanceStateCode, FILING_PLAN,
     resolveFourEyesPolicy, resolveFilingPlan,
     buildLopProvenance, // F16 — payslip LOP provenance (LOW#1 phantom-line guard)
   },
