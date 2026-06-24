@@ -1034,8 +1034,171 @@ async function revokeLetter(client, args = {}) {
   return { id: updated.id, status: updated.status, referenceNo: updated.referenceNo, voidedAt: updated.voidedAt };
 }
 
+// ── issueRenderedDocument ─────────────────────────────────────────────────────
+/**
+ * issueRenderedDocument(client, args) — issue a CALLER-RENDERED PDF (Form 16, an
+ * FnF-statement bundle, a payslip-pack…) through the SAME audited register path
+ * as issueLetter, WITHOUT the merge-field renderer. Factored out of issueLetter's
+ * §4 ISSUE tail so a non-template PDF rides one path: allocateCode ref-no → sha256
+ * → storePdf → IssuedLetter ISSUED + snapshot → EmployeeDocument EMPLOYEE_VISIBLE
+ * → optional built-in e-sign envelope (when sign + a signer set) → audit.
+ *
+ * The caller owns rendering (the bytes ARE the certificate); we own provenance.
+ * The register / scope / download / supersede-chain / e-sign all inherit for free.
+ *
+ * @param {Object} client  prisma OR an interactive tx (the caller may pass its own).
+ * @param {Object} args
+ * @param {string}  args.businessId
+ * @param {string}  [args.entityId]            entity whose LETTER sequence + ref-segment apply
+ * @param {string}  args.actorUserId
+ * @param {string}  args.employeeId            subject employee (caller already F1-scoped it)
+ * @param {Buffer}  args.pdf                   the rendered PDF bytes (required)
+ * @param {string}  args.subject               document subject / EmployeeDocument name
+ * @param {string}  [args.category='CUSTOM']   LetterCategory for the IssuedLetter row
+ * @param {string}  [args.docCategory='FORM16'] EmployeeDocument.category
+ * @param {string}  [args.refNoPrefix='F16']   ref-no prefix (allocateCode)
+ * @param {string}  [args.templateId]          link the IssuedLetter to a template (optional)
+ * @param {boolean} [args.sign=false]          open a built-in e-sign envelope
+ * @param {Array}   [args.signers]             signer set (defaults to a single EMPLOYER signatory)
+ * @param {Object}  [args.brand]               { signatoryName, signatoryDesignation } for default signer
+ * @param {Object}  [args.business]            { email } for the default signer email
+ * @param {Object}  [args.mergeDataJson]       audit snapshot of what was certified
+ * @returns { issuedLetterId, referenceNo, fileUrl, fileHash, status,
+ *            employeeDocumentId, signatureEnvelopeId, sizeBytes }
+ */
+async function issueRenderedDocument(client, args = {}) {
+  const {
+    businessId, entityId = null, actorUserId, employeeId = null, pdf,
+    subject, category = 'CUSTOM', docCategory = 'FORM16', refNoPrefix = 'F16',
+    templateId = null, sign = false, signers, brand = null, business = null,
+    mergeDataJson = {}, periodKey: periodKeyArg = null,
+  } = args;
+
+  const db = client || prismaDefault;
+  if (!businessId) throw new ServiceError('businessId is required', 400);
+  if (!Buffer.isBuffer(pdf) || !pdf.length) throw new ServiceError('A rendered PDF buffer is required', 400);
+
+  const prefix = String(refNoPrefix || 'F16').replace(/\/+$/, '');
+  // Resolve the entity for the ref-segment + tax-year period key.
+  let entity = null;
+  if (entityId) {
+    entity = await db.entity.findFirst({ where: { id: entityId, businessId, deletedAt: null } });
+  }
+  const now = new Date();
+  const periodKey = periodKeyArg || taxYearFor(now, entity ? (entity.taxYearStartMonth || 4) : 4);
+  const refEntitySeg = entity ? entityRefSegment(entity) : (entityId ? entityRefSegment({ id: entityId }) : null);
+  const status = sign ? 'PENDING_SIGNATURE' : 'ISSUED';
+
+  const result = await inTx(db, async (tx) => {
+    // Ref-no: signed docs DEFER the human ref-no to COMPLETED (no seq burned),
+    // exactly like issueLetter's requiresSignature path.
+    let referenceNo = null;
+    let seqValue = null;
+    if (!sign) {
+      const code = await allocateCode(tx, { businessId, entityId, scope: 'LETTER', prefix, padding: 4, periodKey });
+      const tail = String(code).replace(/^.*?(\d+)$/, '$1');
+      seqValue = parseInt(tail, 10);
+      referenceNo = refEntitySeg
+        ? `${prefix}/${refEntitySeg}/${periodKey}/${tail}`
+        : `${prefix}/${periodKey}/${tail}`;
+    }
+
+    const fileHash = sha256(pdf);
+    const fileUrl = await storePdf({ pdf, businessId });
+
+    let employeeDocumentId = null;
+    if (employeeId) {
+      const doc = await tx.employeeDocument.create({
+        data: {
+          businessId,
+          employeeId,
+          category: docCategory,
+          name: subject || 'Document',
+          fileUrl,
+          fileHash,
+          mimeType: 'application/pdf',
+          sizeBytes: pdf.length,
+          visibility: 'EMPLOYEE_VISIBLE',
+          signatureStatus: sign ? 'PENDING' : 'NOT_REQUIRED',
+        },
+        select: { id: true },
+      });
+      employeeDocumentId = doc.id;
+    }
+
+    const letter = await tx.issuedLetter.create({
+      data: {
+        businessId,
+        entityId: entityId || null,
+        referenceNo: referenceNo || draftRef(),
+        category,
+        employeeId: employeeId || null,
+        templateId: templateId || null,
+        subject: subject || null,
+        renderedBody: subject || 'Rendered document',
+        mergeDataJson: mergeDataJson || {},
+        fileUrl,
+        fileHash,
+        mimeType: 'application/pdf',
+        sizeBytes: pdf.length,
+        status,
+        employeeDocumentId,
+        issuedBy: actorUserId || 'system',
+        issuedAt: sign ? null : now,
+        seqScope: 'LETTER',
+        seqPeriodKey: periodKey,
+        seqValue,
+      },
+    });
+
+    // Optional built-in e-sign envelope (the same provider path issueLetter uses).
+    let signatureEnvelopeId = null;
+    if (sign && employeeDocumentId) {
+      const provider = esign.getProvider('BUILTIN');
+      const signatoryName = (brand && brand.signatoryName) || 'Authorised Signatory';
+      const signatoryEmail = (business && business.email) || 'hr@example.com';
+      const envSigners = Array.isArray(signers) && signers.length
+        ? signers
+        : [{ signerOrder: 1, role: 'EMPLOYER', name: signatoryName, email: signatoryEmail }];
+      const out = await provider.createEnvelope({
+        businessId,
+        subject: subject || 'Document for signature',
+        employeeDocumentId,
+        signers: envSigners,
+        sequential: true,
+      }, tx);
+      signatureEnvelopeId = out.envelope.id;
+      await tx.issuedLetter.update({ where: { id: letter.id }, data: { signatureEnvelopeId } });
+      await tx.signatureEnvelope.update({ where: { id: signatureEnvelopeId }, data: { issuedLetterId: letter.id } });
+    }
+
+    return {
+      issuedLetterId: letter.id,
+      referenceNo,
+      fileUrl,
+      fileHash,
+      status,
+      employeeDocumentId,
+      signatureEnvelopeId,
+      sizeBytes: pdf.length,
+    };
+  });
+
+  await writeAudit({
+    businessId,
+    actorId: actorUserId,
+    action: sign ? 'document.issue.pending_signature' : 'document.issue',
+    entityType: 'IssuedLetter',
+    entityId: result.issuedLetterId,
+    meta: { referenceNo: result.referenceNo, category, docCategory, employeeId, status: result.status, fileHash: result.fileHash },
+  });
+
+  return result;
+}
+
 module.exports = {
   issueLetter,
+  issueRenderedDocument,
   reissueLetter,
   revokeLetter,
   ServiceError,

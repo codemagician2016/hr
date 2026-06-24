@@ -8,12 +8,32 @@
 // caller's own rows. Until the /me/ route is deployed in a given environment a
 // 404 degrades to a friendly empty state so the page stays branded/shippable.
 
+import { useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { ErrorBanner, Empty, Spinner, Centered } from '@hr/ui';
 import { useApi } from '@/lib/useApi';
 import { formatDate } from '@/lib/format';
 
 const DOCS_PATH = '/api/hr/me/documents';
+
+// Friendly labels for the raw EmployeeDocument.category enum (Feature 24 adds the
+// "Form 16 · Tax" label so the issued TDS certificate reads cleanly in the vault).
+const CATEGORY_LABEL = {
+  FORM16: 'Form 16 · Tax',
+  TAX_DECLARATION: 'Tax declaration',
+  PAYSLIP_COPY: 'Payslip',
+  OFFER_LETTER: 'Offer letter',
+  CONTRACT: 'Contract',
+  EXPERIENCE: 'Experience letter',
+  BANK_PROOF: 'Bank proof',
+  ID_PROOF: 'ID proof',
+  PAN: 'PAN', AADHAAR: 'Aadhaar', PASSPORT: 'Passport',
+};
+function categoryLabel(d) {
+  if (d.documentType) return d.documentType;
+  const c = d.category;
+  return (c && CATEGORY_LABEL[c]) || c || null;
+}
 
 function expiryTone(doc) {
   const exp = doc.expiresAt || doc.expiryDate || doc.validTill;
@@ -29,16 +49,42 @@ function DocumentsInner() {
   const { data, loading, error } = useApi(DOCS_PATH, {
     select: (b) => (Array.isArray(b) ? b : b?.items || b?.documents || []),
   });
-  const docs = data || [];
+  const allDocs = data || [];
+  const [filter, setFilter] = useState('ALL');
 
   if (loading) return <Centered><Spinner /></Centered>;
   if (error && error.status !== 404) {
     return <ErrorBanner message={error.message || 'Could not load documents.'} />;
   }
 
+  // Has the employee any tax/Form-16 documents? Surface a quick filter when so.
+  const hasTax = allDocs.some((d) => d.category === 'FORM16' || d.category === 'TAX_DECLARATION');
+  const docs = filter === 'TAX'
+    ? allDocs.filter((d) => d.category === 'FORM16' || d.category === 'TAX_DECLARATION')
+    : allDocs;
+
   return (
     <div className="max-w-3xl space-y-4">
-      <h1 className="text-2xl font-semibold" style={{ color: 'var(--theme-text)' }}>Documents</h1>
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold" style={{ color: 'var(--theme-text)' }}>Documents</h1>
+        {hasTax && (
+          <div className="flex gap-1 text-xs">
+            {[{ k: 'ALL', l: 'All' }, { k: 'TAX', l: 'Form 16 / Tax' }].map((t) => (
+              <button
+                key={t.k}
+                type="button"
+                onClick={() => setFilter(t.k)}
+                className="rounded-full border px-3 py-1 font-medium"
+                style={filter === t.k
+                  ? { borderColor: 'var(--theme-primary)', color: 'var(--theme-primary)' }
+                  : { borderColor: 'var(--theme-border)', color: 'var(--theme-muted)' }}
+              >
+                {t.l}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       {docs.length === 0 ? (
         <Empty text="No documents available." />
@@ -55,9 +101,9 @@ function DocumentsInner() {
               >
                 <div className="min-w-0">
                   <div className="truncate text-sm font-medium" style={{ color: 'var(--theme-text)' }}>{title}</div>
-                  {(d.documentType || d.category) && (
+                  {categoryLabel(d) && (
                     <div className="text-xs" style={{ color: 'var(--theme-muted)' }}>
-                      {d.documentType || d.category}
+                      {categoryLabel(d)}
                     </div>
                   )}
                   {tone && (
