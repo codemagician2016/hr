@@ -454,6 +454,7 @@ model Business {
   hrBands                  Band[]
   // People
   employees                Employee[]
+  employeeInvites          EmployeeInvite[]
   employmentRecords        EmploymentRecord[]
   bankAccounts             BankAccount[]
   emergencyContacts        EmergencyContact[]
@@ -6721,6 +6722,9 @@ model Employee {
   // are keyed by employee (the ESS session resolves the subject employee), so the
   // unread badge + per-row read state survive a userId remap.
   announcementReads      AnnouncementRead[]
+  // Portal-invitation flow — the welcome/set-password tokens minted for this
+  // employee's ESS (Customer) login. Single-use, expiring, hashed-at-rest.
+  portalInvites          EmployeeInvite[]
 
   @@unique([businessId, code])
   // FLAG (Feature 17 — review HIGH fix): a PARTIAL unique index backs the
@@ -6763,6 +6767,43 @@ enum EmployeeStatus {
   SUSPENDED // disciplinary; payroll may be held
   TERMINATED // separated; FNF pending or done
   RETIRED
+}
+
+/// Employee portal-invitation token. provisionEmployee mints the ESS Customer
+/// login with a RANDOM temp password; THIS is the welcome/set-password loop that
+/// lets the new hire actually claim it. Single-use, expiring, and tenant-scoped.
+/// SECURITY: we store only a SHA-256 HASH of the raw token (sent in the email/
+/// WhatsApp link) — a DB leak never yields a usable token. Look-ups go by the
+/// hash (the raw token is never persisted). Re-invite invalidates the prior token
+/// by superseding its row (status REVOKED) and minting a fresh one.
+model EmployeeInvite {
+  id              String               @id @default(uuid())
+  businessId      String
+  business        Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId      String
+  employee        Employee             @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  // The login identity the token claims — always the WORK email (never personal).
+  // Stored alongside so accept-invite can verify the Customer match without a join.
+  email           String
+  // SHA-256 hex digest of the raw token. @unique so a presented token resolves to
+  // exactly one row (and a collision is impossible to use across tenants).
+  tokenHash       String               @unique
+  expiresAt       DateTime
+  usedAt          DateTime? // stamped when the new hire claims the password
+  status          EmployeeInviteStatus @default(PENDING)
+  // Audit — the operator who sent it (User.id). Nullable for system-issued.
+  createdByUserId String?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  @@index([businessId, employeeId])
+  @@index([businessId, status])
+}
+
+enum EmployeeInviteStatus {
+  PENDING // sent, not yet claimed, not expired
+  ACCEPTED // claimed — the new hire set their password
+  REVOKED // superseded by a re-invite (the old token is dead)
 }
 
 /// Append-only employment history. Rehire/transfer creates a new record.

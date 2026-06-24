@@ -484,6 +484,153 @@ function ManagerSection({ employee, onSaved }) {
   );
 }
 
+// ── Feature 4 — Portal access section. Shows the employee's ESS portal state
+// (Not invited / Invited / Active / Invite expired / revoked) + their login
+// (work email) + invite / resend / reset controls. The copyable link is shown
+// after an action so HR can share it even when the email/WhatsApp send failed. ──
+const PORTAL_META = {
+  ACTIVE: { label: 'Active', cls: 'bg-green-50 text-green-700 border-green-200', hint: 'This employee has set a password and can sign in to their portal.' },
+  INVITED: { label: 'Invited', cls: 'bg-blue-50 text-blue-700 border-blue-200', hint: 'A welcome link has been sent. Awaiting the employee to set their password.' },
+  EXPIRED: { label: 'Invite expired', cls: 'bg-amber-50 text-amber-700 border-amber-200', hint: 'The last invite link expired before it was used. Resend a fresh one.' },
+  REVOKED: { label: 'Invite revoked', cls: 'bg-gray-100 text-gray-600 border-gray-200', hint: 'The last invite was superseded. Send a new one if needed.' },
+  NOT_INVITED: { label: 'Not invited', cls: 'bg-gray-50 text-gray-500 border-gray-200', hint: 'No portal welcome link has been sent yet.' },
+};
+
+function PortalAccessSection({ employee }) {
+  const [state, setState] = useState(employee.portalStatus || (employee.portal && employee.portal.state) || 'NOT_INVITED');
+  const [loginEmail, setLoginEmail] = useState((employee.portal && employee.portal.loginEmail) || employee.workEmail || null);
+  const [invite, setInvite] = useState((employee.portal && employee.portal.invite) || null);
+  const [link, setLink] = useState(null);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
+  const [note, setNote] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+
+  const meta = PORTAL_META[String(state).toUpperCase()] || PORTAL_META.NOT_INVITED;
+  const isActive = state === 'ACTIVE';
+  const hasEmail = !!employee.workEmail;
+  const actionLabel = state === 'NOT_INVITED' ? 'Send invite' : isActive ? 'Reset password' : 'Resend invite';
+
+  async function copy() {
+    if (!link) return;
+    try {
+      if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(link);
+      else { const ta = document.createElement('textarea'); ta.value = link; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); }
+      setCopied(true); setTimeout(() => setCopied(false), 1800);
+    } catch { /* leave the field for manual copy */ }
+  }
+
+  async function send() {
+    setSending(true); setError(''); setNote('');
+    try {
+      const res = await post(`/api/hr/employees/${employee.id}/invite`, isActive ? { reset: true } : {});
+      setState(res.portalStatus || 'INVITED');
+      if (res.loginEmail) setLoginEmail(res.loginEmail);
+      if (res.invite) setInvite(res.invite);
+      if (res.link) setLink(res.link);
+      setNote(res.notified && res.notified.ok
+        ? `Invite sent to ${res.loginEmail || employee.workEmail}.`
+        : `Invite created. We couldn't send the email/WhatsApp — copy the link below and share it.`);
+      setConfirm(false);
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Could not send the invite.');
+      setConfirm(false);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-5">
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="flex items-center text-sm font-semibold text-gray-900">
+          Portal access
+        </h2>
+        {hasEmail && (
+          <button
+            type="button"
+            onClick={() => setConfirm(true)}
+            className="text-sm font-medium text-[color:var(--theme-primary)] hover:underline"
+          >
+            {actionLabel}
+          </button>
+        )}
+      </div>
+
+      <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+        <div>
+          <dt className="text-xs uppercase tracking-wide text-gray-500">Status</dt>
+          <dd className="mt-0.5">
+            <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${meta.cls}`}>
+              {meta.label}
+            </span>
+          </dd>
+        </div>
+        <Field label="Login email" value={loginEmail || <span className="text-gray-400">No work email</span>} />
+        <Field
+          label="Invite expires"
+          value={invite && invite.expiresAt && state === 'INVITED' ? formatAdminDate(invite.expiresAt) : null}
+        />
+      </dl>
+
+      <p className="mt-3 text-xs text-gray-500">{meta.hint}</p>
+      {!hasEmail && (
+        <p className="mt-2 text-xs text-amber-700">Add a work email (Edit profile) before inviting this person to the portal.</p>
+      )}
+
+      {error && <div className="mt-3"><ErrorBanner message={error} /></div>}
+      {note && <p className="mt-3 text-sm text-emerald-700">{note}</p>}
+
+      {link && (
+        <div className="mt-3">
+          <label className="mb-1 block text-xs font-medium text-gray-500">Set-password link</label>
+          <div className="flex items-center gap-2">
+            <input
+              readOnly
+              value={link}
+              onFocus={(e) => e.target.select()}
+              className="flex-1 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs text-gray-600"
+            />
+            <button
+              type="button"
+              onClick={copy}
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+            >
+              {copied ? 'Copied!' : 'Copy'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {confirm && (
+        <Modal title={isActive ? 'Reset portal password' : actionLabel} onClose={() => (sending ? null : setConfirm(false))}>
+          <p className="text-sm text-gray-600">
+            {isActive ? (
+              <>Send a fresh set-password link to <strong>{employee.workEmail}</strong>. Their current password stays valid until they set a new one; any pending invite is invalidated.</>
+            ) : (
+              <>Send a welcome email + WhatsApp to <strong>{employee.workEmail}</strong> with a link to set their portal password. Their login is their work email. Resending invalidates any earlier link.</>
+            )}
+          </p>
+          <ModalActions>
+            <button
+              type="button"
+              onClick={() => setConfirm(false)}
+              disabled={sending}
+              className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <PrimaryButton onClick={send} loading={sending}>
+              {isActive ? 'Send reset link' : 'Send invite'}
+            </PrimaryButton>
+          </ModalActions>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 export default function EmployeeDetailPage() {
   const { id } = useParams();
   const router = useRouter();
@@ -621,6 +768,9 @@ export default function EmployeeDetailPage() {
       </Section>
 
       <ManagerSection employee={emp} onSaved={(u) => applyUpdate(u)} />
+
+      {/* Feature 4 — portal access (invite / resend / reset + status). */}
+      <PortalAccessSection employee={emp} />
 
       {/* Feature 13 — the rich, sectioned profile (lazy + scoped). */}
       <RichProfileSection employeeId={emp.id} />

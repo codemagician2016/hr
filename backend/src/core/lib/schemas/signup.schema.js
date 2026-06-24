@@ -36,4 +36,14 @@ const resetPasswordSchema = z.object({
   password: passwordSchema,
 });
 
-module.exports = { signupSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema };
+// POST /api/customer/accept-invite — Feature 4 employee portal-invite claim.
+// PUBLIC + token-driven: NO email (it comes from the invite row, not the client,
+// so there's no enumeration surface). Password strength is re-checked in the
+// controller via validatePassword so its precise message reaches the user; here
+// we only assert the shape (a non-empty token + a present password).
+const acceptInviteSchema = z.object({
+  token: z.string().trim().min(1, 'This link is invalid or has expired.').max(512),
+  password: z.string().min(1, 'Password is required'),
+});
+
+module.exports = { signupSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema, acceptInviteSchema };

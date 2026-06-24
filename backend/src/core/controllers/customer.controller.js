@@ -411,6 +411,54 @@ async function login(req, res) {
   });
 }
 
+// POST /api/customer/accept-invite   { token, password }
+// PUBLIC (unauthenticated) — the Feature 4 employee portal-invitation claim path.
+// The new hire follows the welcome link (the tenant /set-password page carrying a
+// single-use token), picks a password, and POSTs here. The TOKEN is the only
+// context — the tenant + employee + login email all come FROM the invite row, so
+// no X-Tenant-Host is needed and a token can only ever touch the tenant that
+// minted it.
+//
+// SECURITY:
+//   • Generic errors only — a wrong / expired / used / unknown token all yield the
+//     SAME 400 message ('This link is invalid or has expired'), so a token can't
+//     be probed for validity and there's no account-existence oracle.
+//   • Single-use + expiry + hash-match are enforced in portalInvite.acceptInvite()
+//     inside a transaction (a double-submit loses the race).
+//   • Password strength is the SAME rule the rest of customer auth uses
+//     (validatePassword); we hash with bcrypt 12 to match login/reset.
+//   • On success we auto-issue the customer session cookie (so the set-password
+//     page lands the new hire straight in their portal).
+async function acceptInvite(req, res) {
+  const { token, password } = req.body || {};
+
+  // Validate the password BEFORE touching the token so a weak password is a clean
+  // 400 (the token stays usable for a retry). Reuse the shared strength rule.
+  const pwErr = validatePassword(password);
+  if (pwErr) return res.status(400).json({ message: pwErr });
+
+  if (!token || typeof token !== 'string') {
+    return res.status(400).json({ message: 'This link is invalid or has expired. Please ask your HR team for a new invite.' });
+  }
+
+  const { acceptInvite: acceptInviteService } = require('../../hr/lifecycle/portalInvite');
+  const hashed = await bcrypt.hash(password, 12);
+  const result = await acceptInviteService({ token, passwordHash: hashed });
+  if (!result.ok) {
+    // GENERIC — never distinguish wrong / expired / used / revoked / anonymised.
+    return res.status(400).json({ message: 'This link is invalid or has expired. Please ask your HR team for a new invite.' });
+  }
+
+  // Auto-login: issue the customer session so the portal opens immediately.
+  const { customer, businessId } = result;
+  setCustomerTokenCookie(res, { id: customer.id, businessId }, req);
+  return res.json({
+    ok: true,
+    customer: { id: customer.id, email: customer.email, businessId },
+    message: 'Your password is set. Welcome to your employee portal!',
+  });
+}
+
 // GET /api/customer/me
 async function me(req, res) {
   if (!req.customer) {
@@ -627,4 +675,6 @@ function logout(req, res) {
 module.exports = {
   register, login, me, logout, resolveBusinessId,
   updateMe, changePassword, deleteAccount, undoDeleteAccount, verifyOtp, resendOtp, forgotPassword, resetPassword,
+  // Feature 4 — employee portal-invitation claim (public, token-driven).
+  acceptInvite,
 };

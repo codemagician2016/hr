@@ -7,6 +7,7 @@ const prisma = require('../../core/lib/prisma');
 const { writeAudit } = require('../../core/lib/audit');
 const { scopeWhere } = require('../lib/scopeResolver');
 const { allocateCode, SCOPE_DEFAULTS } = require('../lifecycle/lib/codes');
+const portalInvite = require('../lifecycle/portalInvite');
 
 const EMP_SCOPE = 'EMPLOYEE';
 const EMP_DEFAULTS = SCOPE_DEFAULTS[EMP_SCOPE] || { prefix: 'EMP-', padding: 6 };
@@ -113,7 +114,17 @@ async function list(req, res, next) {
       prisma.employee.findMany({ where, select: LIST_SELECT, orderBy: { createdAt: 'desc' }, skip, take }),
       prisma.employee.count({ where }),
     ]);
-    const items = rows.map(shapeListRow);
+    // Feature 4 — surface each employee's portal-access state (NOT_INVITED /
+    // INVITED / ACTIVE / EXPIRED / REVOKED) in two batched reads so the directory
+    // can render a "Portal" pill + drive the invite/resend actions per row.
+    const portalMap = await portalInvite
+      .portalStatusForEmployees(businessId, rows.map((r) => ({ id: r.id, workEmail: r.workEmail })))
+      .catch(() => new Map());
+    const items = rows.map((emp) => {
+      const shaped = shapeListRow(emp);
+      const portal = portalMap.get(emp.id) || { state: 'NOT_INVITED', invite: null, loginEmail: emp.workEmail || null };
+      return { ...shaped, portalStatus: portal.state, portal };
+    });
     res.json({ items, total, page: Math.max(parseInt(page, 10) || 1, 1), pageSize: take });
   } catch (e) { next(e); }
 }
@@ -175,7 +186,14 @@ async function get(req, res, next) {
         }
       : null;
 
-    res.json({ ...emp, employment });
+    // Feature 4 — portal-access state for the detail header (status pill + login
+    // email + invite controls). Best-effort; a lookup failure degrades to
+    // NOT_INVITED rather than failing the whole profile read.
+    const portal = await portalInvite
+      .portalStatusForEmployee(businessId, { id: emp.id, workEmail: emp.workEmail })
+      .catch(() => ({ state: 'NOT_INVITED', invite: null, loginEmail: emp.workEmail || null }));
+
+    res.json({ ...emp, employment, portalStatus: portal.state, portal });
   } catch (e) { next(e); }
 }
 
@@ -546,4 +564,113 @@ async function terminate(req, res, next) {
   } catch (e) { next(e); }
 }
 
-module.exports = { list, get, create, update, terminate, settleEmployeeTermination };
+// ── Feature 4 — Employee portal-invitation controllers ─────────────────────
+// All gated on canManageEmployees + the per-row employee scope (the route wires
+// withEmployeeScope so a manager can only invite within their sub-tree). The
+// heavy lifting (token mint/hash, revoke-old, fan-out, no-clobber) lives in the
+// portalInvite service so it can be reused by bulk + the public accept path.
+
+// Map a service reason → an HTTP status + message (kept here so the wire contract
+// is in one place). Note the SERVICE never reveals token internals.
+function inviteReasonResponse(res, reason, extra = {}) {
+  switch (reason) {
+    case 'EMPLOYEE_NOT_FOUND':
+      return res.status(404).json({ message: 'Employee not found' });
+    case 'NO_WORK_EMAIL':
+      return res.status(422).json({ message: 'This employee has no work email — add one before inviting them to the portal.' });
+    case 'EMPLOYEE_SEPARATED':
+      return res.status(409).json({ message: 'This employee has been separated and cannot be invited to the portal.' });
+    case 'ALREADY_ACTIVE':
+      return res.status(409).json({ message: 'This employee has already activated their portal login. Use "Reset" to re-send a set-password link.', ...extra });
+    default:
+      return res.status(400).json({ message: 'Could not send the invite. Please try again.' });
+  }
+}
+
+// POST /api/hr/employees/:id/invite   { reset?: boolean }
+// Sends (or re-sends, invalidating the prior token) a portal invite. Returns the
+// copyable link so the admin can share it directly even if the fan-out is best
+// -effort. `reset: true` re-mints for an already-active login (explicit reset).
+async function invite(req, res, next) {
+  try {
+    const { businessId, id: actorUserId } = req.user;
+    const allowReset = req.body && (req.body.reset === true || req.body.allowReset === true);
+    const out = await portalInvite.createInvite({
+      businessId,
+      employeeId: req.params.id,
+      createdByUserId: actorUserId || null,
+      allowReset,
+    });
+    if (!out.ok) return inviteReasonResponse(res, out.reason, out.alreadyActive ? { alreadyActive: true, loginEmail: out.loginEmail } : {});
+
+    await writeAudit({
+      businessId,
+      actorId: actorUserId,
+      action: 'employee.portal.invite',
+      entityType: 'Employee',
+      entityId: req.params.id,
+      meta: { inviteId: out.invite && out.invite.id, reset: !!allowReset, notified: out.notified && out.notified.ok },
+    }).catch(() => {});
+
+    res.json({
+      ok: true,
+      employeeId: req.params.id,
+      loginEmail: out.loginEmail,
+      link: out.link,
+      invite: out.invite,
+      notified: out.notified,
+      portalStatus: 'INVITED',
+    });
+  } catch (e) { next(e); }
+}
+
+// POST /api/hr/employees/invite/bulk   { employeeIds: [..], reset?: boolean }
+// Invites many at once. Each row is independent — one failure (no email,
+// separated, already-active) never aborts the batch; every row reports its own
+// outcome + link. Capped to a sane page size.
+async function inviteBulk(req, res, next) {
+  try {
+    const { businessId, id: actorUserId } = req.user;
+    const ids = Array.isArray(req.body && req.body.employeeIds) ? req.body.employeeIds : [];
+    const allowReset = req.body && (req.body.reset === true || req.body.allowReset === true);
+    if (ids.length === 0) return res.status(400).json({ message: 'employeeIds is required' });
+    if (ids.length > 200) return res.status(400).json({ message: 'Too many employees in one request (max 200).' });
+
+    // Scope-enforce: only invite employees the actor can manage. req.scope is set
+    // by withEmployeeScope on the route; ALL → no filter, IDS → intersect.
+    const scoped = req.scope && req.scope.kind === 'IDS'
+      ? ids.filter((eid) => req.scope.ids.has(eid))
+      : ids;
+
+    const results = [];
+    let sent = 0;
+    for (const employeeId of scoped) {
+      // eslint-disable-next-line no-await-in-loop
+      const out = await portalInvite.createInvite({ businessId, employeeId, createdByUserId: actorUserId || null, allowReset });
+      if (out.ok) {
+        sent += 1;
+        results.push({ employeeId, ok: true, loginEmail: out.loginEmail, link: out.link, invite: out.invite, notified: out.notified && out.notified.ok });
+      } else {
+        results.push({ employeeId, ok: false, reason: out.reason, loginEmail: out.loginEmail || null });
+      }
+    }
+    // Rows the actor isn't scoped to (silently dropped from the batch) are reported
+    // as out-of-scope so the UI can explain the gap.
+    for (const employeeId of ids) {
+      if (!scoped.includes(employeeId)) results.push({ employeeId, ok: false, reason: 'OUT_OF_SCOPE' });
+    }
+
+    await writeAudit({
+      businessId,
+      actorId: actorUserId,
+      action: 'employee.portal.invite.bulk',
+      entityType: 'Employee',
+      entityId: scoped[0] || null,
+      meta: { requested: ids.length, sent, reset: !!allowReset },
+    }).catch(() => {});
+
+    res.json({ ok: true, requested: ids.length, sent, results });
+  } catch (e) { next(e); }
+}
+
+module.exports = { list, get, create, update, terminate, settleEmployeeTermination, invite, inviteBulk };
