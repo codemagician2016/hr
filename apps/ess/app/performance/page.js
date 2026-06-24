@@ -11,7 +11,7 @@
 
 import { useState } from 'react';
 import AppShell, { useSession } from '@/components/AppShell';
-import { ErrorBanner, Empty, Spinner, Centered, RatingScale, GoalCard } from '@hr/ui';
+import { ErrorBanner, Empty, Spinner, Centered, RatingScale, GoalCard, GapBar } from '@hr/ui';
 import { useApi } from '@/lib/useApi';
 import { apiPost } from '@/lib/api';
 
@@ -29,6 +29,9 @@ function GrowthInner() {
     select: (b) => b?.review ?? null,
   });
   const review = reviewWrap;
+  // Feature 34 — development surface: own competency gaps + shared IDP only. The box,
+  // potential rating, and any talent tag are NEVER in this payload (server-stripped).
+  const { data: dev, loading: devLoading } = useApi('/api/hr/ess/performance/development', { enabled: tab === 'development' });
 
   async function submitSelf() {
     setBusy(true); setError('');
@@ -54,7 +57,7 @@ function GrowthInner() {
       {error ? <ErrorBanner message={error} /> : null}
 
       <div className="flex gap-2 text-sm">
-        {[['hub', 'Overview'], ['goals', 'My Goals'], ['review', 'My Review']].map(([k, label]) => {
+        {[['hub', 'Overview'], ['goals', 'My Goals'], ['review', 'My Review'], ['development', 'Development']].map(([k, label]) => {
           const on = tab === k;
           return (
             <button
@@ -121,6 +124,43 @@ function GrowthInner() {
                 </button>
               ) : null}
             </div>
+          </div>
+        )
+      ) : null}
+
+      {tab === 'development' ? (
+        devLoading ? <Spinner /> : !dev || !dev.released ? (
+          <Empty text="Your development view opens once your review is released." />
+        ) : (
+          <div className="space-y-4">
+            <div className="rounded-2xl border bg-white p-5 shadow-sm" style={{ borderColor: 'var(--theme-border)' }}>
+              <p className="text-xs mb-3" style={{ color: 'var(--theme-muted)' }}>
+                This shows where you&apos;re strong and where to grow — it&apos;s a development tool, not a ranking.
+              </p>
+              <Row label="Overall competency score" value={<span className="font-semibold">{dev.scorePct == null ? '—' : `${dev.scorePct}%`}</span>} />
+            </div>
+            {(dev.gaps || []).length === 0 ? (
+              <Empty text="No competencies are mapped to your role yet." />
+            ) : (
+              <div className="rounded-2xl border bg-white p-5 shadow-sm space-y-3" style={{ borderColor: 'var(--theme-border)' }}>
+                <div className="text-sm font-semibold" style={{ color: 'var(--theme-text)' }}>Your competency profile</div>
+                {dev.gaps.map((g) => (
+                  <div key={g.competencyId} className="space-y-1">
+                    <div className="flex items-center justify-between text-sm">
+                      <span style={{ color: 'var(--theme-text)' }}>{g.name || g.code || g.competencyId}</span>
+                      {g.gap != null && <span className={g.gap < 0 ? 'text-rose-600' : 'text-emerald-600'}>{g.gap > 0 ? `+${g.gap}` : g.gap}</span>}
+                    </div>
+                    <GapBar expected={g.expected} actual={g.actual} />
+                  </div>
+                ))}
+              </div>
+            )}
+            {dev.idpNote ? (
+              <div className="rounded-2xl border bg-white p-5 shadow-sm" style={{ borderColor: 'var(--theme-border)' }}>
+                <div className="text-sm font-semibold mb-1" style={{ color: 'var(--theme-text)' }}>Your development focus</div>
+                <p className="text-sm" style={{ color: 'var(--theme-muted)' }}>{dev.idpNote}</p>
+              </div>
+            ) : null}
           </div>
         )
       ) : null}

@@ -31,6 +31,11 @@ router.get('/review', c.getReview);
 router.post('/review/self', c.submitSelf);
 router.post('/review/acknowledge', c.acknowledge);
 
+// Feature 34 — read-only development surface: own competency gaps + shared IDP only.
+// The box / potential / talent tags are NEVER served here (self-only by construction
+// + the §5.8 serializer); release-gated like the rating screen.
+router.get('/development', c.development);
+
 // Peer feedback (give / request; requester sees status only)
 router.get('/feedback/requests', c.listFeedbackRequests);
 router.post('/feedback/requests', c.requestFeedback);
