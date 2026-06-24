@@ -990,13 +990,21 @@ function buildLopProvenance(r, ln) {
     // half-day / other LOP that is neither approved-LWP nor full-day-absent
     otherLopDays: Math.round((lopDays - lwpDays - absentDays) * 1e4) / 1e4,
   };
-  if (lopDays <= 0 || standardDays <= 0) return prov;
+  // F16 review fix (LOW#1) — only render the informational LOP line when the engine
+  // ACTUALLY reduced gross, i.e. payableDays < standardDays. If lopDays>0 yet
+  // payableDays ≥ standardDays the engine clamped to full pay (it was a basis
+  // mismatch — now fixed at freeze — or a FIXED_REGARDLESS component), so net was
+  // NOT reduced; printing a non-zero "Loss of Pay" figure here would contradict the
+  // actual net (a self-contradictory payslip). Suppress the line in that case; the
+  // raw day counts (lopDays/lwpDays/absentDays) still surface for transparency.
+  if (lopDays <= 0 || standardDays <= 0 || payableDays >= standardDays) return prov;
 
   // Full (unprorated) gross = prorated gross × standard / payable. Recover it so the
   // per-day rate matches what payroll prorated against (exact rational, paise-safe).
+  // payableDays is now guaranteed 0 < payableDays < standardDays whenever lop>0.
   const grossMinor = r.grossMinor || 0;
   let fullGrossMinor = grossMinor;
-  if (payableDays > 0 && payableDays < standardDays) {
+  if (payableDays > 0) {
     fullGrossMinor = money.roundRational(
       grossMinor * Math.round(standardDays * 10000),
       Math.round(payableDays * 10000),
@@ -2317,5 +2325,6 @@ module.exports = {
     resolveCurrentCompensation, resolveBalancingTarget, varianceLineFromRow,
     totalsHashOf, remittanceDueDate, remittanceTaxPeriod, FILING_PLAN,
     resolveFourEyesPolicy, resolveFilingPlan,
+    buildLopProvenance, // F16 — payslip LOP provenance (LOW#1 phantom-line guard)
   },
 };

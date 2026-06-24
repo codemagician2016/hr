@@ -114,9 +114,37 @@ const rollPaid = rollupEmployee(paidRows, '2026-01-01', '2026-01-31', { proratio
 eq('paid leave → lopDays 0', rollPaid.lopDays, 0);
 eq('paid leave → lwpDays 0', rollPaid.lwpDays, 0);
 eq('paid leave → payableDays 31 (full pay)', rollPaid.payableDays, 31);
-// FIXED_30 basis standardDays.
+// FIXED_30 basis standardDays + payableDays (F16 HIGH#2 regression guard).
+// Jan 2026 = 31 calendar days, 4 LOP. payableDays MUST be 30−4=26 (a 30-day
+// numerator), NOT the old calendar 31−4=27. 27/30 would over-pay every LOP day.
 const roll30 = rollupEmployee(rows, '2026-01-01', '2026-01-31', { prorationBasis: 'FIXED_30' });
 eq('FIXED_30 standardDays 30', roll30.standardDays, 30);
+eq('FIXED_30 payableDays = 30−4 = 26 (NOT 31−4=27)', roll30.payableDays, 26);
+ok('FIXED_30 payable+lop == standard (one basis)', roll30.payableDays + roll30.lopDays === roll30.standardDays);
+
+// WORKING_DAYS basis (F16 HIGH#1 regression guard). Feb 2026 = 28 calendar days.
+// 8 weekly-offs → standardDays = 28−8 = 20 working days. 3 LOP days (e.g. LWP).
+// payableDays MUST be 20−3=17 (a working-days numerator), NOT the old calendar
+// 28−3=25 — which, being ≥ standardDays(20), made the engine CLAMP LOP to zero and
+// pay an absent employee in full.
+const febRows = [];
+for (let i = 0; i < 17; i += 1) febRows.push({ id: `p${i}`, status: 'PRESENT', lopFraction: 0 });
+for (let i = 0; i < 8; i += 1) febRows.push({ id: `w${i}`, status: 'WEEKLY_OFF', lopFraction: 0 });
+for (let i = 0; i < 3; i += 1) febRows.push({ id: `l${i}`, status: 'ON_LEAVE', lopFraction: 1 }); // 3 LWP
+const rollWork = rollupEmployee(febRows, '2026-02-01', '2026-02-28', { prorationBasis: 'WORKING_DAYS' });
+eq('WORKING_DAYS calendarDays 28', rollWork.calendarDays, 28);
+eq('WORKING_DAYS weeklyOffDays 8', rollWork.weeklyOffDays, 8);
+eq('WORKING_DAYS standardDays = 28−8 = 20', rollWork.standardDays, 20);
+eq('WORKING_DAYS payableDays = 20−3 = 17 (NOT calendar 28−3=25)', rollWork.payableDays, 17);
+eq('WORKING_DAYS lopDays 3 (all LWP)', rollWork.lopDays, 3);
+ok('WORKING_DAYS payable+lop == standard (one basis)', rollWork.payableDays + rollWork.lopDays === rollWork.standardDays);
+// Paid leave on a WORKING_DAYS tenant must NOT cost the employee anything.
+const febPaid = [];
+for (let i = 0; i < 20; i += 1) febPaid.push({ id: `p${i}`, status: 'PRESENT', lopFraction: 0 });
+for (let i = 0; i < 8; i += 1) febPaid.push({ id: `w${i}`, status: 'WEEKLY_OFF', lopFraction: 0 });
+const rollWorkPaid = rollupEmployee(febPaid, '2026-02-01', '2026-02-28', { prorationBasis: 'WORKING_DAYS' });
+eq('WORKING_DAYS no LOP → payableDays == standardDays 20 (full pay)', rollWorkPaid.payableDays, 20);
+eq('WORKING_DAYS no LOP → lopDays 0', rollWorkPaid.lopDays, 0);
 
 // ── 5. Engine proration per basis (paise-exact) ─────────────────────────────
 console.log('\n(5) engine proration per basis:');
@@ -138,14 +166,19 @@ const rCal = computePayslip({
 eq('CALENDAR_DAYS gross = ₹27,000.00', rCal.grossMinor, 2700000);
 
 // FIXED_30: 3,100,000 × (30−4)/30 = 3,100,000 × 26/30 = 2,686,666.67 → 2686667 paise (HALF_UP).
+// CRITICAL: drive payableDays/standardDays from the REAL freeze rollup (roll30) so
+// this guards the freeze→engine seam, NOT a hand-fed value. (The old test fed
+// payableDays:26 which freeze.js never produced — it produced 27 — masking HIGH#2.)
 const comp30 = [{ ...comp[0], prorationPolicy: PRORATION.FIXED_30 }];
 const r30 = computePayslip({
   components: comp30, complianceModule: noModule,
-  inputs: { calendarDays: 31, standardDays: 30, payableDays: 26, lopDays: 4 },
+  inputs: { calendarDays: roll30.calendarDays, standardDays: roll30.standardDays, payableDays: roll30.payableDays, lopDays: roll30.lopDays },
   period: { start: '2026-01-01', end: '2026-01-31' },
 });
 // 3,100,000 × 26 = 80,600,000 ; /30 = 2,686,666.666… → 2,686,667 (HALF_UP).
-eq('FIXED_30 gross = ₹26,866.67', r30.grossMinor, 2686667);
+eq('FIXED_30 gross = ₹26,866.67 (from real rollup payableDays=26)', r30.grossMinor, 2686667);
+// Prove the OLD buggy numerator (27/30) would have OVER-paid: 3,100,000×27/30 = 2,790,000.
+ok('FIXED_30 gross ≠ buggy 27/30 (₹27,900) — LOP day actually charged', r30.grossMinor !== 2790000);
 
 // Full-LOP month: payableDays 0 → gross 0.
 const rZero = computePayslip({
@@ -167,6 +200,47 @@ const rFixed = computePayslip({
 });
 // BASIC prorated to 2,700,000 + STAT_ALLOW unreduced 100,000 = 2,800,000.
 eq('FIXED_REGARDLESS allowance unreduced', rFixed.grossMinor, 2800000);
+
+// ── 5b. freeze→engine SEAM per basis, driven by REAL rollup output ──────────
+// The regression net: feed the engine EXACTLY what freeze.js froze (calendarDays,
+// standardDays, payableDays, lopDays from rollupEmployee) for each basis, and prove
+// an absent/LWP employee LOSES the correct amount — to the paise.
+console.log('\n(5b) freeze→engine seam (real rollup, all three bases):');
+const GROSS = 3000000; // ₹30,000.00
+const seamComp = (policy) => [{
+  code: 'BASIC', name: 'Basic', category: CATEGORY.EARNING, calcMethod: CALC.FIXED,
+  amountMinor: GROSS, prorationPolicy: policy, lopBehavior: LOP_BEHAVIOR.REDUCES_WITH_LOP,
+  isBasic: true, isPfWages: true, _order: 0,
+}];
+const runSeam = (policy, roll, period) => computePayslip({
+  components: seamComp(policy), complianceModule: noModule,
+  inputs: { calendarDays: roll.calendarDays, standardDays: roll.standardDays, payableDays: roll.payableDays, lopDays: roll.lopDays },
+  period,
+});
+
+// CALENDAR_DAYS — Jan 2026, 4 LOP (the §4 `rows` rollup). 3,000,000 × 27/31 =
+// 81,000,000/31 = 2,612,903.226 → 2,612,903 (HALF_UP).
+const rollCal = rollupEmployee(rows, '2026-01-01', '2026-01-31', { prorationBasis: 'CALENDAR_DAYS' });
+const seamCal = runSeam(PRORATION.CALENDAR_DAYS, rollCal, { start: '2026-01-01', end: '2026-01-31' });
+eq('SEAM CALENDAR_DAYS gross 30k×27/31 = ₹26,129.03', seamCal.grossMinor, 2612903);
+
+// WORKING_DAYS — Feb 2026, 3 LWP, standardDays 20, payableDays 17 (rollWork above).
+// 3,000,000 × 17/20 = 2,550,000 EXACTLY. The bug paid 3,000,000 (full) — a ₹4,500 hit.
+const seamWork = runSeam(PRORATION.WORKING_DAYS, rollWork, { start: '2026-02-01', end: '2026-02-28' });
+eq('SEAM WORKING_DAYS absent employee gross 30k×17/20 = ₹25,500.00', seamWork.grossMinor, 2550000);
+ok('SEAM WORKING_DAYS absent employee is NOT paid in full (bug fixed)', seamWork.grossMinor < GROSS);
+eq('SEAM WORKING_DAYS LOP charge = exactly ₹4,500.00', GROSS - seamWork.grossMinor, 450000);
+
+// WORKING_DAYS, paid leave only (rollWorkPaid): payableDays==standardDays → FULL pay.
+const seamWorkPaid = runSeam(PRORATION.WORKING_DAYS, rollWorkPaid, { start: '2026-02-01', end: '2026-02-28' });
+eq('SEAM WORKING_DAYS paid-leave-only → full ₹30,000.00 (paid leave ≠ LOP)', seamWorkPaid.grossMinor, GROSS);
+
+// FIXED_30 — Jan 2026, 4 LOP, standardDays 30, payableDays 26 (roll30).
+// 3,000,000 × 26/30 = 2,600,000 EXACTLY. The bug paid 27/30 = 2,700,000 — ₹1,000 over.
+const seam30 = runSeam(PRORATION.FIXED_30, roll30, { start: '2026-01-01', end: '2026-01-31' });
+eq('SEAM FIXED_30 gross 30k×26/30 = ₹26,000.00', seam30.grossMinor, 2600000);
+ok('SEAM FIXED_30 ≠ buggy 27/30 (₹27,000) — each LOP day charged in full', seam30.grossMinor !== 2700000);
+eq('SEAM FIXED_30 LOP charge = exactly ₹4,000.00 (4 days × ₹1,000)', GROSS - seam30.grossMinor, 400000);
 
 // ── 6. AccrualMethod.NONE never grants units ────────────────────────────────
 console.log('\n(6) AccrualMethod.NONE (LWP) accrues nothing:');
@@ -200,6 +274,26 @@ const pfOf = (r) => (r.employeeDeductions.find((d) => d.code === 'EPF') || {}).a
 ok('PF EE present on both (capped wage ₹15k → ₹1,800)', pfOf(full) === 180000 && pfOf(prorated) === 180000,
   `full=${pfOf(full)} prorated=${pfOf(prorated)}`);
 ok('compute runs on the prorated gross without throwing', prorated && Array.isArray(prorated.employeeDeductions));
+
+// ── 8. payslip LOP provenance block (LOW#1 — no phantom line) ────────────────
+console.log('\n(8) payslip LOP provenance (buildLopProvenance):');
+const { _internal: svcInternal } = require('../service.js');
+const buildLopProvenance = svcInternal.buildLopProvenance;
+// (a) Real LOP, payableDays<standardDays: line is rendered with the right amount.
+//     gross ₹25,500 prorated (30k×17/20); standard 20, payable 17, lop 3.
+//     full-gross recovered = 25,500×20/17 = 30,000; lop = 30,000×3/20 = ₹4,500.
+const provLop = buildLopProvenance({ grossMinor: 2550000 }, { standardDays: 20, payableDays: 17, lopDays: 3, lwpDays: 3, absentDays: 0 });
+ok('LOP line present when payableDays<standardDays', provLop.lop && provLop.lop.code === 'LOP');
+eq('LOP amount = ₹4,500.00 (recovered full-gross × 3/20)', provLop.lop.amount, '4500.00');
+eq('perDayRate = ₹1,500.00 (full-gross ÷ 20)', provLop.perDayRate, '1500.00');
+// (b) lopDays==0: no LOP line at all (clean payslip).
+const provClean = buildLopProvenance({ grossMinor: 3000000 }, { standardDays: 20, payableDays: 20, lopDays: 0, lwpDays: 0, absentDays: 0 });
+ok('no LOP line when lopDays=0 (phantom suppressed)', provClean.lop === undefined);
+// (c) DEFENSE: lopDays>0 but payableDays>=standardDays (engine did NOT reduce net) →
+//     suppress the line so the provenance can't contradict the actual full-pay net.
+const provPhantom = buildLopProvenance({ grossMinor: 3000000 }, { standardDays: 20, payableDays: 25, lopDays: 3, lwpDays: 3, absentDays: 0 });
+ok('no phantom LOP line when payableDays>=standardDays (net not reduced)', provPhantom.lop === undefined);
+eq('phantom case still surfaces raw lopDays for transparency', provPhantom.lopDays, 3);
 
 // ── summary ─────────────────────────────────────────────────────────────────
 console.log(`\nlwp.golden: ${pass} passed, ${fail} failed`);

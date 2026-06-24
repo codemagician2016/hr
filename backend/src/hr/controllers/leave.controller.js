@@ -124,6 +124,15 @@ async function validateLeavePolicyBody(businessId, body, existing = {}) {
     return null;
   }
 
+  // F16 review fix (LOW#2) — the statutory leave floor is INDIA-ONLY. Gate on the
+  // TENANT's HR country UNCONDITIONALLY (single-country lock, as getStatutoryFramework
+  // does), not on entityId presence. Previously the non-IN short-circuit lived INSIDE
+  // the `if (entityId)` block, so a LeavePolicy with NO entityId fell through to the
+  // national '*' IN floor (EL=15…) and could reject/stamp a non-IN tenant's
+  // ANNUAL/SICK leave type with an Indian floor. Resolve country first; bail for non-IN.
+  const biz = await prisma.business.findUnique({ where: { id: businessId }, select: { hrCountry: true } });
+  if (biz && biz.hrCountry && biz.hrCountry !== 'IN') return null; // floor gate is India-only
+
   // Resolve the entity's state (PT state / address state) to pick the floor.
   let stateCode = null;
   const entityId = body.entityId || existing.entityId;
@@ -131,7 +140,7 @@ async function validateLeavePolicyBody(businessId, body, existing = {}) {
     const entity = await prisma.entity.findFirst({
       where: { id: entityId, businessId }, select: { stateCode: true, countryCode: true },
     });
-    if (entity && entity.countryCode !== 'IN') return null; // floor gate is India-only
+    if (entity && entity.countryCode !== 'IN') return null; // per-entity guard (mixed IN+NZ tenant)
     stateCode = entity ? entity.stateCode : null;
   }
 
