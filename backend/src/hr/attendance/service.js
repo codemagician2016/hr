@@ -82,22 +82,47 @@ function clockInstant(dayKeyStr, hhmm, tz) {
 }
 
 /**
+ * isCrossMidnightShift(schedule) — the ONE canonical cross-midnight test, used by
+ * BOTH the punch-filter window (shiftInstantWindow) AND the scheduledEnd civil-day
+ * roll (endKey in recompute). Keeping a single predicate is the whole fix: when the
+ * two halves disagreed, a shift's worked span and its scheduledEnd landed on
+ * different civil days, mis-pairing the IN/OUT and firing a bogus EARLY_OUT.
+ *
+ * Source of truth = the WALL CLOCK: a shift crosses midnight iff endTime is at/before
+ * startTime (e.g. 22:00→06:00 ⇒ '06:00' <= '22:00'). This is necessary AND sufficient
+ * — a real overnight span always has end-clock <= start-clock, and any shift whose
+ * end-clock is strictly AFTER its start-clock finishes the SAME civil day (no >24h
+ * shift exists). The boolean flags (crossesMidnight / isNightShift) only matter when
+ * they AGREE with the clock; honouring a flag set on a same-day clock (end > start)
+ * is exactly what produced the bug — the window leaked into the next day and/or
+ * scheduledEnd rolled a day, yielding a false EARLY_OUT. So the clock decides; a flag
+ * can confirm a genuine overnight (end <= start) but can never override a same-day
+ * clock into a cross-midnight one.
+ */
+function isCrossMidnightShift(schedule) {
+  if (!schedule || !schedule.startTime || !schedule.endTime) return false;
+  // Clock is authoritative: end-of-shift at/before start-of-shift ⇒ crosses midnight.
+  return schedule.endTime <= schedule.startTime;
+}
+
+/**
  * Compute the shift's working INSTANT window for one civil day D (in the employee
  * timezone), as a half-open [start, end) of UTC instants used to FILTER punches
  * before they reach derive (C1):
- *   - night shift (endTime <= startTime, or crossesMidnight): the worked span runs
- *     from D's local startTime up to (but not including) D+1's local startTime, so
- *     the OUT after midnight — even one exactly at the nominal end time — pairs with
- *     D, while D+1's own window (starting at D+1's startTime) cannot re-pull it.
- *     This stops day D's post-midnight OUT being double-counted on D+1.
+ *   - cross-midnight shift (isCrossMidnightShift ⇒ endTime <= startTime, e.g.
+ *     22:00→06:00): the worked span runs from D's local startTime up to (but not
+ *     including) D+1's local startTime, so the OUT after midnight — even one exactly
+ *     at the nominal end time — pairs with D, while D+1's own window (starting at
+ *     D+1's startTime) cannot re-pull it. This stops day D's post-midnight OUT being
+ *     double-counted on D+1. The SAME predicate drives scheduledEnd's day-roll in
+ *     recompute, so the window and scheduledEnd never disagree (no false EARLY_OUT).
  *   - day / flexi shift: the civil day [D 00:00 local, D+1 00:00 local).
  *   - no schedule (open attendance): the civil day [D 00:00 local, D+1 00:00 local).
  * Returns { gte, lt } as UTC Date instants (half-open [gte, lt)).
  */
 function shiftInstantWindow(dayKeyStr, schedule, tz) {
   const nextKey = civilDateInTz(addDays(dayKeyToDate(dayKeyStr), 1), tz);
-  const isNight = schedule && schedule.startTime && schedule.endTime
-    && (schedule.crossesMidnight || schedule.isNightShift || schedule.endTime <= schedule.startTime);
+  const isNight = isCrossMidnightShift(schedule);
   if (isNight) {
     const gte = zonedWallTimeToUtc(dayKeyStr, schedule.startTime, tz);
     // Run up to the NEXT day's local startTime (exclusive). This captures a
@@ -406,9 +431,11 @@ async function recompute(businessId, employeeId, fromDate, toDate, tx) {
 
     // C2 — scheduledStart/End are the LOCAL shift wall-clock resolved to UTC
     // instants in the employee tz. The night-shift end rolls to the next civil day.
+    // Use the SAME isCrossMidnightShift predicate that shiftInstantWindow uses, so
+    // the punch-filter window and scheduledEnd agree: an overnight shift's OUT lands
+    // inside D's window AND scheduledEnd sits on D+1, so no false EARLY_OUT fires.
     const nextKey = civilDateInTz(addDays(dayKeyToDate(key), 1), tz);
-    const endKey = (schedule && schedule.startTime && schedule.endTime
-      && schedule.endTime <= schedule.startTime) ? nextKey : key;
+    const endKey = isCrossMidnightShift(schedule) ? nextKey : key;
     const ctx = {
       date: key,
       schedule,
@@ -484,7 +511,7 @@ module.exports = {
   // exposed for tests / freeze rollup reuse
   _internals: {
     resolveLeaveForDay, resolvePresenceForDay, resolveOtRule, eachDay, utcDay, dayKey,
-    shiftInstantWindow, clockInstant, dayKeyToDate,
+    shiftInstantWindow, isCrossMidnightShift, clockInstant, dayKeyToDate,
     evaluateDayGeofence, tenantGeofenceEnforce,
   },
 };

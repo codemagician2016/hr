@@ -142,6 +142,43 @@ check('tenant enforce: flag set → true',
 check('tenant enforce: unrelated flags → false',
   svc.tenantGeofenceEnforce({ featureFlags: { attendance: { somethingElse: true } } }) === false);
 
+/* ── REGRESSION: Haversine accuracy + the EXACT-boundary (>) gate + enforce/warn
+ * precedence stay correct after the night-shift fix (these share geo.js with the
+ * attendance derivation path). ──────────────────────────────────────────────*/
+// Haversine is symmetric and metric: a known E–W step at the equator.
+{
+  const ab = haversineMeters(0, 0, 0, 0.001);   // ~111.3 m east at the equator
+  const ba = haversineMeters(0, 0.001, 0, 0);   // reversed args → same distance
+  check('regress: haversine ~111m east at equator', Math.abs(ab - 111.3) < 1.5);
+  check('regress: haversine symmetric (a→b == b→a)', Math.abs(ab - ba) < 1e-6);
+}
+// EXACT-boundary gate is strict greater-than: distance == radius is INSIDE.
+{
+  // ~150 m north; round-trip the exact radius so distance === radius holds.
+  const punch = { geoLat: 12.9716 + 0.00135, geoLng: 77.5946 };
+  const dist = haversineMeters(LOC.geoLat, LOC.geoLng, punch.geoLat, punch.geoLng);
+  const vAt = evaluatePunchGeofence(punch, { ...LOC, geofenceM: dist }); // radius == distance
+  check('regress: distance == radius → NOT out (strict > gate)', vAt.outOfGeofence === false);
+  const vOut = evaluatePunchGeofence(punch, { ...LOC, geofenceM: dist - 0.001 });
+  check('regress: distance just over radius → out', vOut.outOfGeofence === true);
+}
+// enforce/warn precedence: per-location explicit value ALWAYS wins over tenant default.
+{
+  const out = { geoLat: 12.99, geoLng: 77.60 };
+  check('regress: location enforce:true wins over tenant false',
+    evaluatePunchGeofence(out, { ...LOC, geofenceEnforce: true }, { tenantEnforce: false }).enforce === true);
+  check('regress: location enforce:false wins over tenant true',
+    evaluatePunchGeofence(out, { ...LOC, geofenceEnforce: false }, { tenantEnforce: true }).enforce === false);
+  const noKey = { geoLat: 12.9716, geoLng: 77.5946, geofenceM: 100 }; // no geofenceEnforce key
+  check('regress: tenant default used only when location unset',
+    evaluatePunchGeofence(out, noKey, { tenantEnforce: true }).enforce === true);
+  // enforce mode NEVER changes the outOfGeofence verdict — we always flag, enforce is advisory.
+  const warn = evaluatePunchGeofence(out, { ...LOC, geofenceEnforce: false });
+  const enf = evaluatePunchGeofence(out, { ...LOC, geofenceEnforce: true });
+  check('regress: outOfGeofence verdict independent of enforce mode',
+    warn.outOfGeofence === true && enf.outOfGeofence === true);
+}
+
 /* ── report ────────────────────────────────────────────────────────────────*/
 console.log(`\ngeofence.unit: ${passed} passed, ${failed} failed`);
 if (failed) { console.error('FAILURES:', fails.join('; ')); process.exit(1); }
