@@ -206,6 +206,15 @@ router.use('/me/engagement', require('../engagement/routes/meEngagement.routes')
 // headcount & attrition, leave liability. RBAC: canViewPayrollReports.
 router.use('/reports', require('../reports/reports.routes'));
 
+// FLAG (Feature 32 — NEW mount): Statutory Registers (muster roll + Form
+// registers). READ-ONLY projection over the frozen attendance + payroll + leave
+// sources — a per-state, effective-dated RegisterDefinition + a pure projector +
+// PDF/Excel/CSV export. India-only (the controller asserts entity.countryCode ===
+// 'IN'). Read/export = canViewPayrollReports; definition management =
+// canManageStatutory. Reuses the reports/filing read patterns + the payslip/
+// Form-16 pdfkit path; adds NO new permission and NO new dependency.
+router.use('/registers', require('../registers/registers.routes'));
+
 // Integrations — accounting GL export (operator) + public read-only HR API.
 //   /api/hr/integrations  → operator API (session auth + RBAC)
 //   /api/hr/v1            → public read-only API (ApiKey auth, no session)

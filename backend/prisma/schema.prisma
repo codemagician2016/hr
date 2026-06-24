@@ -487,6 +487,9 @@ model Business {
   payslips                 Payslip[]
   statutoryRemittances     StatutoryRemittance[]
   complianceObligations    ComplianceObligation[]
+  // Feature 32 — statutory register definitions + generated-artefact log.
+  registerDefinitions      RegisterDefinition[]
+  registerExports          RegisterExport[]
   payRunInputItems         PayRunInputItem[]
   varianceThreshold        VarianceThreshold?
   // Leave
@@ -6483,6 +6486,9 @@ model Entity {
   arrearCycles  ArrearCycle[]
   remittances   StatutoryRemittance[]
   complianceObligations ComplianceObligation[]
+  // Feature 32 — per-entity register definition overrides + generated exports.
+  registerDefinitions   RegisterDefinition[]
+  registerExports       RegisterExport[]
   compensations CompensationRevision[]
   importJobs    ImportJob[]
   form16Batches Form16Batch[]
@@ -8666,6 +8672,127 @@ enum ComplianceCadence {
   HALF_YEARLY
   ANNUAL
   EVENT
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §7c  STATUTORY REGISTERS  (Feature 32 — muster roll + Form registers)
+//
+// A per-state, effective-dated DEFINITION table (each statutory form → its
+// ordered columns, every column bound to a field PATH on one of the FROZEN
+// sources: attendance freeze / payroll snapshot / leave ledger / employee). A
+// PURE projector (src/hr/registers/projector.js) reads the definition + the
+// already-fetched frozen rows and emits the register. NOTHING is recomputed; no
+// source table is created or mutated. Mirrors ComplianceObligation (Feature 23):
+// adding a state/form is DATA (a seed row), never a code branch.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model RegisterDefinition {
+  id         String   @id @default(uuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  // Definitions are usually TENANT-DEFAULT (businessId-only, entityId NULL) seeded
+  // rows that all entities inherit; an entityId-scoped row OVERRIDES the default
+  // for one entity (e.g. a factory entity adopting a different state's forms).
+  entityId String?
+  entity   Entity? @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  kind      RegisterKind // MUSTER_ROLL | WAGE_REGISTER | ... (the §2.1 families)
+  formCode  String // "FORM_25" | "FORM_Q" | "FORM_D" | "FORM_3A" ...
+  formLabel String // "Muster Roll (Factories Form 25)"
+  actLabel  String // "Factories Act 1948" | "Maharashtra S&E 2017" | "Ease-of-Compliance Rules 2017"
+  stateCode String? // per-state form; NULL = central / any state
+  cadence   RegisterCadence // PERIOD | HALF_YEARLY | ANNUAL | SNAPSHOT
+  source    RegisterSource // which FROZEN source the projector reads
+
+  // The ordered columns. Each column binds a label to a field PATH on the source
+  // row (resolved by the projector). `transform` is a named, whitelisted formatter
+  // (e.g. "rupee", "days2", "statusMark", "date"); `daily:true` marks the per-day
+  // muster grid expansion (one column per day-of-month). Validated by assertColumns
+  // at write time. Stored as JSON (a small ordered read-mostly layout descriptor,
+  // consumed wholesale — same rationale as ComplianceObligation.specialRules).
+  columns Json // [{ key, label, source, path, transform?, daily?, statutory? }]
+
+  // Effective-dating — same shape as StatutoryRegistration / ComplianceObligation,
+  // so a form-number change (a state notifying a new format, or a tenant adopting
+  // the Ease-of-Compliance set on a date) is DATA, not a code fork.
+  effectiveFrom DateTime  @db.Date
+  effectiveTo   DateTime? @db.Date
+  isActive      Boolean   @default(true)
+  meta          Json? // { retentionYears, govtRef, orientation:"landscape", combinedWith? }
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  version   Int      @default(0)
+
+  exports RegisterExport[]
+
+  @@unique([businessId, entityId, kind, formCode, stateCode, effectiveFrom])
+  @@index([businessId, isActive, kind])
+}
+
+// Every generated register is logged (who / which entity / which period / which
+// format / row + control totals + the frozen source refs it read) for inspector
+// evidence + idempotent re-download + tamper evidence (fileHash). Optionally
+// archives the bytes to S3 for the statutory retention window. No source mutation.
+model RegisterExport {
+  id           String             @id @default(uuid())
+  businessId   String
+  business     Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  definitionId String?
+  definition   RegisterDefinition? @relation(fields: [definitionId], references: [id], onDelete: SetNull)
+  entityId     String
+  entity       Entity             @relation(fields: [entityId], references: [id], onDelete: Restrict)
+  kind         RegisterKind
+  formCode     String
+  stateCode    String?
+
+  // The period the register covers:
+  periodStart DateTime @db.Date
+  periodEnd   DateTime @db.Date
+  periodLabel String // "2026-05" | "FY2025-26" | "H1-2026"
+  format      String // "PDF" | "XLSX" | "CSV"
+
+  // Provenance of the FROZEN sources rolled in (so a re-export is reproducible /
+  // verifiable): the payRunIds / attendance-freeze markers / leave period it read.
+  sourceRefs Json // { payRunIds:[], attendanceFrozen:true, leavePeriodCode? }
+
+  rowCount      Int     @default(0)
+  controlTotals Json? // { grossRupees, netRupees, pfEeRupees, ... } — printed footer + tamper check
+  fileUrl       String? @db.Text // S3 archive (optional)
+  fileHash      String? // SHA-256 of generated bytes (tamper evidence, like Payslip.pdfHash)
+
+  generatedByUserId String
+  createdAt         DateTime @default(now())
+
+  @@index([businessId, entityId, kind, periodStart])
+  @@index([businessId, definitionId])
+}
+
+enum RegisterKind {
+  MUSTER_ROLL
+  WAGE_REGISTER
+  MUSTER_WAGE_COMBINED
+  OVERTIME_REGISTER
+  LEAVE_REGISTER
+  FINES_REGISTER
+  EMPLOYEE_REGISTER
+  PF_ANNUAL // Form 3A/6A as a human register
+  ESI_REGISTER // half-yearly contribution register
+}
+
+enum RegisterCadence {
+  PERIOD
+  HALF_YEARLY
+  ANNUAL
+  SNAPSHOT
+}
+
+enum RegisterSource {
+  ATTENDANCE
+  PAYRUN
+  LEAVE
+  EMPLOYEE
+  PAYRUN_ANNUAL
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
