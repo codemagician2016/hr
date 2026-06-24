@@ -98,6 +98,9 @@ router.use('/letters', require('../letters/routes/issuance.routes'));
 const talent = require('../talent/routes');
 router.use('/recruitment', talent.recruitment);
 router.use('/performance', talent.performance);
+// Feature 34 — 9-box grid + competency framework (talent-review depth over a closed
+// F8 cycle). Operator session; F1 scope + SoD wired per route.
+router.use('/ninebox', talent.ninebox);
 // Feature 8 ESS — employee self-service performance (customer session, self-only).
 router.use('/ess/performance', talent.essPerformance);
 

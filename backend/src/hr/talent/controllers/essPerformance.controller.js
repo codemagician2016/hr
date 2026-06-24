@@ -15,6 +15,7 @@ const { writeAudit } = require('../../../core/lib/audit');
 const { evaluate } = require('../performance/reviewStateMachine');
 const { objectiveProgress, num } = require('../performance/goalRollup');
 const { serializeReviewInstance } = require('../performance/serializers');
+const { competencyGap, COMPETENCY_SECTION } = require('../performance/competencyRollup');
 
 const STALE_MSG = 'This record was updated elsewhere — reload and try again';
 const SEPARATED = new Set(['TERMINATED', 'RETIRED']);
@@ -196,6 +197,63 @@ async function acknowledge(req, res, next) {
   } catch (e) { return next(e); }
 }
 
+// GET /ess/performance/development — Feature 34 §6.4: the EMPLOYEE development surface,
+// READ-ONLY and confidentiality-gated. The subject sees ONLY their own competency
+// expected-vs-actual gaps + an overall competency score, and the manager-authored IDP
+// note ONLY when the manager shared it (placement.sharedWithSubject). The subject
+// NEVER sees their box, potential rating/band, talent tags, or successor status — none
+// of those are queried here, so they cannot leak (mirror of the §5.8 serializer; the
+// 9-box payload simply never reaches this self-only surface).
+//
+// Release-gated like the rating screen: the gaps are computed from the subject's OWN
+// review, and only once that review is RELEASED (this shows their assessed competencies
+// the same moment they learn their rating). Pre-release → an empty, "not yet" payload.
+async function development(req, res, next) {
+  try {
+    const ctx = await withSelf(req, res); if (!ctx) return undefined;
+    const { businessId, employee } = ctx;
+    // The subject's latest review instance + its cycle (for the release gate + role map).
+    const review = await prisma.performanceReview.findFirst({
+      where: { businessId, employeeId: employee.id }, orderBy: { createdAt: 'desc' },
+      include: { reviewCycle: { select: { id: true, name: true, releasedAt: true } } },
+    });
+    const released = !!(review && review.releasedAt);
+    if (!review || !released) {
+      // Pre-release: never expose competency assessments early (same gate as the rating).
+      return res.json({ released: false, cycle: review ? review.reviewCycle : null, gaps: [], scorePct: null, idpNote: null });
+    }
+    // Role map for the subject — role data (designation/grade) lives on the CURRENT
+    // EmploymentRecord; 'ALL' always applies for org-wide competencies.
+    const roleKeys = ['ALL'];
+    const empRec = await prisma.employee.findFirst({ where: { id: employee.id, businessId }, select: { currentEmploymentRecordId: true } });
+    if (empRec && empRec.currentEmploymentRecordId) {
+      const rec = await prisma.employmentRecord.findFirst({ where: { id: empRec.currentEmploymentRecordId, businessId }, select: { designationId: true, gradeId: true } });
+      if (rec && rec.designationId) roleKeys.push(rec.designationId);
+      if (rec && rec.gradeId) roleKeys.push(rec.gradeId);
+    }
+    const roleMaps = await prisma.roleCompetency.findMany({ where: { businessId, roleKey: { in: roleKeys } } });
+    let rollup = { gaps: [], mappedCount: 0, ratedMappedCount: 0, scorePct: null };
+    if (roleMaps.length) {
+      const competencyIds = [...new Set(roleMaps.map((m) => m.competencyId))];
+      const comps = await prisma.competency.findMany({ where: { businessId, id: { in: competencyIds } }, select: { id: true, code: true, name: true, category: true } });
+      const competencyById = Object.fromEntries(comps.map((c) => [c.id, c]));
+      // SHARED-visibility competency responses only (manager-only/HR-only never reach ESS).
+      const responses = await prisma.reviewResponse.findMany({
+        where: { businessId, reviewInstanceId: review.id, sectionKey: COMPETENCY_SECTION, visibility: 'SHARED' },
+        select: { sectionKey: true, itemKey: true, ratingValue: true, perspective: true },
+      });
+      rollup = competencyGap(responses, roleMaps, competencyById);
+    }
+    // The IDP note is exposed ONLY when the manager explicitly shared the placement.
+    const placement = await prisma.nineBoxPlacement.findFirst({
+      where: { businessId, cycleId: review.reviewCycleId, employeeId: employee.id },
+      select: { idpNote: true, sharedWithSubject: true },
+    });
+    const idpNote = placement && placement.sharedWithSubject ? placement.idpNote : null;
+    return res.json({ released: true, cycle: review.reviewCycle, gaps: rollup.gaps, scorePct: rollup.scorePct, mappedCount: rollup.mappedCount, idpNote });
+  } catch (e) { return next(e); }
+}
+
 // ── Peer feedback ─────────────────────────────────────────────────────────────
 // GET /ess/performance/feedback/requests — feedback the employee owes (as rater).
 async function listFeedbackRequests(req, res, next) {
@@ -265,6 +323,7 @@ async function listOneOnOnes(req, res, next) {
 module.exports = {
   overview, listGoals, createGoal, createKeyResult, createCheckIn,
   getReview, submitSelf, acknowledge,
+  development, // Feature 34 — read-only development surface (own gaps + shared IDP)
   listFeedbackRequests, respondFeedback, requestFeedback,
   listOneOnOnes,
   _internals: { resolveSelf, isSeparated },

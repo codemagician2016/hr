@@ -31,6 +31,13 @@ const { ROLES } = require('../../core/lib/roles');
 const APPROVAL_ACTIONS = new Set([
   'canApproveLeave', 'canApprovePayroll', 'canApproveRegularization',
   'review.submitMgr', 'review.calibrate', 'review.signOff',
+  // Feature 34 — 9-box SoD: a manager/skip-level may never MOVE their OWN box in a
+  // calibration session. The key drops `selfId` from the resolved set, so the actor
+  // is structurally absent from their own move scope (fail-closed, same as
+  // "cannot calibrate own rating"). Authoring potential on a direct report uses
+  // canViewTeamPerformance (TEAM, self already excluded — a manager isn't in their
+  // own sub-tree).
+  'ninebox.calibrate',
   // Feature 12 — recruitment SoD: an interviewer who SUBMITTED a scorecard on a
   // candidate's application may not be the sole offer approver/extender for that
   // candidate. The action key drops `selfId` from the resolved set, so a scorer is

@@ -51,6 +51,36 @@ function serializeReviewInstance(instance, viewer) {
   return out;
 }
 
+/**
+ * serializeNineBox — Feature 34 §5.8: a 9-box placement is NEVER exposed to the
+ * subject. For viewer==='SELF' (the employee) the box, potential rating/band, the
+ * whole move ledger, and the manager-authored development context are ABSENT from
+ * the payload (not client-hidden). The subject's only window is the ESS development
+ * surface (competency gaps + the IDP, and the IDP only when sharedWithSubject).
+ *
+ * MANAGER (the subject's manager) and HR see the full placement. OTHER (out of
+ * relationship) should never reach here — the route 404s first — but we fail-closed
+ * by stripping the sensitive axes for any non-MANAGER/HR viewer too.
+ */
+function serializeNineBox(placement, viewer) {
+  if (!placement) return placement;
+  const out = { ...placement };
+  const privileged = viewer === 'MANAGER' || viewer === 'HR';
+  if (!privileged) {
+    // SELF / OTHER: the talent verdict is invisible. Keep only neutral identity +
+    // the release-gated IDP (the controller decides whether to even reach this path).
+    delete out.box;
+    delete out.potentialRating;
+    delete out.potentialBand;
+    delete out.performanceBand;
+    delete out.moves;
+    delete out.potentialScaleId;
+    // idpNote leaves only when explicitly shared; the ESS controller release-gates it.
+    if (!placement.sharedWithSubject) delete out.idpNote;
+  }
+  return out;
+}
+
 // Filter a list of ReviewResponse rows by the viewer's visibility relationship.
 function filterResponses(responses, viewer) {
   if (!Array.isArray(responses)) return [];
@@ -105,6 +135,7 @@ function aggregatePeerRatings(responses) {
 module.exports = {
   ANON_FLOOR,
   serializeReviewInstance,
+  serializeNineBox,
   filterResponses,
   serializePeerResponse,
   aggregatePeerRatings,

@@ -60,6 +60,14 @@ export const NAV_ITEMS = [
   // canManagePerformanceCycle, hidden via hasPermission on the page). Server is the
   // real boundary; this just shows the tab to anyone with team-performance read.
   { key: 'performance', label: 'Performance', href: '/performance', feature: 'hr', permission: 'canViewTeamPerformance', icon: 'chart' },
+  // Feature 34 — 9-box talent grid + competency framework + talent pool/succession.
+  // The board (performance × potential) is visible to anyone with team-performance read
+  // (Manager TEAM band — server-scoped to their sub-tree; HR sees all). Competency config
+  // is HR-Admin (canManagePerformanceCycle, hidden on the page for others); talent pool
+  // writes need canManageSuccession. The server is the real boundary; nav just hides links.
+  { key: 'nine-box', label: '9-box grid', href: '/performance/nine-box', feature: 'hr', permission: 'canViewTeamPerformance', icon: 'chart' },
+  { key: 'competencies', label: 'Competencies', href: '/performance/competencies', feature: 'hr', permission: 'canManagePerformanceCycle', icon: 'chart' },
+  { key: 'talent-pool', label: 'Talent pool', href: '/performance/talent-pool', feature: 'hr', permission: 'canViewTeamPerformance', icon: 'people' },
   // Recruitment / ATS (Feature 12). Visible to anyone with the new canViewHiring
   // read key OR canManageHiring (recruiters/HR) OR the legacy canManageEmployees
   // super-set. The server is the real boundary; this just hides the nav link.

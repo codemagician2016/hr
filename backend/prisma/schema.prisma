@@ -559,6 +559,11 @@ model Business {
   ratingScales                 RatingScale[]
   oneOnOnes                    OneOnOne[]
   meritRecommendations         MeritRecommendation[]
+  // Talent depth — Feature 34 (competency framework + 9-box + succession)
+  competencies                 Competency[]
+  roleCompetencies             RoleCompetency[]
+  nineBoxPlacements            NineBoxPlacement[]
+  talentTags                   TalentTag[]
   // Recruitment
   jobs                         Job[]
   jobStages                    JobStage[]
@@ -6772,6 +6777,9 @@ model Employee {
   objectivesOwned        Objective[]                       @relation("ObjectiveOwner")
   oneOnOnesAsManager     OneOnOne[]                        @relation("OneOnOneManager")
   oneOnOnesAsEmployee    OneOnOne[]                        @relation("OneOnOneEmployee")
+  // Talent depth — Feature 34
+  nineBoxPlacements      NineBoxPlacement[]                @relation("NineBoxSubject")
+  talentTags             TalentTag[]                       @relation("TalentTagSubject")
   payRunLines            PayRunLine[]
   payslips               Payslip[]
   helpdeskTickets        HelpdeskTicket[]
@@ -11062,6 +11070,11 @@ model ReviewCycle {
   goalWeightPct        Decimal?              @db.Decimal(5, 2) // composite weighting: goals
   competencyWeightPct  Decimal?              @db.Decimal(5, 2) // composite weighting: competencies
   meritMatrixJson      Json? // rating→% merit matrix (config; drives MeritRecommendation)
+  // Feature 34: per-cycle 9-box config — { perfBands:[{max,band}], potentialScaleId,
+  // gridTargetJson }. Banding thresholds + the potential scale + the grid target
+  // distribution live here so the grid is reproducible per cycle and the scale-lock
+  // guard protects them once the cycle launches. Additive, optional.
+  nineBoxConfigJson    Json?
   hrReviewerEmployeeId String? // fallback reviewer for top-of-tree subjects
   version              Int                   @default(0)
   createdAt            DateTime              @default(now())
@@ -11070,6 +11083,7 @@ model ReviewCycle {
   objectives           Objective[]
   calibrationSessions  CalibrationSession[]
   meritRecommendations MeritRecommendation[]
+  nineBoxPlacements    NineBoxPlacement[]
 
   @@unique([businessId, code])
   @@index([businessId, status])
@@ -11130,6 +11144,7 @@ model PerformanceReview {
   peerRequests           PeerFeedbackRequest[]
   calibrationAdjustments CalibrationAdjustment[]
   meritRecommendations   MeritRecommendation[]
+  nineBoxPlacements      NineBoxPlacement[]
 
   @@unique([businessId, reviewCycleId, employeeId])
   @@index([businessId, reviewerId, status])
@@ -11376,6 +11391,9 @@ model CalibrationSession {
   cycle               ReviewCycle             @relation(fields: [cycleId], references: [id], onDelete: Cascade)
   skipLevelEmployeeId String // group root (reviewer's manager)
   status              CalibrationStatus       @default(OPEN)
+  // Feature 34: discriminator so a session can be a rating histogram, a 9-box grid,
+  // or both. Default RATING → existing rows keep their current behaviour.
+  kind                CalibrationKind         @default(RATING)
   version             Int                     @default(0)
   createdAt           DateTime                @default(now())
   updatedAt           DateTime                @updatedAt
@@ -11512,6 +11530,164 @@ enum MeritStatus {
   APPROVED
   APPLIED
   REJECTED
+}
+
+// ── §14.2 Talent depth (Feature 34): competency framework + 9-box + succession ──
+// A thin layer over a CLOSED F8 review cycle. Tenant-scoped on businessId; mutable
+// models carry `version` for optimistic concurrency; the append-only NineBoxMove
+// ledger carries none (mirrors the CalibrationAdjustment convention). NOTHING here
+// re-rates performance — the perf axis is DERIVED from the F8 calibrated/final rating.
+
+model Competency {
+  id          String             @id @default(cuid())
+  businessId  String
+  business    Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  code        String // stable key, unique per tenant
+  name        String // "Stakeholder Management"
+  category    CompetencyCategory @default(BEHAVIOURAL)
+  description String?
+  scaleId     String? // RatingScale used to rate this competency (else cycle default)
+  isActive    Boolean            @default(true)
+  version     Int                @default(0)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  roleMaps    RoleCompetency[]
+
+  @@unique([businessId, code])
+  @@index([businessId, category, isActive])
+}
+
+enum CompetencyCategory {
+  CORE // org-wide values, everyone
+  LEADERSHIP // people-manager competencies
+  FUNCTIONAL // role/skill specific
+  BEHAVIOURAL // soft skills
+  TECHNICAL
+}
+
+// Maps a competency to a designation (and optional level/grade). The "role" is the
+// existing Designation/grade on Employee — we key on a free `roleKey` (designation id
+// or grade code, or 'ALL' for org-wide) for v1 to avoid coupling to a specific org
+// model; expectedLevel is the target proficiency on the competency's scale.
+model RoleCompetency {
+  id            String     @id @default(cuid())
+  businessId    String
+  business      Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  competencyId  String
+  competency    Competency @relation(fields: [competencyId], references: [id], onDelete: Cascade)
+  roleKey       String // designationId | grade code | 'ALL' for org-wide
+  expectedLevel Decimal    @db.Decimal(4, 2) // target proficiency on the scale
+  weight        Decimal?   @db.Decimal(5, 2) // optional weighting within the role's competency set
+  version       Int        @default(0)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  @@unique([businessId, competencyId, roleKey])
+  @@index([businessId, roleKey])
+}
+
+// ── 9-box placement: ONE per (cycle, employee). Performance axis DERIVED from the
+// F8 review instance (never re-rated); potential axis authored + calibrated. ──
+model NineBoxPlacement {
+  id                String             @id @default(cuid())
+  businessId        String
+  business          Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  cycleId           String
+  cycle             ReviewCycle        @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  employeeId        String
+  employee          Employee           @relation("NineBoxSubject", fields: [employeeId], references: [id], onDelete: Cascade)
+  reviewInstanceId  String? // FK to the PerformanceReview the perf axis was read from
+  reviewInstance    PerformanceReview? @relation(fields: [reviewInstanceId], references: [id], onDelete: SetNull)
+  // Axes (1..3). performanceBand is DERIVED (snapshot at placement create / recompute);
+  // potentialRating is AUTHORED on a RatingScale, potentialBand is its banding.
+  performanceBand   Int // 1..3 (low/med/high) banded from calibrated/final rating
+  potentialRating   Decimal?           @db.Decimal(4, 2) // raw, on the potential scale
+  potentialBand     Int? // 1..3 banded
+  box               Int? // 1..9 = (potentialBand-1)*3 + performanceBand (null until both set)
+  status            PlacementStatus    @default(DRAFT)
+  potentialScaleId  String? // which RatingScale the potential was rated on
+  idpNote           String? // free-text development plan (manager-authored)
+  sharedWithSubject Boolean            @default(false) // gates the ESS gap/IDP view
+  version           Int                @default(0)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  moves             NineBoxMove[]
+
+  @@unique([businessId, cycleId, employeeId])
+  @@index([businessId, cycleId, box])
+  @@index([businessId, cycleId, status])
+}
+
+enum PlacementStatus {
+  DRAFT // perf axis seeded, potential not yet authored
+  PROPOSED // manager authored potential → box set
+  CALIBRATED // adjusted inside a NINE_BOX calibration session
+  FINALIZED // locked; succession/talent decisions act on it
+}
+
+// Append-only ledger of every box move (mirrors CalibrationAdjustment).
+model NineBoxMove {
+  id            String           @id @default(cuid())
+  businessId    String
+  placementId   String
+  placement     NineBoxPlacement @relation(fields: [placementId], references: [id], onDelete: Cascade)
+  sessionId     String? // set when the move happened inside a calibration session
+  fromBox       Int?
+  toBox         Int
+  fromPotential Decimal?         @db.Decimal(4, 2)
+  toPotential   Decimal?         @db.Decimal(4, 2)
+  reason        String
+  byEmployeeId  String
+  createdAt     DateTime         @default(now())
+
+  @@index([businessId, placementId])
+  @@index([businessId, sessionId])
+}
+
+// Talent pool / succession tag on an employee. Many tags per employee allowed
+// (HIPO + FLIGHT_RISK can coexist). SUCCESSOR carries a positionRef + readiness.
+model TalentTag {
+  id                  String        @id @default(cuid())
+  businessId          String
+  business            Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId          String
+  employee            Employee      @relation("TalentTagSubject", fields: [employeeId], references: [id], onDelete: Cascade)
+  kind                TalentTagKind
+  positionRef         String? // for SUCCESSOR: target designation/position (free string v1)
+  readiness           Readiness? // for SUCCESSOR / PROMOTION_READY
+  note                String?
+  cycleId             String? // optional provenance: which talent review created it
+  isActive            Boolean       @default(true)
+  createdByEmployeeId String?
+  version             Int           @default(0)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  @@index([businessId, employeeId, kind, isActive])
+  @@index([businessId, kind, isActive])
+}
+
+enum TalentTagKind {
+  HIPO // high potential
+  FLIGHT_RISK
+  PROMOTION_READY
+  SUCCESSOR // successor FOR a position (positionRef)
+  KEY_PERSON // critical / single point of failure
+}
+
+enum Readiness {
+  READY_NOW
+  READY_1_2_YR
+  READY_3_PLUS_YR
+}
+
+// CalibrationSession discriminator (Feature 34 §4.3): one session can host the
+// rating histogram, the 9-box grid, or both. Default RATING keeps every existing
+// row's behaviour unchanged (calibration.controller.js untouched on the rating path).
+enum CalibrationKind {
+  RATING
+  NINE_BOX
+  BOTH
 }
 
 // ── §15 Recruitment (ATS) ──

@@ -53,6 +53,12 @@ const PERMISSIONS = Object.freeze({
   canManagePerformanceCycle: 'Create/configure review cycles, templates, scales; reopen/calibrate',
   canCalibrateRatings:       'Participate in calibration sessions for own org sub-tree',
   canViewTeamPerformance:    "View reports' goals + reviews (TEAM band)",
+  // Talent depth (Feature 34) — additive; no migration. The HR talent-review grant:
+  // finalize a 9-box placement, manage the talent pool, and nominate successors. The
+  // competency-library/role-map/banding CONFIG reuses canManagePerformanceCycle; the
+  // board READ + author-potential reuses canViewTeamPerformance; the calibration
+  // session reuses canCalibrateRatings. Only finalization/succession needs this key.
+  canManageSuccession:       'Manage the talent pool, 9-box finalization + succession nominations (HR talent)',
   // Approval workflows + RBAC/hierarchy admin (Feature 10) — additive; no migration.
   // CONFIG keys: they gate the Workflow Builder / Role Manager / Org-Chart editor.
   // WHO may ACT on a given approval is NOT one of these — it is the engine's resolved
@@ -125,6 +131,8 @@ const SYSTEM_ROLES = Object.freeze({
     canManageLetters: true,
     // Feature 8 — HR-Admin owns performance config + calibration + team visibility.
     canManagePerformanceCycle: true, canCalibrateRatings: true, canViewTeamPerformance: true,
+    // Feature 34 — HR-Admin owns the talent pool, 9-box finalization + succession.
+    canManageSuccession: true,
     // Feature 10 — HR-Admin owns approval-chain config, role management + the org tree.
     canManageApprovalWorkflows: true, canManageRoles: true, canManageHierarchy: true,
     // Feature 12 — HR-Admin owns the full recruitment/ATS surface.
