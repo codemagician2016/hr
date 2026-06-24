@@ -198,15 +198,24 @@ async function buildPartA({
         bsrCode: r.challanRef ? String(r.challanRef).slice(0, 7) : null,
         challanRef: r.challanRef || null,
         paidDate: isoDate(r.paidDate || r.filedDate),
-        amountMinor: rupeesToMinor(r.amount),
+        // ENTITY-pool amount on the challan row (whole-entity deposit for the
+        // quarter). This is the deductor's aggregate deposit and must NEVER be
+        // written onto an individual employee's deposited figure (it would leak the
+        // company-wide TDS onto every cert + defeat the §201 gap). It is retained
+        // ONLY as challan-identity detail for FVU/TRACES reconciliation.
+        entityDepositedMinor: rupeesToMinor(r.amount),
       }));
-    const depositedMinor = challans.reduce((s, c) => s + c.amountMinor, 0);
+    // PER-EMPLOYEE deposited slice: when a covering PAID/FILED challan exists for the
+    // quarter, this employee's own deducted TDS is treated as deposited (capped at
+    // the employee's deducted — never more, never the entity pool). A quarter with
+    // TDS deducted but NO matching challan row → depositedMinor stays 0, so the §201
+    // reconcile flags it (the gap surfaces here AND at the batch level). A quarter
+    // with no deduction needs no challan and deposits 0.
+    const hasCoveringChallan = challans.length > 0;
+    const depositedMinor = hasCoveringChallan ? deducted.tdsMinor : 0;
     return {
       quarter: q,
       tdsDeductedMinor: deducted.tdsMinor,
-      // A quarter with TDS deducted but no matching challan row → depositedMinor
-      // stays 0, so the batch reconcile flags CHALLAN_MISSING (never silently
-      // certified). A quarter with no deduction needs no challan.
       tdsDepositedMinor: depositedMinor,
       challans,
     };
@@ -214,7 +223,9 @@ async function buildPartA({
 
   const totalDeductedMinor = quarters.reduce((s, q) => s + q.tdsDeductedMinor, 0);
   const totalDepositedMinor = quarters.reduce((s, q) => s + q.tdsDepositedMinor, 0);
-  // Reconciled when every quarter that deducted TDS deposited at least as much.
+  // Reconciled when every quarter that deducted TDS has a covering challan (deposited
+  // === deducted for this employee). The deposited figure is now the employee's own
+  // slice, so this is a true per-employee §201 check (not a trivially-true pool one).
   const reconciledOk = quarters.every(
     (q) => q.tdsDeductedMinor === 0 || q.tdsDepositedMinor >= q.tdsDeductedMinor,
   );
@@ -279,12 +290,21 @@ async function buildPartB({ businessId, employeeId, financialYear, ptMinor = 0, 
   // Net salary after §10 exemptions (before §16 deductions).
   const netSalaryMinor = Math.max(0, grossSalaryTotal - exemptTotalMinor);
 
-  // Income under the head "Salaries" (after §16). We disclose PT here; the engine
-  // already nets standard deduction. The certified totalIncome/tax below come
-  // straight from F15 so the certificate reconciles to the live run to the paise.
+  // Income under the head "Salaries" (after §16). The CERTIFIED totalIncome/tax
+  // below come straight from F15 (zero new tax math), and the F15 income-tax engine
+  // does NOT model professional tax (PT is a payroll deduction, not fed into the
+  // §16(iii) line of the projection). To keep the DISPLAYED chain footing to the
+  // certified F15 totalIncome to the paise (gross → −§10 → net → −§16 → income under
+  // Salaries → +prev-emp → gross-total → −ChVI-A == totalIncome), the §16 deduction
+  // that flows through this chain is the SAME standard-deduction F15 used; PT is
+  // DISCLOSED as a §16(iii) memo line only and is NOT subtracted here (subtracting
+  // it would make the chain disagree with the certified total by exactly the PT and
+  // would silently over/under-state the cert). Feeding PT into the certified tax is
+  // out of scope (it would require new tax math in the F15/india engine).
+  const section16TotalMinor = standardDeductionMinor; // PT is memo-only (see above)
   const incomeUnderHeadSalariesMinor = Math.max(
     0,
-    netSalaryMinor - standardDeductionMinor - professionalTaxMinor,
+    netSalaryMinor - section16TotalMinor,
   );
 
   // Chapter VI-A (OLD only) → section / gross / deductible.
@@ -305,14 +325,39 @@ async function buildPartB({ businessId, employeeId, financialYear, ptMinor = 0, 
     ? rupeesToMinor(stmt.previousEmployerTaxableIncome)
     : 0;
 
-  // CERTIFIED chain — straight from F15 (no new math). totalIncome is the statutory
-  // §288A nearest-₹10 presentation of F15's taxable income.
-  const totalIncomeMinor = roundToTenRupeesMinor(rupeesToMinor(stmt.totalTaxableIncome));
+  // CERTIFIED chain — straight from F15 (no new math). The EXACT (paise) F15 taxable
+  // income is what the displayed Part-B chain must foot to; `totalIncome` is the
+  // statutory §288A nearest-₹10 PRESENTATION of that same figure.
+  const totalIncomeExactMinor = rupeesToMinor(stmt.totalTaxableIncome);
+  const totalIncomeMinor = roundToTenRupeesMinor(totalIncomeExactMinor);
   const taxPayableBeforeMinor = rupeesToMinor(stmt.taxPayable); // tax before surcharge/cess (post-rebate)
   const surchargeMinor = rupeesToMinor(stmt.surcharge);
   const cessMinor = rupeesToMinor(stmt.cess);
   const totalTaxMinor = rupeesToMinor(stmt.totalTax); // = taxPayable + surcharge + cess (post-rebate/relief)
   const tdsDeductedMinor = rupeesToMinor(stmt.tdsDeductedThisFY) + rupeesToMinor(stmt.previousEmployerTds);
+
+  const grossTotalIncomeMinor = incomeUnderHeadSalariesMinor + prevEmployerIncomeMinor;
+
+  // ── FOOTING ASSERTION — the displayed chain MUST reconcile to the certified F15
+  // total income to the paise. grossTotalIncome − ChVI-A == (exact) F15 taxable
+  // income. F15 clamps taxable income at ≥0 (Math.max(0, …)+prevTaxable); mirror
+  // that clamp on the displayed side so a fully-deductible nil-income employee also
+  // foots. A mismatch beyond ₹1 (rounding noise) is a hard error — the cert is a
+  // statutory document and must never be issued not-footing.
+  const chainTotalIncomeMinor = Math.max(
+    0,
+    incomeUnderHeadSalariesMinor - chapterVIA.totalDeductible,
+  ) + prevEmployerIncomeMinor;
+  const footingDeltaMinor = Math.abs(chainTotalIncomeMinor - totalIncomeExactMinor);
+  if (footingDeltaMinor > 100) {
+    const e = new Error(
+      `Form-16 Part B does not foot: displayed chain total income ₹${(chainTotalIncomeMinor / 100).toFixed(2)} `
+      + `≠ certified F15 total income ₹${(totalIncomeExactMinor / 100).toFixed(2)} `
+      + `(delta ₹${(footingDeltaMinor / 100).toFixed(2)})`,
+    );
+    e.code = 'PARTB_NOT_FOOTING';
+    throw e;
+  }
 
   const partB = {
     grossSalary: {
@@ -329,7 +374,7 @@ async function buildPartB({ businessId, employeeId, financialYear, ptMinor = 0, 
     incomeUnderHeadSalaries: incomeUnderHeadSalariesMinor,
     incomeFromOtherSources: 0,
     previousEmployerIncome: prevEmployerIncomeMinor,
-    grossTotalIncome: incomeUnderHeadSalariesMinor + prevEmployerIncomeMinor,
+    grossTotalIncome: grossTotalIncomeMinor,
     chapterVIA,
     totalIncome: totalIncomeMinor,
     taxOnTotalIncome: taxPayableBeforeMinor,

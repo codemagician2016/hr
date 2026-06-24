@@ -8515,12 +8515,23 @@ model Form16Certificate {
   fileHash            String? // sha256 of the issued PDF (tamper anchor)
   signatureEnvelopeId String? // when the batch issues signed
   status              Form16CertStatus @default(PENDING)
+  // Supersede chain (mirrors IssuedLetter.supersedes/supersededBy). A re-generate
+  // NEVER mutates a frozen ISSUED cert: it marks the old row SUPERSEDED and INSERTs a
+  // fresh row, linked both ways, so the originally-certified partAJson/partBJson stays
+  // immutable and recoverable.
+  supersedesCertId    String? // this row re-mints an older (now SUPERSEDED) cert
+  supersededByCertId  String? // an older row superseded by a newer one
   createdAt           DateTime         @default(now())
   updatedAt           DateTime         @updatedAt
   version             Int              @default(0)
 
-  @@unique([businessId, batchId, employeeId]) // one cert per employee per batch
-  @@unique([businessId, certificateNo]) // certificate number is unique per tenant
+  // NOTE: "one cert per employee per batch" is now a PARTIAL unique index (only over
+  // rows whose status <> 'SUPERSEDED'), created in the migration via raw SQL — a
+  // superseded cert and its replacement legitimately coexist for the same
+  // (business, batch, employee). Prisma can't express a filtered unique, so the
+  // compound @@unique is intentionally dropped here in favour of that partial index.
+  @@unique([businessId, certificateNo]) // certificate number is unique per tenant (burned, never reused)
+  @@index([businessId, batchId, employeeId])
   @@index([businessId, employeeId, financialYear])
   @@index([businessId, status])
 }
@@ -8529,7 +8540,8 @@ enum Form16CertStatus {
   PENDING // computed, not yet issued
   ISSUED // PDF minted + in the employee's vault (unsigned or signed-complete)
   PENDING_SIGNATURE // issued into an e-sign envelope, awaiting signer(s)
-  VOIDED // superseded by a re-generate (the IssuedLetter is revoked)
+  VOIDED // legally retracted (the IssuedLetter is revoked) without a replacement
+  SUPERSEDED // immutable history: replaced by a re-generated cert (supersededByCertId)
 }
 
 /// Employer filing/payment obligations generated from a pay run.
