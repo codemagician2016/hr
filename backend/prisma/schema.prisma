@@ -593,6 +593,10 @@ model Business {
   // Data Migration / Bulk Import (Feature 18)
   importJobs                   ImportJob[]
   importRows                   ImportRow[]
+  // Feature 28 — Biometric / device punch ingestion (additive).
+  punchDevices                 PunchDevice[]
+  deviceEmployeeMaps           DeviceEmployeeMap[]
+  rawPunchEvents               RawPunchEvent[]
   // Engagement (Cycle 1) — company announcements / news feed + read receipts.
   announcements                Announcement[]
   announcementReads            AnnouncementRead[]
@@ -6493,6 +6497,7 @@ model Entity {
   compensations CompensationRevision[]
   importJobs    ImportJob[]
   form16Batches Form16Batch[]
+  punchDevices  PunchDevice[] // Feature 28 — biometric devices live at an entity site
 
   @@unique([businessId, code])
   @@index([businessId, countryCode, status])
@@ -6539,7 +6544,8 @@ model Location {
   deletedAt        DateTime?
   version          Int       @default(0)
 
-  employments EmploymentRecord[]
+  employments  EmploymentRecord[]
+  punchDevices PunchDevice[] // Feature 28 — biometric devices optionally scoped to a location
 
   @@unique([businessId, entityId, code])
   @@index([businessId, entityId, isActive])
@@ -6736,6 +6742,7 @@ model Employee {
   leaveTxns              LeaveTransaction[]
   compOffCredits         CompOffCredit[] // Feature 30 — comp-off expiry lots
   punches                AttendancePunch[]
+  deviceEmployeeMaps     DeviceEmployeeMap[] // Feature 28 — device enroll-no/PIN → this employee
   shiftAssignments       ShiftAssignment[]
   timesheets             Timesheet[]
   attendances            Attendance[]                      @relation("EmployeeAttendances")
@@ -9269,6 +9276,13 @@ model AttendancePunch {
   selfieUrl               String?     @db.Text // @pii:sensitive (optional)
   isManual                Boolean     @default(false) // regularization
   regularizationRequestId String?
+  // Feature 28 — biometric/device punch provenance (additive, nullable → existing
+  // rows unaffected). When source=BIOMETRIC the punch carries its registered device
+  // (punchDeviceId, FK-by-id, distinct from the free-text deviceId serial above) and
+  // the immutable RawPunchEvent that produced it (rawPunchEventId, 1:1 traceability
+  // back to the muster-roll evidence layer). Both null for web/mobile/manual punches.
+  punchDeviceId           String?
+  rawPunchEventId         String?
   createdAt               DateTime    @default(now())
 
   @@index([businessId, employeeId, punchAt])
@@ -9291,6 +9305,163 @@ enum PunchSource {
   API
   IMPORT
   MANUAL
+}
+
+// ===========================================================================
+// Feature 28 — Biometric / device punch ingestion (additive ingestion layer).
+// A device registry + a device-code→employee map + an IMMUTABLE raw-event spine.
+// These models ONLY land raw vendor punch logs as canonical AttendancePunch rows
+// (source=BIOMETRIC) and then call the EXISTING attendance recompute — they never
+// re-implement IN/OUT pairing / night-shift / geofence / OT / LOP (that stays in
+// derive.js + service.js, untouched). DPDP note: only the EVENT (code+time+device)
+// is stored — never the biometric template (which never leaves the terminal).
+// ===========================================================================
+
+/// A physical biometric / access-control terminal registered to a tenant site.
+/// The trust + mapping anchor: every inbound punch must name a known device.
+model PunchDevice {
+  id            String    @id @default(uuid())
+  businessId    String
+  business      Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  // Site scoping — a device lives at one entity (drives country/TZ) and optionally
+  // a location (seeds the punch's locationId so geofence/holiday scope work).
+  entityId      String
+  entity        Entity    @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  locationId    String?
+  location      Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  vendor        DeviceVendor // ESSL | ZKTECO | MATRIX | MANTRA | CAMS | REALTIME | BIOMAX | GENERIC
+  adapterKey    String // resolves the normaliser, e.g. "zkteco.adms", "essl.csv", "cams.rest"
+  name          String // operator-facing, e.g. "Plant-A Main Gate"
+  // Device identity AS THE DEVICE REPORTS IT — the join key for push/SFTP. ZK ADMS
+  // sends the terminal serial (SN=...); CSV imports may carry it as a column.
+  serialNumber  String?
+  // Direction handling: TRUST_DEVICE (use the device's IN/OUT) | DERIVE (ignore
+  // device direction, alternate by time order per employee-day) | ALL_IN (single
+  // reader gate — every punch is an IN; OUT inferred downstream by derive.js).
+  directionMode DeviceDirectionMode @default(DERIVE)
+  // De-bounce: two events for the same employee within this window collapse to one
+  // (a double-tap on the reader). The 2nd → DUPLICATE, never deleted.
+  dedupWindowSec Int      @default(60)
+  // When no DeviceEmployeeMap row resolves a code, fall back to Employee.code.
+  fallbackToEmployeeCode Boolean @default(true)
+  // Optional per-device clock correction (seconds) applied BEFORE zonedWallTimeToUtc
+  // for a device whose wall-clock is known-skewed. Default 0 (trust as-reported).
+  clockOffsetSec Int      @default(0)
+  // Push/SFTP auth: a per-device shared secret (hashed) the device/agent presents.
+  // NEVER the raw secret in the DB.
+  ingestSecretHash  String?
+  ingestSecretLast4 String? // display hint only
+  // Polling (SFTP/folder) config, when this device is pulled rather than pushed.
+  pollKind      PollKind? // SFTP | FOLDER | null (push/CSV-only)
+  pollConfigJson Json? // { host, port, user, path, keyRef } — secrets BY REFERENCE
+  pollCursor    String? // last consumed file / offset (idempotent poll)
+  // Health / watchdog
+  lastSeenAt    DateTime? // last successful inbound batch
+  expectedSilenceMin Int? // alert if no punch for N minutes during site hours
+  timezone      String? // override; else resolved location→entity→business
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+  version       Int       @default(0)
+
+  maps          DeviceEmployeeMap[]
+  events        RawPunchEvent[]
+
+  @@unique([businessId, serialNumber]) // a serial is unique per tenant (push join key)
+  @@index([businessId, entityId, isActive])
+  @@index([businessId, locationId])
+}
+
+enum DeviceVendor {
+  ESSL
+  ZKTECO
+  MATRIX
+  MANTRA
+  CAMS
+  REALTIME
+  BIOMAX
+  GENERIC
+}
+
+enum DeviceDirectionMode {
+  TRUST_DEVICE
+  DERIVE
+  ALL_IN
+}
+
+enum PollKind {
+  SFTP
+  FOLDER
+}
+
+/// device-side employee code (enroll-no / PIN) → DriftHR employee. Explicit map for
+/// the common case where the enroll number ≠ Employee.code. A missing map row falls
+/// back to Employee.code (per device.fallbackToEmployeeCode).
+model DeviceEmployeeMap {
+  id         String       @id @default(uuid())
+  businessId String
+  business   Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  // device-specific (deviceId set) OR tenant-wide (deviceId null): a PIN namespace
+  // is often shared across a site's gates.
+  deviceId   String?
+  device     PunchDevice? @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  deviceCode String // enroll-no / PIN as the device reports it (string, exact)
+  employeeId String
+  employee   Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  createdAt  DateTime     @default(now())
+  createdBy  String?
+
+  // One mapping per (device-or-tenant, code). NULL deviceId is the tenant-wide row.
+  @@unique([businessId, deviceId, deviceCode])
+  @@index([businessId, employeeId])
+}
+
+/// The IMMUTABLE raw inbound punch event — the audit + dedup spine. We keep the
+/// device's literal payload forever; nothing downstream mutates the raw record.
+/// This is the muster-roll evidence layer. A RawPunchEvent that materialises
+/// produces an AttendancePunch (linked); one that can't (unmapped / unknown device
+/// / locked day) is parked with a reason and surfaced on the error report.
+model RawPunchEvent {
+  id          String       @id @default(uuid())
+  businessId  String
+  business    Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  deviceId    String?
+  device      PunchDevice? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  importJobId String? // set when ingested via the file-import surface (F18 job)
+  // As-reported, before mapping
+  deviceCode  String // enroll-no / PIN string
+  localTimeRaw String // the device's literal "YYYY-MM-DD HH:MM:SS" (no TZ)
+  punchAt     DateTime // resolved UTC instant (zonedWallTimeToUtc in device TZ)
+  rawDirection String? // device's raw direction token, if any ("0","C/In","OUT")
+  resolvedType PunchType? // IN/OUT/BREAK_* after direction resolution (null until resolved)
+  rawPayloadJson Json // the full original record (every column the adapter saw)
+  // Lifecycle
+  status      RawPunchStatus @default(RECEIVED)
+  reason      String?
+  employeeId  String? // resolved subject (null when UNMAPPED)
+  attendancePunchId String? // the AttendancePunch this produced (null until MATERIALISED)
+  // DEDUP / idempotency natural key: sha256(businessId|deviceId|deviceCode|punchAt|rawDirection)
+  dedupKey    String
+  createdAt   DateTime     @default(now())
+
+  @@unique([businessId, dedupKey]) // exactly-once: same device+code+instant lands once
+  @@index([businessId, deviceId, punchAt])
+  @@index([businessId, status])
+  @@index([businessId, employeeId, punchAt])
+}
+
+enum RawPunchStatus {
+  RECEIVED // landed, not yet processed
+  MAPPED // employee resolved, ready to materialise
+  MATERIALISED // AttendancePunch created + recompute run
+  UNMAPPED // device code has no employee mapping
+  UNKNOWN_DEVICE // serial/secret not in the registry
+  LOCKED // target civil day is frozen (period closed)
+  DUPLICATE // dedupKey already present (no-op) / de-bounced
+  ERROR // adapter/parse/validation failure
+  IGNORED // operator-discarded (manual correction) — never hard-deleted
 }
 
 /// Derived daily summary (one per emp/day).
@@ -11957,6 +12128,7 @@ enum ImportKind {
   ATTENDANCE
   PAYROLL_HISTORY
   REIMBURSEMENT
+  BIOMETRIC // Feature 28 — device punch logs (eSSL/ZKTeco/Matrix/...) → AttendancePunch
 }
 
 enum ImportStatus {

@@ -184,6 +184,30 @@ app.post('/api/razorpay/webhook', express.raw({ type: 'application/json' }), han
 // RAW body, so they live here before express.json() for the same reason as above.
 app.post('/api/integrations/:id/webhook', express.raw({ type: 'application/json' }), asyncHandler(require('./core/controllers/integrations.controller').receiveWebhook));
 
+// FLAG (Feature 28 — biometric push door): the device punch ingest webhook. Mounted
+// here BEFORE express.json() so the body arrives as TEXT — a ZK ADMS terminal POSTs
+// TAB-SEPARATED ATTLOG (text/plain), Cams/Matrix POST JSON; the per-vendor adapter
+// parses the literal string. Device-secret auth (X-Device-Secret), NOT operator JWT
+// — devices carry no session, exactly like the webhook surface above. Per-serial
+// rate limit guards a chatty/looping terminal. Idempotent by dedupKey (retry-safe).
+{
+  const rateLimit = require('express-rate-limit');
+  const biometricIngestLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 600, // a busy gate rarely exceeds ~10/s; well above real device cadence
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => `biometric:${req.params.deviceSerial || 'unknown'}`,
+    message: { message: 'rate limit exceeded for this device' },
+  });
+  app.post(
+    '/api/hr/biometric/ingest/:deviceSerial',
+    biometricIngestLimiter,
+    express.text({ type: () => true, limit: '5mb' }),
+    asyncHandler(require('./hr/attendance/biometric/webhook.controller').ingestPunch),
+  );
+}
+
 // Raised from 10mb so a gallery with ~10 compressed images can still publish
 // in a single request. Client-side compression keeps typical payloads small
 // (see compressImageToDataUrl in ContentEditor.js) — this is just the ceiling.

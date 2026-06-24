@@ -65,6 +65,9 @@ const HR_EVENT_TEMPLATES = Object.freeze({
   'comp-off.earn-pending':  'HR_COMP_OFF_EARN_PENDING',  // → manager when a credit awaits approval
   'comp-off.expiring-soon': 'HR_COMP_OFF_EXPIRING_SOON', // → employee N days before a credit lapses
   'comp-off.lapsed':        'HR_COMP_OFF_LAPSED',        // → employee when a credit expires unused
+  // Feature 28 — Biometric ingestion watchdog fan-out (→ canManageAttendance ops).
+  'biometric.device_silent': 'HR_BIOMETRIC_DEVICE_SILENT', // a registered device went quiet past expectedSilenceMin
+  'biometric.high_unmapped': 'HR_BIOMETRIC_HIGH_UNMAPPED', // a batch parked >X% UNMAPPED (likely re-numbering / new joiner)
 });
 
 // HR template registry. vertical: 'HR' so listTemplates({vertical:'HR'}) scopes
@@ -340,6 +343,25 @@ const HR_TEMPLATES = Object.freeze([
     vertical: 'HR',
     body: 'Hi {NAME}, {DAYS} unused comp-off day(s) lapsed on {EXPIRES}. — {BIZ}',
     variables: ['NAME', 'DAYS', 'EXPIRES', 'BIZ'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  // ─── Feature 28 — Biometric ingestion watchdog ───
+  {
+    key: 'HR_BIOMETRIC_DEVICE_SILENT',
+    displayName: 'Biometric device silent',
+    category: 'SERVICE',
+    vertical: 'HR',
+    body: '{BIZ}: biometric device {DEVICE} ({SITE}) has sent no punches for {MINUTES} min (last seen {LASTSEEN}). Check the terminal: {LINK}',
+    variables: ['BIZ', 'DEVICE', 'SITE', 'MINUTES', 'LASTSEEN', 'LINK'],
+    channels: { sms: true, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_BIOMETRIC_HIGH_UNMAPPED',
+    displayName: 'Biometric high unmapped rate',
+    category: 'SERVICE',
+    vertical: 'HR',
+    body: '{BIZ}: {PCT}% of a punch batch from {DEVICE} ({COUNT} rows) had no employee mapping. Map the codes + reprocess: {LINK}',
+    variables: ['BIZ', 'DEVICE', 'PCT', 'COUNT', 'LINK'],
     channels: { sms: false, whatsapp: true, email: true },
   },
 ]);

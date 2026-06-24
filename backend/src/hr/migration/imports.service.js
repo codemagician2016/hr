@@ -376,6 +376,15 @@ async function commit({ businessId, actorId, jobId, autoGenerate = true }) {
     await driver.sweepPreviewRuns(businessId, jobId);
     autogen = await driver.runPayrollAutogen({ businessId, actorId, jobId });
   }
+  // FLAG (Feature 28 — shared edit): BIOMETRIC post-commit recompute pass. The
+  // per-row committer only LANDED RawPunchEvents (each row in its own tx); here we
+  // materialise the distinct (employee, civil-day) the batch touched and call the
+  // EXISTING recompute ONCE per day (§6.1 batching). No dry-run (autoGenerate gates
+  // the real commit only — dry-run never reaches commit()).
+  if (job.kind === 'BIOMETRIC') {
+    const bio = require('../attendance/biometric/committer');
+    autogen = await bio.recomputeBatchForJob({ businessId, jobId });
+  }
   return { ...(await getJob({ businessId, jobId })), commitSummary: { committed, skipped, failed }, autogen };
 }
 
@@ -400,6 +409,11 @@ async function commitOneRow(tx, job, row, actorId, opts) {
     case 'ATTENDANCE': return commitAttendance(tx, job, n, opts);
     case 'PAYROLL_HISTORY': return commitPayrollHistory(tx, job, n, opts);
     case 'REIMBURSEMENT': return commitReimbursement(tx, job, n, actorId, opts);
+    // FLAG (Feature 28 — shared edit): BIOMETRIC device punches. The committer LANDS
+    // a RawPunchEvent (dedup) per row; recompute is deferred to a post-commit pass
+    // (recomputeBatchForJob) keyed on distinct (employee, civil-day). All ingest
+    // logic lives in attendance/biometric/* — this is a one-line dispatch.
+    case 'BIOMETRIC': return require('../attendance/biometric/committer').commitBiometricPunch(tx, job, n, opts);
     default: throw new Error(`no committer for kind ${job.kind}`);
   }
 }

@@ -138,6 +138,11 @@ export const NAV_ITEMS = [
   // The server is the real boundary; this just hides the link. It lives under
   // Settings because migration is a one-time setup/onboarding task, not daily work.
   { key: 'settings-import', label: 'Import / Migrate', href: '/settings/import', permission: 'canManageImports', parent: 'settings', icon: 'upload' },
+  // FLAG FOR MERGE (Feature 28 — NEW nav item): Biometric / device punch ingestion.
+  // Gated on canManageAttendance (Owner + HR-Admin). Lives under Settings →
+  // Attendance: register devices, map enroll-no→employee, watch ingest activity,
+  // triage parked rows. The push/poll ingest doors are device-secret/cron, not here.
+  { key: 'settings-biometric', label: 'Biometric devices', href: '/settings/attendance/biometric', permission: 'canManageAttendance', parent: 'settings', icon: 'clock' },
 ];
 
 // ── Sidebar grouping ─────────────────────────────────────────────────────────
