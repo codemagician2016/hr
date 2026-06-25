@@ -48,9 +48,11 @@ function handleError(res, err) {
 async function createBatch(req, res) {
   try {
     const { businessId, id: actorId } = req.user;
-    const { bank, debitAccount, valueDate, narration } = req.body || {};
+    const { bank, debitAccount, valueDate, narration, force } = req.body || {};
     const batch = await service.createBatch({
       businessId, actorId, payRunId: req.params.id, bank, debitAccount, valueDate, narration,
+      // `force` re-issues over an in-flight batch — audited; truthy strings count.
+      force: force === true || force === 'true' || force === 1 || force === '1',
     });
     res.status(201).json(batch);
   } catch (err) { handleError(res, err); }

@@ -133,6 +133,26 @@ async function main() {
   ok(afterGen.fileGeneratedAt != null, 'fileGeneratedAt stamped');
   ok(afterGen.status === 'PROCESSING', `status flipped QUEUED→PROCESSING (got ${afterGen.status})`);
 
+  // 3b. HIGH double-pay window: batch is now PROCESSING (file OUT, money in flight)
+  // but NOT yet reconciled/CREDITED. A 2nd createBatch in this window MUST be
+  // refused — the OLD CREDITED-only guard let it through and double-paid everyone.
+  await throws(() => svc.createBatch({ businessId, actorId: 'maker', payRunId: run.id, bank: 'HDFC' }), 'BAD_STATE',
+    'HIGH: 2nd batch blocked while a PROCESSING (in-flight) batch exists (no double-pay)');
+  // generateFile on a NEW (hypothetical) sibling is also guarded — proven below via
+  // the force path; here we assert the in-flight batch still re-renders idempotently.
+  const reRender = await svc.generateFile({ businessId, batchId: batch.id });
+  ok(reRender.meta.totalMinor === expectTotal, 'in-flight batch re-renders its own file idempotently');
+
+  // 3c. An explicit audited `force` re-issues over the in-flight batch (allowed).
+  const forced = await svc.createBatch({ businessId, actorId: 'maker', payRunId: run.id, bank: 'HDFC', force: true });
+  ok(forced && forced.id && forced.id !== batch.id, 'HIGH: force=true re-issues a NEW batch over an in-flight one (audited)');
+  // The forced sibling's file is blocked while the original is still in flight (no 2 live files).
+  await throws(() => svc.generateFile({ businessId, batchId: forced.id }), 'BAD_STATE',
+    'HIGH: generateFile refuses a 2nd live file while a sibling batch is in flight');
+  // Clean up the forced sibling so the rest of the scenario (single batch) is unaffected.
+  await prisma.payoutLine.deleteMany({ where: { batchId: forced.id } });
+  await prisma.payoutBatch.delete({ where: { id: forced.id } });
+
   // 4a. reconcile a MIX (one CREDITED, one FAILED) → PARTIAL.
   const lineRows = await prisma.payoutLine.findMany({ where: { businessId, batchId: batch.id }, select: { employeeId: true, accountNumber: true } });
   const mix = svc.reconcile ? await svc.reconcile({
@@ -152,16 +172,36 @@ async function main() {
   });
   ok(allCredited.batch.status === 'CREDITED', `all-credited rolls up to CREDITED (got ${allCredited.batch.status})`);
   ok(allCredited.batch.reconciledAt != null, 'reconciledAt stamped on terminal CREDITED');
-  // Re-run identical reconcile — still CREDITED (idempotent).
+  // Re-run identical reconcile — still CREDITED (idempotent) AND must NOT wipe UTR.
   const again = await svc.reconcile({
     businessId, actorId: 'maker', batchId: batch.id,
     rows: lineRows.map((l) => ({ accountNumber: l.accountNumber, status: 'CREDITED' })),
   });
   ok(again.batch.status === 'CREDITED', 'reconcile is idempotent (still CREDITED)');
+  const utrsAfterIdem = (await prisma.payoutLine.findMany({ where: { businessId, batchId: batch.id }, select: { utr: true } })).map((l) => l.utr);
+  ok(utrsAfterIdem.every((u) => u && /^UTR900\d$/.test(u)), `LOW5: stale CREDITED re-apply (no utr in row) PRESERVES utr (${utrsAfterIdem.join(',')})`);
 
-  // createBatch now refused (a credited batch exists → no over-pay).
+  // createBatch refused while the batch is CREDITED (non-terminal-for-reissue → no over-pay).
   await throws(() => svc.createBatch({ businessId, actorId: 'maker', payRunId: run.id, bank: 'HDFC' }), 'BAD_STATE',
     'a 2nd batch after CREDITED is refused (no over-pay)');
+
+  // 4c. LOW 5 — RETURNED after CREDITED must PRESERVE the original credit UTR (proof
+  // money left) and NOT null it. Reconcile ONE line as RETURNED with NO utr in the row.
+  const firstLine = await prisma.payoutLine.findFirst({ where: { businessId, batchId: batch.id }, orderBy: { createdAt: 'asc' }, select: { id: true, accountNumber: true, utr: true } });
+  const origUtr = firstLine.utr;
+  ok(!!origUtr, `a credited line has a UTR before clawback (${origUtr})`);
+  const ret = await svc.reconcile({
+    businessId, actorId: 'maker', batchId: batch.id,
+    rows: [{ accountNumber: firstLine.accountNumber, status: 'RETURNED', failureReason: 'Beneficiary returned' }],
+  });
+  const retLine = await prisma.payoutLine.findUnique({ where: { id: firstLine.id }, select: { status: true, utr: true, failureReason: true } });
+  ok(retLine.status === 'RETURNED', `line flips to RETURNED (got ${retLine.status})`);
+  ok(retLine.utr === origUtr, `LOW5: RETURNED-after-CREDITED KEEPS the original UTR ${origUtr} (got ${retLine.utr})`);
+  ok(retLine.failureReason === 'Beneficiary returned', 'RETURNED captures the failure reason');
+  ok(ret.report.some((r) => r.matched && r.clawedBack === true), 'LOW5: report flags credited-then-returned as clawedBack');
+  ok(ret.breakdown && ret.breakdown.returned === 1 && ret.breakdown.failed === 0, `LOW5: rollup breakdown counts RETURNED separately from FAILED (${JSON.stringify(ret.breakdown)})`);
+  // Re-credit it so the batch returns to a clean CREDITED for the rest of the scenario.
+  await svc.reconcile({ businessId, actorId: 'maker', batchId: batch.id, rows: [{ accountNumber: firstLine.accountNumber, status: 'CREDITED', utr: origUtr }] });
 
   // 5. tenant isolation: another tenant cannot see this batch (404).
   const other = await prisma.business.findFirst({ where: { slug: { not: 'demo' } }, select: { id: true } });
@@ -178,6 +218,51 @@ async function main() {
   const view = await svc.getBatch({ businessId, batchId: batch.id, page: 1, pageSize: 1 });
   ok(view.pagination.total === expectPayable && view.lines.length === 1, 'getBatch paginates lines');
   ok(/^X+\d{4}$/.test(view.lines[0].accountNumberMasked), `account number masked in the read model (${view.lines[0].accountNumberMasked})`);
+
+  // 6. MEDIUM 3 — an INVALID account number is FLAGGED (skipped), never shipped to
+  // the bank file where the fixed-width formatter would truncate/corrupt it.
+  // Build a SECOND fresh run with a single line for payEmpA, temporarily set that
+  // employee's PRIMARY account to a too-long number, and assert createBatch skips it.
+  const acctRow = await prisma.bankAccount.findFirst({
+    where: { businessId, employeeId: payEmpA, isPrimary: true, isActive: true, deletedAt: null },
+    select: { id: true, accountNumber: true },
+  });
+  if (acctRow) {
+    const run2 = await prisma.payRun.create({
+      data: {
+        businessId, entityId: inEntity.id, payCalendarId: cal.id,
+        code: `${PREFIX}-INVACC-${Date.now()}`,
+        periodStart: new Date('2026-06-01'), periodEnd: new Date('2026-06-30'), payDate: new Date('2026-06-30'),
+        sequenceInYear: 4, taxYear: '2026-27', currencyCode: inEntity.payCurrency || 'INR', status: 'LOCKED', type: 'REGULAR',
+      },
+    });
+    await prisma.payRunLine.create({
+      data: {
+        businessId, payRunId: run2.id, employeeId: payEmpA, compensationId: 'disb-test',
+        payableDays: '30', netPay: money.fromMinor(4500075), grossEarnings: money.fromMinor(4500075),
+        totalDeductions: '0', employerCost: money.fromMinor(4500075), currencyCode: 'INR', status: 'COMPUTED',
+      },
+    });
+    const origAcct = acctRow.accountNumber;
+    try {
+      // 19 digits → exceeds the 6..18 rule AND the SBI 17-wide column → must be flagged.
+      await prisma.bankAccount.update({ where: { id: acctRow.id }, data: { accountNumber: '1234567890123456789' } });
+      await throws(() => svc.createBatch({ businessId, actorId: 'maker', payRunId: run2.id, bank: 'HDFC' }), 'MISSING_BANK_DETAILS',
+        'MEDIUM3: an invalid (too-long) account number yields no payable lines (422)');
+      // The offender carries the INVALID_ACCOUNT reason (not shipped to the file).
+      let offReason = null;
+      try { await svc.createBatch({ businessId, actorId: 'maker', payRunId: run2.id, bank: 'HDFC' }); }
+      catch (e) { offReason = (e.offenders || []).map((o) => o.reason); }
+      ok(Array.isArray(offReason) && offReason.includes('INVALID_ACCOUNT'),
+        `MEDIUM3: offender flagged INVALID_ACCOUNT (got ${JSON.stringify(offReason)})`);
+    } finally {
+      await prisma.bankAccount.update({ where: { id: acctRow.id }, data: { accountNumber: origAcct } });
+      await prisma.payRunLine.deleteMany({ where: { payRunId: run2.id } });
+      await prisma.payRun.delete({ where: { id: run2.id } });
+    }
+  } else {
+    log('  SKIP  no primary account for payEmpA to test INVALID_ACCOUNT');
+  }
 
   await cleanup(businessId);
 
