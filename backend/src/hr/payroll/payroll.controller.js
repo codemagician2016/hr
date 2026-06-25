@@ -177,7 +177,9 @@ async function getThresholds(req, res) {
   } catch (err) { handleError(res, err); }
 }
 
-// Feature 7 — edit the per-tenant variance tolerances. canRunPayroll-gated.
+// Feature 7 — edit the per-tenant variance tolerances. canApprovePayroll-gated
+// (MEDIUM-3): the thresholds drive the BLOCKER gate, so only the checker may tune
+// them — the maker can't self-tune the gate they are gated by.
 async function updateThresholds(req, res) {
   try {
     const { businessId, id: actorId } = req.user;

@@ -233,6 +233,10 @@ function has(findings, code, employeeId) {
   check('base-jump: EPF base jump is WARNING', 'WARNING', (baseJump || {}).severity);
   check('base-jump: deltaPct = 1.0', 1, (baseJump || {}).deltaPct);
   check('base-jump: baseline=1800*100, observed=3600*100', [R(1800), R(3600)], [(baseJump || {}).baseline, (baseJump || {}).observed]);
+  // FINDING #7: a STATUTORY code's movement is OWNED by the statutory family — the
+  // generic COMPONENT_DELTA (same 0.30 threshold) must NOT also fire for EPF, so the
+  // identical |Δ%| movement is reported exactly once (deterministic, no duplicate).
+  check('base-jump: COMPONENT_DELTA suppressed for statutory EPF (#7)', null, has(findings, 'COMPONENT_DELTA', 'K'));
   // A comp revision suppresses the base-jump (it's an explained change).
   const curRev = {
     runId: 'c2', type: 'REGULAR', totalsMinor: { netMinor: R(44600) },

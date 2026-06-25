@@ -8151,10 +8151,22 @@ model AnomalyAcknowledgement {
   employeeId     String? // NULL ⇒ a RUN-scoped blocker (e.g. RECONCILIATION_MISMATCH)
   reason         String // mandatory justification (audited)
   acknowledgedBy String // actor id (the canApprovePayroll checker)
+  // Finding-CONTENT fingerprint captured at ack time (HIGH-1). A deterministic hash of
+  // the EXACT blocker instance overridden — {code, employeeId, observed, baseline,
+  // deltaMinor} plus the run's totalsHash. countUnacknowledgedBlockers only credits an
+  // ack whose fingerprint MATCHES the current blocker, so a recompute that changes the
+  // numbers (or a new/worse blocker for the same code/employee) INVALIDATES the stale
+  // ack and forces a fresh, re-audited acknowledgement. Additive/nullable: legacy rows
+  // (fingerprint NULL) still match only by (code, employeeId) — back-compatible.
+  fingerprint    String?
   createdAt      DateTime @default(now())
 
   // One LIVE ack per (run, code, employee) — re-acknowledging updates the reason.
-  // employeeId NULL collapses to a single run-scoped ack per code via the unique below.
+  // employeeId NULL collapses to a single run-scoped ack per code: Postgres treats
+  // NULLs as DISTINCT in a multi-column UNIQUE, so this index does NOT dedup the
+  // run-scoped (employeeId IS NULL) rows — a separate partial unique index
+  // "(payRunId, code) WHERE employeeId IS NULL" enforces that (see migration), and
+  // ackAnomaly branches to findFirst+update on NULL rather than upsert-on-NULL (LOW-5).
   @@unique([payRunId, code, employeeId])
   @@index([businessId, payRunId])
 }
