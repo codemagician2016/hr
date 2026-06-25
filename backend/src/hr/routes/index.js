@@ -65,6 +65,12 @@ router.use('/documents', require('./documents.routes'));
 // scoped, SoD on verify). The ESS upload + Form 12BB live under /me/proofs (below).
 router.use('/tax-windows', require('./taxWindow.routes'));
 router.use('/proofs', require('./proofs.routes'));
+// FLAG (Feature 15/25 — NEW mount): income-tax REGIME ELECTION console. Operator
+// surfaces under /tax (so /tax/regime-policy + /tax/regime + /tax/regime/lock): the
+// per-FY employer DEFAULT + election WINDOW + global LOCK (canManageStatutory) and the
+// per-employee regime VIEW (elected/effective + lock status, canViewPayrollReports,
+// F1-scoped). The ESS election lives under /me/tax/regime (below).
+router.use('/tax', require('./regimeAdmin.routes'));
 // FLAG (Feature 25 — NEW mount): FBP / Flexi Basket. Operator surfaces: the plan
 // builder (canViewCompensation/canManageCompensation) + the allocation roster +
 // per-employee drill-down + force-lock (canViewEmployees/canManagePayroll, F1-scoped).
@@ -187,6 +193,11 @@ router.use('/me/tax-declaration', require('./meTax.routes'));
 // statement + monthly TDS projection + PDF). Customer session, SELF_ONLY (subject
 // resolved from the session). India-only — the assembler 422s for non-IN tenants.
 router.use('/me/tax-projection', require('./meTaxProjection.routes'));
+// FLAG (Feature 15/25 — NEW mount): ESS income-tax REGIME ELECTION (elect OLD/NEW for
+// the FY, with the OLD-vs-NEW comparison + window/lock state). Customer session,
+// SELF_ONLY (subject resolved from the session). Mounted at /me/tax so the election is
+// GET/PUT /me/tax/regime. India-only (the controller country-gates).
+router.use('/me/tax/regime', require('./meTaxRegime.routes'));
 // FLAG (Feature 20 — new mount): ESS investment-PROOF upload + Form 12BB. Customer
 // session, SELF_ONLY (subject resolved from the session). Window-OPEN-gated uploads,
 // withdraw-own-PENDING, per-claim declared/verified/pending rollup, Form 12BB PDF.

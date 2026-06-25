@@ -622,12 +622,19 @@ async function resolveRunTaxOverride({ businessId, employeeId, asOf, db = prisma
 
   const taxYear = payrollService._internal.taxYearFor(asOfIso, 4);
 
-  // The declaration drives the elected regime. The FBP exemption (and therefore any
-  // run/projection divergence) exists ONLY under OLD — NEW exempts ₹0, so the run's
-  // default full-gross annualisation already equals the projection. Skip (return null)
-  // for NEW so non-OLD employees are byte-identical to today.
+  // The EFFECTIVE regime drives the elected/default regime. The FBP exemption (and
+  // therefore any run/projection divergence) exists ONLY under OLD — NEW exempts ₹0, so
+  // the run's default full-gross annualisation already equals the projection. Skip
+  // (return null) for NEW so non-OLD employees are byte-identical to today.
+  // Feature 15/25 — an UN-ELECTED employee resolves to the employer default
+  // (TaxRegimePolicy.defaultRegime) here too, so the run override matches the same
+  // effective regime the withholding stamps (consistency for a default-OLD tenant).
   const sp = await db.statutoryProfile.findFirst({ where: { businessId, employeeId } });
-  const elected = sp && sp.taxRegime ? String(sp.taxRegime).toUpperCase() : 'NEW';
+  // eslint-disable-next-line global-require
+  const regimeService = require('./regime/regime.service');
+  const { regime: elected } = await regimeService.getEffectiveRegime({
+    businessId, employeeId, fy: taxYear, sp, db,
+  });
   if (elected !== 'OLD') return null;
 
   // The current FBP exemption (the SINGLE computeFbpExempt source). No allocation →

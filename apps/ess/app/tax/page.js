@@ -11,13 +11,34 @@
 // (audit #57: the page could collect a declaration but had nowhere to persist it,
 // so every submission was lost).
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { ErrorBanner } from '@hr/ui';
-import { apiGet, apiPost } from '@/lib/api';
+import { apiGet, apiPost, apiSend } from '@/lib/api';
 import { useCountry } from '@/lib/useCountry';
 
 const TAX_PATH = '/api/hr/me/tax-declaration';
+const REGIME_PATH = '/api/hr/me/tax/regime';
+
+// ⓘ tip — circled "i" revealing help on hover/focus (mirrors hr-admin InfoTip).
+function InfoTip({ text }) {
+  if (!text) return null;
+  return (
+    <span
+      className="ml-1 inline-flex h-4 w-4 cursor-help select-none items-center justify-center rounded-full border text-[10px] font-semibold leading-none align-middle"
+      style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-muted)' }}
+      title={text} tabIndex={0} role="img" aria-label={`Help: ${text}`}
+    >
+      i
+    </span>
+  );
+}
+
+// ₹ formatting for the comparison (whole rupees, Indian grouping).
+function inr(n) {
+  if (n == null || Number.isNaN(Number(n))) return '—';
+  return `₹${Math.round(Number(n)).toLocaleString('en-IN')}`;
+}
 
 // India 80C-style investment heads (amounts in major units, employee-entered).
 const INDIA_HEADS = [
@@ -50,6 +71,144 @@ function MoneyField({ label, hint, value, onChange }) {
       />
       {hint && <span className="mt-1 block text-xs" style={{ color: 'var(--theme-muted)' }}>{hint}</span>}
     </label>
+  );
+}
+
+// RegimeCard — Feature 15/25. The employee elects OLD vs NEW for the FY, sees the
+// OLD-vs-NEW tax comparison (betterRegime hint) so the choice is INFORMED, and the
+// window/lock state (read-only after lock, with the reason + date). Persists to
+// /api/hr/me/tax/regime (which enforces the lock/window server-side). `onRegime`
+// keeps the parent's investment fieldset enable/disable in sync.
+function RegimeCard({ onRegime }) {
+  const [state, setState] = useState(null);   // GET payload
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(null);
+  const [ok, setOk] = useState(false);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    apiGet(REGIME_PATH)
+      .then((res) => {
+        setState(res);
+        if (res && res.effectiveRegime) onRegime?.(res.elected || res.effectiveRegime);
+      })
+      .catch((e) => setErr(e.message || 'Could not load your tax-regime election.'))
+      .finally(() => setLoading(false));
+  }, [onRegime]);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function elect(regime) {
+    if (saving) return;
+    setSaving(true); setErr(null); setOk(false);
+    try {
+      await apiSend(REGIME_PATH, 'PUT', { regime });
+      setOk(true);
+      onRegime?.(regime);
+      load(); // refresh comparison + effective regime + lock state
+    } catch (e) {
+      // 409 = locked/window-closed; 422 = bad input/country. Carry the message.
+      setErr(e.message || 'Could not save your regime election.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <Card>
+        <p className="text-sm" style={{ color: 'var(--theme-muted)' }}>Loading your tax regime…</p>
+      </Card>
+    );
+  }
+  if (!state || state.countryCode !== 'IN') return null; // India-only / not set up
+
+  const lock = state.lock || {};
+  const locked = !!lock.locked;
+  const cmp = state.comparison;
+  const chosen = state.elected || state.effectiveRegime || 'NEW';
+  const better = cmp && cmp.betterRegime;
+
+  return (
+    <Card>
+      <div className="flex items-center justify-between">
+        <h2 className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--theme-muted)' }}>
+          Tax regime <InfoTip text="Choose how your income tax is computed. NEW = lower slabs, almost no deductions. OLD = standard slabs with 80C/HRA/home-loan deductions. Your monthly TDS follows this choice." />
+        </h2>
+        <span className="text-[11px]" style={{ color: 'var(--theme-muted)' }}>FY {state.fy}</span>
+      </div>
+
+      {err && <ErrorBanner message={err} />}
+      {ok && !err && (
+        <div className="rounded-lg px-3 py-2 text-sm" style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}>
+          Regime election saved.
+        </div>
+      )}
+
+      {/* When the employee has NOT elected, we surface the employer default they fall back to. */}
+      {!state.elected && (
+        <p className="text-xs" style={{ color: 'var(--theme-muted)' }}>
+          You haven&apos;t elected a regime — you&apos;re currently on your employer&apos;s default
+          (<strong>{state.defaultRegime === 'OLD' ? 'Old regime' : 'New regime'}</strong>).
+          <InfoTip text="Until you elect, your TDS is computed under the employer default. Elect to lock in your own choice." />
+        </p>
+      )}
+
+      <div className="grid grid-cols-2 gap-3">
+        {['NEW', 'OLD'].map((r) => {
+          const active = chosen === r;
+          const cmpTotal = cmp && cmp[r] ? cmp[r].totalTax : null;
+          return (
+            <button
+              type="button" key={r}
+              onClick={() => !locked && elect(r)}
+              disabled={locked || saving}
+              className="rounded-lg border py-3 px-2 text-sm font-semibold text-left disabled:opacity-60"
+              style={active
+                ? { background: 'var(--theme-primary)', color: 'var(--theme-on-primary)', borderColor: 'var(--theme-primary)' }
+                : { borderColor: 'var(--theme-border)', color: 'var(--theme-text)' }}
+            >
+              <span className="flex items-center justify-between gap-1">
+                <span>{r === 'NEW' ? 'New regime' : 'Old regime'}</span>
+                {better === r && (
+                  <span className="rounded px-1.5 py-0.5 text-[10px] font-bold"
+                    style={active ? { background: 'var(--theme-on-primary)', color: 'var(--theme-primary)' } : { background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}>
+                    Saves more
+                  </span>
+                )}
+              </span>
+              {cmpTotal != null && (
+                <span className="mt-1 block text-xs font-normal" style={{ opacity: 0.85 }}>
+                  Projected tax {inr(cmpTotal)}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* The comparison summary — so the employee elects informed. */}
+      {cmp && cmp.NEW && cmp.OLD && (
+        <p className="text-xs" style={{ color: 'var(--theme-muted)' }}>
+          Under the New regime your projected annual tax is {inr(cmp.NEW.totalTax)}; under the Old regime it&apos;s {inr(cmp.OLD.totalTax)}.
+          {better && <> The <strong>{better === 'OLD' ? 'Old' : 'New'} regime</strong> saves you more on today&apos;s declaration.</>}
+          <InfoTip text="Projected from your current salary + declared deductions. Final tax is computed at year-end (Form 16). Changing your 80C/HRA below updates the Old-regime figure." />
+        </p>
+      )}
+
+      {/* Lock / window state — read-only with the reason + date. */}
+      {locked ? (
+        <div className="rounded-lg border px-3 py-2 text-xs" style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-text)' }}>
+          🔒 Election locked{lock.lockedAt ? ` on ${new Date(lock.lockedAt).toLocaleDateString('en-IN')}` : ''}.
+          {lock.reason ? ` ${lock.reason}` : ''}
+        </div>
+      ) : (lock.electionLockDate && (
+        <p className="text-[11px]" style={{ color: 'var(--theme-muted)' }}>
+          You can change your regime until {new Date(lock.electionLockDate).toLocaleDateString('en-IN')}.
+        </p>
+      ))}
+    </Card>
   );
 }
 
@@ -161,30 +320,10 @@ function TaxInner() {
 
       {country === 'IN' && (
         <>
-          <Card>
-            <h2 className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--theme-muted)' }}>Tax regime</h2>
-            <div className="grid grid-cols-2 gap-3">
-              {['NEW', 'OLD'].map((r) => {
-                const active = regime === r;
-                return (
-                  <button
-                    type="button" key={r} onClick={() => setRegime(r)}
-                    className="rounded-lg border py-3 text-sm font-semibold"
-                    style={active
-                      ? { background: 'var(--theme-primary)', color: 'var(--theme-on-primary)', borderColor: 'var(--theme-primary)' }
-                      : { borderColor: 'var(--theme-border)', color: 'var(--theme-text)' }}
-                  >
-                    {r === 'NEW' ? 'New regime' : 'Old regime'}
-                  </button>
-                );
-              })}
-            </div>
-            <p className="text-xs" style={{ color: 'var(--theme-muted)' }}>
-              {regime === 'NEW'
-                ? 'Lower slab rates, most exemptions not available.'
-                : 'Standard slabs with Chapter VI-A deductions below.'}
-            </p>
-          </Card>
+          {/* Feature 15/25 — the regime ELECTION (comparison + lock/window aware). It
+              persists to its own endpoint and syncs `regime` so the investment fieldset
+              below enables/disables correctly. */}
+          <RegimeCard onRegime={setRegime} />
 
           <Card>
             <h2 className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--theme-muted)' }}>
