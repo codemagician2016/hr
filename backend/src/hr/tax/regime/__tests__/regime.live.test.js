@@ -69,16 +69,26 @@ async function cleanup(businessId) {
       ok('un-elected + default OLD → OLD/DEFAULT', r.regime === 'OLD' && r.source === 'DEFAULT');
     }
 
-    // 3. electRegime persists + appends history; effective becomes ELECTED.
+    // 3. electRegime persists + STAMPS THE MARKER + appends history; effective ELECTED.
+    //    MEDIUM-2: the employee deliberately elects NEW even though the employer default
+    //    is OLD and any provisioned taxRegime would already read 'NEW' — this is a REAL
+    //    election (marker null → set), NOT a dropped no-op.
     {
       const out = await regime.electRegime({ businessId, employeeId: emp.id, fy: FY, regime: 'NEW', actorId: 'u-emp' });
-      ok('elect NEW changed=true', out.changed === true && out.regime === 'NEW');
+      ok('elect NEW (over un-elected default OLD) changed=true', out.changed === true && out.regime === 'NEW');
       const sp = await prisma.statutoryProfile.findFirst({ where: { businessId, employeeId: emp.id } });
       ok('SP.taxRegime persisted = NEW', sp && sp.taxRegime === 'NEW');
+      ok('SP.regimeElectedAt marker stamped', sp && sp.regimeElectedAt != null);
       const hist = await prisma.statutoryElectionHistory.findMany({ where: { businessId, statutoryProfileId: sp.id, field: 'taxRegime' } });
-      ok('one taxRegime history row written', hist.length === 1 && hist[0].newValue === 'NEW');
+      ok('one taxRegime history row written (old=null,new=NEW)',
+        hist.length === 1 && hist[0].newValue === 'NEW' && hist[0].oldValue === null);
       const r = await regime.getEffectiveRegime({ businessId, employeeId: emp.id, fy: FY });
-      ok('after elect NEW → effective NEW/ELECTED', r.regime === 'NEW' && r.source === 'ELECTED');
+      ok('after elect NEW → effective NEW/ELECTED (no longer DEFAULT OLD)', r.regime === 'NEW' && r.source === 'ELECTED');
+      // Idempotent now that there IS a prior election: re-electing NEW is a no-op.
+      const again = await regime.electRegime({ businessId, employeeId: emp.id, fy: FY, regime: 'NEW', actorId: 'u-emp' });
+      ok('re-elect NEW (already elected) changed=false', again.changed === false);
+      const hist2 = await prisma.statutoryElectionHistory.findMany({ where: { businessId, statutoryProfileId: sp.id, field: 'taxRegime' } });
+      ok('idempotent re-elect writes no extra history row', hist2.length === 1);
     }
 
     // 4. Election PAST the lock date is rejected (WINDOW_CLOSED).

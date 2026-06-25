@@ -74,7 +74,10 @@ async function main() {
   await prisma.employmentRecord.create({
     data: { businessId, employeeId: emp.id, entityId: entity.id, employmentType: 'FULL_TIME', workerCategory: 'STAFF', effectiveFrom: new Date('2024-01-15'), changeReason: 'HIRE', isCurrent: true, fteRatio: 1 },
   });
-  await prisma.statutoryProfile.create({ data: { businessId, employeeId: emp.id, countryCode: 'IN', taxRegime: 'OLD', pan: 'ABCDE1234F' } });
+  // This employee has DELIBERATELY elected OLD — the marker (regimeElectedAt) is what
+  // getEffectiveRegime now keys off (a bare taxRegime value is no longer an election),
+  // so a directly-seeded elected profile must stamp it.
+  await prisma.statutoryProfile.create({ data: { businessId, employeeId: emp.id, countryCode: 'IN', taxRegime: 'OLD', regimeElectedAt: new Date('2024-04-01'), pan: 'ABCDE1234F' } });
 
   // ── compensation: Basic 50k/mo, HRA 20k/mo, FBP envelope 25k/mo (₹3,00,000/yr) ──
   const rev = await prisma.compensationRevision.create({

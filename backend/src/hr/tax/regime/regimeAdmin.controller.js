@@ -132,14 +132,18 @@ async function listEmployeeRegimes(req, res, next) {
         take: pageSize,
         select: {
           id: true, code: true, firstName: true, middleName: true, lastName: true,
-          statutoryProfile: { select: { taxRegime: true, regimeLockedAt: true } },
+          statutoryProfile: { select: { taxRegime: true, regimeElectedAt: true, regimeLockedAt: true } },
         },
       }),
     ]);
 
     const items = rows.map((emp) => {
       const sp = emp.statutoryProfile || null;
-      const elected = sp && sp.taxRegime ? sp.taxRegime : null;
+      // ELECTION is the MARKER (regimeElectedAt), NOT the persisted taxRegime — a
+      // never-elected profile carries taxRegime='NEW' from @default/provisioning but is
+      // NOT an election, so `elected` stays null and the row reads "Not elected".
+      const hasElected = !!(sp && sp.regimeElectedAt && sp.taxRegime);
+      const elected = hasElected ? sp.taxRegime : null;
       const effectiveRegime = elected || defaultRegime || 'NEW';
       return {
         employeeId: emp.id,
@@ -147,7 +151,9 @@ async function listEmployeeRegimes(req, res, next) {
         name: [emp.firstName, emp.middleName, emp.lastName].filter(Boolean).join(' ') || emp.code,
         elected,                              // null = un-elected (on the default)
         effectiveRegime,                      // elected else employer default
-        effectiveSource: elected ? 'ELECTED' : (policy ? 'DEFAULT' : 'STATUTORY'),
+        // Source follows the resolver: ELECTED only when the marker is set; else the
+        // employer DEFAULT (policy) or the STATUTORY NEW when no policy exists.
+        effectiveSource: hasElected ? 'ELECTED' : (policy ? 'DEFAULT' : 'STATUTORY'),
         locked: !!(sp && sp.regimeLockedAt),
         lockedAt: sp && sp.regimeLockedAt ? sp.regimeLockedAt : null,
       };

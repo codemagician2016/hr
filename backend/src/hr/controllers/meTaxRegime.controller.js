@@ -113,9 +113,12 @@ async function getRegime(req, res, next) {
       employeeId: emp.id,
       countryCode: countryCode || null,
       fy,
-      elected: profile && profile.taxRegime ? profile.taxRegime : null,
+      // `elected` is the employee's DELIBERATE choice — the MARKER (regimeElectedAt), not
+      // the persisted taxRegime (which defaults to NEW). null → the ESS card shows the
+      // "you haven't elected, you're on the employer default" state.
+      elected: profile && profile.regimeElectedAt && profile.taxRegime ? profile.taxRegime : null,
       effectiveRegime: eff.regime,
-      effectiveSource: eff.source, // ELECTED | DEFAULT | STATUTORY
+      effectiveSource: eff.source, // ELECTED | DEFAULT | STATUTORY (now correct for un-elected)
       defaultRegime: policy ? policy.defaultRegime : 'NEW',
       lock: lockView({ profile, policy }),
       comparison,
