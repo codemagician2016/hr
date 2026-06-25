@@ -616,6 +616,8 @@ model Business {
   // Investment-proof workflow (Feature 20) — year-end §192(2D)/Rule 26C/Form 12BB.
   investmentDeclarationWindows InvestmentDeclarationWindow[]
   investmentProofs             InvestmentProof[]
+  // Feature 15/25 — per-FY income-tax regime ELECTION policy (employer default + window + lock).
+  taxRegimePolicies            TaxRegimePolicy[]
   // Form 16 / 24Q (Feature 24) — annual TDS-certificate generation runs + certs.
   form16Batches                Form16Batch[]
   form16Certificates           Form16Certificate[]
@@ -7523,6 +7525,10 @@ model StatutoryProfile {
   isManagerial        Boolean?     @default(false) // managerial/supervisory (LWF mgr-exclusion)
   aadhaarVerified     Boolean?     @default(false) // store flag, NOT the number
   taxRegime           INTaxRegime? @default(NEW) // NEW is statutory default
+  // Feature 15/25 — regime ELECTION LOCK. Set once HR finalises the election (or the
+  // FY election window closes); a non-null value freezes taxRegime (the regime service
+  // rejects any further self/HR election). Bulk-set by lockRegime when the window shuts.
+  regimeLockedAt      DateTime? // when the regime election was locked (null = still electable)
   section80CDeclared  Decimal?     @db.Decimal(15, 2) // old-regime declarations
   hraExemptionClaimed Boolean?     @default(false)
   abryEligible        Boolean?     @default(false)
@@ -7871,6 +7877,32 @@ model StatutoryElectionHistory {
   createdAt          DateTime         @default(now())
 
   @@index([businessId, statutoryProfileId, field])
+}
+
+// Feature 15/25 — TAX REGIME ELECTION POLICY. The employer's per-FY income-tax regime
+// stance: the DEFAULT regime an un-elected employee falls back to (getEffectiveRegime),
+// the optional election WINDOW (employees may self-elect only between electionOpenFrom
+// and electionLockDate), and a global LOCK (lockedGlobally) that freezes all elections
+// for the FY at once. Tenant-walled; one row per (businessId, fy). The per-EMPLOYEE lock
+// signal lives on StatutoryProfile.regimeLockedAt (set when HR finalises an individual /
+// the window closes). Additive — nothing about the existing withholding math changes;
+// the resolver simply falls back to defaultRegime when the profile is silent.
+model TaxRegimePolicy {
+  id             String      @id @default(uuid())
+  businessId     String
+  business       Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  fy             String      @db.VarChar(7) // "2026-27" (StatutoryProfile.prevEmployerFY format)
+  defaultRegime  INTaxRegime @default(NEW) // what an un-elected employee is withheld under
+  electionOpenFrom DateTime? // employees may self-elect on/after this (null = always open)
+  electionLockDate DateTime? // employees may self-elect strictly before this (null = no deadline)
+  lockedGlobally Boolean     @default(false) // hard freeze: no election for this FY, period
+  updatedBy      String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  version        Int         @default(0)
+
+  @@unique([businessId, fy]) // one policy per tenant per FY
+  @@index([businessId])
 }
 
 /// Per-entity employer statutory registrations (EPF/ESI/PT/TAN/IRD/ACC...).

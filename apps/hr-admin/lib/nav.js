@@ -111,6 +111,10 @@ export const NAV_ITEMS = [
   // server is the real boundary). The proofDeadline is when TDS flips DECLARED→VERIFIED.
   { key: 'tax-declaration-window', label: 'Tax declaration window', href: '/tax/declaration-window', feature: 'payroll', anyPermission: ['canManageStatutory', 'canViewPayrollReports'], icon: 'doc' },
   { key: 'tax-proof-verification', label: 'Tax proof verification', href: '/tax/proof-verification', feature: 'payroll', permission: 'canViewEmployees', icon: 'shield' },
+  // Feature 15/25 — income-tax REGIME election console: employer default + window + lock
+  // + the per-employee elected/effective regime view. Read = canViewPayrollReports (the
+  // server enforces canManageStatutory on policy/lock writes). FLAG: nav.js shared edit.
+  { key: 'tax-regime', label: 'Tax regime', href: '/tax/regime', feature: 'payroll', anyPermission: ['canManageStatutory', 'canViewPayrollReports'], icon: 'coin' },
   // Letters & Communication (Feature 9). The group header is gated on EITHER key:
   // canGenerateLetters (the maker/issue key) OR canManageLetters (the config/
   // checker/revoke key), so both a maker-only HR-Admin and a config-only checker
@@ -196,7 +200,7 @@ export const NAV_GROUPS = [
   { key: 'people-org', label: 'People & Org', icon: 'people', items: ['people', 'org', 'profile-changes', 'profile-policy', 'helpdesk', 'announcements'] },
   { key: 'talent', label: 'Talent', icon: 'onboarding', items: ['recruitment', 'onboarding', 'separations', 'performance'] },
   { key: 'time', label: 'Time', icon: 'calendar', items: ['leave', 'comp-off', 'leave-encashment', 'attendance'] },
-  { key: 'pay', label: 'Pay', icon: 'wallet', items: ['compensation', 'ctc-policies', 'fbp-plans', 'fbp-allocations', 'payroll', 'bonus', 'arrears', 'form16', 'compliance', 'registers', 'tax-declaration-window', 'tax-proof-verification', 'expenses', 'travel', 'loans', 'reports'] },
+  { key: 'pay', label: 'Pay', icon: 'wallet', items: ['compensation', 'ctc-policies', 'fbp-plans', 'fbp-allocations', 'payroll', 'bonus', 'arrears', 'form16', 'compliance', 'registers', 'tax-declaration-window', 'tax-proof-verification', 'tax-regime', 'expenses', 'travel', 'loans', 'reports'] },
   // FLAG FOR MERGE: new Feature 10 group — approval chains + RBAC + reporting tree.
   { key: 'approvals-access', label: 'Approvals & Access', icon: 'approvals', items: ['approvals', 'access-roles', 'access-hierarchy'] },
 ];

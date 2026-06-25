@@ -905,11 +905,35 @@ async function loadRunRowBundles(businessId, payRun, db = prisma) {
       taxOverride = null;
     }
 
+    // Feature 15/25 — the EFFECTIVE regime. computeTds keys its slabs/§87A off
+    // statutory.taxRegime, but an un-elected India employee should be withheld under
+    // the EMPLOYER DEFAULT (TaxRegimePolicy.defaultRegime), not a blanket NEW. We
+    // resolve elected→default→NEW via the regime service and STAMP the result onto the
+    // statutory bag the engine reads (sp.taxRegime, line ~570). When the employee HAS
+    // elected, the resolver returns their election unchanged (golden parity). India-only
+    // (the policy/regime concept); other countries fall through untouched. Fail-open: a
+    // resolver hiccup keeps the profile's raw regime (never blocks the run). Lazy-required
+    // to avoid a require cycle with the regime service's prisma import.
+    let statutory = emp.statutoryProfile || null;
+    if ((entity.countryCode || '') === 'IN') {
+      try {
+        // eslint-disable-next-line global-require
+        const regimeService = require('../tax/regime/regime.service');
+        const { regime } = await regimeService.getEffectiveRegime({
+          businessId, employeeId: emp.id, fy: payRun.taxYear,
+          sp: statutory, db,
+        });
+        if (regime) statutory = { ...(statutory || { countryCode: 'IN' }), taxRegime: regime };
+      } catch (_e) {
+        // Fail-open: keep the raw profile regime (computeTds defaults NEW when silent).
+      }
+    }
+
     bundles.push({
       employee: emp,
       compensation,
       taxOverride,
-      statutory: emp.statutoryProfile || null,
+      statutory,
       attendance: attendanceByEmp.get(emp.id) || null,
       entity,
       period: {
