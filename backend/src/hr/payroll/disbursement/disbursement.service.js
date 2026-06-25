@@ -101,7 +101,7 @@ async function loadRunForDisbursement({ businessId, payRunId }) {
  * from the batch instead of failing the whole run. Persists the batch + lines in
  * a single transaction. Round-trips the total (Σ lines == batch total).
  */
-async function createBatch({ businessId, actorId, payRunId, bank, debitAccount, valueDate, narration }) {
+async function createBatch({ businessId, actorId, payRunId, bank, debitAccount, valueDate, narration, force = false }) {
   if (!bank || !bankFormats.isSupportedBank(bank)) {
     throw badRequest('MISSING_FIELDS', `bank must be one of ${bankFormats.listBanks().map((b) => b.value).join(', ')}`);
   }
@@ -110,14 +110,25 @@ async function createBatch({ businessId, actorId, payRunId, bank, debitAccount, 
     throw badRequest('BAD_STATE', `Disbursement requires a frozen or approved run (current: ${run.status}).`);
   }
 
-  // Guard against a duplicate / over-pay: once a batch for this run is CREDITED,
-  // refuse a fresh one (a correction rides a CORRECTION run, not a 2nd batch).
-  const credited = await prisma.payoutBatch.findFirst({
-    where: { businessId, payRunId, status: 'CREDITED' },
-    select: { id: true },
+  // Guard against a DOUBLE-PAY. A batch is only marked CREDITED after FULL
+  // reconciliation, so a CREDITED-only guard leaves a wide-open window: between
+  // generateFile (QUEUED→PROCESSING) and reconcile, the money is IN FLIGHT (a bank
+  // file is already out) but no batch is CREDITED yet — a 2nd createBatch would
+  // emit a 2nd identical file and pay everyone twice. So we refuse a new batch
+  // while ANY non-terminal batch exists for the run (QUEUED/PROCESSING/PARTIAL/
+  // CREDITED). Only a fully FAILED prior batch (no money landed) frees the run;
+  // an explicit, audited `force` overrides even an in-flight batch (maker chose to
+  // re-issue after a confirmed bank rejection of the whole file).
+  const blocking = await prisma.payoutBatch.findFirst({
+    where: { businessId, payRunId, status: { in: ['QUEUED', 'PROCESSING', 'PARTIAL', 'CREDITED'] } },
+    select: { id: true, status: true, fileGeneratedAt: true },
+    orderBy: { createdAt: 'desc' },
   });
-  if (credited) {
-    throw badRequest('BAD_STATE', 'A credited payout batch already exists for this run. Disburse corrections via a CORRECTION run.');
+  if (blocking && !force) {
+    const e = badRequest('BAD_STATE', `A non-terminal payout batch (${blocking.status}) already exists for this run — treating its file as money-in-flight. Reconcile or fully fail it first, disburse corrections via a CORRECTION run, or pass force=true (audited) to re-issue.`);
+    e.blockingBatchId = blocking.id;
+    e.blockingStatus = blocking.status;
+    throw e;
   }
 
   // Net pay per employee from the committed run lines (exclude EXCLUDED lines).
@@ -146,6 +157,7 @@ async function createBatch({ businessId, actorId, payRunId, bank, debitAccount, 
 
   const empName = (e) => [e.firstName, e.lastName].filter(Boolean).join(' ').trim();
   const IFSC_RE = bankFormats._internals.IFSC_RE;
+  const ACCOUNT_RE = bankFormats._internals.ACCOUNT_RE;
 
   const payable = [];
   const skipped = []; // employees flagged: no/invalid bank detail or non-positive net
@@ -163,6 +175,15 @@ async function createBatch({ businessId, actorId, payRunId, bank, debitAccount, 
       skipped.push({ employeeId: l.employeeId, code: emp.code || null, name, reason: 'MISSING_BANK_ACCOUNT', detail: 'No primary active bank account on file.' });
       continue;
     }
+    // Validate the account number (length/charset) BEFORE it reaches the
+    // fixed-width formatter — a too-long or non-numeric account would otherwise be
+    // silently truncated into a CORRUPTED account and route the credit to a wrong
+    // (or non-existent) account. Flag it as a skipped offender, like INVALID_IFSC.
+    const account = String(acct.accountNumber).trim();
+    if (!ACCOUNT_RE.test(account)) {
+      skipped.push({ employeeId: l.employeeId, code: emp.code || null, name, reason: 'INVALID_ACCOUNT', detail: `Account "${account}" is not 6-18 digits.` });
+      continue;
+    }
     const ifsc = String(acct.ifsc || '').trim().toUpperCase();
     if (!IFSC_RE.test(ifsc)) {
       skipped.push({ employeeId: l.employeeId, code: emp.code || null, name, reason: 'INVALID_IFSC', detail: `IFSC "${acct.ifsc || ''}" is not an 11-char IFSC.` });
@@ -172,7 +193,7 @@ async function createBatch({ businessId, actorId, payRunId, bank, debitAccount, 
       employeeId: l.employeeId,
       amountMinor: netMinor,
       beneficiaryName: acct.accountName || name || emp.code || 'EMPLOYEE',
-      accountNumber: String(acct.accountNumber).trim(),
+      accountNumber: account,
       ifsc,
       narration: narration || defaultNarration(run),
     });
@@ -224,7 +245,12 @@ async function createBatch({ businessId, actorId, payRunId, bank, debitAccount, 
     action: 'payout.batch.create',
     entityType: 'PayoutBatch',
     entityId: batch.id,
-    meta: { payRunId, bank, count: payable.length, totalMinor, skippedCount: skipped.length },
+    // Record `force` + the batch it overrode so a re-issue over an in-flight batch
+    // is always auditable (HIGH double-pay guard).
+    meta: {
+      payRunId, bank, count: payable.length, totalMinor, skippedCount: skipped.length,
+      force: !!force, overrodeBatchId: blocking ? blocking.id : undefined, overrodeStatus: blocking ? blocking.status : undefined,
+    },
   }).catch(() => {});
 
   const out = serializeBatch(batch);
@@ -244,8 +270,11 @@ function defaultNarration(run) {
 /**
  * generateFile — render the bank salary-advice file for a batch via the PURE
  * formatter, and stamp fileGeneratedAt (first generation flips QUEUED→PROCESSING).
- * Re-rendering an already-generated batch is allowed (idempotent re-download).
- * Returns { fileName, contentType, content, meta }.
+ * Re-rendering this same already-generated batch is allowed (idempotent
+ * re-download). But it REFUSES to render a file while a DIFFERENT (sibling) batch
+ * on the same run has a generated-but-unreconciled file — that sibling's file is
+ * money-in-flight, and a second live file would double-pay. Returns { fileName,
+ * contentType, content, meta }.
  */
 async function generateFile({ businessId, batchId }) {
   const batch = await prisma.payoutBatch.findFirst({
@@ -256,6 +285,28 @@ async function generateFile({ businessId, batchId }) {
     },
   });
   if (!batch) throw notFound('Payout batch not found');
+
+  // HIGH double-pay guard: a sibling batch on this run whose file is already out
+  // (fileGeneratedAt set) and NOT yet terminal-reconciled (still QUEUED/PROCESSING/
+  // PARTIAL/CREDITED) is money-in-flight. Emitting a 2nd live file for the same run
+  // pays everyone twice — refuse. (A fully FAILED sibling carried no money, so it
+  // does not block.) Re-rendering THIS batch's own file stays allowed (idempotent).
+  const inFlightSibling = await prisma.payoutBatch.findFirst({
+    where: {
+      businessId,
+      payRunId: batch.payRunId,
+      id: { not: batch.id },
+      fileGeneratedAt: { not: null },
+      status: { in: ['QUEUED', 'PROCESSING', 'PARTIAL', 'CREDITED'] },
+    },
+    select: { id: true, status: true },
+  });
+  if (inFlightSibling) {
+    const e = badRequest('BAD_STATE', `Another payout batch (${inFlightSibling.status}) for this run already has a file in flight; generating a second file would double-pay. Reconcile or fully fail it first.`);
+    e.blockingBatchId = inFlightSibling.id;
+    e.blockingStatus = inFlightSibling.status;
+    throw e;
+  }
 
   const beneficiaries = batch.lines.map((l) => ({
     beneficiaryName: l.beneficiaryName,
@@ -365,14 +416,23 @@ async function reconcile({ businessId, actorId, batchId, rows }) {
       report.push({ index: i, matched: false, reason: 'NO_MATCH', detail: 'No batch line matched this row (by employee or account).' });
       continue;
     }
+    // UTR is PROOF money left the company account. NEVER blank it on a status
+    // change unless the row carries a new one: a previously-CREDITED line later
+    // reconciled as RETURNED/FAILED must KEEP its original credit UTR (the proof of
+    // a credited-then-clawed-back payment), so a row with no utr falls back to the
+    // existing line.utr — for EVERY status, not just CREDITED. This also keeps a
+    // stale re-applied row idempotent (it can't wipe the UTR).
+    const newUtr = r.utr ? String(r.utr).trim() : line.utr || null;
     const data = {
       status,
-      utr: status === 'CREDITED' ? (r.utr ? String(r.utr).trim() : line.utr) : (r.utr ? String(r.utr).trim() : null),
+      utr: newUtr,
       failureReason: status === 'FAILED' || status === 'RETURNED' ? (r.failureReason ? String(r.failureReason).trim() : 'Returned by bank') : null,
-      reconciledAt: status === 'PENDING' ? null : now,
+      // Idempotent timestamp: PENDING clears it; any settled status stamps `now` on
+      // first settle but PRESERVES the existing reconciledAt on re-apply of a stale row.
+      reconciledAt: status === 'PENDING' ? null : (line.reconciledAt || now),
     };
     updates.push({ id: line.id, data });
-    report.push({ index: i, matched: true, lineId: line.id, employeeId: line.employeeId, status });
+    report.push({ index: i, matched: true, lineId: line.id, employeeId: line.employeeId, status, clawedBack: status === 'RETURNED' && line.status === 'CREDITED' });
   }
 
   // Apply line updates + roll up the batch status in ONE transaction.
@@ -380,11 +440,16 @@ async function reconcile({ businessId, actorId, batchId, rows }) {
     for (const u of updates) {
       await tx.payoutLine.update({ where: { id: u.id }, data: u.data });
     }
-    // Recompute the rollup from the now-current line statuses.
+    // Recompute the rollup from the now-current line statuses. We count RETURNED
+    // (clawed-back, money DID leave) SEPARATELY from FAILED (never paid) so the two
+    // aren't conflated in the breakdown, even though both are non-credited for the
+    // purposes of the batch-status rollup.
     const fresh = await tx.payoutLine.findMany({ where: { businessId, batchId: batch.id }, select: { status: true } });
     const total = fresh.length;
     const credited = fresh.filter((l) => l.status === 'CREDITED').length;
-    const failed = fresh.filter((l) => l.status === 'FAILED' || l.status === 'RETURNED').length;
+    const failedOnly = fresh.filter((l) => l.status === 'FAILED').length;
+    const returnedOnly = fresh.filter((l) => l.status === 'RETURNED').length;
+    const failed = failedOnly + returnedOnly; // non-credited settled (for rollup)
     let batchStatus;
     if (credited === total && total > 0) batchStatus = 'CREDITED';
     else if (failed === total && total > 0) batchStatus = 'FAILED';
@@ -392,23 +457,26 @@ async function reconcile({ businessId, actorId, batchId, rows }) {
     else batchStatus = batch.fileGeneratedAt ? 'PROCESSING' : 'QUEUED';
 
     const isTerminal = batchStatus === 'CREDITED' || batchStatus === 'FAILED';
-    return tx.payoutBatch.update({
+    const out = await tx.payoutBatch.update({
       where: { id: batch.id },
       data: { status: batchStatus, reconciledAt: isTerminal ? now : batch.reconciledAt },
       include: { lines: { orderBy: { createdAt: 'asc' } } },
     });
+    out._breakdown = { total, credited, failed: failedOnly, returned: returnedOnly };
+    return out;
   });
 
+  const breakdown = updated._breakdown || null;
   await writeAudit({
     businessId,
     actorId,
     action: 'payout.batch.reconcile',
     entityType: 'PayoutBatch',
     entityId: batch.id,
-    meta: { matched: report.filter((x) => x.matched).length, total: rows.length, status: updated.status },
+    meta: { matched: report.filter((x) => x.matched).length, total: rows.length, status: updated.status, breakdown },
   }).catch(() => {});
 
-  return { batch: serializeBatch(updated), report };
+  return { batch: serializeBatch(updated), report, breakdown };
 }
 
 /**

@@ -42,6 +42,14 @@ const { fromMinor, assertMinor, sumMinor } = require('../money');
 
 const CRLF = '\r\n';
 const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/; // 4 alpha + '0' + 6 alnum
+// Beneficiary account number: digits only, 6..18 long. The widest fixed-width
+// account column we emit is SBI's (17), so a >18 account would silently overflow
+// any flat-file rail — we reject it up-front instead of corrupting the credit.
+const ACCOUNT_RE = /^[0-9]{6,18}$/;
+// Chars that Excel/Sheets treat as the start of a FORMULA when they lead a cell.
+// A cell beginning with one of these (incl. a leading TAB/CR) is neutralized with
+// a single leading quote so opening the file can't execute it (CSV-injection guard).
+const CSV_FORMULA_LEAD = new Set(['=', '+', '-', '@', '\t', '\r']);
 
 /** Rupees-with-2-decimals from integer paise (no float math). "123456" -> "1234.56" */
 function rupees2(amountMinor) {
@@ -49,26 +57,56 @@ function rupees2(amountMinor) {
   return fromMinor(amountMinor, 2);
 }
 
-/** CSV cell: quote+escape if it contains a comma, quote, CR or LF. */
+/**
+ * neutralizeFormula — if a cell begins with a formula-trigger char (= + - @ TAB
+ * CR), prefix a single quote so a spreadsheet opens it as text, never executes it
+ * (standard CSV-injection guard). Empty cells pass through unchanged.
+ */
+function neutralizeFormula(s) {
+  const str = String(s == null ? '' : s);
+  return str.length && CSV_FORMULA_LEAD.has(str[0]) ? `'${str}` : str;
+}
+
+/** CSV cell: neutralize a leading formula char, then quote+escape if it contains a comma, quote, CR or LF. */
 function csvCell(v) {
-  const s = String(v == null ? '' : v);
+  const s = neutralizeFormula(v);
   return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 
-/** Strip delimiters/newlines from free-text so it can't break a fixed layout. */
+/**
+ * Strip delimiters/newlines from free-text so it can't break a fixed layout, then
+ * neutralize a leading formula char (the cleaned text can still land in a CSV via
+ * the generic/control rails, so guard it the same as csvCell).
+ */
 function clean(s) {
-  return String(s == null ? '' : s).replace(/[,"|\r\n]+/g, ' ').trim();
+  const stripped = String(s == null ? '' : s).replace(/[,"|\r\n]+/g, ' ').trim();
+  return neutralizeFormula(stripped);
 }
 
-/** Left-justify + pad/truncate to width (fixed-width fields). */
-function padRight(s, width) {
-  const v = String(s == null ? '' : s).slice(0, width);
+/**
+ * Left-justify + pad to width (fixed-width fields). THROWS a tagged 422 on
+ * overflow rather than silently truncating — a truncated account/IFSC/name routes
+ * or corrupts a real credit, so it must fail loudly. `field` names the column.
+ */
+function padRight(s, width, field = 'field') {
+  const v = String(s == null ? '' : s);
+  if (v.length > width) {
+    throw bankFmtError('BAD_INPUT', 422, `${field} "${v}" exceeds fixed-width ${width} (got ${v.length}); refusing to truncate.`);
+  }
   return v + ' '.repeat(Math.max(0, width - v.length));
 }
 
-/** Right-justify zero-padded (numeric fixed-width fields, e.g. amount in paise). */
-function padLeftZero(s, width) {
-  const v = String(s == null ? '' : s).slice(-width);
+/**
+ * Right-justify zero-padded (numeric fixed-width fields, e.g. amount in paise).
+ * THROWS a tagged 422 on overflow rather than dropping the HIGH-order digit —
+ * a truncated amount credits the wrong (smaller) sum and breaks the trailer
+ * control total, so overflow must fail loudly. `field` names the column.
+ */
+function padLeftZero(s, width, field = 'field') {
+  const v = String(s == null ? '' : s);
+  if (v.length > width) {
+    throw bankFmtError('BAD_INPUT', 422, `${field} "${v}" exceeds fixed-width ${width} (got ${v.length}); refusing to truncate.`);
+  }
   return '0'.repeat(Math.max(0, width - v.length)) + v;
 }
 
@@ -89,6 +127,7 @@ function normalizeInput(beneficiaries, meta = {}) {
     const amountMinor = b && b.amountMinor;
     if (!name) throw bankFmtError('BAD_INPUT', 422, `line ${i}: beneficiaryName is required`);
     if (!account) throw bankFmtError('BAD_INPUT', 422, `line ${i}: accountNumber is required`);
+    if (!ACCOUNT_RE.test(account)) throw bankFmtError('BAD_INPUT', 422, `line ${i}: invalid accountNumber "${account}" (expect 6-18 digits)`);
     if (!IFSC_RE.test(ifsc)) throw bankFmtError('BAD_INPUT', 422, `line ${i}: invalid IFSC "${ifsc}"`);
     assertMinor(amountMinor, `line ${i} amountMinor`);
     if (amountMinor <= 0) throw bankFmtError('BAD_INPUT', 422, `line ${i}: amount must be > 0`);
@@ -271,17 +310,19 @@ function generateSbi(beneficiaries, meta = {}) {
   const detail = rows.map((r) =>
     [
       'D',
-      padRight('NEFT', 4),
-      padRight(r.account, 17),
-      padRight(r.ifsc, 11),
-      padLeftZero(String(r.amountMinor), 15),
-      padRight(r.name, 40),
-      padRight(r.narration, 30),
-      padRight(m.valueDateDdmmyyyy.replace(/\//g, ''), 8), // DDMMYYYY
+      padRight('NEFT', 4, 'pymtMode'),
+      padRight(r.account, 17, `line ${r.idx} accountNumber`),
+      padRight(r.ifsc, 11, `line ${r.idx} IFSC`),
+      // Assert the paise amount fits the 15-wide column BEFORE padding — overflow
+      // must fail loudly (a dropped high digit = wrong, smaller credit + broken trailer).
+      padLeftZero(String(r.amountMinor), 15, `line ${r.idx} amount(paise)`),
+      padRight(r.name, 40, `line ${r.idx} beneficiaryName`),
+      padRight(r.narration, 30, `line ${r.idx} narration`),
+      padRight(m.valueDateDdmmyyyy.replace(/\//g, ''), 8, 'valueDate'), // DDMMYYYY
     ].join(''),
   );
   const trailer =
-    'T' + padLeftZero(String(rows.length), 7) + padLeftZero(String(norm.totalMinor), 18);
+    'T' + padLeftZero(String(rows.length), 7, 'count') + padLeftZero(String(norm.totalMinor), 18, 'totalPaise');
   return [...detail, trailer].join(CRLF) + CRLF;
 }
 
@@ -392,9 +433,12 @@ module.exports = {
     rupees2,
     toDdMmYyyy,
     csvCell,
+    clean,
+    neutralizeFormula,
     padRight,
     padLeftZero,
     IFSC_RE,
+    ACCOUNT_RE,
     RTGS_FLOOR_MINOR,
     ICICI_HEADER,
     AXIS_HEADER,

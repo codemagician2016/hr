@@ -143,3 +143,72 @@ describe('validation (fail-closed, tagged errors → 4xx not 500)', () => {
     expect(() => bf.generate('HDFC', [{ beneficiaryName: 'X', accountNumber: '', ifsc: 'HDFC0001234', amountMinor: 100 }], META)).toThrow(/accountNumber/);
   });
 });
+
+// ── Review-finding regression pins (HIGH/MEDIUM/LOW) ──────────────────────────
+describe('review fixes — fixed-width overflow fails loudly (MEDIUM 2/3)', () => {
+  const { padLeftZero, padRight, normalizeInput } = bf._internals;
+
+  test('padLeftZero THROWS BAD_INPUT/422 on overflow instead of dropping the high digit', () => {
+    // 16-digit paise into a 15-wide column: the OLD code sliced off the leading
+    // '9' → a smaller credit + a broken trailer total. It must now throw.
+    expect(padLeftZero('123456789012345', 15)).toBe('123456789012345'); // exact fit OK
+    try { padLeftZero('9123456789012345', 15); throw new Error('should have thrown'); }
+    catch (e) { expect(e.code).toBe('BAD_INPUT'); expect(e.statusCode).toBe(422); expect(e.message).toMatch(/exceeds fixed-width|truncate/); }
+  });
+
+  test('padRight THROWS BAD_INPUT/422 on overflow instead of silently truncating', () => {
+    expect(padRight('12345', 5)).toBe('12345'); // exact fit OK
+    try { padRight('123456', 5); throw new Error('should have thrown'); }
+    catch (e) { expect(e.code).toBe('BAD_INPUT'); expect(e.statusCode).toBe(422); }
+  });
+
+  test('generateSbi THROWS (not truncates) when a paise amount overflows the 15-wide column', () => {
+    // ₹10,00,00,00,000.00 = 100000000000000 paise = 15 digits (fits). Bump one more
+    // digit → 16 → must throw BAD_INPUT/422, never emit a smaller-credit row.
+    const overflow = [{ beneficiaryName: 'Big Pay', accountNumber: '123456', ifsc: 'HDFC0001234', amountMinor: 1000000000000000 }];
+    try { bf.generateSbi(overflow, META); throw new Error('should have thrown'); }
+    catch (e) { expect(e.code).toBe('BAD_INPUT'); expect(e.statusCode).toBe(422); }
+  });
+
+  test('account number validated: too long / non-numeric throws BAD_INPUT/422 (MEDIUM 3)', () => {
+    const tooLong = [{ beneficiaryName: 'X', accountNumber: '1234567890123456789', ifsc: 'HDFC0001234', amountMinor: 100 }]; // 19 digits
+    try { bf.generate('HDFC', tooLong, META); throw new Error('should have thrown'); }
+    catch (e) { expect(e.code).toBe('BAD_INPUT'); expect(e.statusCode).toBe(422); expect(e.message).toMatch(/accountNumber/); }
+    const nonNumeric = [{ beneficiaryName: 'X', accountNumber: 'ABC123', ifsc: 'HDFC0001234', amountMinor: 100 }];
+    expect(() => bf.generate('HDFC', nonNumeric, META)).toThrow(/accountNumber/);
+    // A normal 6-18 digit account still passes.
+    expect(() => normalizeInput([{ beneficiaryName: 'X', accountNumber: '500100123456', ifsc: 'HDFC0001234', amountMinor: 100 }], META)).not.toThrow();
+  });
+});
+
+describe('review fixes — CSV formula injection neutralized (LOW 4)', () => {
+  const { csvCell, clean, neutralizeFormula } = bf._internals;
+
+  test('a leading = + - @ TAB CR is prefixed with a single quote', () => {
+    expect(neutralizeFormula('=SUM(A1:A9)')).toBe("'=SUM(A1:A9)");
+    expect(neutralizeFormula('+1+1')).toBe("'+1+1");
+    expect(neutralizeFormula('-2+3')).toBe("'-2+3");
+    expect(neutralizeFormula('@cmd')).toBe("'@cmd");
+    expect(neutralizeFormula('\tTAB')).toBe("'\tTAB");
+    expect(neutralizeFormula('Priya Nair')).toBe('Priya Nair'); // benign untouched
+    expect(neutralizeFormula('')).toBe(''); // empty untouched
+  });
+
+  test('csvCell neutralizes a formula-leading cell (and still quotes if needed)', () => {
+    expect(csvCell('=1+1')).toBe("'=1+1");
+    // formula lead + embedded comma → neutralized THEN quoted
+    expect(csvCell('=HYPERLINK("x"),evil')).toBe('"\'=HYPERLINK(""x""),evil"');
+  });
+
+  test('clean neutralizes a formula lead after stripping delimiters', () => {
+    expect(clean('=danger')).toBe("'=danger");
+  });
+
+  test('a malicious beneficiaryName surfaces neutralized in a real generated file', () => {
+    // clean() strips | so the name lands as "=cmd calc"; the leading '=' must be guarded.
+    const evil = [{ beneficiaryName: '=cmd|calc', accountNumber: '500100123456', ifsc: 'HDFC0001234', amountMinor: 100 }];
+    const out = bf.generateHdfc(evil, META);
+    expect(out).toContain("'=cmd calc"); // single-quote guard present (| stripped by clean)
+    expect(out).not.toMatch(/(^|,)=cmd/); // no raw formula at a cell boundary
+  });
+});
