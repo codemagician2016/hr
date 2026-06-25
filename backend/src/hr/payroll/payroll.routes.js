@@ -22,10 +22,25 @@ const c = require('./payroll.controller');
 // run will pay / has paid (read-only, reports-gated). The payout itself rides the
 // existing compute/disburse flow — no new mutation route.
 const enc = require('../controllers/encashment.controller');
+// FLAG (India salary disbursement — shared edit): convert a FROZEN/APPROVED run into a
+// bank-uploadable salary-advice batch (+ optional payout-gateway path) with UTR
+// reconciliation. create/file/reconcile gated on canRunPayroll; reads on
+// canViewPayrollReports. India-only (the service 422s a non-IN run).
+const disb = require('./disbursement/disbursement.controller');
 
 // Every payroll route requires an authenticated operator. `protect` runs first
 // so the per-tenant rate-limit key (req.user.businessId) is populated.
 router.use(protect);
+
+// ── India salary disbursement (NET-NEW) ──
+// Money-moving create/reconcile carry the per-(tenant,IP) mutation limiter on top of
+// the RBAC gate, mirroring compute/approve. Lists/reads are reports-gated. The file
+// download is a maker action (it materialises beneficiary account numbers).
+router.post('/runs/:id/disbursement', payrollMutationLimiter, requirePermission('canRunPayroll'), disb.createBatch);
+router.get('/runs/:id/disbursement', requirePermission('canViewPayrollReports'), disb.listBatches);
+router.get('/disbursement/:batchId', requirePermission('canViewPayrollReports'), disb.getBatch);
+router.get('/disbursement/:batchId/file', requirePermission('canRunPayroll'), disb.downloadFile);
+router.post('/disbursement/:batchId/reconcile', payrollMutationLimiter, requirePermission('canRunPayroll'), disb.reconcile);
 
 // ── Pay runs ──
 // compute + approve are heavy, money-moving mutations — rate-limited per

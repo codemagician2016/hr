@@ -98,6 +98,12 @@ export const NAV_ITEMS = [
   // attendance + payroll + leave data. Read/export = canViewPayrollReports;
   // definition management = canManageStatutory (server is the real boundary).
   { key: 'registers', label: 'Statutory Registers', href: '/payroll/registers', feature: 'payroll', permission: 'canViewPayrollReports', icon: 'register' },
+  // FLAG (India salary disbursement — NEW nav item): convert a FROZEN/APPROVED run
+  // into a bank salary-advice file (+ UTR reconciliation). Visible to anyone who can
+  // run payroll OR view reports (the create/file/reconcile actions are server-gated on
+  // canRunPayroll; the batch/line reads on canViewPayrollReports). India-only — the
+  // server 422s a non-IN run. The server is the real boundary; this just hides the link.
+  { key: 'disbursement', label: 'Salary Disbursement', href: '/payroll/disbursement', feature: 'payroll', anyPermission: ['canRunPayroll', 'canViewPayrollReports'], icon: 'wallet' },
   { key: 'reports', label: 'Reports', href: '/reports', feature: 'payroll', permission: 'canViewPayrollReports', icon: 'report' },
   // FLAG (Feature 20 — NEW nav items): Investment-proof workflow (India year-end §192(2D)/
   // Rule 26C/Form 12BB). Two flat items in the Pay group. The window admin actions are
