@@ -492,6 +492,7 @@ model Business {
   registerExports          RegisterExport[]
   payRunInputItems         PayRunInputItem[]
   varianceThreshold        VarianceThreshold?
+  anomalyAcks              AnomalyAcknowledgement[]
   // Leave
   leaveTypes                   LeaveType[]
   leavePolicies                LeavePolicy[]
@@ -8016,6 +8017,7 @@ model PayRun {
   remittances      StatutoryRemittance[]
   attendanceInputs AttendancePayInput[]
   inputItems       PayRunInputItem[]
+  anomalyAcks      AnomalyAcknowledgement[]
 
   @@unique([businessId, code])
   @@index([businessId, entityId, payCalendarId, periodStart, type])
@@ -8085,8 +8087,33 @@ model VarianceThreshold {
   id         String   @id @default(uuid())
   businessId String   @unique
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  config     Json // { softNetPct, hardNetPct, grossPct, componentPct, lopSpikeDays, absMinFloorMinor, statutoryRateTolerance }
+  config     Json // { softNetPct, hardNetPct, grossPct, componentPct, lopSpikeDays, absMinFloorMinor, statutoryRateTolerance, statutoryBasePct }
   updatedAt  DateTime @updatedAt
+}
+
+/// Feature 7 — an EXPLICIT, AUDITED human override of a pre-run anomaly BLOCKER.
+/// approveRun gates on un-resolved BLOCKERs; a checker (canApprovePayroll) may
+/// acknowledge a specific (code[, employeeId]) blocker WITH A REASON to let the
+/// approval proceed. Each ack is append-only provenance: who, why, when. The ack
+/// is scoped to a single run; a recompute that clears the blocker simply makes the
+/// ack moot (the gate no longer sees that blocker). Additive; no behaviour change
+/// for tenants that never acknowledge.
+model AnomalyAcknowledgement {
+  id             String   @id @default(uuid())
+  businessId     String
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  payRunId       String
+  payRun         PayRun   @relation(fields: [payRunId], references: [id], onDelete: Cascade)
+  code           String // the variance/engine finding code being overridden
+  employeeId     String? // NULL ⇒ a RUN-scoped blocker (e.g. RECONCILIATION_MISMATCH)
+  reason         String // mandatory justification (audited)
+  acknowledgedBy String // actor id (the canApprovePayroll checker)
+  createdAt      DateTime @default(now())
+
+  // One LIVE ack per (run, code, employee) — re-acknowledging updates the reason.
+  // employeeId NULL collapses to a single run-scoped ack per code via the unique below.
+  @@unique([payRunId, code, employeeId])
+  @@index([businessId, payRunId])
 }
 
 /// Frozen attendance/leave feed for a (payRun, employee). The "AttendancePayInput"

@@ -1714,8 +1714,17 @@ async function approveRun({ businessId, actorId, payRunId }) {
   // from the current persisted lines AT APPROVE — never trust that the operator
   // (or submit) already ran variance. An unreviewed run with blockers cannot be
   // approved even on the direct CALCULATED→APPROVED path.
+  //
+  // OPERABLE OVERRIDE (Feature 7 — pre-run anomaly review): the gate is the count
+  // of UN-acknowledged blockers. A BLOCKER may be explicitly, audibly overridden
+  // by a canApprovePayroll checker via ackAnomaly (an AnomalyAcknowledgement with a
+  // reason). countUnacknowledgedBlockers subtracts every blocker that has a live
+  // ack matching its (code, employeeId); only the remainder still hard-blocks. This
+  // makes the gate a human decision point, not a hard wall — while every override
+  // stays audited. With zero acks this is identical to the old recountBlockers.
   await computeVariance({ businessId, payRunId });
-  const blockingAnomalies = await recountBlockers(businessId, payRunId);
+  const blockerGate = await countUnacknowledgedBlockers(businessId, payRunId);
+  const blockingAnomalies = blockerGate.remaining;
 
   // (2) Four-eyes is a SERVER-SIDE invariant (finding #2): derived from tenant
   // policy, NEVER from the request. {fourEyes:false} in a body is ignored.
@@ -1771,6 +1780,9 @@ async function approveRun({ businessId, actorId, payRunId }) {
       submitterId: payRun.submittedBy || null,
       reviewerId: actorId,
       totalsHash: anchoredHash,
+      // Provenance of the operable blocker gate: how many blockers were overridden.
+      blockersTotal: blockerGate.total,
+      blockersAcknowledged: blockerGate.acknowledged,
     },
   });
 
@@ -2260,6 +2272,8 @@ function varianceLineFromRow(line, ctx = {}) {
     hasCompRevision: !!ctx.hasCompRevision,
     hasArrear: !!ctx.hasArrear,
     hasBankDetail: ctx.hasBankDetail,
+    // Payee fingerprint for the cross-employee DUPLICATE_BANK_ACCOUNT check.
+    bankKey: ctx.bankKey == null ? null : ctx.bankKey,
   };
 }
 
@@ -2269,6 +2283,81 @@ async function resolveThresholds(businessId) {
   return row && row.config && typeof row.config === 'object'
     ? { ...variance.DEFAULT_THRESHOLDS, ...row.config }
     : variance.DEFAULT_THRESHOLDS;
+}
+
+// The editable numeric tolerances the threshold UI exposes (the booleans +
+// allowSingleOperator are policy, not tolerances, and are NOT editable here so the
+// threshold editor can never weaken separation-of-duties).
+const EDITABLE_THRESHOLD_KEYS = Object.freeze([
+  'softNetPct', 'hardNetPct', 'grossPct', 'componentPct', 'lopSpikeDays',
+  'absMinFloorMinor', 'statutoryRateTolerance', 'statutoryBasePct',
+]);
+// Integer-minor / whole-day keys take integers; the rest are fractional ratios.
+const INTEGER_THRESHOLD_KEYS = new Set(['lopSpikeDays', 'absMinFloorMinor']);
+
+/**
+ * getThresholds — the EFFECTIVE tolerances (defaults merged with the tenant
+ * override) plus the bare defaults, so the UI can show "current vs default" and
+ * offer a reset. Read-only; canRunPayroll-gated at the route.
+ */
+async function getThresholds(businessId) {
+  const row = await prisma.varianceThreshold.findUnique({ where: { businessId } }).catch(() => null);
+  const override = row && row.config && typeof row.config === 'object' ? row.config : {};
+  const effective = { ...variance.DEFAULT_THRESHOLDS, ...override };
+  // Surface only the editable tolerance subset (hide the policy flags).
+  const pick = (src) => Object.fromEntries(EDITABLE_THRESHOLD_KEYS.map((k) => [k, src[k]]));
+  return {
+    defaults: pick(variance.DEFAULT_THRESHOLDS),
+    effective: pick(effective),
+    isCustomised: !!row,
+    updatedAt: row ? row.updatedAt : null,
+    editableKeys: EDITABLE_THRESHOLD_KEYS,
+  };
+}
+
+/**
+ * updateThresholds — upsert the tenant's variance tolerances. canRunPayroll-gated.
+ * Only the EDITABLE numeric keys are accepted; each is range-validated (positive,
+ * percentages in (0,5], an integer-minor floor ≥ 0). The persisted config MERGES
+ * over the existing row so the policy flag (allowSingleOperator) is preserved — the
+ * threshold editor can never silently disable four-eyes. Returns getThresholds().
+ */
+async function updateThresholds({ businessId, actorId, config }) {
+  if (!config || typeof config !== 'object') throw badRequest('MISSING_FIELDS', 'config object is required');
+  const clean = {};
+  for (const k of EDITABLE_THRESHOLD_KEYS) {
+    if (config[k] === undefined || config[k] === null || config[k] === '') continue;
+    const n = Number(config[k]);
+    if (!Number.isFinite(n) || n < 0) throw badRequest('INVALID_THRESHOLD', `${k} must be a non-negative number`);
+    if (INTEGER_THRESHOLD_KEYS.has(k)) {
+      if (!Number.isInteger(n)) throw badRequest('INVALID_THRESHOLD', `${k} must be a whole number`);
+      clean[k] = n;
+    } else {
+      // Fractional ratio tolerances: a sane upper bound so a typo (e.g. 60 for 0.60)
+      // can't disable a check by setting an impossible threshold.
+      if (n > 5) throw badRequest('INVALID_THRESHOLD', `${k} is a ratio (e.g. 0.25 = 25%); ${n} is out of range`);
+      clean[k] = n;
+    }
+  }
+  if (Object.keys(clean).length === 0) throw badRequest('MISSING_FIELDS', 'No valid threshold values supplied');
+
+  const existing = await prisma.varianceThreshold.findUnique({ where: { businessId } }).catch(() => null);
+  const merged = { ...(existing && existing.config && typeof existing.config === 'object' ? existing.config : {}), ...clean };
+
+  await prisma.varianceThreshold.upsert({
+    where: { businessId },
+    update: { config: merged },
+    create: { businessId, config: merged },
+  });
+
+  await writeAudit({
+    businessId, actorId,
+    action: 'payrun.variance.thresholds.update',
+    entityType: 'VarianceThreshold', entityId: businessId,
+    meta: { config: clean },
+  });
+
+  return getThresholds(businessId);
 }
 
 /**
@@ -2344,12 +2433,31 @@ async function computeVariance({ businessId, payRunId }) {
       .map((r) => r.employeeId),
   );
 
+  // Payee fingerprints for the cross-employee DUPLICATE_BANK_ACCOUNT check + the
+  // per-line BANK_DETAIL_MISSING gate. Primary, active, live salary account only;
+  // bankKey is a normalised "accountNumber|ifsc-or-nz" so a shared account collides
+  // deterministically. We resolve to the FIRST primary account per employee (the
+  // salary-credit target) so the fingerprint matches what the bank file would credit.
+  const bankRows = await prisma.bankAccount.findMany({
+    where: { businessId, employeeId: { in: curLines.map((l) => l.employeeId) }, isPrimary: true, isActive: true, deletedAt: null },
+    select: { employeeId: true, accountNumber: true, ifsc: true, nzBankAccount: true },
+  });
+  const bankByEmp = new Map();
+  for (const b of bankRows) {
+    if (bankByEmp.has(b.employeeId)) continue; // first primary wins (deterministic)
+    const acct = (b.nzBankAccount || b.accountNumber || '').trim();
+    if (!acct) continue;
+    bankByEmp.set(b.employeeId, `${acct.toUpperCase()}|${(b.ifsc || '').trim().toUpperCase()}`);
+  }
+
   const current = {
     runId: payRun.id, type: payRun.type,
     totalsMinor: { netMinor: decimalToMinor(payRun.totalNet) },
     lines: curLines.map((l) => varianceLineFromRow(l, {
       isNewJoiner: prevPayload ? !prevEmpIds.has(l.employeeId) : false,
       hasArrear: oneTimeByEmp.has(l.employeeId),
+      hasBankDetail: bankByEmp.has(l.employeeId),
+      bankKey: bankByEmp.get(l.employeeId) || null,
     })),
   };
 
@@ -2412,26 +2520,126 @@ async function computeVariance({ businessId, payRunId }) {
  * clobber each other, so the count no longer depends on call ordering (finding #7).
  */
 async function recountBlockers(businessId, payRunId) {
+  return (await listBlockerFindings(businessId, payRunId)).length;
+}
+
+/**
+ * listBlockerFindings — the materialised BLOCKER set (the union recountBlockers
+ * counts), each carrying { code, employeeId } so the ack/override gate can match
+ * an AnomalyAcknowledgement to the exact finding it overrides. Per-line ENGINE
+ * (errorJson) + per-line VARIANCE (varianceJson) + run-level varianceReport
+ * (employeeId-null findings only, so a per-employee variance blocker isn't double
+ * counted between varianceJson and the report).
+ */
+async function listBlockerFindings(businessId, payRunId) {
   const lines = await prisma.payRunLine.findMany({
     where: { businessId, payRunId },
-    select: { errorJson: true, varianceJson: true },
+    select: { employeeId: true, errorJson: true, varianceJson: true },
   });
-  let blockers = 0;
+  const out = [];
   for (const l of lines) {
     const engine = Array.isArray(l.errorJson) ? l.errorJson : [];
-    for (const e of engine) if (e && e.severity === 'BLOCKER') blockers += 1;
+    for (const e of engine) if (e && e.severity === 'BLOCKER') out.push({ code: e.code, employeeId: l.employeeId });
     const varns = Array.isArray(l.varianceJson) ? l.varianceJson : [];
-    for (const v of varns) if (v && v.severity === 'BLOCKER') blockers += 1;
+    for (const v of varns) if (v && v.severity === 'BLOCKER') out.push({ code: v.code, employeeId: l.employeeId });
   }
-  // Run-level (e.g. RECONCILIATION_MISMATCH) lives only in varianceReport.
+  // Run-level (e.g. RECONCILIATION_MISMATCH, DUPLICATE_BANK_ACCOUNT roll-up) lives
+  // only in varianceReport with employeeId == null.
   const run = await prisma.payRun.findFirst({ where: { id: payRunId, businessId }, select: { varianceReport: true } });
   const report = run && run.varianceReport;
   if (report && Array.isArray(report.findings)) {
     for (const f of report.findings) {
-      if (f.severity === 'BLOCKER' && f.employeeId == null) blockers += 1;
+      if (f.severity === 'BLOCKER' && f.employeeId == null) out.push({ code: f.code, employeeId: null });
     }
   }
-  return blockers;
+  return out;
+}
+
+/**
+ * countUnacknowledgedBlockers — the OPERABLE blocker gate (the human override).
+ * Materialises the BLOCKER set FRESH, then subtracts every blocker that has a
+ * live AnomalyAcknowledgement matching its (code, employeeId). The remainder is
+ * what still hard-blocks approval. A blocker is "covered" by an ack with the same
+ * code and the same employeeId (a NULL-employee ack covers the run-scoped blocker
+ * of that code). Each ack covers at most one blocker instance (no over-credit if
+ * the same code somehow recurs). Returns { total, acknowledged, remaining }.
+ */
+async function countUnacknowledgedBlockers(businessId, payRunId) {
+  const blockers = await listBlockerFindings(businessId, payRunId);
+  const acks = await prisma.anomalyAcknowledgement.findMany({
+    where: { businessId, payRunId },
+    select: { code: true, employeeId: true },
+  });
+  // A multiset of "code employeeId" ack keys; consume one credit per match.
+  const credits = new Map();
+  for (const a of acks) {
+    const k = `${a.code} ${a.employeeId == null ? '' : a.employeeId}`;
+    credits.set(k, (credits.get(k) || 0) + 1);
+  }
+  let remaining = 0;
+  for (const b of blockers) {
+    const k = `${b.code} ${b.employeeId == null ? '' : b.employeeId}`;
+    const have = credits.get(k) || 0;
+    if (have > 0) credits.set(k, have - 1);
+    else remaining += 1;
+  }
+  return { total: blockers.length, acknowledged: blockers.length - remaining, remaining };
+}
+
+/**
+ * ackAnomaly — record an EXPLICIT, AUDITED human override of a pre-run BLOCKER so
+ * approveRun can proceed past the gate. canApprovePayroll-gated at the route. The
+ * run must still be in a pre-approval, mutable state (variance is read-only once
+ * approved/closed). A reason is mandatory. Upsert keyed on (payRun, code,
+ * employeeId) so re-acknowledging updates the reason rather than duplicating; the
+ * action is audited either way.
+ */
+async function ackAnomaly({ businessId, actorId, payRunId, code, employeeId = null, reason }) {
+  if (!code || typeof code !== 'string') throw badRequest('MISSING_FIELDS', 'code is required');
+  if (!reason || !String(reason).trim()) throw badRequest('MISSING_FIELDS', 'A reason is required to acknowledge a blocker');
+  const emp = employeeId == null || employeeId === '' ? null : String(employeeId);
+
+  const payRun = await prisma.payRun.findFirst({ where: { id: payRunId, businessId } });
+  if (!payRun) throw notFound('Pay run not found');
+  if (!VARIANCE_MUTABLE_STATUSES.has(payRun.status) || payRun.closedAt) {
+    throw badRequest(
+      'IMMUTABLE_RUN_VIOLATION',
+      `Cannot acknowledge anomalies once a run is approved/closed (current: ${payRun.closedAt ? 'CLOSED' : payRun.status})`,
+    );
+  }
+
+  // The (code, employeeId) must actually correspond to a CURRENT blocker — never
+  // let a checker pre-acknowledge a blocker that doesn't exist (no blanket waiver).
+  const blockers = await listBlockerFindings(businessId, payRunId);
+  const matches = blockers.some((b) => b.code === code && (b.employeeId == null ? null : b.employeeId) === emp);
+  if (!matches) {
+    throw badRequest('NO_SUCH_BLOCKER', `No open BLOCKER "${code}"${emp ? ` for employee ${emp}` : ''} on this run to acknowledge.`);
+  }
+
+  const ack = await prisma.anomalyAcknowledgement.upsert({
+    where: { payRunId_code_employeeId: { payRunId, code, employeeId: emp } },
+    update: { reason: String(reason).trim(), acknowledgedBy: actorId },
+    create: { businessId, payRunId, code, employeeId: emp, reason: String(reason).trim(), acknowledgedBy: actorId },
+  });
+
+  await writeAudit({
+    businessId, actorId,
+    action: 'payrun.anomaly.acknowledge',
+    entityType: 'PayRun', entityId: payRunId,
+    meta: { code, employeeId: emp, reason: String(reason).trim() },
+  });
+
+  const gate = await countUnacknowledgedBlockers(businessId, payRunId);
+  return { ack, gate };
+}
+
+/** listAcknowledgements — the run's ack ledger (for the review panel). */
+async function listAcknowledgements(businessId, payRunId) {
+  const items = await prisma.anomalyAcknowledgement.findMany({
+    where: { businessId, payRunId },
+    orderBy: { createdAt: 'asc' },
+  });
+  return { items };
 }
 
 /** Stable hash of the run totals — what the checker reviews; STALE_TOTALS guard. */
@@ -3146,6 +3354,13 @@ module.exports = {
   cancelRun,
   reopenRun,
   recountBlockers,
+  // Feature 7 — pre-run anomaly review: thresholds config + acknowledge/override gate.
+  getThresholds,
+  updateThresholds,
+  ackAnomaly,
+  listAcknowledgements,
+  countUnacknowledgedBlockers,
+  listBlockerFindings,
   // ESS self-resolution (reused by the compensation ESS route).
   resolveSelfEmployee,
   // internals exposed for tests
