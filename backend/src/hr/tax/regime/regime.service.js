@@ -77,27 +77,40 @@ async function getPolicy({ businessId, fy, db = prisma } = {}) {
 
 /**
  * getEffectiveRegime — the RESOLVER the withholding/projection path consults.
- * Precedence: the employee's ELECTED regime (StatutoryProfile.taxRegime) →
- * the tenant DEFAULT (TaxRegimePolicy.defaultRegime for the FY) → statutory NEW.
+ * Precedence: the employee's ELECTED regime (only when they have DELIBERATELY elected
+ * — signalled by StatutoryProfile.regimeElectedAt, NOT by the mere presence of
+ * taxRegime, which carries a harmless @default(NEW)/provisioning value) → the tenant
+ * DEFAULT (TaxRegimePolicy.defaultRegime for the FY) → statutory NEW.
  *
- * `sp`/`policy` may be passed in to avoid a re-fetch on the hot payroll path (the
- * payroll service already loaded the StatutoryProfile). When omitted they are looked
- * up (tenant-scoped). Returns a plain string 'NEW'|'OLD' — never throws on a missing
- * profile (an employee with no SP falls through to default/NEW).
+ * THE MARKER, NOT taxRegime presence, signals an election. Before this fix every
+ * un-elected employee (taxRegime persisted = 'NEW') resolved to source ELECTED, so a
+ * tenant default of OLD was silently skipped — the central-promise bug this closes.
+ *
+ * `sp`/`policy` may be passed in to avoid a re-fetch on the hot payroll path (callers
+ * MUST then include regimeElectedAt + taxRegime in their select). When omitted they are
+ * looked up (tenant-scoped). Returns a plain string 'NEW'|'OLD' — never throws on a
+ * missing profile (an employee with no SP falls through to default/NEW).
  *
  * @returns {Promise<{ regime:'NEW'|'OLD', source:'ELECTED'|'DEFAULT'|'STATUTORY' }>}
  */
 async function getEffectiveRegime({ businessId, employeeId, fy, sp, policy, db = prisma } = {}) {
   if (!businessId || !employeeId) return { regime: 'NEW', source: 'STATUTORY' };
 
-  // 1. ELECTED — the employee's own choice on their StatutoryProfile.
+  // 1. ELECTED — only when the employee has DELIBERATELY elected (regimeElectedAt set).
+  //    A non-null taxRegime alone is NOT an election (it defaults to NEW and is written
+  //    at provisioning), so the marker — not taxRegime presence — gates this branch.
   const profile = sp !== undefined
     ? sp
-    : await db.statutoryProfile.findFirst({ where: { businessId, employeeId }, select: { taxRegime: true } });
-  const elected = profile && profile.taxRegime ? normRegime(profile.taxRegime) : null;
-  if (elected) return { regime: elected, source: 'ELECTED' };
+    : await db.statutoryProfile.findFirst({
+        where: { businessId, employeeId },
+        select: { taxRegime: true, regimeElectedAt: true },
+      });
+  const electedRegime = profile && profile.taxRegime ? normRegime(profile.taxRegime) : null;
+  if (profile && profile.regimeElectedAt && electedRegime) {
+    return { regime: electedRegime, source: 'ELECTED' };
+  }
 
-  // 2. DEFAULT — the employer's per-FY policy default.
+  // 2. DEFAULT — the employer's per-FY policy default (what an un-elected employee gets).
   const pol = policy !== undefined ? policy : await getPolicy({ businessId, fy, db });
   const def = pol && pol.defaultRegime ? normRegime(pol.defaultRegime) : null;
   if (def) return { regime: def, source: 'DEFAULT' };
@@ -141,13 +154,16 @@ function assertElectable({ profile, policy, now = new Date() }) {
 /**
  * electRegime — set the elected regime (ESS employee or HR acting for an employee).
  * ENFORCES the window/lock via assertElectable, then (on a real change) updates
- * StatutoryProfile.taxRegime and APPENDS a StatutoryElectionHistory row (field
- * "taxRegime", oldValue→newValue, effectiveFrom = FY start, changedBy = actorId).
+ * StatutoryProfile.taxRegime, STAMPS the election MARKER (regimeElectedAt = now) and
+ * APPENDS a StatutoryElectionHistory row (field "taxRegime", oldValue→newValue,
+ * effectiveFrom = FY start, changedBy = actorId).
  *
- * Idempotent: electing the regime the employee already has is a success no-op (no
- * history row written). Tenant-walled. The StatutoryProfile is upserted by the unique
- * employeeId so an employee without one yet can still elect (countryCode required on
- * create — resolved from the employee row).
+ * Idempotent against the ACTUAL prior election, NOT the persisted taxRegime: an
+ * un-elected employee (regimeElectedAt null) carries taxRegime='NEW' from @default,
+ * so electing NEW IS a real change (marker set, history row oldValue=null). Only an
+ * employee who has ALREADY elected the same regime is a no-op success. Tenant-walled.
+ * The StatutoryProfile is upserted by the unique employeeId so an employee without one
+ * yet can still elect (countryCode required on create — resolved from the employee row).
  *
  * @returns {Promise<{ employeeId, fy, regime, changed:boolean, source:'ELECTED' }>}
  */
@@ -171,25 +187,32 @@ async function electRegime({ businessId, employeeId, fy, regime, actorId, db = p
   // Lock/window gate — refused with a precise code (the controller maps to 409).
   assertElectable({ profile, policy, now: new Date() });
 
-  const current = profile && profile.taxRegime ? normRegime(profile.taxRegime) : null;
-  if (current === target) {
-    // Idempotent: already elected this regime — success, no history row.
+  // The ACTUAL prior election: the regime ONLY counts as a previous choice when the
+  // marker is set. An un-elected profile (regimeElectedAt null) has NO prior election —
+  // even though taxRegime carries the @default/provisioning 'NEW'.
+  const wasElected = !!(profile && profile.regimeElectedAt);
+  const priorElected = wasElected && profile.taxRegime ? normRegime(profile.taxRegime) : null;
+  if (priorElected === target) {
+    // Idempotent: already DELIBERATELY elected this exact regime — success, no history row.
     return { employeeId, fy: f, regime: target, changed: false, source: 'ELECTED' };
   }
 
+  const now = new Date();
   const effectiveFrom = fyStartDate(f);
   const saved = await db.$transaction(async (tx) => {
     const sp = await tx.statutoryProfile.upsert({
       where: { employeeId },
-      update: { taxRegime: target, version: { increment: 1 } },
-      create: { businessId, employeeId, countryCode: emp.countryCode || 'IN', taxRegime: target },
+      update: { taxRegime: target, regimeElectedAt: now, version: { increment: 1 } },
+      create: { businessId, employeeId, countryCode: emp.countryCode || 'IN', taxRegime: target, regimeElectedAt: now },
     });
     await tx.statutoryElectionHistory.create({
       data: {
         businessId,
         statutoryProfileId: sp.id,
         field: 'taxRegime',
-        oldValue: current || null,
+        // The prior ELECTED regime (null when the employee had never elected — so an
+        // un-elected → NEW election is audited as null → NEW, a real change).
+        oldValue: priorElected || null,
         newValue: target,
         effectiveFrom,
         changedBy: actorId || 'system',

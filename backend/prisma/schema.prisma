@@ -7526,6 +7526,12 @@ model StatutoryProfile {
   isManagerial        Boolean?     @default(false) // managerial/supervisory (LWF mgr-exclusion)
   aadhaarVerified     Boolean?     @default(false) // store flag, NOT the number
   taxRegime           INTaxRegime? @default(NEW) // NEW is statutory default
+  // Feature 15/25 — regime ELECTION MARKER. The TRUE signal that the employee (or HR for
+  // them) has deliberately elected a regime. NULL = never elected → getEffectiveRegime
+  // falls back to the employer default (TaxRegimePolicy.defaultRegime) then statutory NEW.
+  // This is SEPARATE from taxRegime, whose @default(NEW)/provisioning write means a stored
+  // value can NOT distinguish "elected NEW" from "never elected" — the marker can.
+  regimeElectedAt     DateTime? // when the regime was deliberately elected (null = never elected)
   // Feature 15/25 — regime ELECTION LOCK. Set once HR finalises the election (or the
   // FY election window closes); a non-null value freezes taxRegime (the regime service
   // rejects any further self/HR election). Bulk-set by lockRegime when the window shuts.
