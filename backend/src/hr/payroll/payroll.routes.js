@@ -49,6 +49,12 @@ router.post('/runs', requirePermission('canRunPayroll'), c.createRun);
 router.post('/runs/:id/compute', payrollMutationLimiter, requirePermission('canRunPayroll'), c.computeRun);
 router.post('/runs/:id/freeze', payrollMutationLimiter, requirePermission('canRunPayroll'), c.freezeRun);
 router.post('/runs/:id/approve', payrollMutationLimiter, requirePermission('canApprovePayroll'), c.approveRun);
+// FLAG (Feature 7 — pre-run anomaly review, NEW routes). Registered BEFORE
+// '/runs/:id' so the literal '/runs/thresholds' is not captured by the :id param.
+//   - Per-tenant variance THRESHOLDS (the tolerances variance.js reads): read +
+//     edit under canRunPayroll (the maker who runs payroll tunes them).
+router.get('/runs/thresholds', requirePermission('canRunPayroll'), c.getThresholds);
+router.put('/runs/thresholds', payrollMutationLimiter, requirePermission('canRunPayroll'), c.updateThresholds);
 router.get('/runs', requirePermission('canViewPayrollReports'), c.listRuns);
 router.get('/runs/:id', requirePermission('canViewPayrollReports'), c.getRun);
 router.get('/runs/:id/payslips', requirePermission('canViewPayrollReports'), c.getRunPayslips);
@@ -89,6 +95,10 @@ router.get('/runs/:id/inputs-checklist', requirePermission('canRunPayroll'), c.g
 router.post('/runs/:id/inputs/one-time', requirePermission('canRunPayroll'), c.upsertOneTimeInput);
 router.get('/runs/:id/variance', requirePermission('canViewPayrollReports'), c.getVariance);
 router.post('/runs/:id/variance', payrollMutationLimiter, requirePermission('canViewPayrollReports'), c.getVariance);
+// FLAG (Feature 7 — pre-run anomaly review): ACKNOWLEDGE/override a pre-run BLOCKER
+// before approval — canApprovePayroll (the audited human override is a CHECKER
+// action, same gate as approve, so a maker can never waive their own blockers).
+router.post('/runs/:id/anomalies/ack', payrollMutationLimiter, requirePermission('canApprovePayroll'), c.ackAnomaly);
 router.post('/runs/:id/submit', payrollMutationLimiter, requirePermission('canRunPayroll'), c.submitRun);
 router.post('/runs/:id/send-back', payrollMutationLimiter, requirePermission('canApprovePayroll'), c.sendBackRun);
 router.post('/runs/:id/payslips/publish', payrollMutationLimiter, requirePermission('canApprovePayroll'), c.publishRun);

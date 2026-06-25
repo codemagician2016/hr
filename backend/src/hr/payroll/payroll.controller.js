@@ -50,6 +50,8 @@ const CODE_STATUS = {
   CLOSE_BLOCKED: 409,
   ILLEGAL_TRANSITION: 409,
   IMMUTABLE_RUN_VIOLATION: 409,
+  NO_SUCH_BLOCKER: 409, // tried to acknowledge a blocker that isn't open on the run
+  INVALID_THRESHOLD: 400, // a variance tolerance value out of range
   UNKNOWN_FILE_KIND: 400,
   COUNTRY_MISMATCH: 400,
   COUNTRY_UNSUPPORTED: 422, // Feature 15 — tax projection is India-only
@@ -144,6 +146,42 @@ async function getVariance(req, res) {
   try {
     const { businessId } = req.user;
     const out = await service.computeVariance({ businessId, payRunId: req.params.id });
+    // Surface the run's acknowledgement ledger + the operable blocker gate so the
+    // pre-run review panel can show what's overridden without a second round-trip.
+    const [{ items: acknowledgements }, gate] = await Promise.all([
+      service.listAcknowledgements(businessId, req.params.id),
+      service.countUnacknowledgedBlockers(businessId, req.params.id),
+    ]);
+    res.json({ ...out, acknowledgements, blockerGate: gate });
+  } catch (err) { handleError(res, err); }
+}
+
+// Feature 7 — acknowledge / override a pre-run BLOCKER before approval. The route
+// gates this on canApprovePayroll (the checker's audited override).
+async function ackAnomaly(req, res) {
+  try {
+    const { businessId, id: actorId } = req.user;
+    const { code, employeeId, reason } = req.body || {};
+    const out = await service.ackAnomaly({ businessId, actorId, payRunId: req.params.id, code, employeeId, reason });
+    res.json(out);
+  } catch (err) { handleError(res, err); }
+}
+
+// Feature 7 — view the per-tenant variance tolerances (the thresholds variance.js
+// reads). Read-only, canRunPayroll-gated.
+async function getThresholds(req, res) {
+  try {
+    const { businessId } = req.user;
+    const out = await service.getThresholds(businessId);
+    res.json(out);
+  } catch (err) { handleError(res, err); }
+}
+
+// Feature 7 — edit the per-tenant variance tolerances. canRunPayroll-gated.
+async function updateThresholds(req, res) {
+  try {
+    const { businessId, id: actorId } = req.user;
+    const out = await service.updateThresholds({ businessId, actorId, config: (req.body || {}).config || req.body || {} });
     res.json(out);
   } catch (err) { handleError(res, err); }
 }
@@ -414,6 +452,9 @@ module.exports = {
   getInputsChecklist,
   upsertOneTimeInput,
   getVariance,
+  ackAnomaly,
+  getThresholds,
+  updateThresholds,
   submitRun,
   sendBackRun,
   publishRun,

@@ -26,11 +26,11 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Spinner, ErrorBanner, PrimaryButton, TextInput, DateField, Modal, ModalActions, formatAdminDate } from '@hr/ui';
-import { get, post, downloadFile } from '@/lib/api';
+import { get, post, put, downloadFile } from '@/lib/api';
 import { DataTable, PageHeader, StatusBadge, ActionButton, employeeLabel, moneyish } from '@/lib/ui';
 import EmployeeSearchSelect from '@/components/EmployeeSearchSelect';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
-import { InfoTip } from '@/lib/widgets';
+import { InfoTip, usePagination, Pagination } from '@/lib/widgets';
 
 const PAGE_SIZE = 20;
 
@@ -623,16 +623,361 @@ function EmployeeVarianceDrawer({ run, employeeId, onClose }) {
   );
 }
 
+// ── Pre-run Payroll health / checks panel (Feature 7) ────────────────────────
+// A readable, grouped review of every pre-run finding with per-employee
+// drill-down, the suggestedAction, and an Acknowledge-with-reason override for
+// BLOCKERs so a checker can clear the approval gate explicitly + audibly.
+
+// Money formatter for minor units coming back from the variance report.
+function minorMoney(minor, currency) {
+  const v = Number(minor || 0) / 100;
+  return `${currency || ''} ${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// Deterministic, template-based plain-language summary (NOT an LLM call): turns
+// the run-level roll-up into one paragraph a human can read at a glance.
+function plainLanguageSummary(report, currency) {
+  if (!report) return '';
+  const s = report.summary || {};
+  const blocker = s.blocker || 0;
+  const warning = s.warning || 0;
+  const info = s.info || 0;
+  const t = report.totals || {};
+  const curNet = Number(t?.current?.net || 0);
+  const prevNet = t?.previous?.net == null ? null : Number(t.previous.net);
+  const swing = prevNet == null ? null : curNet - prevNet;
+  const empCount = new Set((report.findings || []).filter((f) => f.employeeId && f.severity !== 'INFO').map((f) => f.employeeId)).size;
+
+  const parts = [];
+  if (!blocker && !warning) {
+    parts.push('This run is clean — no blockers or warnings were raised.');
+  } else {
+    parts.push(`This run raised ${blocker} blocker${blocker === 1 ? '' : 's'} and ${warning} warning${warning === 1 ? '' : 's'}${info ? ` (plus ${info} context note${info === 1 ? '' : 's'})` : ''}.`);
+  }
+  if (swing != null) {
+    const dir = swing > 0 ? 'up' : swing < 0 ? 'down' : 'unchanged';
+    if (dir === 'unchanged') parts.push('Net pay is unchanged versus the previous period.');
+    else parts.push(`Net pay is ${dir} ${minorMoney(Math.abs(swing), currency)} versus the previous period${empCount ? `, across ${empCount} flagged employee${empCount === 1 ? '' : 's'}` : ''}.`);
+  }
+  if (blocker > 0) parts.push('Approval is blocked until each blocker is resolved or explicitly acknowledged with a reason.');
+  return parts.join(' ');
+}
+
+function FindingRow({ f, currency, canAck, onAck, ackedKeys }) {
+  const key = `${f.code} ${f.employeeId || ''}`;
+  const acked = ackedKeys.has(key);
+  return (
+    <li className="flex flex-wrap items-start gap-2 py-1.5 border-b border-gray-100 last:border-0">
+      <AnomalyChip severity={f.severity} />
+      <div className="flex-1 min-w-[12rem]">
+        <div className="text-xs text-gray-800">
+          <span className="font-mono text-[10px] text-gray-400 mr-1">{f.code}</span>
+          {f.message}
+        </div>
+        {f.suggestedAction && <div className="text-[11px] text-gray-500 mt-0.5">→ {f.suggestedAction}</div>}
+        {f.employeeId && <div className="text-[10px] text-gray-400 mt-0.5">Employee: {f.employeeId}</div>}
+      </div>
+      {f.severity === 'BLOCKER' && (
+        acked
+          ? <span className="text-[10px] font-semibold text-emerald-600 self-center">✓ Acknowledged</span>
+          : canAck && <ActionButton tone="neutral" onClick={() => onAck(f)}>Acknowledge</ActionButton>
+      )}
+    </li>
+  );
+}
+
+function AcknowledgeModal({ finding, runId, onClose, onDone }) {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  async function submit() {
+    if (!reason.trim()) return;
+    setBusy(true); setError('');
+    try {
+      await post(`/api/hr/payroll/runs/${runId}/anomalies/ack`, { code: finding.code, employeeId: finding.employeeId || null, reason: reason.trim() });
+      onDone();
+    } catch (e) { setError(e.data?.message || e.message || 'Failed to acknowledge.'); }
+    finally { setBusy(false); }
+  }
+  return (
+    <Modal onClose={onClose} title="Acknowledge blocker (audited override)">
+      <div className="space-y-3 text-sm">
+        <div className="rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-800">
+          <div className="font-semibold">{finding.code}{finding.employeeId ? ` · ${finding.employeeId}` : ''}</div>
+          <div className="mt-0.5">{finding.message}</div>
+        </div>
+        <p className="text-xs text-gray-500">
+          Overriding a blocker is recorded against your name with the reason below. The run can then be approved
+          even though this blocker is open — use this only when the finding is understood and accepted.
+        </p>
+        {error && <ErrorBanner message={error} />}
+        <label className="block">
+          <span className="text-xs font-medium text-gray-700">Reason (required)</span>
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            rows={3}
+            placeholder="e.g. New joiner mid-month; net swing confirmed correct by HR."
+            className="mt-1 w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+          />
+        </label>
+        <ModalActions>
+          <ActionButton tone="neutral" onClick={onClose}>Cancel</ActionButton>
+          <PrimaryButton loading={busy} disabled={!reason.trim()} onClick={submit}>Acknowledge &amp; override</PrimaryButton>
+        </ModalActions>
+      </div>
+    </Modal>
+  );
+}
+
+function PayrollHealthPanel({ runId, run, perms, readOnly, onChanged }) {
+  const [report, setReport] = useState(null);
+  const [acks, setAcks] = useState([]);
+  const [gate, setGate] = useState(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [ackTarget, setAckTarget] = useState(null);
+  const [drawerEmp, setDrawerEmp] = useState(null);
+  const canAck = !readOnly && hasPermission(perms, 'canApprovePayroll');
+  const currency = run?.currencyCode;
+
+  const load = useCallback(() => {
+    setLoading(true);
+    post(`/api/hr/payroll/runs/${runId}/variance`)
+      .then((res) => { setReport(res); setAcks(res.acknowledgements || []); setGate(res.blockerGate || null); })
+      .catch((e) => setError(e.data?.message || e.message || 'Checks unavailable.'))
+      .finally(() => setLoading(false));
+  }, [runId]);
+  useEffect(() => { load(); }, [load]);
+
+  const findings = report?.findings || [];
+  const blockers = findings.filter((f) => f.severity === 'BLOCKER');
+  const warnings = findings.filter((f) => f.severity === 'WARNING');
+  const infos = findings.filter((f) => f.severity === 'INFO');
+  const ackedKeys = useMemo(() => new Set((acks || []).map((a) => `${a.code} ${a.employeeId || ''}`)), [acks]);
+  const empPager = usePagination(findings.filter((f) => f.employeeId && f.severity !== 'INFO'), { initialPageSize: 10 });
+
+  if (loading) return <Spinner />;
+
+  const summaryLine = report
+    ? `${report.summary?.blocker || 0} blocker(s), ${report.summary?.warning || 0} warning(s)`
+      + (report.totals?.previous?.net != null
+        ? `; ${minorMoney((report.totals.current?.net || 0) - report.totals.previous.net, currency)} net-pay swing`
+        : '')
+      + (gate ? ` · ${gate.remaining} unacknowledged blocker(s) gating approval` : '')
+    : '';
+
+  return (
+    <div className="space-y-4">
+      {error && <ErrorBanner message={error} />}
+
+      {/* Run-level summary line + plain-language paragraph */}
+      <div className="rounded-2xl border border-gray-200 bg-white p-4">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold text-gray-900">Payroll health</h3>
+          <InfoTip text="Pre-run checks compare this run to the previous period and apply absolute sanity rules. Blockers gate approval; a blocker can be explicitly acknowledged with a reason by an approver." />
+        </div>
+        <div className="text-xs font-medium text-gray-700 mt-1">{summaryLine}</div>
+        <p className="text-xs text-gray-500 mt-2">{plainLanguageSummary(report, currency)}</p>
+        {!report?.hasBaseline && (
+          <div className="mt-2 rounded-lg border border-blue-100 bg-blue-50 p-2 text-[11px] text-blue-700">
+            First run for this entity/calendar — no prior period to compare. Absolute checks only.
+          </div>
+        )}
+      </div>
+
+      {/* Severity-grouped findings */}
+      <div className="grid lg:grid-cols-3 gap-3">
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-3">
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-semibold text-red-700">Blockers ({blockers.length})</div>
+            {gate && gate.acknowledged > 0 && <span className="text-[10px] text-emerald-700 font-semibold">{gate.acknowledged} acknowledged</span>}
+          </div>
+          <ul className="mt-1">
+            {blockers.length === 0 && <li className="text-xs text-red-400 py-1">None — approval is not gated.</li>}
+            {blockers.map((f, i) => <FindingRow key={i} f={f} currency={currency} canAck={canAck} onAck={setAckTarget} ackedKeys={ackedKeys} />)}
+          </ul>
+        </div>
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3">
+          <div className="text-xs font-semibold text-amber-800">Warnings ({warnings.length})</div>
+          <ul className="mt-1">
+            {warnings.length === 0 && <li className="text-xs text-amber-400 py-1">None.</li>}
+            {warnings.map((f, i) => <FindingRow key={i} f={f} currency={currency} canAck={false} onAck={() => {}} ackedKeys={ackedKeys} />)}
+          </ul>
+        </div>
+        <div className="rounded-2xl border border-blue-100 bg-blue-50 p-3">
+          <div className="text-xs font-semibold text-blue-700">Context ({infos.length})</div>
+          <ul className="mt-1">
+            {infos.length === 0 && <li className="text-xs text-blue-400 py-1">None.</li>}
+            {infos.map((f, i) => <FindingRow key={i} f={f} currency={currency} canAck={false} onAck={() => {}} ackedKeys={ackedKeys} />)}
+          </ul>
+        </div>
+      </div>
+
+      {/* Per-employee drill-down (paginated for 100+ employees) */}
+      <div>
+        <h3 className="text-sm font-semibold text-gray-900 mb-2">Flagged employees</h3>
+        <DataTable
+          columns={[
+            { key: 'emp', header: 'Employee', render: (f) => f.employeeId },
+            { key: 'sev', header: '', render: (f) => <AnomalyChip severity={f.severity} /> },
+            { key: 'code', header: 'Finding', render: (f) => f.code },
+            { key: 'msg', header: 'Detail', render: (f) => <span className="text-xs text-gray-600">{f.message}</span> },
+            { key: 'act', header: 'Suggested action', render: (f) => <span className="text-[11px] text-gray-500">{f.suggestedAction || '—'}</span> },
+            { key: 'drill', header: '', render: (f) => f.employeeId && <ActionButton onClick={() => setDrawerEmp(f.employeeId)}>Drill</ActionButton> },
+          ]}
+          rows={empPager.pageItems}
+          loading={false}
+          emptyText="No flagged employees."
+        />
+        <Pagination pager={empPager} noun="findings" />
+      </div>
+
+      {/* Acknowledgement ledger */}
+      {acks.length > 0 && (
+        <div className="rounded-2xl border border-gray-200 bg-white p-3">
+          <div className="text-xs font-semibold text-gray-700 mb-1">Acknowledged blockers ({acks.length})</div>
+          <ul className="text-xs text-gray-600 space-y-1">
+            {acks.map((a) => (
+              <li key={a.id} className="flex flex-wrap gap-2">
+                <span className="font-mono text-[10px] text-gray-400">{a.code}{a.employeeId ? ` · ${a.employeeId}` : ''}</span>
+                <span className="italic">"{a.reason}"</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {drawerEmp && (
+        <EmployeeVarianceDrawer runId={runId} run={run} employeeId={drawerEmp} onClose={() => setDrawerEmp(null)} />
+      )}
+      {ackTarget && (
+        <AcknowledgeModal
+          finding={ackTarget}
+          runId={runId}
+          onClose={() => setAckTarget(null)}
+          onDone={() => { setAckTarget(null); load(); if (onChanged) onChanged(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Variance thresholds (tolerances) editor — canRunPayroll ──────────────────
+const THRESHOLD_META = {
+  softNetPct: { label: 'Net swing — warn at', tip: 'A net-pay change of at least this fraction vs last period raises a WARNING (e.g. 0.25 = 25%).' },
+  hardNetPct: { label: 'Net swing — block at', tip: 'A net-pay change of at least this fraction (with no revision/arrear) raises a BLOCKER (e.g. 0.60 = 60%).' },
+  grossPct: { label: 'Gross swing — warn at', tip: 'A gross change of at least this fraction vs last period raises a WARNING.' },
+  componentPct: { label: 'Component swing — warn at', tip: 'A per-component change of at least this fraction (or a component appearing/vanishing) raises a WARNING.' },
+  statutoryRateTolerance: { label: 'Statutory rate drift', tip: 'How far a statutory deduction’s effective rate (amount ÷ gross) may drift before a WARNING (e.g. 0.005 = 0.5%).' },
+  statutoryBasePct: { label: 'Statutory base jump — warn at', tip: 'A statutory contribution amount moving by at least this fraction vs last period raises a WARNING (possible wage-base discontinuity).' },
+  lopSpikeDays: { label: 'LOP spike (days)', tip: 'Loss-of-pay days jumping by at least this many vs last period raises a WARNING.' },
+  absMinFloorMinor: { label: 'Outlier floor (paise)', tip: 'A minimum baseline (in minor units) for the percentage math so a tiny base value can’t blow up the ratio.' },
+};
+
+function ThresholdsConfig({ perms }) {
+  const [data, setData] = useState(null);
+  const [form, setForm] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
+  const [open, setOpen] = useState(false);
+  const canRun = hasPermission(perms, 'canRunPayroll');
+
+  const load = useCallback(() => {
+    get('/api/hr/payroll/runs/thresholds')
+      .then((res) => { setData(res); setForm({ ...res.effective }); })
+      .catch((e) => setError(e.data?.message || e.message || 'Thresholds unavailable.'));
+  }, []);
+  useEffect(() => { if (open && !data) load(); }, [open, data, load]);
+
+  async function save() {
+    setBusy(true); setError(''); setSaved(false);
+    try {
+      const res = await put('/api/hr/payroll/runs/thresholds', { config: form });
+      setData(res); setForm({ ...res.effective }); setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (e) { setError(e.data?.message || e.message || 'Failed to save thresholds.'); }
+    finally { setBusy(false); }
+  }
+  function resetToDefaults() { if (data) setForm({ ...data.defaults }); }
+
+  const keys = (data?.editableKeys || Object.keys(THRESHOLD_META));
+
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white">
+      <button type="button" onClick={() => setOpen((o) => !o)} className="w-full flex items-center justify-between p-4 text-left">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold text-gray-900">Variance tolerances</span>
+          <InfoTip text="The thresholds the pre-run checks use. Loosening a tolerance means fewer warnings/blockers; tightening means more. Defaults are India-tuned." />
+          {data?.isCustomised && <span className="text-[10px] font-semibold text-amber-600">customised</span>}
+        </div>
+        <span className="text-gray-400 text-xs">{open ? '▲ Hide' : '▼ Edit'}</span>
+      </button>
+      {open && (
+        <div className="px-4 pb-4 space-y-3">
+          {error && <ErrorBanner message={error} />}
+          {!data ? <Spinner /> : (
+            <>
+              <div className="grid sm:grid-cols-2 gap-3">
+                {keys.map((k) => {
+                  const meta = THRESHOLD_META[k] || { label: k, tip: '' };
+                  return (
+                    <label key={k} className="block">
+                      <span className="flex items-center text-xs font-medium text-gray-700">{meta.label}{meta.tip && <InfoTip text={meta.tip} />}</span>
+                      <input
+                        type="number"
+                        step="any"
+                        disabled={!canRun}
+                        value={form[k] ?? ''}
+                        onChange={(e) => setForm((f) => ({ ...f, [k]: e.target.value }))}
+                        className="mt-1 w-full rounded-lg border border-gray-300 px-2 py-1 text-sm disabled:bg-gray-50"
+                      />
+                      <span className="text-[10px] text-gray-400">default {String(data.defaults[k])}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              {canRun ? (
+                <div className="flex items-center gap-2">
+                  <PrimaryButton loading={busy} onClick={save}>Save tolerances</PrimaryButton>
+                  <ActionButton tone="neutral" onClick={resetToDefaults}>Reset to defaults</ActionButton>
+                  {saved && <span className="text-xs font-semibold text-emerald-600">✓ Saved</span>}
+                </div>
+              ) : <p className="text-xs text-gray-500">You lack canRunPayroll — tolerances are read-only.</p>}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Decision bar (submit / approve / send-back) ──────────────────────────────
 function DecisionBar({ run, runId, me, perms, onChanged }) {
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [reason, setReason] = useState('');
+  const [gate, setGate] = useState(null); // { total, acknowledged, remaining } — the OPERABLE blocker gate
   const status = run?.status;
   const isMaker = me && (run?.computedBy === me.id || run?.lockedBy === me.id || run?.submittedBy === me.id);
   const canApprove = hasPermission(perms, 'canApprovePayroll');
   const canRun = hasPermission(perms, 'canRunPayroll');
-  const blockers = (run?.anomalies || []).filter((a) => a.severity === 'BLOCKER').length;
+
+  // Keep the gate fresh (an acknowledge in the panel above re-loads the parent,
+  // which remounts this) — fetch the operable blocker gate from the variance read.
+  useEffect(() => {
+    let alive = true;
+    post(`/api/hr/payroll/runs/${runId}/variance`)
+      .then((res) => { if (alive) setGate(res.blockerGate || null); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [runId]);
+
+  // Raw blockers (from the loaded run) gate SUBMIT — a maker cannot override.
+  const rawBlockers = (run?.anomalies || []).filter((a) => a.severity === 'BLOCKER').length;
+  // Unacknowledged blockers gate APPROVE — a checker may acknowledge to proceed.
+  const unacked = gate ? gate.remaining : rawBlockers;
 
   async function act(action, body) {
     setBusy(action); setError('');
@@ -648,10 +993,10 @@ function DecisionBar({ run, runId, me, perms, onChanged }) {
         <div className="flex items-center gap-2">
           <PrimaryButton
             loading={busy === 'submit'}
-            disabled={blockers > 0 || !canRun}
+            disabled={rawBlockers > 0 || !canRun}
             onClick={() => act('submit')}
           >Submit for approval</PrimaryButton>
-          {blockers > 0 && <span className="text-xs text-red-600">{blockers} blocker(s) must be cleared first.</span>}
+          {rawBlockers > 0 && <span className="text-xs text-red-600">{rawBlockers} blocker(s) must be resolved or acknowledged first.</span>}
         </div>
       )}
       {status === 'REVIEW' && (
@@ -664,7 +1009,7 @@ function DecisionBar({ run, runId, me, perms, onChanged }) {
             <div className="flex items-center gap-2">
               <ActionButton
                 tone="positive"
-                disabled={busy === 'approve' || blockers > 0 || !canApprove}
+                disabled={busy === 'approve' || unacked > 0 || !canApprove}
                 onClick={() => act('approve', { totalsHash: run?.totalsHash })}
               >Approve</ActionButton>
               <input
@@ -679,7 +1024,15 @@ function DecisionBar({ run, runId, me, perms, onChanged }) {
                 onClick={() => act('send-back', { reason })}
               >Send back</ActionButton>
             </div>
-            {blockers > 0 && <span className="text-xs text-red-600">Approval is gated by {blockers} blocker(s).</span>}
+            {unacked > 0 && (
+              <span className="text-xs text-red-600">
+                Approval is gated by {unacked} unacknowledged blocker(s)
+                {gate && gate.acknowledged > 0 ? ` (${gate.acknowledged} already acknowledged)` : ''}. Acknowledge each blocker above with a reason to proceed.
+              </span>
+            )}
+            {unacked === 0 && gate && gate.total > 0 && (
+              <span className="text-xs text-emerald-600">All {gate.total} blocker(s) acknowledged — approval is allowed.</span>
+            )}
             {!canApprove && <span className="text-xs text-gray-500">You lack canApprovePayroll.</span>}
           </div>
         )
@@ -840,6 +1193,7 @@ function RunDetail({ runId, onBack, tab, setTab, me, perms }) {
   const tabs = [
     { key: 'inputs', label: 'Inputs' },
     { key: 'summary', label: 'Summary' },
+    { key: 'checks', label: 'Checks' },
     { key: 'variance', label: 'Variance' },
     { key: 'approval', label: 'Approval' },
     { key: 'disburse', label: 'Disburse' },
@@ -923,6 +1277,15 @@ function RunDetail({ runId, onBack, tab, setTab, me, perms }) {
         </div>
       )}
 
+      {tab === 'checks' && (
+        <div className="space-y-4">
+          <ThresholdsConfig perms={perms} />
+          {status === 'DRAFT'
+            ? <div className="text-sm text-gray-500">Compute the run to see pre-run checks.</div>
+            : <PayrollHealthPanel runId={runId} run={run} perms={perms} readOnly={immutable} onChanged={load} />}
+        </div>
+      )}
+
       {tab === 'variance' && (
         status === 'DRAFT' ? <div className="text-sm text-gray-500">Compute the run to see variance.</div>
           : <VarianceReview runId={runId} run={run} readOnly={immutable} />
@@ -930,7 +1293,10 @@ function RunDetail({ runId, onBack, tab, setTab, me, perms }) {
 
       {tab === 'approval' && (
         <div className="space-y-4">
-          <VarianceReview runId={runId} run={run} readOnly />
+          {/* The checker reviews + acknowledges blockers here, then decides. */}
+          {['COMPUTED', 'REVIEW'].includes(status)
+            ? <PayrollHealthPanel runId={runId} run={run} perms={perms} readOnly={immutable} onChanged={load} />
+            : <VarianceReview runId={runId} run={run} readOnly />}
           {(status === 'COMPUTED' || status === 'REVIEW') && (
             <DecisionBar run={run} runId={runId} me={me} perms={perms} onChanged={load} />
           )}

@@ -178,6 +178,71 @@ function has(findings, code, employeeId) {
 }
 
 // ===========================================================================
+// SCENARIO 6 — CROSS-EMPLOYEE: DUPLICATE_BANK_ACCOUNT (BLOCKER, scope RUN+EMPLOYEE).
+//   F & G share bankKey "ACC1|IFSC1" (both active, positive net) → BLOCKER each
+//   + one RUN roll-up. H has a distinct account → clean. I has net 0 sharing F's
+//   key → NOT counted (no money leaving). J has no bankKey → not counted here.
+// ===========================================================================
+{
+  const current = {
+    runId: 'dup', type: 'REGULAR',
+    totalsMinor: { netMinor: R(10000) + R(10000) + R(10000) + R(0) + R(10000) },
+    lines: [
+      { employeeId: 'F', status: 'COMPUTED', grossMinor: R(12000), netMinor: R(10000), components: [], lopDays: 0, bankKey: 'ACC1|IFSC1' },
+      { employeeId: 'G', status: 'COMPUTED', grossMinor: R(12000), netMinor: R(10000), components: [], lopDays: 0, bankKey: 'ACC1|IFSC1' },
+      { employeeId: 'H', status: 'COMPUTED', grossMinor: R(12000), netMinor: R(10000), components: [], lopDays: 0, bankKey: 'ACC2|IFSC2' },
+      { employeeId: 'I', status: 'COMPUTED', grossMinor: R(12000), netMinor: R(0), components: [], lopDays: 0, bankKey: 'ACC1|IFSC1' },
+      { employeeId: 'J', status: 'COMPUTED', grossMinor: R(12000), netMinor: R(10000), components: [], lopDays: 0 },
+    ],
+  };
+  const { findings } = variance.runVarianceChecks({ current, previous: null });
+  const fDup = findings.find((f) => f.code === 'DUPLICATE_BANK_ACCOUNT' && f.employeeId === 'F');
+  const gDup = findings.find((f) => f.code === 'DUPLICATE_BANK_ACCOUNT' && f.employeeId === 'G');
+  const runDup = findings.find((f) => f.code === 'DUPLICATE_BANK_ACCOUNT' && f.employeeId === null);
+  check('dup-bank: F is a BLOCKER', 'BLOCKER', (fDup || {}).severity);
+  check('dup-bank: G is a BLOCKER', 'BLOCKER', (gDup || {}).severity);
+  check('dup-bank: RUN roll-up is a BLOCKER', 'BLOCKER', (runDup || {}).severity);
+  check('dup-bank: RUN roll-up counts exactly 2 employees', 2, (runDup || {}).observed);
+  check('dup-bank: H (distinct account) is clean', null, has(findings, 'DUPLICATE_BANK_ACCOUNT', 'H'));
+  check('dup-bank: I (net 0) NOT flagged', null, has(findings, 'DUPLICATE_BANK_ACCOUNT', 'I'));
+  check('dup-bank: J (no bankKey) NOT flagged', null, has(findings, 'DUPLICATE_BANK_ACCOUNT', 'J'));
+  // Exactly 3 dup findings total: F, G, and one RUN roll-up.
+  check('dup-bank: exactly 3 DUPLICATE_BANK_ACCOUNT findings', 3, findings.filter((f) => f.code === 'DUPLICATE_BANK_ACCOUNT').length);
+}
+
+// ===========================================================================
+// SCENARIO 7 — STATUTORY_BASE_JUMP (WARNING): EPF amount jumps with no revision.
+//   PREVIOUS: K gross ₹50,000, EPF ₹1,800. CURRENT: gross UNCHANGED ₹50,000 but
+//   EPF ₹3,600 (base doubled). |Δ%| of EPF = (3600-1800)/1800 = 1.0 ≥ 0.30 → WARNING.
+//   Gross is unchanged so no GROSS/NET outlier. (RATE_DRIFT may also fire since the
+//   effective rate moved — both are legitimate; we pin BASE_JUMP here.)
+// ===========================================================================
+{
+  const previous = { runId: 'p', lines: [
+    { employeeId: 'K', status: 'COMPUTED', grossMinor: R(50000), netMinor: R(46400), components: [{ code: 'EPF', amountMinor: R(1800), statutory: true }] },
+  ] };
+  const current = {
+    runId: 'c', type: 'REGULAR',
+    totalsMinor: { netMinor: R(44600) },
+    lines: [
+      { employeeId: 'K', status: 'COMPUTED', grossMinor: R(50000), netMinor: R(44600), components: [{ code: 'EPF', amountMinor: R(3600), statutory: true }], lopDays: 0 },
+    ],
+  };
+  const { findings } = variance.runVarianceChecks({ current, previous });
+  const baseJump = has(findings, 'STATUTORY_BASE_JUMP', 'K');
+  check('base-jump: EPF base jump is WARNING', 'WARNING', (baseJump || {}).severity);
+  check('base-jump: deltaPct = 1.0', 1, (baseJump || {}).deltaPct);
+  check('base-jump: baseline=1800*100, observed=3600*100', [R(1800), R(3600)], [(baseJump || {}).baseline, (baseJump || {}).observed]);
+  // A comp revision suppresses the base-jump (it's an explained change).
+  const curRev = {
+    runId: 'c2', type: 'REGULAR', totalsMinor: { netMinor: R(44600) },
+    lines: [{ employeeId: 'K', status: 'COMPUTED', grossMinor: R(50000), netMinor: R(44600), components: [{ code: 'EPF', amountMinor: R(3600), statutory: true }], hasCompRevision: true, lopDays: 0 }],
+  };
+  const rev = variance.runVarianceChecks({ current: curRev, previous });
+  check('base-jump: suppressed under comp revision', null, has(rev.findings, 'STATUTORY_BASE_JUMP', 'K'));
+}
+
+// ===========================================================================
 console.log('');
 console.log(`Variance golden test: ${passed} passed, ${failed} failed of ${passed + failed} assertions.`);
 if (failed > 0) {

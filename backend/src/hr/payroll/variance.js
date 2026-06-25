@@ -16,7 +16,11 @@
  *     { employeeId, status, grossMinor, netMinor,
  *       components: [{ code, amountMinor, statutory? }],
  *       payableDays?, lopDays?, isNewJoiner?, isLeaver?, hasBankDetail?,
- *       hasCompRevision?, hasArrear? }
+ *       hasCompRevision?, hasArrear?, bankKey? }
+ *
+ *   bankKey — a normalised "accountNumber|ifsc" payee fingerprint (orchestrator
+ *   builds it from the employee bank row). Two ACTIVE payable lines sharing a
+ *   bankKey ⇒ DUPLICATE_BANK_ACCOUNT (money about to land in one account twice).
  *
  *   Finding shape:
  *     { code, severity:'BLOCKER'|'WARNING'|'INFO', employeeId|null,
@@ -36,6 +40,7 @@ const DEFAULT_THRESHOLDS = Object.freeze({
   lopSpikeDays: 5, // lopDays jump >= this → WARNING
   absMinFloorMinor: 50_00, // outlier-math floor so ₹10→₹40 doesn't scream +300%
   statutoryRateTolerance: 0.005, // effective-rate drift band → WARNING
+  statutoryBasePct: 0.30, // |Δ%| of a statutory component's BASE (amount) period-over-period → WARNING
   newJoinerSuppressesOutliers: true,
   leaverSuppressesOutliers: true,
 });
@@ -348,9 +353,68 @@ function runVarianceChecks({ current, previous = null, thresholds } = {}) {
                 suggestedAction: 'Confirm the statutory rate/slab change is correct.',
               }));
             }
+
+            // STATUTORY_BASE_JUMP (WARNING) — the statutory contribution AMOUNT (a
+            // proxy for its wage base) jumped/dropped period-over-period beyond
+            // statutoryBasePct while BOTH periods were non-zero. Distinct from
+            // RATE_DRIFT (which is amount÷gross): a base discontinuity catches a
+            // PF/ESI wage-base reset (e.g. cap re-applied, arrear inflated the base)
+            // even when the effective rate held steady. Statutory drops to zero are
+            // already the harder STATUTORY_DROP_TO_ZERO above (those `continue`).
+            const baseDp = deltaPct(cAmt, pAmt, T.absMinFloorMinor);
+            if (Math.abs(baseDp) >= T.statutoryBasePct && !suppressOutlier) {
+              findings.push(makeFinding({
+                code: 'STATUTORY_BASE_JUMP', severity: SEV.WARNING, employeeId: empId, scope: 'EMPLOYEE',
+                metric: code, baseline: pAmt, observed: cAmt, deltaMinor: cAmt - pAmt, deltaPct: baseDp,
+                message: `Statutory ${code} base moved ${(baseDp * 100).toFixed(1)}% (${pAmt} → ${cAmt}) — possible wage-base discontinuity.`,
+                suggestedAction: 'Confirm the PF/ESI wage base / cap is correct this period.',
+              }));
+            }
           }
         }
       }
+    }
+  }
+
+  // ── 1b. CROSS-EMPLOYEE: DUPLICATE_BANK_ACCOUNT (BLOCKER) ──
+  // Two (or more) ACTIVE, positive-net lines in THIS run that share a payee
+  // fingerprint (bankKey = normalised accountNumber|ifsc) mean the same bank
+  // account is about to be credited for multiple employees — a classic typo /
+  // mis-keyed payee / fraud signal. Emit one EMPLOYEE-scoped BLOCKER per member
+  // of each colliding group (so every offending line gates + drills down) and a
+  // single RUN-scoped roll-up. Pure: groups are keyed off the input array only.
+  {
+    const byBank = new Map(); // bankKey → [employeeId, …]
+    for (const cur of curLines) {
+      if (!isActive(cur)) continue;
+      if (num(cur.netMinor) <= 0) continue; // only money actually leaving the org
+      const key = cur.bankKey == null ? null : String(cur.bankKey).trim();
+      if (!key) continue; // no fingerprint → BANK_DETAIL_MISSING already covers it
+      if (!byBank.has(key)) byBank.set(key, []);
+      byBank.get(key).push(cur.employeeId);
+    }
+    // Deterministic order: iterate groups sorted by key; dedupe employees per group.
+    const collidedKeys = [...byBank.keys()].filter((k) => {
+      const emps = [...new Set(byBank.get(k))];
+      return emps.length > 1;
+    }).sort();
+    for (const key of collidedKeys) {
+      const emps = [...new Set(byBank.get(key))].sort();
+      for (const empId of emps) {
+        const others = emps.filter((e) => e !== empId);
+        findings.push(makeFinding({
+          code: 'DUPLICATE_BANK_ACCOUNT', severity: SEV.BLOCKER, employeeId: empId, scope: 'EMPLOYEE',
+          metric: 'bankKey',
+          message: `Bank account shared with ${others.length} other payee(s) in this run (${others.join(', ')}).`,
+          suggestedAction: 'Verify each employee owns a distinct account before the bank file is generated.',
+        }));
+      }
+      findings.push(makeFinding({
+        code: 'DUPLICATE_BANK_ACCOUNT', severity: SEV.BLOCKER, employeeId: null, scope: 'RUN',
+        metric: 'bankKey', observed: emps.length,
+        message: `${emps.length} employees share one bank account in this run (${emps.join(', ')}).`,
+        suggestedAction: 'Resolve duplicate payees before approval — money would land in one account.',
+      }));
     }
   }
 
