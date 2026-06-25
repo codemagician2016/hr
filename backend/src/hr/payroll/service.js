@@ -2318,6 +2318,12 @@ const EDITABLE_THRESHOLD_KEYS = Object.freeze([
 ]);
 // Integer-minor / whole-day keys take integers; the rest are fractional ratios.
 const INTEGER_THRESHOLD_KEYS = new Set(['lopSpikeDays', 'absMinFloorMinor']);
+// MEDIUM-3: sane per-key UPPER bounds on the BLOCKER-driving ratios so the gate can't
+// be effectively disabled by setting an impossible tolerance (a 5.0 / 500% hardNetPct
+// would never fire). hardNetPct is the net-variance BLOCKER trigger; cap it at 2.0
+// (200% net swing) so it always remains a live gate. Other ratios keep the generic
+// (0,5] bound below. Checker-gated AND bounded — defence in depth.
+const MAX_THRESHOLD_RATIO = Object.freeze({ hardNetPct: 2 });
 
 /**
  * getThresholds — the EFFECTIVE tolerances (defaults merged with the tenant
@@ -2340,7 +2346,10 @@ async function getThresholds(businessId) {
 }
 
 /**
- * updateThresholds — upsert the tenant's variance tolerances. canRunPayroll-gated.
+ * updateThresholds — upsert the tenant's variance tolerances. canApprovePayroll-gated
+ * at the route (MEDIUM-3): the thresholds drive the BLOCKER gate (hardNetPct etc.), so
+ * mutating them is a CHECKER action — the maker who runs payroll can read but not
+ * self-tune the gate (which would disable a blocker without an audited ack).
  * Only the EDITABLE numeric keys are accepted; each is range-validated (positive,
  * percentages in (0,5], an integer-minor floor ≥ 0). The persisted config MERGES
  * over the existing row so the policy flag (allowSingleOperator) is preserved — the
@@ -2358,8 +2367,10 @@ async function updateThresholds({ businessId, actorId, config }) {
       clean[k] = n;
     } else {
       // Fractional ratio tolerances: a sane upper bound so a typo (e.g. 60 for 0.60)
-      // can't disable a check by setting an impossible threshold.
-      if (n > 5) throw badRequest('INVALID_THRESHOLD', `${k} is a ratio (e.g. 0.25 = 25%); ${n} is out of range`);
+      // can't disable a check by setting an impossible threshold. Blocker-driving
+      // ratios (e.g. hardNetPct) carry a TIGHTER cap (MEDIUM-3) so the gate stays live.
+      const cap = MAX_THRESHOLD_RATIO[k] != null ? MAX_THRESHOLD_RATIO[k] : 5;
+      if (n > cap) throw badRequest('INVALID_THRESHOLD', `${k} is a ratio (e.g. 0.25 = 25%); ${n} exceeds the max ${cap}`);
       clean[k] = n;
     }
   }
@@ -2462,6 +2473,11 @@ async function computeVariance({ businessId, payRunId }) {
   // bankKey is a normalised "accountNumber|ifsc-or-nz" so a shared account collides
   // deterministically. We resolve to the FIRST primary account per employee (the
   // salary-credit target) so the fingerprint matches what the bank file would credit.
+  // LOW-6: strip ALL non-alphanumerics (not just leading/trailing whitespace) and
+  // uppercase so two records for the SAME account that differ only by internal
+  // spacing / punctuation ("1234 5678" vs "12345678", "ifsc 0001" vs "IFSC0001")
+  // still collide. (variance.js stays PURE — the orchestrator builds the key.)
+  const normBank = (s) => String(s == null ? '' : s).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
   const bankRows = await prisma.bankAccount.findMany({
     where: { businessId, employeeId: { in: curLines.map((l) => l.employeeId) }, isPrimary: true, isActive: true, deletedAt: null },
     select: { employeeId: true, accountNumber: true, ifsc: true, nzBankAccount: true },
@@ -2469,9 +2485,9 @@ async function computeVariance({ businessId, payRunId }) {
   const bankByEmp = new Map();
   for (const b of bankRows) {
     if (bankByEmp.has(b.employeeId)) continue; // first primary wins (deterministic)
-    const acct = (b.nzBankAccount || b.accountNumber || '').trim();
+    const acct = normBank(b.nzBankAccount || b.accountNumber || '');
     if (!acct) continue;
-    bankByEmp.set(b.employeeId, `${acct.toUpperCase()}|${(b.ifsc || '').trim().toUpperCase()}`);
+    bankByEmp.set(b.employeeId, `${acct}|${normBank(b.ifsc)}`);
   }
 
   const current = {
@@ -2548,64 +2564,124 @@ async function recountBlockers(businessId, payRunId) {
 }
 
 /**
+ * fingerprintFinding — a DETERMINISTIC content hash of the exact blocker instance
+ * (HIGH-1). Binds an AnomalyAcknowledgement to the finding it overrides: the ack is
+ * only honoured while the blocker's CONTENT is unchanged. Includes the run's
+ * totalsHash so that ANY recompute that moves the totals (even one that leaves this
+ * finding's own numbers untouched) re-requires acknowledgement. Missing numeric
+ * fields hash as null (engine anomalies often carry only {code, severity, message}),
+ * so a same-code/same-employee finding is still pinned by (code, employeeId, runHash).
+ */
+function fingerprintFinding(finding, runTotalsHash) {
+  return computeInputHash({
+    inputs: {
+      code: finding.code,
+      employeeId: finding.employeeId == null ? null : String(finding.employeeId),
+      observed: finding.observed == null ? null : String(finding.observed),
+      baseline: finding.baseline == null ? null : String(finding.baseline),
+      deltaMinor: finding.deltaMinor == null ? null : String(finding.deltaMinor),
+      runTotalsHash: runTotalsHash || null,
+    },
+    ruleVersions: {}, engineVersion: ENGINE_VERSION,
+  });
+}
+
+/**
  * listBlockerFindings — the materialised BLOCKER set (the union recountBlockers
- * counts), each carrying { code, employeeId } so the ack/override gate can match
- * an AnomalyAcknowledgement to the exact finding it overrides. Per-line ENGINE
- * (errorJson) + per-line VARIANCE (varianceJson) + run-level varianceReport
- * (employeeId-null findings only, so a per-employee variance blocker isn't double
- * counted between varianceJson and the report).
+ * counts), each carrying { code, employeeId, observed, baseline, deltaMinor,
+ * fingerprint } so the ack/override gate can match an AnomalyAcknowledgement to the
+ * exact finding it overrides (HIGH-1). Per-line ENGINE (errorJson) + per-line
+ * VARIANCE (varianceJson) + run-level varianceReport (employeeId-null findings only,
+ * so a per-employee variance blocker isn't double counted between varianceJson and
+ * the report). The fingerprint folds in the run's CURRENT totalsHash, so a recompute
+ * that changes the numbers (or a brand-new/worse blocker for the same code/employee)
+ * produces a different fingerprint and invalidates any stale ack.
  */
 async function listBlockerFindings(businessId, payRunId) {
   const lines = await prisma.payRunLine.findMany({
     where: { businessId, payRunId },
     select: { employeeId: true, errorJson: true, varianceJson: true },
   });
+  // Anchor the fingerprint on the run's CURRENT totals so a recompute re-keys it.
+  const run = await prisma.payRun.findFirst({
+    where: { id: payRunId, businessId },
+    select: { totalGross: true, totalDeductions: true, totalNet: true, totalEmployerCost: true, headcount: true, complianceVersionId: true, varianceReport: true },
+  });
+  const runTotalsHash = run ? totalsHashOf(run) : null;
   const out = [];
+  const push = (f, employeeId) => {
+    const finding = {
+      code: f.code,
+      employeeId: employeeId == null ? null : employeeId,
+      observed: f.observed == null ? null : f.observed,
+      baseline: f.baseline == null ? null : f.baseline,
+      deltaMinor: f.deltaMinor == null ? null : f.deltaMinor,
+    };
+    finding.fingerprint = fingerprintFinding(finding, runTotalsHash);
+    out.push(finding);
+  };
   for (const l of lines) {
     const engine = Array.isArray(l.errorJson) ? l.errorJson : [];
-    for (const e of engine) if (e && e.severity === 'BLOCKER') out.push({ code: e.code, employeeId: l.employeeId });
+    for (const e of engine) if (e && e.severity === 'BLOCKER') push(e, l.employeeId);
     const varns = Array.isArray(l.varianceJson) ? l.varianceJson : [];
-    for (const v of varns) if (v && v.severity === 'BLOCKER') out.push({ code: v.code, employeeId: l.employeeId });
+    for (const v of varns) if (v && v.severity === 'BLOCKER') push(v, l.employeeId);
   }
   // Run-level (e.g. RECONCILIATION_MISMATCH, DUPLICATE_BANK_ACCOUNT roll-up) lives
   // only in varianceReport with employeeId == null.
-  const run = await prisma.payRun.findFirst({ where: { id: payRunId, businessId }, select: { varianceReport: true } });
   const report = run && run.varianceReport;
   if (report && Array.isArray(report.findings)) {
     for (const f of report.findings) {
-      if (f.severity === 'BLOCKER' && f.employeeId == null) out.push({ code: f.code, employeeId: null });
+      if (f.severity === 'BLOCKER' && f.employeeId == null) push(f, null);
     }
   }
   return out;
 }
 
+/** Stable, control-char-free ack key (LOW-4: no raw NUL delimiter in source). */
+function ackKey(code, employeeId) {
+  return JSON.stringify([code, employeeId == null ? null : String(employeeId)]);
+}
+
 /**
  * countUnacknowledgedBlockers — the OPERABLE blocker gate (the human override).
  * Materialises the BLOCKER set FRESH, then subtracts every blocker that has a
- * live AnomalyAcknowledgement matching its (code, employeeId). The remainder is
- * what still hard-blocks approval. A blocker is "covered" by an ack with the same
- * code and the same employeeId (a NULL-employee ack covers the run-scoped blocker
- * of that code). Each ack covers at most one blocker instance (no over-credit if
- * the same code somehow recurs). Returns { total, acknowledged, remaining }.
+ * live AnomalyAcknowledgement matching its (code, employeeId) AND whose fingerprint
+ * still matches the CURRENT finding content (HIGH-1). A recompute that changes the
+ * blocker's numbers (or surfaces a new/worse blocker for the same code/employee)
+ * re-keys the fingerprint, so the stale ack no longer credits it — a real blocker
+ * is never silently waived. An ack with a NULL fingerprint is a legacy/pre-migration
+ * row and still matches by (code, employeeId) only (back-compatible). A NULL-employee
+ * ack covers the run-scoped blocker of that code. Each ack covers at most one blocker
+ * instance (no over-credit). Returns { total, acknowledged, remaining }.
  */
 async function countUnacknowledgedBlockers(businessId, payRunId) {
   const blockers = await listBlockerFindings(businessId, payRunId);
   const acks = await prisma.anomalyAcknowledgement.findMany({
     where: { businessId, payRunId },
-    select: { code: true, employeeId: true },
+    select: { code: true, employeeId: true, fingerprint: true },
   });
-  // A multiset of "code employeeId" ack keys; consume one credit per match.
-  const credits = new Map();
+  // Two credit pools per blocker: fingerprint-bound acks (strict content match) and
+  // legacy acks (NULL fingerprint — match by code/employeeId only, back-compat).
+  const byFingerprint = new Map(); // fingerprint -> count
+  const legacyByKey = new Map(); // ackKey(code, employeeId) -> count of NULL-fp acks
   for (const a of acks) {
-    const k = `${a.code} ${a.employeeId == null ? '' : a.employeeId}`;
-    credits.set(k, (credits.get(k) || 0) + 1);
+    if (a.fingerprint == null) {
+      const k = ackKey(a.code, a.employeeId);
+      legacyByKey.set(k, (legacyByKey.get(k) || 0) + 1);
+    } else {
+      byFingerprint.set(a.fingerprint, (byFingerprint.get(a.fingerprint) || 0) + 1);
+    }
   }
   let remaining = 0;
   for (const b of blockers) {
-    const k = `${b.code} ${b.employeeId == null ? '' : b.employeeId}`;
-    const have = credits.get(k) || 0;
-    if (have > 0) credits.set(k, have - 1);
-    else remaining += 1;
+    // Prefer a content-bound ack (exact fingerprint match) — the strong guarantee.
+    const fpHave = byFingerprint.get(b.fingerprint) || 0;
+    if (fpHave > 0) { byFingerprint.set(b.fingerprint, fpHave - 1); continue; }
+    // Else fall back to a legacy (NULL-fingerprint) ack matched by (code, employeeId).
+    const k = ackKey(b.code, b.employeeId);
+    const legacyHave = legacyByKey.get(k) || 0;
+    if (legacyHave > 0) { legacyByKey.set(k, legacyHave - 1); continue; }
+    remaining += 1;
   }
   return { total: blockers.length, acknowledged: blockers.length - remaining, remaining };
 }
@@ -2614,9 +2690,19 @@ async function countUnacknowledgedBlockers(businessId, payRunId) {
  * ackAnomaly — record an EXPLICIT, AUDITED human override of a pre-run BLOCKER so
  * approveRun can proceed past the gate. canApprovePayroll-gated at the route. The
  * run must still be in a pre-approval, mutable state (variance is read-only once
- * approved/closed). A reason is mandatory. Upsert keyed on (payRun, code,
- * employeeId) so re-acknowledging updates the reason rather than duplicating; the
- * action is audited either way.
+ * approved/closed). A reason is mandatory.
+ *
+ * SoD (HIGH-2): the override is a CHECKER action — when four-eyes is in force the
+ * actor must NOT be any maker on the run (computedBy / submittedBy / lockedBy),
+ * mirroring the makers[] list the APPROVED transition enforces (payrun.js). A maker
+ * holding canApprovePayroll can no longer waive their OWN blockers.
+ *
+ * The ack is bound to the EXACT finding it overrides via a content fingerprint
+ * (HIGH-1) captured from the current blocker set, so a later recompute that changes
+ * the numbers invalidates it (the gate re-blocks until re-acknowledged). Re-acking
+ * the same (run, code, employee) updates the reason + fingerprint rather than
+ * duplicating; on the run-scoped (employeeId NULL) path we findFirst+update instead
+ * of upsert-on-NULL, since Postgres treats NULLs as DISTINCT (LOW-5).
  */
 async function ackAnomaly({ businessId, actorId, payRunId, code, employeeId = null, reason }) {
   if (!code || typeof code !== 'string') throw badRequest('MISSING_FIELDS', 'code is required');
@@ -2632,25 +2718,58 @@ async function ackAnomaly({ businessId, actorId, payRunId, code, employeeId = nu
     );
   }
 
-  // The (code, employeeId) must actually correspond to a CURRENT blocker — never
-  // let a checker pre-acknowledge a blocker that doesn't exist (no blanket waiver).
-  const blockers = await listBlockerFindings(businessId, payRunId);
-  const matches = blockers.some((b) => b.code === code && (b.employeeId == null ? null : b.employeeId) === emp);
-  if (!matches) {
-    throw badRequest('NO_SUCH_BLOCKER', `No open BLOCKER "${code}"${emp ? ` for employee ${emp}` : ''} on this run to acknowledge.`);
+  // SoD (HIGH-2): when four-eyes is in force, a maker on this run cannot acknowledge
+  // (waive) its blockers — the override must come from an independent checker. The
+  // maker set mirrors the makers[] the APPROVED transition rejects (payrun.js).
+  const fourEyes = await resolveFourEyesPolicy(businessId);
+  if (fourEyes) {
+    const makers = [payRun.computedBy, payRun.submittedBy, payRun.lockedBy].filter(Boolean);
+    if (makers.includes(actorId)) {
+      throw badRequest(
+        'MAKER_CHECKER',
+        'Maker-checker: a preparer/submitter of this run cannot acknowledge (waive) its own blockers — an independent checker must override.',
+      );
+    }
   }
 
-  const ack = await prisma.anomalyAcknowledgement.upsert({
-    where: { payRunId_code_employeeId: { payRunId, code, employeeId: emp } },
-    update: { reason: String(reason).trim(), acknowledgedBy: actorId },
-    create: { businessId, payRunId, code, employeeId: emp, reason: String(reason).trim(), acknowledgedBy: actorId },
-  });
+  // The (code, employeeId) must actually correspond to a CURRENT blocker — never let
+  // a checker pre-acknowledge a blocker that doesn't exist (no blanket waiver). Pin
+  // the matched blocker so we persist ITS fingerprint (HIGH-1).
+  const blockers = await listBlockerFindings(businessId, payRunId);
+  const matched = blockers.find((b) => b.code === code && (b.employeeId == null ? null : b.employeeId) === emp);
+  if (!matched) {
+    throw badRequest('NO_SUCH_BLOCKER', `No open BLOCKER "${code}"${emp ? ` for employee ${emp}` : ''} on this run to acknowledge.`);
+  }
+  const fingerprint = matched.fingerprint;
+
+  let ack;
+  if (emp == null) {
+    // Run-scoped: Postgres NULL is DISTINCT, so upsert-on-NULL can duplicate (LOW-5).
+    // Explicit findFirst+update keeps a single live run-scoped ack per (run, code).
+    const existing = await prisma.anomalyAcknowledgement.findFirst({
+      where: { businessId, payRunId, code, employeeId: null },
+    });
+    ack = existing
+      ? await prisma.anomalyAcknowledgement.update({
+        where: { id: existing.id },
+        data: { reason: String(reason).trim(), acknowledgedBy: actorId, fingerprint },
+      })
+      : await prisma.anomalyAcknowledgement.create({
+        data: { businessId, payRunId, code, employeeId: null, reason: String(reason).trim(), acknowledgedBy: actorId, fingerprint },
+      });
+  } else {
+    ack = await prisma.anomalyAcknowledgement.upsert({
+      where: { payRunId_code_employeeId: { payRunId, code, employeeId: emp } },
+      update: { reason: String(reason).trim(), acknowledgedBy: actorId, fingerprint },
+      create: { businessId, payRunId, code, employeeId: emp, reason: String(reason).trim(), acknowledgedBy: actorId, fingerprint },
+    });
+  }
 
   await writeAudit({
     businessId, actorId,
     action: 'payrun.anomaly.acknowledge',
     entityType: 'PayRun', entityId: payRunId,
-    meta: { code, employeeId: emp, reason: String(reason).trim() },
+    meta: { code, employeeId: emp, reason: String(reason).trim(), fingerprint },
   });
 
   const gate = await countUnacknowledgedBlockers(businessId, payRunId);

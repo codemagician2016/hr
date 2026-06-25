@@ -51,10 +51,14 @@ router.post('/runs/:id/freeze', payrollMutationLimiter, requirePermission('canRu
 router.post('/runs/:id/approve', payrollMutationLimiter, requirePermission('canApprovePayroll'), c.approveRun);
 // FLAG (Feature 7 — pre-run anomaly review, NEW routes). Registered BEFORE
 // '/runs/:id' so the literal '/runs/thresholds' is not captured by the :id param.
-//   - Per-tenant variance THRESHOLDS (the tolerances variance.js reads): read +
-//     edit under canRunPayroll (the maker who runs payroll tunes them).
+//   - Per-tenant variance THRESHOLDS (the tolerances variance.js reads): the maker
+//     who runs payroll may READ them (canRunPayroll), but MUTATING them is gated on
+//     canApprovePayroll (MEDIUM-3). Thresholds drive the BLOCKER gate (e.g.
+//     hardNetPct) — letting the maker self-tune them would silently disable the gate
+//     without an audited acknowledgement, defeating maker-checker. The CHECKER owns
+//     the tolerances; the maker can never weaken the gate they are gated by.
 router.get('/runs/thresholds', requirePermission('canRunPayroll'), c.getThresholds);
-router.put('/runs/thresholds', payrollMutationLimiter, requirePermission('canRunPayroll'), c.updateThresholds);
+router.put('/runs/thresholds', payrollMutationLimiter, requirePermission('canApprovePayroll'), c.updateThresholds);
 router.get('/runs', requirePermission('canViewPayrollReports'), c.listRuns);
 router.get('/runs/:id', requirePermission('canViewPayrollReports'), c.getRun);
 router.get('/runs/:id/payslips', requirePermission('canViewPayrollReports'), c.getRunPayslips);
@@ -96,8 +100,12 @@ router.post('/runs/:id/inputs/one-time', requirePermission('canRunPayroll'), c.u
 router.get('/runs/:id/variance', requirePermission('canViewPayrollReports'), c.getVariance);
 router.post('/runs/:id/variance', payrollMutationLimiter, requirePermission('canViewPayrollReports'), c.getVariance);
 // FLAG (Feature 7 — pre-run anomaly review): ACKNOWLEDGE/override a pre-run BLOCKER
-// before approval — canApprovePayroll (the audited human override is a CHECKER
-// action, same gate as approve, so a maker can never waive their own blockers).
+// before approval. The PERMISSION gate is canApprovePayroll (same as approve), but
+// that is a capability check, not an identity check — a user holding BOTH
+// canRunPayroll and canApprovePayroll could otherwise waive blockers on a run they
+// prepared. The actual maker≠checker SoD identity check (actor ∉ {computedBy,
+// submittedBy, lockedBy} when four-eyes is in force) is enforced in service.ackAnomaly
+// (HIGH-2), so the maker can never acknowledge their OWN blockers.
 router.post('/runs/:id/anomalies/ack', payrollMutationLimiter, requirePermission('canApprovePayroll'), c.ackAnomaly);
 router.post('/runs/:id/submit', payrollMutationLimiter, requirePermission('canRunPayroll'), c.submitRun);
 router.post('/runs/:id/send-back', payrollMutationLimiter, requirePermission('canApprovePayroll'), c.sendBackRun);

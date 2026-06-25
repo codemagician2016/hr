@@ -312,10 +312,15 @@ function runVarianceChecks({ current, previous = null, thresholds } = {}) {
         }
 
         // COMPONENT_DELTA (WARNING) — appeared/vanished OR |Δ%| >= componentPct.
+        // LOW-7: STATUTORY codes are OWNED by the statutory family (STATUTORY_DROP_TO_ZERO
+        // / STATUTORY_BASE_JUMP / STATUTORY_RATE_DRIFT) — which trigger at the SAME 0.30
+        // threshold — so we suppress COMPONENT_DELTA for them to avoid a duplicate
+        // WARNING for the identical movement. Non-statutory components keep COMPONENT_DELTA.
+        const isStatutoryCode = STATUTORY_SET.has(code);
         if (cAmt == null || pAmt == null) {
           // appeared (prev null) or vanished (cur null) — skip noise for tiny amounts.
           const amt = cAmt == null ? pAmt : cAmt;
-          if (Math.abs(num(amt)) >= T.absMinFloorMinor) {
+          if (!isStatutoryCode && Math.abs(num(amt)) >= T.absMinFloorMinor) {
             findings.push(makeFinding({
               code: 'COMPONENT_DELTA', severity: suppressOutlier ? SEV.INFO : SEV.WARNING,
               employeeId: empId, scope: 'EMPLOYEE',
@@ -329,7 +334,7 @@ function runVarianceChecks({ current, previous = null, thresholds } = {}) {
           }
         } else {
           const dp = deltaPct(cAmt, pAmt, T.absMinFloorMinor);
-          if (Math.abs(dp) >= T.componentPct) {
+          if (!isStatutoryCode && Math.abs(dp) >= T.componentPct) {
             findings.push(makeFinding({
               code: 'COMPONENT_DELTA', severity: suppressOutlier ? SEV.INFO : SEV.WARNING,
               employeeId: empId, scope: 'EMPLOYEE',

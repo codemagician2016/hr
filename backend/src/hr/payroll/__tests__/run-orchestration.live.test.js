@@ -42,6 +42,7 @@ async function cleanup(businessId) {
     await prisma.payRunLine.deleteMany({ where: { payRunId: { in: ids } } });
     await prisma.payRunInputItem.deleteMany({ where: { payRunId: { in: ids } } });
     await prisma.attendancePayInput.deleteMany({ where: { payRunId: { in: ids } } });
+    await prisma.anomalyAcknowledgement.deleteMany({ where: { payRunId: { in: ids } } });
     await prisma.payRun.deleteMany({ where: { id: { in: ids } } });
   }
 }
@@ -200,6 +201,118 @@ async function main() {
       () => service.approveRun({ businessId, actorId: CHECKER, payRunId: fcRun.id }),
       'OPEN_BLOCKERS', 'F2d approve fail-closed: variance BLOCKER blocks even unreviewed run',
     );
+  }
+
+  // ── F3. ANOMALY-ACK GATE — approve BLOCKS on un-acked blockers, ALLOWS after an
+  //        acked-with-reason override, a recompute that changes a blocker's numbers
+  //        INVALIDATES the prior ack (re-blocks), and a MAKER cannot ack (SoD). ──
+  //  A single forced-negative line raises a SET of blockers (NEGATIVE_NET +
+  //  DEDUCTION_EXCEEDS_GROSS + NET_PCT_OUTLIER_HARD); we ack the whole open set
+  //  (checker) so the gate clears, then prove the stale-ack invalidation.
+  {
+    // Helper: ack every CURRENTLY-open blocker as the given actor (one reason each).
+    const ackAllOpen = async (payRunId, actorId, reason) => {
+      const open = await service.listBlockerFindings(businessId, payRunId);
+      for (const b of open) {
+        await service.ackAnomaly({ businessId, actorId, payRunId, code: b.code, employeeId: b.employeeId, reason });
+      }
+      return service.countUnacknowledgedBlockers(businessId, payRunId);
+    };
+
+    const ackRun = await mkRun(businessId, inEntity, inCal, {
+      periodStart: '2026-07-01', periodEnd: '2026-07-31', payDate: '2026-07-31', taxYear: '2026-27', seq: 4, suffix: 'IN-JUL-ACKGATE',
+    });
+    // MAKER computes the run (so computedBy = MAKER → the maker identity for SoD).
+    await service.computeRun({ businessId, actorId: MAKER, payRunId: ackRun.id });
+    // Force a NEGATIVE net on one line (real VARIANCE BLOCKERs the engine raises),
+    // re-reconciling the run total so the run total still matches the line sum.
+    const ackLine = await prisma.payRunLine.findFirst({ where: { businessId, payRunId: ackRun.id }, orderBy: { createdAt: 'asc' } });
+    const r0 = await prisma.payRun.findUnique({ where: { id: ackRun.id }, select: { totalNet: true } });
+    const origLineNet = Number(ackLine.netPay);
+    await prisma.payRunLine.update({ where: { id: ackLine.id }, data: { netPay: -100 } });
+    await prisma.payRun.update({ where: { id: ackRun.id }, data: { totalNet: Number(r0.totalNet) - origLineNet + (-100) } });
+
+    // Materialise variance + read the operable gate. At least one un-acked blocker.
+    await service.computeVariance({ businessId, payRunId: ackRun.id });
+    const gate0 = await service.countUnacknowledgedBlockers(businessId, ackRun.id);
+    ok(gate0.remaining >= 1, `F3a un-acked blocker(s) block the gate (remaining=${gate0.remaining})`);
+    const emp = ackLine.employeeId;
+
+    // (1) Approve BLOCKS while the blockers are un-acked (checker, no ack yet).
+    await expectThrow(
+      () => service.approveRun({ businessId, actorId: CHECKER, payRunId: ackRun.id }),
+      'OPEN_BLOCKERS', 'F3b approve BLOCKS on the un-acknowledged blocker(s)',
+    );
+
+    // (2) SoD: the MAKER (computedBy) cannot acknowledge (waive) their OWN blocker.
+    await expectThrow(
+      () => service.ackAnomaly({ businessId, actorId: MAKER, payRunId: ackRun.id, code: 'NEGATIVE_NET', employeeId: emp, reason: 'maker tries to self-waive' }),
+      'MAKER_CHECKER', 'F3c MAKER acknowledging own blocker → MAKER_CHECKER (SoD)',
+    );
+
+    // (3) A reason is mandatory (no blanket waiver).
+    await expectThrow(
+      () => service.ackAnomaly({ businessId, actorId: CHECKER, payRunId: ackRun.id, code: 'NEGATIVE_NET', employeeId: emp, reason: '   ' }),
+      'MISSING_FIELDS', 'F3d ack without a reason rejected',
+    );
+
+    // (3b) A checker cannot ack a blocker that isn't open (no blanket pre-waiver).
+    await expectThrow(
+      () => service.ackAnomaly({ businessId, actorId: CHECKER, payRunId: ackRun.id, code: 'NO_SUCH_CODE_XYZ', employeeId: emp, reason: 'nope' }),
+      'NO_SUCH_BLOCKER', 'F3e ack of a non-existent blocker → NO_SUCH_BLOCKER',
+    );
+
+    // (4) CHECKER acks the WHOLE open set WITH a reason → the gate fully clears.
+    const oneAck = await service.ackAnomaly({ businessId, actorId: CHECKER, payRunId: ackRun.id, code: 'NEGATIVE_NET', employeeId: emp, reason: 'Approved recovery — net negative is expected this cycle.' });
+    ok(!!oneAck.ack.fingerprint, 'F3f ack persisted a content fingerprint (HIGH-1)');
+    const gateAfter = await ackAllOpen(ackRun.id, CHECKER, 'Reviewed + approved exception this cycle.');
+    ok(gateAfter.remaining === 0, `F3g checker acks clear the gate (remaining=${gateAfter.remaining})`);
+
+    // (5) Approve now ALLOWS (every blocker is acked-with-reason).
+    const approvedAck = await service.approveRun({ businessId, actorId: CHECKER, payRunId: ackRun.id });
+    ok(approvedAck.payRun.status === 'APPROVED', 'F3h approve ALLOWS after the acked-with-reason overrides');
+
+    // ── STALE-ACK INVALIDATION (HIGH-1) — on a FRESH run so we can recompute. ──
+    const staleRun = await mkRun(businessId, inEntity, inCal, {
+      periodStart: '2026-07-01', periodEnd: '2026-07-31', payDate: '2026-07-31', taxYear: '2026-27', seq: 4, suffix: 'IN-JUL-STALEACK',
+    });
+    await service.computeRun({ businessId, actorId: MAKER, payRunId: staleRun.id });
+    const sLine = await prisma.payRunLine.findFirst({ where: { businessId, payRunId: staleRun.id }, orderBy: { createdAt: 'asc' } });
+    const s0 = await prisma.payRun.findUnique({ where: { id: staleRun.id }, select: { totalNet: true } });
+    const sOrig = Number(sLine.netPay);
+    await prisma.payRunLine.update({ where: { id: sLine.id }, data: { netPay: -100 } });
+    await prisma.payRun.update({ where: { id: staleRun.id }, data: { totalNet: Number(s0.totalNet) - sOrig + (-100) } });
+    await service.computeVariance({ businessId, payRunId: staleRun.id });
+
+    // Capture the NEGATIVE_NET blocker's fingerprint at net=-100, then ack the full set.
+    const blockers1 = await service.listBlockerFindings(businessId, staleRun.id);
+    const negBlocker1 = blockers1.find((b) => b.code === 'NEGATIVE_NET');
+    ok(!!negBlocker1, 'F3i stale-test: NEGATIVE_NET present at net=-100');
+    const fpAtMinus100 = negBlocker1.fingerprint;
+    const sGate1 = await ackAllOpen(staleRun.id, CHECKER, 'Acked at net=-100.');
+    ok(sGate1.remaining === 0, 'F3j stale-test: acks clear the gate at net=-100');
+
+    // NOW a recompute CHANGES a blocker's numbers (net -100 → -250). The NEGATIVE_NET
+    // observed (and the run totals) change → a DIFFERENT fingerprint → the prior acks
+    // no longer match the CURRENT findings → the gate RE-BLOCKS (HIGH-1).
+    await prisma.payRunLine.update({ where: { id: sLine.id }, data: { netPay: -250 } });
+    await prisma.payRun.update({ where: { id: staleRun.id }, data: { totalNet: Number(s0.totalNet) - sOrig + (-250) } });
+    await service.computeVariance({ businessId, payRunId: staleRun.id });
+    const blockers2 = await service.listBlockerFindings(businessId, staleRun.id);
+    const negBlocker2 = blockers2.find((b) => b.code === 'NEGATIVE_NET');
+    ok(negBlocker2 && negBlocker2.fingerprint !== fpAtMinus100, 'F3k recompute changed the blocker fingerprint (content moved -100→-250)');
+    const gateStale = await service.countUnacknowledgedBlockers(businessId, staleRun.id);
+    ok(gateStale.remaining >= 1, `F3l stale ack INVALIDATED — gate re-blocks after recompute (remaining=${gateStale.remaining})`);
+
+    // Approve must re-BLOCK with the stale acks present (the core HIGH-1 guarantee).
+    await expectThrow(
+      () => service.approveRun({ businessId, actorId: CHECKER, payRunId: staleRun.id }),
+      'OPEN_BLOCKERS', 'F3m approve RE-BLOCKS after a recompute invalidated the prior acks',
+    );
+
+    // Re-acking the CURRENT (net=-250) set stamps NEW fingerprints → gate clears again.
+    const sGate2 = await ackAllOpen(staleRun.id, CHECKER, 'Re-acked at net=-250.');
+    ok(sGate2.remaining === 0, 'F3n re-ack of the CURRENT blockers clears the gate');
   }
 
   // ── G. Lifecycle past APPROVED — pay (publish) → file (remittances) → close ──
