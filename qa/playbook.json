@@ -1,0 +1,1169 @@
+{
+  "project": {
+    "key": "DRIFTHR",
+    "name": "DriftHR",
+    "description": "HRMS & Payroll (India + NZ) — multi-tenant, white-label SaaS. Tenant HR console (app-staging), white-label Employee Self-Service (demo-staging), and Super Admin (admin-staging). Core invariants tested throughout: tenant isolation, hierarchical RBAC (a manager only sees/acts on their own reporting sub-tree), and maker-checker separation of duties on money.",
+    "note": "Login endpoints have an aggressive rate limiter (HTTP 429) — space out automated logins."
+  },
+  "logins": [
+    {
+      "label": "HR Admin (maker)",
+      "role": "Owner / HR Admin",
+      "email": "operator@demo.test",
+      "password": "Demo@12345",
+      "portalUrl": "https://app-staging.drifthr.com",
+      "scopeNote": "Full tenant access (ALL scope band). Runs HR org-wide and is the 'maker' in maker-checker: can run/submit a payroll run but cannot approve it for disbursement. Configures org, roles, branding, letters, recruitment, onboarding.",
+      "sortOrder": 1
+    },
+    {
+      "label": "Finance (checker)",
+      "role": "Finance",
+      "email": "finance@demo.test",
+      "password": "Demo@12345",
+      "portalUrl": "https://app-staging.drifthr.com",
+      "scopeNote": "Money, not people (ALL financial scope). The 'checker' in maker-checker: approves payroll runs and compensation revisions, views comp tenant-wide, files returns. Cannot create/terminate employees or approve leave.",
+      "sortOrder": 2
+    },
+    {
+      "label": "Manager (Aarav)",
+      "role": "Manager",
+      "email": "aarav.sharma@demo.test",
+      "password": "Demo@12345",
+      "portalUrl": "https://app-staging.drifthr.com",
+      "scopeNote": "TEAM band — sees and acts on ONLY his own reporting sub-tree (direct + indirect reports via the reporting tree). Can approve his team's leave and manage their attendance. Has NO compensation/payroll access. The security-critical role: out-of-team records return 404, never another team's data.",
+      "sortOrder": 3
+    },
+    {
+      "label": "Employee (Priya)",
+      "role": "Employee",
+      "email": "priya.nair@demo.test",
+      "password": "Demo@12345",
+      "portalUrl": "https://demo-staging.drifthr.com",
+      "scopeNote": "Self-service only (SELF band), on the white-label Employee portal. Sees only her own profile, payslips, leave, attendance, letters. Subject is always derived from her session — she can never read another employee's data.",
+      "sortOrder": 4
+    },
+    {
+      "label": "Employee (Meera)",
+      "role": "Employee",
+      "email": "meera.iyer@demo.test",
+      "password": "Demo@12345",
+      "portalUrl": "https://demo-staging.drifthr.com",
+      "scopeNote": "Second self-service employee, used for cross-employee isolation tests (e.g. confirming one employee cannot see another's payslip/profile). SELF band on the Employee portal.",
+      "sortOrder": 5
+    },
+    {
+      "label": "Super Admin",
+      "role": "Super Admin",
+      "email": "superadmin@demo.test",
+      "password": "Demo@12345",
+      "portalUrl": "https://admin-staging.drifthr.com",
+      "scopeNote": "Platform operator on the Super Admin host. Provisions/runs tenants and the SaaS business; bypasses tenant gates but every privileged read/impersonation is audited. Never used for day-to-day HR.",
+      "sortOrder": 6
+    }
+  ],
+  "features": [
+    {
+      "key": "login-rbac",
+      "title": "Login, Roles & Hierarchical Scopes",
+      "portal": "HR Admin",
+      "summary": "The authorization spine of DriftHR: who can do what (action permissions) AND over whom (data scope from the reporting tree). It is what makes 'a manager manages only their own employees' true by construction.",
+      "howItWorks": "Authorization is a pair: (action, scope). Holding a permission is necessary but not sufficient — every action also resolves a DATA SCOPE from the reporting tree, and the two are ANDed on every query.\n\n- Five system roles: Owner & HR-Admin (ALL band), Manager (TEAM band = own reporting sub-tree), Finance (ALL financial), Employee (hard SELF).\n- A Manager has NO `canViewCompensation` by default — salary never serializes into a manager-scoped payload.\n- Out-of-scope single-row access returns 404 (never reveals existence); lists are filtered, never 403'd.\n- Roles & per-user assignment are managed in Settings > Roles; the org/reporting tree is set via the org chart. Editing a role takes effect on the user's next request (no re-login).",
+      "notes": "Live. RBAC is Feature 1 (done) and underpins every other module's scoping.",
+      "sortOrder": 1,
+      "useCases": [
+        {
+          "key": "each-role-logs-in-and-lands-on-its-correct-console",
+          "title": "Each role logs in and lands on its correct console",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)",
+            "Finance (checker)",
+            "Manager (Aarav)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/login",
+          "steps": [
+            "Open the HR Admin login page.",
+            "Log in as operator@demo.test (password Demo@12345). Note the full nav (People, Payroll, Compensation, Org, Settings, etc.).",
+            "Log out, log in as finance@demo.test. Note Payroll/Compensation are present but People/Org editing is not.",
+            "Log out, log in as aarav.sharma@demo.test. Note Compensation, Payroll, Reports and Settings > Roles are absent from the nav."
+          ],
+          "expected": "Each user logs in successfully. HR Admin sees the full console; Finance sees money modules; Manager sees a reduced 'my team' console with no Compensation/Payroll/Roles nav items.",
+          "sortOrder": 1
+        },
+        {
+          "key": "manager-sees-only-his-own-team-in-the-directory",
+          "title": "Manager sees only his own team in the directory",
+          "kind": "EDGE",
+          "loginLabels": [
+            "Manager (Aarav)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/people",
+          "steps": [
+            "Log in as aarav.sharma@demo.test on the HR Admin portal.",
+            "Open People.",
+            "Note the count and the names listed."
+          ],
+          "expected": "The People list shows ONLY Aarav's reporting sub-tree (his direct and indirect reports), not the whole company. Total equals the sub-tree size; peers/other teams are absent.",
+          "sortOrder": 2
+        },
+        {
+          "key": "manager-cannot-open-a-non-reports-record-idor-safe-404",
+          "title": "Manager cannot open a non-report's record (IDOR-safe 404)",
+          "kind": "NEGATIVE",
+          "loginLabels": [
+            "Manager (Aarav)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/people",
+          "steps": [
+            "Log in as aarav.sharma@demo.test.",
+            "Open People and copy the URL of one of your own reports (it ends in /people/<id>).",
+            "Edit the URL to point at an employee who is NOT in your team (e.g. swap in another employee id) and load it."
+          ],
+          "expected": "The out-of-team record renders 'Not found' / a 404 — NOT a 403 and never another team's data. Existence is not revealed.",
+          "sortOrder": 3
+        },
+        {
+          "key": "hr-admin-assigns-a-role-and-it-takes-effect-immediately",
+          "title": "HR Admin assigns a role and it takes effect immediately",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/settings/roles",
+          "steps": [
+            "Log in as operator@demo.test.",
+            "Open Settings > Roles.",
+            "Review the 5 system roles and the per-user role assignment table; note system roles are read-only/duplicatable.",
+            "(Optional) reassign a non-critical user's role and confirm the change saves."
+          ],
+          "expected": "The roles matrix (15 permission keys) and the people-to-role table load. Changes save without error; you cannot strip the last Owner (guarded with a 409-style message).",
+          "sortOrder": 4
+        }
+      ]
+    },
+    {
+      "key": "onboarding-lifecycle",
+      "title": "Onboarding & Employee Lifecycle",
+      "portal": "HR Admin",
+      "summary": "Turns an accepted offer into a fully provisioned, active employee through a tracked onboarding pipeline, and runs the reverse (separation -> Full & Final settlement) at exit.",
+      "howItWorks": "Hire -> onboard -> active as a pipeline:\n- An accepted offer seeds an onboarding journey with a checklist; the new hire self-onboards (personal/statutory/bank + document upload + e-sign) before day one.\n- HR clicks 'Provision' once -> atomically creates the Employee + portal User + role + manager link + compensation + leave (all-or-nothing; re-click is a no-op).\n- Probation -> confirm -> Active.\n- Separation: initiate -> exit clearance checklist -> compute FnF (gratuity IN / holiday payout NZ / leave encashment / notice / asset & loan recovery) -> approve (separate approver) -> pay via an FnF pay run -> relieving/experience letters.\nManagers see only their own reports' lifecycle tasks (TEAM band); a new/exiting employee sees only themselves.",
+      "notes": "Live. Provisioning is atomic and idempotent; FnF approval is separation-of-duties gated (initiator cannot approve).",
+      "sortOrder": 2,
+      "useCases": [
+        {
+          "key": "view-the-onboarding-pipeline-board",
+          "title": "View the onboarding pipeline board",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/onboarding",
+          "steps": [
+            "Log in as operator@demo.test.",
+            "Open Onboarding.",
+            "Review the pipeline columns (Offer Sent -> Accepted -> Onboarding -> Active) and any cards with their task-progress ring and blocking-task badge."
+          ],
+          "expected": "The pipeline board renders columns and cards. A card cannot reach 'Active' while a blocking task is open or a required e-sign document is unsigned.",
+          "sortOrder": 1
+        },
+        {
+          "key": "initiate-a-separation-and-review-the-fnf-runner",
+          "title": "Initiate a separation and review the FnF runner",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/separations",
+          "steps": [
+            "Log in as operator@demo.test.",
+            "Open Separations.",
+            "Open (or initiate) a separation case and review the three panes: clearance checklist, FnF preview, and the status timeline."
+          ],
+          "expected": "The separation runner shows clearance lanes, an FnF preview (gratuity / leave encashment / notice / recoveries), and a status timeline. Settle is gated on all clearance lanes cleared + FnF approved + zero un-returned assets.",
+          "sortOrder": 2
+        },
+        {
+          "key": "initiator-cannot-approve-their-own-fnf-separation-of-duties",
+          "title": "Initiator cannot approve their own FnF (separation of duties)",
+          "kind": "NEGATIVE",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/separations",
+          "steps": [
+            "Log in as operator@demo.test (the person who initiated/computed the separation).",
+            "Open the separation case and compute FnF.",
+            "Attempt to approve the FnF as the same user."
+          ],
+          "expected": "Approve is disabled/blocked for the initiator — FnF approval requires a different actor (a Finance/checker holding payroll-approval). The system never lets the maker approve their own settlement.",
+          "sortOrder": 3
+        }
+      ]
+    },
+    {
+      "key": "attendance",
+      "title": "Attendance & Time",
+      "portal": "HR Admin",
+      "summary": "Captures punches, derives a deterministic daily attendance status (present/absent/half-day/leave/holiday/LOP), and freezes the payable result into payroll. Regularization fixes go through manager approval.",
+      "howItWorks": "Punch -> daily rollup -> freeze to payroll:\n- An employee clocks in/out (ESS); a pure derivation engine turns punches + schedule + leave + holidays into exactly one Attendance row per (employee, day) with status and LOP fraction.\n- A leave day is ON_LEAVE, never ABSENT; holidays/weekly-offs are recognised.\n- HR runs a period close that locks the period and freezes payable days/LOP/overtime into the payroll feed (immutable once frozen).\n- Regularization (missed punch / WFH / on-duty): the employee self-raises -> routes to their manager -> on approve, punches are materialized and the day re-derived.\nManager sees only their sub-tree's board and decisions; out-of-scope target -> 404.",
+      "notes": "Live. Derivation engine is golden-tested; freeze is monotonic and immutable. Multi-mode capture (geo + IP + face selfie) policy is configurable in Settings > Attendance > Capture.",
+      "sortOrder": 3,
+      "useCases": [
+        {
+          "key": "daily-punch-happy-path",
+          "title": "Daily punch (happy path)",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "Employee (Priya)"
+          ],
+          "openUrl": "https://demo-staging.drifthr.com/attendance",
+          "steps": [
+            "Log in as priya.nair@demo.test on the Employee portal.",
+            "Open Attendance.",
+            "Click Punch In, wait a moment, then click Punch Out."
+          ],
+          "expected": "Today's row shows an in-time, out-time, total hours, and status = Present.",
+          "sortOrder": 1
+        },
+        {
+          "key": "employee-raises-a-regularization-manager-approves-it",
+          "title": "Employee raises a regularization, manager approves it",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "Employee (Priya)",
+            "Manager (Aarav)"
+          ],
+          "openUrl": "https://demo-staging.drifthr.com/attendance",
+          "steps": [
+            "As priya.nair@demo.test (Employee portal), open Attendance and raise a correction/regularization (e.g. a missed punch) with a date, requested in/out and reason.",
+            "Log in as aarav.sharma@demo.test on the HR Admin portal and open Attendance.",
+            "Find the pending regularization in the team queue and Approve it."
+          ],
+          "expected": "Priya's request appears only in her manager's queue (not elsewhere). On approval the corrected punches materialize and the day is re-derived to the corrected status.",
+          "sortOrder": 2
+        },
+        {
+          "key": "hr-runs-a-period-close-lock-freeze",
+          "title": "HR runs a period close (lock + freeze)",
+          "kind": "EDGE",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/attendance",
+          "steps": [
+            "Log in as operator@demo.test on the HR Admin portal.",
+            "Open Attendance and go to the Period Close / dashboard area.",
+            "Reconcile any blockers, then lock the period."
+          ],
+          "expected": "The period locks; further punches/regularizations in that range are blocked, and the payable result (payable days, LOP, overtime) is frozen for payroll. Locked rows do not retro-mutate.",
+          "sortOrder": 3
+        }
+      ]
+    },
+    {
+      "key": "leave",
+      "title": "Leave Management",
+      "portal": "HR Admin",
+      "summary": "End-to-end leave: accrual of entitlements, an apply -> approve flow with policy checks, balances and calendar, year-end carry-forward/lapse, and encashment at exit. India + NZ (Holidays Act) aware.",
+      "howItWorks": "Entitlement lifecycle + request flow over an append-only ledger:\n- Balances accrue (monthly/upfront/anniversary/NZ-continuous) via a nightly job; carry-forward and lapse run at year-end.\n- Apply: the engine computes working-day-aware days (skips leading/trailing weekoffs & holidays), runs policy gates (notice, max-consecutive, balance, tenure, gender), and places a soft-hold on the balance.\n- Approve: routes to the applicant's manager (escalates up the chain, HR fallback). The manager is excluded from approving their own leave (SoD). On approve the hold becomes 'taken'.\n- A paid leave day shows as ON_LEAVE in attendance, not absent; LWP (unpaid) drives LOP into payroll.\nClosing = opening + accrued - taken - encashed - lapsed + adjusted (the ledger invariant).",
+      "notes": "Live. Available balance = closing - pendingApproval (the ESS card shows this, not raw closing).",
+      "sortOrder": 4,
+      "useCases": [
+        {
+          "key": "employee-applies-for-leave-available-drops-by-the-held-amount",
+          "title": "Employee applies for leave; available drops by the held amount",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "Employee (Priya)"
+          ],
+          "openUrl": "https://demo-staging.drifthr.com/leave",
+          "steps": [
+            "Log in as priya.nair@demo.test on the Employee portal.",
+            "Open Leave > Apply.",
+            "Pick a leave type, a start and end date (optionally a half-day), add a reason if required, and Submit.",
+            "Check the My Balances tab."
+          ],
+          "expected": "A PENDING request is created with the correct computed day count (weekends/holidays inside the range not charged). 'Available' immediately drops by the held amount; the request shows in My Requests as Pending.",
+          "sortOrder": 1
+        },
+        {
+          "key": "manager-approves-a-direct-reports-leave",
+          "title": "Manager approves a direct report's leave",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "Manager (Aarav)",
+            "Employee (Priya)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/leave",
+          "steps": [
+            "Ensure Priya (a report of Aarav) has a pending leave request.",
+            "Log in as aarav.sharma@demo.test on the HR Admin portal and open Leave > Requests.",
+            "Open the request and Approve it."
+          ],
+          "expected": "The request appears only in Aarav's queue. On approve, the status becomes Approved and Priya's balance moves from held to taken atomically.",
+          "sortOrder": 2
+        },
+        {
+          "key": "a-user-cannot-approve-their-own-leave-sod",
+          "title": "A user cannot approve their own leave (SoD)",
+          "kind": "NEGATIVE",
+          "loginLabels": [
+            "Manager (Aarav)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/leave",
+          "steps": [
+            "Log in as aarav.sharma@demo.test on the HR Admin portal.",
+            "Apply for leave for himself (via ESS or as a self-request).",
+            "Open Leave > Requests and look for his own request to approve."
+          ],
+          "expected": "Aarav cannot approve his own leave — the approve action is absent for his own request and it routes up to his manager/HR instead.",
+          "sortOrder": 3
+        }
+      ]
+    },
+    {
+      "key": "compensation-ctc",
+      "title": "Compensation & CTC",
+      "portal": "HR Admin",
+      "summary": "Salary structures and CTC: build a structure with a live CTC -> gross -> net preview, assign/revise an employee's pay with maker-checker approval, and enforce the India 'Basic >= 50% CTC' wage rule. Salary is masked by role.",
+      "howItWorks": "Structure builder + revisions, all reconciling to the payroll engine to the paise:\n- HR builds a salary structure (components + a BALANCING special allowance) and sees a live waterfall: CTC -> minus employer cost -> gross -> minus deductions -> net, with the India 50% guard chip.\n- Assigning/revising pay is append-only and effective-dated; a revision can be proposed by a maker and must be approved by a different checker (self-approve is blocked).\n- The India 50% rule (Basic+DA >= 50% of CTC) is enforced fail-closed at preview and at save; it is skipped for NZ.\n- Field-level masking on every read: a manager without the comp grant gets a RANGE envelope (band/compa-ratio), never an absolute figure; the number is omitted server-side, not blurred. Employees see only their own.",
+      "notes": "Live for the per-employee revision maker-checker flow. The bulk increment-cycle worksheet is deliberately deferred to a later phase (the Approvals tab signposts this; no dead increment-cycle tab is shown).",
+      "sortOrder": 5,
+      "useCases": [
+        {
+          "key": "build-a-salary-structure-and-watch-the-live-ctc-net-preview",
+          "title": "Build a salary structure and watch the live CTC->net preview",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/compensation",
+          "steps": [
+            "Log in as operator@demo.test.",
+            "Open Compensation > Structures.",
+            "Add/edit a structure: set the header (name, country, currency, basis), add component lines including one BALANCING special allowance, and set a target CTC.",
+            "Watch the right-hand live preview."
+          ],
+          "expected": "The waterfall (CTC -> employer cost -> gross -> deductions -> net) updates live and the India 50% guard chip is green when Basic+DA >= 50% of CTC.",
+          "sortOrder": 1
+        },
+        {
+          "key": "india-wage-floor-blocks-a-structure-with-basic-below-50",
+          "title": "India wage-floor blocks a structure with Basic below 50%",
+          "kind": "NEGATIVE",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/compensation",
+          "steps": [
+            "Log in as operator@demo.test and open Compensation > Structures (an India entity).",
+            "Build a structure where Basic+DA is set below 50% of CTC.",
+            "Attempt to Save."
+          ],
+          "expected": "The 50% guard chip turns red and Save is blocked (client + server) with a clear message — the structure cannot be saved until Basic+DA >= 50% of CTC.",
+          "sortOrder": 2
+        },
+        {
+          "key": "maker-cannot-approve-their-own-compensation-revision-sod",
+          "title": "Maker cannot approve their own compensation revision (SoD)",
+          "kind": "NEGATIVE",
+          "loginLabels": [
+            "HR Admin (maker)",
+            "Finance (checker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/compensation",
+          "steps": [
+            "Log in as operator@demo.test, open Compensation > Revisions, pick an employee and propose a revision (new CTC or % hike); save as Proposed.",
+            "Still as operator@demo.test, try to approve that same revision.",
+            "Then log in as finance@demo.test and approve it."
+          ],
+          "expected": "Self-approval is rejected (SOD_SELF_APPROVAL). The revision can only be approved by a different checker (Finance), after which it becomes Effective.",
+          "sortOrder": 3
+        },
+        {
+          "key": "employee-views-only-their-own-ctc-breakup",
+          "title": "Employee views only their own CTC breakup",
+          "kind": "EDGE",
+          "loginLabels": [
+            "Employee (Priya)"
+          ],
+          "openUrl": "https://demo-staging.drifthr.com/compensation",
+          "steps": [
+            "Log in as priya.nair@demo.test on the Employee portal.",
+            "Open Compensation.",
+            "Review the CTC breakup waterfall, revision history, and any increment letters."
+          ],
+          "expected": "Priya sees her own full CTC breakup (earnings, employee deductions, and employer contributions labelled 'cost to company'). There is no way to view anyone else's pay — the page is always self-scoped.",
+          "sortOrder": 4
+        }
+      ]
+    },
+    {
+      "key": "payroll-run",
+      "title": "Payroll Run (Maker-Checker)",
+      "portal": "HR Admin",
+      "summary": "The guided pay-run workflow: compute payslips, review period-over-period variance, then maker submits and a separate finance checker approves before disbursement, payslip publish, and statutory filing.",
+      "howItWorks": "Lifecycle: Draft -> Inputs locked -> Computed -> In review -> Approved -> Paid -> Filed -> Closed.\n- Maker (operator, canRunPayroll): creates a run with entity/calendar pickers, freezes attendance, computes payslips, reviews the PRE-RUN CHECKS panel (period-over-period deltas + cross-employee + absolute sanity rules, grouped BLOCKER/WARNING/INFO with per-employee drill-down and a plain-language summary), then Submits for approval.\n- Checker (finance, canApprovePayroll): reviews and Approves — or Sends back with a reason.\n- HARD RULES enforced server-side and mirrored in the UI: no state-skipping; maker != checker (approve 409s if the actor computed the run); blocking anomalies gate approval; approved/paid/filed runs are immutable; recompute with unchanged inputs is a cached no-op.\n- After approval: Mark Paid -> payslips publish to ESS -> country-aware filing exports (IN ECR/ESIC/24Q; NZ payday EI + bank batch) -> File -> Close.\n- PRE-RUN ANOMALY REVIEW: a dedicated Checks tab groups every finding by severity with the suggested fix and per-employee drill-down. New cross-employee checks include DUPLICATE BANK ACCOUNT (two payees sharing one account = blocker) and statutory wage-base discontinuity. The tolerances the checks use are tunable per tenant (Variance tolerances editor, canRunPayroll).\n- ACKNOWLEDGE / OVERRIDE GATE: blocking anomalies gate approval, but a checker (canApprovePayroll) can explicitly ACKNOWLEDGE a blocker WITH A REASON (audited) to clear the gate for that finding. Approval proceeds only when every blocker is resolved or acknowledged; a maker cannot waive their own blockers (acknowledge is a checker action).",
+      "notes": "Live. Compute engine, state machine, and filing generators are golden-tested. The headline test surface is the maker-checker SoD: operator submits, finance approves. Pre-run checks are a pure, golden-tested engine; the acknowledge/override is audited and gated on canApprovePayroll.",
+      "sortOrder": 6,
+      "useCases": [
+        {
+          "key": "maker-creates-computes-and-submits-a-pay-run",
+          "title": "Maker creates, computes and submits a pay run",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/payroll",
+          "steps": [
+            "Log in as operator@demo.test.",
+            "Open Payroll and click New Run; pick an Entity and its Pay calendar (the period auto-fills) — no raw UUIDs.",
+            "Work the inputs checklist (freeze attendance), then Compute.",
+            "Open the Variance tab and review deltas, then click Submit for approval."
+          ],
+          "expected": "The run advances Draft -> Computed -> In review. Submit is disabled while any BLOCKER anomaly is open. After submit the maker's view is read-only and the run is queued for a checker.",
+          "sortOrder": 1
+        },
+        {
+          "key": "finance-checker-approves-the-submitted-run",
+          "title": "Finance checker approves the submitted run",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "Finance (checker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/payroll",
+          "steps": [
+            "Log in as finance@demo.test.",
+            "Open Payroll and find the run that is In review.",
+            "Review the read-only variance, then click Approve (or Send back with a reason)."
+          ],
+          "expected": "Finance can Approve the run (maker != checker, zero blockers). On approve it moves to Approved; the audit records the preparer and the four-eyes reviewer.",
+          "sortOrder": 2
+        },
+        {
+          "key": "maker-reviews-pre-run-checks-before-submitting",
+          "title": "Maker reviews the pre-run checks panel",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/payroll",
+          "steps": [
+            "Log in as operator@demo.test.",
+            "Open a computed pay run and click the Checks tab.",
+            "Read the Payroll health summary (N blockers, M warnings, net-pay swing) and the plain-language paragraph.",
+            "Expand the severity groups (Blockers / Warnings / Context) and use Drill on a flagged employee to see the line detail and suggested action.",
+            "Optionally open Variance tolerances and adjust a threshold (e.g. net swing warn-at), Save, then re-open Checks to see the effect."
+          ],
+          "expected": "The Checks tab shows a readable, grouped review of every finding with the suggested fix and per-employee drill-down, paginated for large runs. A one-line summary and a deterministic plain-language paragraph describe the run. Editing a tolerance (canRunPayroll) changes which findings are raised.",
+          "sortOrder": 3
+        },
+        {
+          "key": "checker-acknowledges-a-blocker-then-approves",
+          "title": "Checker acknowledges a blocker with a reason, then approves",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "Finance (checker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/payroll",
+          "steps": [
+            "Log in as finance@demo.test and open a run (Computed or In review) that has at least one blocking anomaly.",
+            "Go to the Approval (or Checks) tab; note the Approve button is disabled while an unacknowledged blocker is open.",
+            "Click Acknowledge on a blocker, enter a reason in the override modal, and confirm.",
+            "Once every blocker shows Acknowledged, click Approve."
+          ],
+          "expected": "Approve is gated while any blocker is unacknowledged. After the checker acknowledges each blocker with a reason (recorded against their name), the gate clears and Approve succeeds. The acknowledgement ledger lists who overrode what and why.",
+          "sortOrder": 4
+        },
+        {
+          "key": "approval-blocked-until-every-blocker-is-acknowledged",
+          "title": "Approval stays blocked until every blocker is resolved or acknowledged",
+          "kind": "NEGATIVE",
+          "loginLabels": [
+            "Finance (checker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/payroll",
+          "steps": [
+            "Log in as finance@demo.test and open a run that has two or more blocking anomalies.",
+            "Acknowledge only ONE of the blockers (with a reason).",
+            "Attempt to Approve."
+          ],
+          "expected": "Approve remains blocked (button disabled and a server OPEN_BLOCKERS 409 on any direct attempt) while even one blocker is still unacknowledged. Only after every blocker is acknowledged-with-reason or resolved does approval proceed — the gate is operable, never a silent bypass.",
+          "sortOrder": 5
+        },
+        {
+          "key": "maker-cannot-approve-their-own-run-maker-checker",
+          "title": "Maker cannot approve their own run (maker-checker)",
+          "kind": "NEGATIVE",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/payroll",
+          "steps": [
+            "Log in as operator@demo.test (the user who computed and submitted the run).",
+            "Open the same run that is In review.",
+            "Look for and attempt the Approve action."
+          ],
+          "expected": "The Approve button is hidden for the maker with a banner ('You computed this run — approval requires a different reviewer'); any direct attempt returns a MAKER_CHECKER 409. The maker can never approve their own run by any path.",
+          "sortOrder": 6
+        },
+        {
+          "key": "employee-sees-a-payslip-only-after-it-is-published",
+          "title": "Employee sees a payslip only after it is published",
+          "kind": "EDGE",
+          "loginLabels": [
+            "Employee (Priya)"
+          ],
+          "openUrl": "https://demo-staging.drifthr.com/payslips",
+          "steps": [
+            "Log in as priya.nair@demo.test on the Employee portal.",
+            "Open Payslips.",
+            "Confirm a payslip appears only for a run that has been Paid/published; open it and download the PDF."
+          ],
+          "expected": "Only published (Paid) payslips are listed. The download is the employee's own payslip PDF — never the run-level bank/statutory file. First open flips the payslip to Viewed.",
+          "sortOrder": 7
+        }
+      ]
+    },
+    {
+      "key": "performance-goals",
+      "title": "Performance & Goals",
+      "portal": "HR Admin",
+      "summary": "Goals/OKRs and a review cycle (self -> manager -> calibrate -> release -> acknowledge), with basic calibration and an optional merit recommendation handed to compensation. Scoped to the reporting tree with reviewer != reviewee SoD.",
+      "howItWorks": "Review cycle + goals over the reporting tree:\n- HR configures a cycle (template + rating scale), launches it (bulk-mints one review per employee, auto-assigning the manager as reviewer), and tracks completion.\n- Flow: employee submits self-review -> manager submits manager-review (reviewer must differ from reviewee) -> HR/skip-level calibrate -> HR releases -> employee acknowledges.\n- Ratings stay hidden from the employee until release (release gate); a manager only sees/acts on their own sub-tree's reviews (out-of-scope -> 404).\n- Goals/OKRs: weighted progress rolls up from key-result check-ins; a manager cannot rate themselves.\n- On close, an eligible review emits a merit recommendation; compensation (a separate approval) decides and applies it.",
+      "notes": "Partially live: the console ships review-operations surfaces (My Team Reviews + cycle list/launch/release/stats) first. Goals/OKR authoring, calibration-session management, template/scale editors and nine-box/competency admin surfaces are deferred to a later phase (listed as 'available via API / coming to the console' rather than empty tabs). Keep use cases light.",
+      "sortOrder": 7,
+      "useCases": [
+        {
+          "key": "hr-reviews-the-performance-cycle-and-team-reviews",
+          "title": "HR reviews the performance cycle and team reviews",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/performance",
+          "steps": [
+            "Log in as operator@demo.test.",
+            "Open Performance.",
+            "Review the cycle list and completion stats; open a cycle's My Team Reviews / launch / release operations."
+          ],
+          "expected": "The performance console renders the cycle list and review-operations surfaces. Deferred admin tabs (goals/OKR authoring, calibration sessions, scale/template editors) are signposted as coming/via-API rather than shown empty.",
+          "sortOrder": 1
+        },
+        {
+          "key": "employee-views-their-own-released-review",
+          "title": "Employee views their own released review",
+          "kind": "EDGE",
+          "loginLabels": [
+            "Employee (Priya)"
+          ],
+          "openUrl": "https://demo-staging.drifthr.com/performance",
+          "steps": [
+            "Log in as priya.nair@demo.test on the Employee portal.",
+            "Open Performance.",
+            "View own goals and, if a cycle rating has been released, the rating and acknowledge it."
+          ],
+          "expected": "Priya sees only her own performance data. A final rating/manager comments are absent from the payload until the cycle is released; after release she can view and acknowledge.",
+          "sortOrder": 2
+        },
+        {
+          "key": "manager-cannot-open-a-non-reports-review",
+          "title": "Manager cannot open a non-report's review",
+          "kind": "NEGATIVE",
+          "loginLabels": [
+            "Manager (Aarav)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/performance",
+          "steps": [
+            "Log in as aarav.sharma@demo.test on the HR Admin portal.",
+            "Open Performance and view his team's reviews.",
+            "Attempt to open a review for an employee outside his reporting sub-tree (e.g. by altering the URL id)."
+          ],
+          "expected": "Only sub-tree reviews are listed; an out-of-team review id returns 404. A manager can never rate their own review (SoD).",
+          "sortOrder": 3
+        }
+      ]
+    },
+    {
+      "key": "letters",
+      "title": "Letters & Communication",
+      "portal": "HR Admin",
+      "summary": "A first-class letters module: letterhead manager with a visual position-picker, versioned merge-field templates, an issue-a-letter wizard (preview -> reference number -> PDF), a tenant register with revoke/re-issue, and an ESS 'My Letters' surface.",
+      "howItWorks": "Configure once, issue per employee:\n- HR uploads an A4 letterhead PDF and visually places the writing area + field anchors (date, ref no, authority, signature), then authors versioned merge-field templates (IN/NZ wording variants).\n- Issue a letter: pick type -> pick a (scoped) employee -> fields auto-merge from the record -> editable live preview rendered onto the letterhead -> mint an atomic reference number -> flatten to PDF -> store as an employee-visible document -> audit. Contracts can route through built-in e-sign.\n- A tenant register lists every issued letter (ref no/type/employee/status); revoke (reason, audited) and re-issue (new ref, supersede link) are supported.\n- Compensation merge fields are masked unless the issuer can view comp.\nEmployees see and download their own letters with a tamper-integrity badge.",
+      "notes": "Live (v1). Bulk/CSV issuance and a separate letter approval queue are deferred to v1.1.",
+      "sortOrder": 8,
+      "useCases": [
+        {
+          "key": "issue-a-letter-to-an-employee-via-the-wizard",
+          "title": "Issue a letter to an employee via the wizard",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/letters/issue",
+          "steps": [
+            "Log in as operator@demo.test.",
+            "Open Letters > Issue.",
+            "Pick a letter type/template, pick an employee, review the auto-merged live preview, then Issue now."
+          ],
+          "expected": "A reference number is minted, a flattened PDF is rendered onto the letterhead and stored as an employee-visible document; the letter appears in the register and is downloadable.",
+          "sortOrder": 1
+        },
+        {
+          "key": "review-the-letter-register-and-revoke-a-letter",
+          "title": "Review the letter register and revoke a letter",
+          "kind": "EDGE",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/letters/register",
+          "steps": [
+            "Log in as operator@demo.test and open Letters > Register.",
+            "Filter/search the register (ref no, type, employee, status).",
+            "On an issued letter, choose Revoke and provide a reason."
+          ],
+          "expected": "The register lists issued letters with status. Revoke requires a reason, marks the letter Voided (audited, employee notified), and the reference number is burned (never reused).",
+          "sortOrder": 2
+        },
+        {
+          "key": "employee-downloads-their-own-letter-with-a-tamper-badge",
+          "title": "Employee downloads their own letter with a tamper badge",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "Employee (Priya)"
+          ],
+          "openUrl": "https://demo-staging.drifthr.com/letters",
+          "steps": [
+            "Log in as priya.nair@demo.test on the Employee portal.",
+            "Open Letters (My Letters).",
+            "Open/download one of her issued letters."
+          ],
+          "expected": "Priya sees only her own issued (non-voided) letters with an integrity/tamper badge derived from the file hash; she can download the PDF. She cannot access another employee's letters.",
+          "sortOrder": 3
+        }
+      ]
+    },
+    {
+      "key": "domain-branding",
+      "title": "Domain & Branding (Self-Service)",
+      "portal": "HR Admin",
+      "summary": "White-label self-service: a tenant sets its branded subdomain, logo and brand color so employees see a branded Employee portal. Owner-gated.",
+      "howItWorks": "Subdomain + branding self-service:\n- The tenant picks a subdomain slug; the system provisions {slug}-staging.drifthr.com (DNS + SSL) and binds it, so employees land on a branded portal.\n- Slug changes are guarded: reserved slugs and collisions return a clear conflict, there is a change cooldown, and the new host goes live before the old one is removed.\n- Branding: upload a logo, set a single brand HEX color, and see a 'what your employees see' preview.\n- Custom domains (hr.acme.com via Cloudflare-for-SaaS) are built but gated behind a readiness flag; until enabled the section shows a 'coming soon' teaser.\nOwner-gated: only canEditDomain/canEditBranding holders see the controls; Managers/Employees get 403/hidden.",
+      "notes": "v1 = subdomain self-service + branding (live on staging). Custom-domain (Mode B) is feature-gated off until a one-time Cloudflare-for-SaaS enablement; the UI shows it as a teaser. Tester note: do NOT change the production demo slug unless instructed.",
+      "sortOrder": 9,
+      "useCases": [
+        {
+          "key": "owner-reviews-subdomain-branding-settings",
+          "title": "Owner reviews subdomain + branding settings",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/settings/domain",
+          "steps": [
+            "Log in as operator@demo.test (Owner).",
+            "Open Settings > Domain.",
+            "Review the live subdomain address card (copy/open), the subdomain section, and the gated custom-domain 'coming soon' teaser."
+          ],
+          "expected": "The address card shows the live subdomain with copy/open; the custom-domain section renders as a feature-gated teaser (not an error). Slug-change controls are present and Owner-gated.",
+          "sortOrder": 1
+        },
+        {
+          "key": "owner-updates-logo-and-brand-color",
+          "title": "Owner updates logo and brand color",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/settings/branding",
+          "steps": [
+            "Log in as operator@demo.test and open Settings > Branding.",
+            "Upload/replace the logo and enter a brand HEX color.",
+            "Check the 'what your employees see' brand preview, then save."
+          ],
+          "expected": "The logo uploads (or degrades gracefully to a URL field if storage is unconfigured), the HEX color validates, and the preview reflects the brand. Saves succeed for the Owner.",
+          "sortOrder": 2
+        },
+        {
+          "key": "non-owner-cannot-edit-domainbranding",
+          "title": "Non-owner cannot edit domain/branding",
+          "kind": "NEGATIVE",
+          "loginLabels": [
+            "Manager (Aarav)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/settings",
+          "steps": [
+            "Log in as aarav.sharma@demo.test on the HR Admin portal.",
+            "Attempt to reach Settings > Domain / Branding."
+          ],
+          "expected": "The domain/branding settings are hidden from the nav for a non-owner; direct navigation is denied (403) — only Owner-level users may edit them.",
+          "sortOrder": 3
+        }
+      ]
+    },
+    {
+      "key": "ess-self-service",
+      "title": "Employee Self-Service (ESS)",
+      "portal": "Employee (ESS)",
+      "summary": "The white-label employee portal where an employee self-serves: dashboard/feed, profile, leave, attendance, payslips, documents, directory and tax — all strictly scoped to themselves.",
+      "howItWorks": "Self-service on the branded employee domain:\n- The employee logs in at demo-staging.drifthr.com and lands on their dashboard/feed.\n- Every read is self-derived from the session — there is no employeeId in any ESS path, so cross-employee access is structurally impossible.\n- Core areas: Profile (view/edit governed fields), Leave (apply/balances/calendar), Attendance (clock in/out), Payslips (published only), Documents, Directory, Tax (declarations/proofs).\n- A forged id for another person's resource returns 404; a terminated employee is locked out (read-only window for letters/FnF).",
+      "notes": "Live. This feature is the ESS shell; deeper flows (leave, payslips, profile) are covered by their own features.",
+      "sortOrder": 10,
+      "useCases": [
+        {
+          "key": "employee-logs-in-and-lands-on-their-dashboard",
+          "title": "Employee logs in and lands on their dashboard",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "Employee (Priya)"
+          ],
+          "openUrl": "https://demo-staging.drifthr.com/login",
+          "steps": [
+            "Open the Employee portal login.",
+            "Log in as priya.nair@demo.test (password Demo@12345).",
+            "Review the dashboard/feed and the nav (Profile, Leave, Attendance, Payslips, Documents, Directory, Tax)."
+          ],
+          "expected": "Priya logs in and sees her own branded dashboard with her self-service nav. Everything shown is her own data.",
+          "sortOrder": 1
+        },
+        {
+          "key": "employee-browses-the-directory",
+          "title": "Employee browses the directory",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "Employee (Meera)"
+          ],
+          "openUrl": "https://demo-staging.drifthr.com/directory",
+          "steps": [
+            "Log in as meera.iyer@demo.test on the Employee portal.",
+            "Open Directory.",
+            "Search for a colleague and open a contact card."
+          ],
+          "expected": "The directory lists colleagues with directory-safe fields (name/designation/contact) — no salary or sensitive PII. Compensation is never exposed here.",
+          "sortOrder": 2
+        },
+        {
+          "key": "employee-cannot-access-another-employees-payslip",
+          "title": "Employee cannot access another employee's payslip",
+          "kind": "NEGATIVE",
+          "loginLabels": [
+            "Employee (Priya)",
+            "Employee (Meera)"
+          ],
+          "openUrl": "https://demo-staging.drifthr.com/payslips",
+          "steps": [
+            "Log in as priya.nair@demo.test and open Payslips; copy the URL of one of her payslips (ends in /payslips/<id>).",
+            "Log in as meera.iyer@demo.test in a separate session.",
+            "Paste Priya's payslip URL into Meera's session and load it."
+          ],
+          "expected": "Meera's session returns 404 for Priya's payslip — payslips are self-scoped and a forged id never leaks another employee's data.",
+          "sortOrder": 3
+        }
+      ]
+    },
+    {
+      "key": "approval-workflows",
+      "title": "Approval Workflows & Friendly RBAC",
+      "portal": "HR Admin",
+      "summary": "A configurable approval engine plus a friendly RBAC/hierarchy surface: a non-technical admin draws an approval chain per process (manager -> finance, amount-tiered, parallel, SLA) and manages roles and the org tree — supporting both a 3-person and a 100-person tenant.",
+      "howItWorks": "One engine routes every approval; one friendly surface manages who-approves and who-reports-to-whom:\n- Workflow builder: per process (Leave, Reimbursement, Travel, etc.) draw steps answering 'who says yes?' — my manager / N-up / a specific person / a role / auto-approve — in sequence or parallel, with 'only if amount > X' rules and SLA time-limits (remind/escalate/auto-decide). Preview shows the resolved approvers before publishing.\n- RBAC: a Simple mode (five preset role cards) for small tenants, an Advanced mode (granular permission builder + scope band + time-bound grants) for big ones.\n- Org-chart editor: drag a person under a new manager (cycle-guarded); a 'flat / no hierarchy' mode routes everything to a named person or role.\n- The engine never lets you approve your own request (maker != checker); published chain changes do not retro-mutate in-flight approvals.",
+      "notes": "The shared approval engine and RBAC/org surfaces are live; Leave and Expense run through the engine. Some advanced builder polish may still be evolving on staging — keep edge cases light.",
+      "sortOrder": 11,
+      "useCases": [
+        {
+          "key": "reviewconfigure-an-approval-workflow",
+          "title": "Review/configure an approval workflow",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/approvals",
+          "steps": [
+            "Log in as operator@demo.test.",
+            "Open Approvals.",
+            "Pick a process (e.g. Reimbursement), review its chain (e.g. 'Manager -> Finance over an amount'), and use Preview to see the resolved approvers for a sample request."
+          ],
+          "expected": "The process cards show each chain in one line. The builder lets you set steps, 'only if' rules and time-limits; Preview lists the exact resolved approver names; Publish only affects new requests.",
+          "sortOrder": 1
+        },
+        {
+          "key": "edit-the-reporting-tree-in-the-org-chart-editor",
+          "title": "Edit the reporting tree in the org-chart editor",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/approvals/org",
+          "steps": [
+            "Log in as operator@demo.test.",
+            "Open Approvals > Org (the org-chart / hierarchy editor).",
+            "Search a person and review the reporting tree; drag a person under a different manager (or inspect the action)."
+          ],
+          "expected": "The tree renders from the reporting hierarchy; re-parenting updates managerEmployeeId and is cycle-guarded (you cannot make someone their own ancestor). This instantly changes who the engine routes 'my manager' steps to.",
+          "sortOrder": 2
+        },
+        {
+          "key": "manage-roles-presets-granular",
+          "title": "Manage roles (presets + granular)",
+          "kind": "EDGE",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/approvals/roles",
+          "steps": [
+            "Log in as operator@demo.test.",
+            "Open Approvals > Roles.",
+            "Review the five preset role cards (Simple), then toggle to the granular builder and inspect the permission checkboxes + scope picker."
+          ],
+          "expected": "Simple mode shows preset cards with plain-English summaries; Advanced mode exposes the granular permission grid + scope band picker. You cannot remove your own role-management permission or strip the last Owner.",
+          "sortOrder": 3
+        }
+      ]
+    },
+    {
+      "key": "reimbursement",
+      "title": "Reimbursement, Claims & Travel",
+      "portal": "HR Admin",
+      "summary": "Claims and travel with a custom policy engine: employees claim expenses or apply for a trip, every bill is auto-validated against a per-diem/hotel/transport policy, and approvals run through the configured chain within the manager's scope.",
+      "howItWorks": "Claim -> auto-validate -> approve in scope -> settle:\n- HR builds a Travel & Expense policy: per-diem caps by trip duration, a hotel budget matrix (employee level x city tier), and allowed transport modes with fare/eligibility rules; plus per-category limits and an enforcement mode (Flag vs Hard).\n- Employee (ESS) files a standalone reimbursement (claim ID EXP-####) or applies for a trip (travel ID TRV-####) and submits bills against it; each bill gets a live policy verdict (within budget / over -> flagged / not allowed -> hard-blocked).\n- Approvals route through the approval engine (manager -> finance, amount-tiered). A manager sees and approves only their own sub-tree's claims and can never approve their own.\n- Finance settles (payment ref) or pushes the net into payroll.\nPolicy rules are snapshotted at submit, so a later policy edit never changes a settled claim's verdict.",
+      "notes": "Live. Approve/reject is engine-driven and F1-scoped + SoD (the bare 'any operator can action any claim' gap is closed).",
+      "sortOrder": 12,
+      "useCases": [
+        {
+          "key": "employee-submits-a-reimbursement-claim-with-a-live-verdict",
+          "title": "Employee submits a reimbursement claim with a live verdict",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "Employee (Priya)"
+          ],
+          "openUrl": "https://demo-staging.drifthr.com/reimbursements",
+          "steps": [
+            "Log in as priya.nair@demo.test on the Employee portal.",
+            "Open Reimbursements and create a claim.",
+            "Add a bill line (category, amount, date, receipt upload) and watch the live budget badge, then Submit."
+          ],
+          "expected": "Each line shows a live policy verdict (Within budget / Over by X -> will be flagged / Not allowed -> hard cap). The claim gets an EXP-#### id and routes for approval; a hard-cap line blocks submit with a clear message.",
+          "sortOrder": 1
+        },
+        {
+          "key": "manager-approves-a-team-claim-in-scope",
+          "title": "Manager approves a team claim in scope",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "Manager (Aarav)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/expenses",
+          "steps": [
+            "Ensure a report (e.g. Priya) has a submitted claim.",
+            "Log in as aarav.sharma@demo.test on the HR Admin portal and open Expenses.",
+            "Open the approvals inbox, review the policy banner and flagged lines, then Approve (acknowledging any flagged lines)."
+          ],
+          "expected": "Only Aarav's sub-tree's claims appear. The inbox shows the policy banner (within/over) per line; approve is enabled after acknowledging flagged lines. The claim status advances per the chain.",
+          "sortOrder": 2
+        },
+        {
+          "key": "hr-buildsreviews-the-travel-expense-policy",
+          "title": "HR builds/reviews the Travel & Expense policy",
+          "kind": "EDGE",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/settings/travel-policy",
+          "steps": [
+            "Log in as operator@demo.test.",
+            "Open Settings > Travel Policy.",
+            "Review the four tabs: Per-diem, Hotel budget (level x city tier), Transport, City tiers; check the Flag-vs-Hard enforcement switch."
+          ],
+          "expected": "The four policy tables render as editable grids and the enforcement switch (Flag over-budget for the approver vs Hard-reject over the cap) is present. Seeded IN/NZ defaults are visible.",
+          "sortOrder": 3
+        }
+      ]
+    },
+    {
+      "key": "recruitment-ats",
+      "title": "Recruitment / ATS",
+      "portal": "HR Admin",
+      "summary": "An applicant tracking system with configurable, objective scoring: screening questions auto-score on apply, interviewers fill weighted 1-10 scorecards, and an auto-ranked merit list blends application + interview scores. A Hired candidate seeds onboarding.",
+      "howItWorks": "Configurable scoring -> ranked merit list -> hire:\n- HR posts a job, defines screening questions (with knockouts + qualification points), an interview scorecard (N weighted skills, 1-10), and a merit blend (e.g. application 40% / interview 60%).\n- A candidate applies (publicly or HR-entered) -> screening auto-scores; a knockout answer auto-rejects with no score leaked.\n- HR shortlists -> schedules an interview with a panel + scorecard template -> each interviewer (ESS) fills only their own card -> scores aggregate into the interview score.\n- The Merit list auto-ranks candidates by the blended score with a 'Why this rank?' drawer printing the exact formula.\n- Make offer (India 50% wage check enforced) -> on accept the application flips Hired and an onboarding journey is seeded automatically.\nReads are scope-limited; a scorer cannot approve their own candidate's offer (SoD).",
+      "notes": "Live. The recruitment console landing is /recruitment (job detail at /recruitment/jobs/<id>); there is no flat jobs-list route.",
+      "sortOrder": 13,
+      "useCases": [
+        {
+          "key": "browse-the-recruitment-console-and-a-job",
+          "title": "Browse the recruitment console and a job",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/recruitment",
+          "steps": [
+            "Log in as operator@demo.test.",
+            "Open Recruitment.",
+            "Open a job and review its pipeline, screening questions, interview scorecard and merit-weighting tabs."
+          ],
+          "expected": "The recruitment console lists jobs and the pipeline; a job exposes screening config, scorecard template, and the application/interview weighting (must total 100).",
+          "sortOrder": 1
+        },
+        {
+          "key": "review-an-applications-merit-breakdown",
+          "title": "Review an application's merit breakdown",
+          "kind": "EDGE",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/recruitment/applications",
+          "steps": [
+            "Log in as operator@demo.test.",
+            "Open Recruitment and go to Applications (or a job's merit list).",
+            "Open an application and expand the 'Why this rank?' / score breakdown."
+          ],
+          "expected": "The application shows screening score, interview score and the blended merit score, with the exact formula and contributing lines (degree points, knockouts passed, each interviewer's total). Knocked-out and not-yet-interviewed candidates are clearly segregated.",
+          "sortOrder": 2
+        },
+        {
+          "key": "interviewer-scores-only-their-own-assigned-interview",
+          "title": "Interviewer scores only their own assigned interview",
+          "kind": "EDGE",
+          "loginLabels": [
+            "Manager (Aarav)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/recruitment/interviews",
+          "steps": [
+            "Log in as aarav.sharma@demo.test (an employee who may sit on a panel).",
+            "Open an interview where he is a panelist and open the score page.",
+            "Rate each skill 1-10 and submit the scorecard."
+          ],
+          "expected": "The interviewer sees only their own scorecard for interviews they are assigned to; they cannot see other panelists' cards or score an unassigned candidate. Submitting locks the card and contributes to the candidate's interview score.",
+          "sortOrder": 3
+        }
+      ]
+    },
+    {
+      "key": "profile-mss",
+      "title": "Profile, Field Governance & Manager Self-Service",
+      "portal": "Employee (ESS)",
+      "summary": "A rich, sectioned employee profile the employee can edit, with per-field governance (self-edit / HR-approval / read-only), plus Manager Self-Service so a manager runs their team from the employee portal, and an org/reporting tree.",
+      "howItWorks": "Self profile + governance + manager team view, all on the employee portal:\n- The profile is sectioned (Personal, Contact, Address with 'same as', Family, Bank, Education, Professional, Nomination, Photo ID). Each field carries a policy: self-edit commits immediately; HR-approval routes a change request HR must approve (shown as a 'Pending approval' chip); read-only is display only.\n- The server classifies every field, so a client can never smuggle a gated field (name/DOB/bank/PAN/UAN/IRD) through a self-edit endpoint.\n- Manager Self-Service (My Team): a manager sees their reporting sub-tree's roster, today's attendance board, a merged leave + reimbursement approval inbox (self excluded), and a comp-masked directory — without leaving ESS.\n- An org/reporting tree (Photo | Name | Position) is drillable, rooted at the signed-in employee on ESS.",
+      "notes": "Live. Subject is always the session employee (no employeeId in any ESS path); gated edits go through ProfileChangeRequest + HR approval with SoD.",
+      "sortOrder": 14,
+      "useCases": [
+        {
+          "key": "employee-edits-a-self-service-profile-field",
+          "title": "Employee edits a self-service profile field",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "Employee (Priya)"
+          ],
+          "openUrl": "https://demo-staging.drifthr.com/profile",
+          "steps": [
+            "Log in as priya.nair@demo.test on the Employee portal.",
+            "Open Profile and go to Contact (or Address/Emergency/Education).",
+            "Edit a self-service field (e.g. personal phone) and Save."
+          ],
+          "expected": "The field saves immediately with a 'Saved' confirmation (self-edit). Each field shows the correct affordance: green pencil (self-edit), amber lock 'Request change' (HR-approval), or grey (read-only).",
+          "sortOrder": 1
+        },
+        {
+          "key": "editing-a-gated-field-creates-an-hr-approval-request",
+          "title": "Editing a gated field creates an HR approval request",
+          "kind": "EDGE",
+          "loginLabels": [
+            "Employee (Priya)",
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://demo-staging.drifthr.com/profile",
+          "steps": [
+            "As priya.nair@demo.test, open Profile and edit a gated field (e.g. bank account number or date of birth).",
+            "Submit the change request and note the 'Pending HR approval' chip.",
+            "Log in as operator@demo.test on the HR Admin portal and open the profile change-request queue to approve it."
+          ],
+          "expected": "The gated field does not change immediately — a change request is created and shown as Pending. HR approval atomically writes the value (re-validating statutory format); an operator cannot approve a request for their own linked employee (SoD).",
+          "sortOrder": 2
+        },
+        {
+          "key": "manager-runs-their-team-from-ess-manager-self-service",
+          "title": "Manager runs their team from ESS (Manager Self-Service)",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "Manager (Aarav)"
+          ],
+          "openUrl": "https://demo-staging.drifthr.com/team",
+          "steps": [
+            "Log in as aarav.sharma@demo.test on the Employee portal.",
+            "Open My Team.",
+            "Review the team roster, today's attendance board, and the merged leave + reimbursement approval inbox; open the team org tree."
+          ],
+          "expected": "Aarav sees only his reporting sub-tree: roster, attendance, and an approvals inbox (his own requests excluded). The directory masks compensation to ranges. He never leaves ESS for the daily team loop.",
+          "sortOrder": 3
+        },
+        {
+          "key": "non-manager-gets-an-empty-team-not-an-error",
+          "title": "Non-manager gets an empty team, not an error",
+          "kind": "NEGATIVE",
+          "loginLabels": [
+            "Employee (Meera)"
+          ],
+          "openUrl": "https://demo-staging.drifthr.com/team",
+          "steps": [
+            "Log in as meera.iyer@demo.test (an employee with no reports) on the Employee portal.",
+            "Attempt to open My Team."
+          ],
+          "expected": "A SELF-band employee sees an empty team (their sub-tree minus self = nothing) — a graceful empty state, never an error and never another person's data. The My Team nav item is hidden/empty for non-managers.",
+          "sortOrder": 4
+        }
+      ]
+    },
+    {
+      "key": "tax-regime-election",
+      "title": "Income-Tax Regime Election (Old vs New)",
+      "portal": "Employee (ESS)",
+      "summary": "India employees elect their income-tax regime (Old vs New) for the financial year — seeing the live Old-vs-New tax comparison so the choice is informed — while HR sets the employer default, the election window, and a lock that freezes the year. Monthly TDS withholding follows the elected regime, falling back to the employer default for un-elected employees.",
+      "howItWorks": "Regime election sits on top of the regime-aware TDS engine and the IT projection:\n- ESS (employee): on the Tax page a Regime card shows the OLD-vs-NEW projected annual tax (with a “Saves more” hint on the better regime) and the employee elects New or Old for the FY. The choice persists to /api/hr/me/tax/regime and immediately drives their monthly TDS. After HR locks (or the window closes) the card is read-only with the reason + date.\n- Resolver: an employee who has NOT elected is withheld under the EMPLOYER DEFAULT (TaxRegimePolicy.defaultRegime), not a blanket New — getEffectiveRegime resolves elected → default → statutory New, and the payroll run consults it.\n- HR (Tax → Tax regime): set the per-FY default regime, the election window (opens / locks dates), and a global lock; view every employee’s elected vs effective regime + lock status (paginated, searchable); lock a single employee or “lock all for FY” when the window closes.\n- Enforcement: an election is rejected once the employee is locked, the window has closed, hasn’t opened, or the FY is globally locked. Every election appends a StatutoryElectionHistory audit row (old→new, effective from FY start).",
+      "notes": "India-only. Withholding honours the effective regime (elected else employer default). Lock/window enforced server-side; ESS is SELF_ONLY (subject from the session). HR policy/lock writes gate on canManageStatutory; the per-employee view on canViewPayrollReports.",
+      "sortOrder": 15,
+      "useCases": [
+        {
+          "key": "employee-elects-tax-regime-with-comparison",
+          "title": "Employee elects their tax regime seeing the Old-vs-New comparison",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "Employee (Priya)"
+          ],
+          "openUrl": "https://demo-staging.drifthr.com/tax",
+          "steps": [
+            "Log in as priya.nair@demo.test on the Employee portal.",
+            "Open the Tax page and find the Tax regime card at the top.",
+            "Read the projected annual tax shown under New vs Old (the better one is badged “Saves more”).",
+            "Click Old regime (or New) to elect; confirm the “Regime election saved” message."
+          ],
+          "expected": "The elected regime saves and becomes the effective regime; the card shows the projected tax under each regime with a “Saves more” hint, and the investment-declaration fields below enable only under Old. The election drives the employee’s monthly TDS.",
+          "sortOrder": 1
+        },
+        {
+          "key": "hr-sets-default-and-locks-fy",
+          "title": "HR sets the employer default regime, the window, and locks the FY",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/tax/regime",
+          "steps": [
+            "Log in as operator@demo.test on the HR console.",
+            "Open Pay → Tax regime.",
+            "In Employer policy, set the Default regime (e.g. New), optionally set the Election opens/locks dates, and Save policy.",
+            "Review the per-employee table: each row shows Elected, Effective (with source ELECTED/DEFAULT) and Lock status.",
+            "Click “Lock all for FY…” and confirm to freeze every India employee’s election."
+          ],
+          "expected": "The policy saves; un-elected employees show Effective = the default with source DEFAULT. After “Lock all”, every India employee is locked (Lock = LOCKED) and can no longer change their regime from ESS (the ESS card goes read-only).",
+          "sortOrder": 2
+        },
+        {
+          "key": "election-rejected-after-lock",
+          "title": "Election is rejected after the window closes / lock",
+          "kind": "EDGE",
+          "loginLabels": [
+            "Employee (Meera)"
+          ],
+          "openUrl": "https://demo-staging.drifthr.com/tax",
+          "steps": [
+            "Ensure HR has locked the FY (or set an election-lock date in the past) for this employee.",
+            "Log in as meera.iyer@demo.test on the Employee portal.",
+            "Open the Tax page and attempt to change the regime on the Tax regime card."
+          ],
+          "expected": "The regime buttons are disabled and the card shows a read-only locked state with the reason + date; any attempt to elect is rejected by the server (409) and the regime that drove the year’s TDS is preserved.",
+          "sortOrder": 3
+        }
+      ]
+    },
+    {
+      "key": "salary-disbursement",
+      "title": "Salary Disbursement (India)",
+      "portal": "HR Admin",
+      "summary": "Turn a frozen / approved pay run into a bank-uploadable salary-advice file (HDFC, ICICI, Axis, Kotak, SBI or a generic NEFT/RTGS CSV), then reconcile the bank UTRs back onto each employee. India-only; money in integer paise end-to-end.",
+      "howItWorks": "A PayoutBatch is the unit of disbursement: one pay run rendered for one bank rail. It can only be created from a run whose totals are committed (Frozen/Approved/Paid/Filed) — Draft/Computed/In-review runs are refused.\n\n- Create a batch: the service snapshots each PayRunLine net pay + the employee's primary active bank account into PayoutLines. Employees with no/invalid bank account (e.g. a missing IFSC) are FLAGGED and excluded — they never silently drop or crash the batch.\n- Money round-trips: sum(PayoutLine.amountMinor) == PayoutBatch.totalMinor == the run net, all in integer paise (no floats).\n- Generate the advice file: a PURE per-bank formatter (golden-tested, byte-pinned) renders the exact upload layout; this stamps the batch as generated (Queued -> Processing). Upload the file to your corporate net-banking.\n- Reconcile: upload the bank's UTR / status export (CSV). Each line is matched by employee code or account number; status (Credited/Failed/Returned) + UTR update per employee and roll up the batch (Partial / Credited / Failed). Idempotent and re-runnable.\n- An optional payout-gateway path (RazorpayX/Cashfree) is a pluggable seam; with no gateway configured the bank-file + reconcile path is the product. Account numbers appear only inside the file — the on-screen table masks them.",
+      "notes": "Live. The six bank formatters are byte-pinned golden tests (the contract). The orchestrator (create -> file -> reconcile) is proven against the live test DB including tenant isolation (cross-tenant batch 404s), the no-over-pay guard (no 2nd batch once one is Credited), and the bank-detail offender-flagging. India-only — a non-IN run returns 422. create/file/reconcile are gated on canRunPayroll; reads on canViewPayrollReports.",
+      "sortOrder": 16,
+      "useCases": [
+        {
+          "key": "generate-a-bank-salary-advice-file-for-an-approved-run",
+          "title": "Generate a bank salary-advice file for an approved run",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/payroll/disbursement",
+          "steps": [
+            "Log in as operator@demo.test and open Payroll > Salary Disbursement.",
+            "Pick a frozen or approved India pay run from the Pay run dropdown.",
+            "Choose a Bank (e.g. HDFC Bank (Enet)), optionally enter a Debit account and Value date, and click Create batch.",
+            "In the batch list click Open, then click Download advice file."
+          ],
+          "expected": "A batch is created covering every employee with a valid bank account; its total equals the sum of the per-employee net pay. The downloaded file is the bank's salary-upload layout (CSV for HDFC/ICICI/Axis/Kotak/NEFT-RTGS, fixed-width TXT for SBI). After download the batch status shows Processing and a \"generated\" timestamp.",
+          "sortOrder": 1
+        },
+        {
+          "key": "employees-with-missing-bank-details-are-flagged-not-paid-blindly",
+          "title": "Employees with missing bank details are flagged, not paid blindly",
+          "kind": "EDGE",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/payroll/disbursement",
+          "steps": [
+            "Open Payroll > Salary Disbursement and pick an approved run that includes an employee with no/invalid IFSC.",
+            "Choose a bank and click Create batch.",
+            "Read the amber \"skipped\" panel that lists the flagged employees."
+          ],
+          "expected": "The batch is created for the payable employees only; each employee with no primary account or an invalid IFSC is listed in the amber panel with the reason to fix. The batch never includes them and never errors out the whole run. (If NO employee is payable, a clear 422 lists every offender.)",
+          "sortOrder": 2
+        },
+        {
+          "key": "reconcile-bank-utrs-back-onto-the-batch",
+          "title": "Reconcile bank UTRs back onto the batch",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/payroll/disbursement",
+          "steps": [
+            "Open a batch whose file you have generated, scroll to \"Reconcile UTRs\".",
+            "Paste (or upload) a CSV with columns accountNumber,status,utr — e.g. one row CREDITED with a UTR and one row FAILED.",
+            "Click Reconcile."
+          ],
+          "expected": "Each matched line updates: a Credited row shows its UTR, a Failed/Returned row shows the reason, and the batch status rolls up — all Credited -> Credited, a mix -> Partial, all failed -> Failed. Re-running the same file is safe (idempotent). The status pills on each employee row update accordingly.",
+          "sortOrder": 3
+        },
+        {
+          "key": "a-draft-run-cannot-be-disbursed",
+          "title": "A draft / uncomputed run cannot be disbursed",
+          "kind": "EDGE",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/payroll/disbursement",
+          "steps": [
+            "Open Payroll > Salary Disbursement. Note the Pay run dropdown only lists Frozen / Approved / Paid / Filed runs.",
+            "Confirm a brand-new Draft or Computed run does not appear as a choice (its totals are not yet committed by a checker)."
+          ],
+          "expected": "Only runs with committed totals are offered; a Draft/Computed/In-review run is never disbursable. (Server-side, a create attempt against such a run is refused with a clear \"requires a frozen or approved run\" error.)",
+          "sortOrder": 4
+        },
+        {
+          "key": "finance-can-view-batches-and-line-status",
+          "title": "Finance can view disbursement batches and per-employee status",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "Finance (checker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/payroll/disbursement",
+          "steps": [
+            "Log in as finance@demo.test and open Payroll > Salary Disbursement.",
+            "Pick a run and Open a batch to see the per-employee lines, amounts, masked accounts and status pills."
+          ],
+          "expected": "Finance (canViewPayrollReports) can read every batch and its lines tenant-wide; account numbers are masked in the table (full values are only in the downloaded file). The reads are paginated for 100+ employees.",
+          "sortOrder": 5
+        }
+      ]
+    }
+  ]
+}
