@@ -492,6 +492,9 @@ model Business {
   registerExports          RegisterExport[]
   payRunInputItems         PayRunInputItem[]
   varianceThreshold        VarianceThreshold?
+  // India salary disbursement — bank salary-advice batches + their per-employee lines.
+  payoutBatches            PayoutBatch[]
+  payoutLines              PayoutLine[]
   // Leave
   leaveTypes                   LeaveType[]
   leavePolicies                LeavePolicy[]
@@ -6757,6 +6760,7 @@ model Employee {
   statutoryProfile       StatutoryProfile?
   compensations          CompensationRevision[]
   bankAccounts           BankAccount[]
+  payoutLines            PayoutLine[] // India salary disbursement — per-employee credit lines
   emergencyContacts      EmergencyContact[]
   dependants             Dependant[]
   leaveBalances          LeaveBalance[]
@@ -8016,6 +8020,7 @@ model PayRun {
   remittances      StatutoryRemittance[]
   attendanceInputs AttendancePayInput[]
   inputItems       PayRunInputItem[]
+  payoutBatches    PayoutBatch[] // India salary disbursement — bank advice batches built from this run
 
   @@unique([businessId, code])
   @@index([businessId, entityId, payCalendarId, periodStart, type])
@@ -13216,4 +13221,115 @@ model LearningCertificate {
 
   @@index([businessId, employeeId])
   @@index([businessId, courseId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INDIA SALARY DISBURSEMENT (NET-NEW)
+//
+// Converts a computed/approved PayRun into a bank-uploadable salary-advice file
+// (+ an optional payout-gateway path) with status reconciliation. A PayoutBatch
+// is the unit of disbursement for one run on one bank rail; its PayoutLines are
+// the per-employee credit instructions (a FROZEN snapshot of net pay + the
+// employee's primary bank account at create time — immutable so the generated
+// advice file always matches what was sent to the bank).
+//
+// MONEY RULE: amounts are INTEGER MINOR UNITS (paise) — `amountMinor`,
+// `totalMinor`. Never floats. sum(PayoutLine.amountMinor) == PayoutBatch.totalMinor
+// == the run's net pay (round-tripped by the service).
+//
+// Tenant-walled on businessId; indexed for the run/batch/line lookups the
+// disbursement console + reconcile upload perform.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// One salary-advice batch: a PayRun rendered for a specific bank rail.
+model PayoutBatch {
+  id              String             @id @default(uuid())
+  businessId      String
+  business        Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  payRunId        String
+  payRun          PayRun             @relation(fields: [payRunId], references: [id], onDelete: Restrict)
+  // Which bank salary-upload format this batch is rendered for (HDFC/ICICI/…) or
+  // the generic NEFT/RTGS rail. Drives the pure formatter in bankFormats.js.
+  bank            PayoutBank
+  status          PayoutBatchStatus  @default(QUEUED)
+  // Money (paise). totalMinor == Σ line.amountMinor == run net (round-tripped).
+  totalMinor      BigInt             @default(0)
+  count           Int                @default(0)
+  currencyCode    String             @db.Char(3)
+  // Company debit account the bank pulls the aggregate credit from (optional —
+  // some banks key it off the channel login). Free-text account number.
+  debitAccount    String?
+  // Requested value date (credit date) for the bank file (YYYY-MM-DD).
+  valueDate       DateTime?          @db.Date
+  // Optional gateway rail (RazorpayX/Cashfree) — null = bank-file path only.
+  gatewayProvider String?
+  gatewayBatchId  String?
+  createdBy       String
+  fileGeneratedAt DateTime?          // stamped when the advice file is first generated
+  reconciledAt    DateTime?          // stamped when reconciliation rolls the batch to a terminal state
+  notes           String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  version         Int                @default(0)
+
+  lines PayoutLine[]
+
+  @@index([businessId, payRunId])
+  @@index([businessId, status])
+}
+
+/// One per-employee credit instruction inside a PayoutBatch. Bank details are a
+/// SNAPSHOT taken at create time (the source BankAccount can change later).
+model PayoutLine {
+  id              String           @id @default(uuid())
+  businessId      String
+  business        Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  batchId         String
+  batch           PayoutBatch      @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  employeeId      String
+  employee        Employee         @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  amountMinor     BigInt           // net pay to credit (paise) — snapshot of PayRunLine.netPay
+  beneficiaryName String           // snapshot of the bank account holder name
+  accountNumber   String           // snapshot of BankAccount.accountNumber
+  ifsc            String           @db.Char(11) // snapshot of BankAccount.ifsc (IN)
+  narration       String?          // statement narration (e.g. "SAL JUN2026")
+  status          PayoutLineStatus @default(PENDING)
+  utr             String?          // bank Unique Transaction Reference once credited
+  failureReason   String?          // populated on FAILED/RETURNED
+  reconciledAt    DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  version         Int              @default(0)
+
+  @@index([businessId, batchId, status])
+  @@index([businessId, employeeId])
+}
+
+/// Supported bank salary-upload rails (India). Each maps to a pure formatter in
+/// backend/src/hr/payroll/disbursement/bankFormats.js.
+enum PayoutBank {
+  HDFC // HDFC Enet bulk salary upload
+  ICICI // ICICI Corporate Internet Banking (CIB)
+  AXIS // Axis Corporate / Power Access
+  KOTAK // Kotak (FYI/Net) bulk upload
+  SBI // SBI Corporate (CINB) salary package
+  NEFT_RTGS // generic NEFT/RTGS CSV (any bank)
+}
+
+/// Batch-level rollup. QUEUED → PROCESSING once the file is generated / sent;
+/// PARTIAL/CREDITED/FAILED resolved by reconciliation.
+enum PayoutBatchStatus {
+  QUEUED
+  PROCESSING
+  PARTIAL
+  CREDITED
+  FAILED
+}
+
+/// Per-line lifecycle. PENDING → CREDITED (UTR) | FAILED | RETURNED (bounce).
+enum PayoutLineStatus {
+  PENDING
+  CREDITED
+  FAILED
+  RETURNED
 }
