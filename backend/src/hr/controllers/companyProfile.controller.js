@@ -44,6 +44,11 @@ const EXPIRING_SOON_DAYS = 60;
 // ── Company profile (India-first registration fields, JSON) ──────────────────
 // Allow-list of profile keys — never persist arbitrary client JSON.
 const PROFILE_FIELDS = [
+  // `businessType` selects the legal structure (sole_proprietorship, llp,
+  // private_limited, …); `registrationNo` is the polymorphic primary id whose
+  // meaning depends on it (CIN / LLPIN / firm-reg / trust-reg). `proprietorName`
+  // only applies to a sole proprietorship. See apps/*/lib/businessTypes.js.
+  'businessType', 'proprietorName',
   'legalName', 'tradeName', 'registrationNo', 'gstin', 'pan', 'tan',
   'registeredAddressLine1', 'registeredAddressLine2', 'registeredCity',
   'registeredState', 'registeredPostalCode', 'registeredCountry',

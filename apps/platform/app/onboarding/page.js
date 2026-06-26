@@ -28,6 +28,7 @@ import LanguageSelector from '@/components/LanguageSelector';
 
 import { STYLES, STYLE_KEYS, DEFAULT_STYLE_KEY } from '@/lib/themeStyles';
 import { isUnifiedAdminHost } from '@/lib/platformDomain';
+import { BUSINESS_TYPES, specForBusinessType } from '@/lib/businessTypes';
 
 // Brand colors (12 curated) — resolved once from the theme engine so the
 // onboarding swatches match what the admin Branding panel shows.
@@ -120,6 +121,7 @@ const DEFAULT_STATE = {
   slug: '',
   slugTouched: false,
   // Step 2
+  businessType: '',
   entityCode: '',
   legalName: '',
   tradeName: '',
@@ -364,6 +366,8 @@ export default function OnboardingPage() {
   const entityReady = (() => {
     if (!s.legalName.trim() || !s.entityCode.trim()) return false;
     if (s.country === 'IN') {
+      // Business type is asked first — it decides which registration fields apply.
+      if (!s.businessType) return false;
       // PAN is the minimum statutory ID for an Indian employer; TAN/GSTIN are
       // format-validated only when present (TAN is needed before TDS filing).
       if (!s.pan.trim() || !PAN_RE.test(s.pan.trim().toUpperCase())) return false;
@@ -447,6 +451,25 @@ export default function OnboardingPage() {
       } catch (entErr) {
         entityResult = { ok: false, message: entErr.response?.data?.message || 'Entity will need finishing in HR · Org.' };
       }
+
+      // 2b) Persist business type + registration onto the company profile so
+      //     Settings → Company profile is pre-filled with the right structure.
+      //     Best-effort — never block onboarding on it.
+      try {
+        const profileBody = {};
+        if (s.businessType) profileBody.businessType = s.businessType;
+        if (s.legalName.trim()) profileBody.legalName = s.legalName.trim();
+        if (s.tradeName.trim()) profileBody.tradeName = s.tradeName.trim();
+        if (s.country === 'IN') {
+          if (s.cin.trim()) profileBody.registrationNo = s.cin.trim().toUpperCase();
+          if (s.pan.trim()) profileBody.pan = s.pan.trim().toUpperCase();
+          if (s.tan.trim()) profileBody.tan = s.tan.trim().toUpperCase();
+          if (s.gstin.trim()) profileBody.gstin = s.gstin.trim().toUpperCase();
+        }
+        if (Object.keys(profileBody).length) {
+          await axios.patch('/api/hr/company-profile', profileBody, { withCredentials: true });
+        }
+      } catch { /* profile pre-fill is best-effort */ }
 
       // 3) Optional first employees. Each is independent + non-blocking.
       let employeesCreated = 0;
@@ -749,6 +772,7 @@ function StepCompany({ s, patch, suffix, derivedSlug, effectiveSlug, slugCheckin
 // --------------------------------------------------------------------------
 function StepEntity({ s, patch, country }) {
   const isIN = s.country === 'IN';
+  const spec = isIN ? specForBusinessType(s.businessType) : null;
   const fieldErr = (cond) => (cond ? 'border-red-300 focus:border-red-500 focus:ring-red-100' : '');
   return (
     <div className="space-y-6">
@@ -756,11 +780,22 @@ function StepEntity({ s, patch, country }) {
         <span className="font-semibold">{country.flag} {country.name}</span> — we collect your <span className="font-semibold">{country.statutory}</span> so payroll, TDS/PAYE and statutory filings are correct from day one.
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
+        {isIN && (
+          <div className="sm:col-span-2">
+            <label className={LABEL_CLASS}>Business type <span className="text-red-500">*</span></label>
+            <select className={INPUT_CLASS} value={s.businessType}
+              onChange={(e) => patch({ businessType: e.target.value })}>
+              <option value="">Select your business type…</option>
+              {BUSINESS_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+            <p className="mt-1 text-xs text-gray-400">This decides which registration numbers apply — e.g. a proprietorship has no CIN, an LLP has an LLPIN.</p>
+          </div>
+        )}
         <div className="sm:col-span-2">
           <label className={LABEL_CLASS}>Registered legal name</label>
           <input className={INPUT_CLASS} value={s.legalName} maxLength={160}
             onChange={(e) => patch({ legalName: e.target.value })}
-            placeholder={isIN ? 'Acme Technologies Pvt Ltd' : 'Acme Technologies Limited'} />
+            placeholder={isIN ? spec.legalNamePlaceholder : 'Acme Technologies Limited'} />
         </div>
         <div>
           <label className={LABEL_CLASS}>Entity code</label>
@@ -778,10 +813,10 @@ function StepEntity({ s, patch, country }) {
         {isIN ? (
           <>
             <div>
-              <label className={LABEL_CLASS}>PAN <span className="text-red-500">*</span></label>
+              <label className={LABEL_CLASS}>{spec.panLabel} <span className="text-red-500">*</span></label>
               <input className={`${INPUT_CLASS} ${fieldErr(s.pan.trim() && !PAN_RE.test(s.pan.trim().toUpperCase()))}`}
                 value={s.pan} maxLength={10}
-                onChange={(e) => patch({ pan: e.target.value.toUpperCase() })} placeholder="ABCDE1234F" />
+                onChange={(e) => patch({ pan: e.target.value.toUpperCase() })} placeholder={spec.panPlaceholder} />
               <p className="mt-1 text-xs text-gray-400">10-character Permanent Account Number.</p>
             </div>
             <div>
@@ -797,11 +832,14 @@ function StepEntity({ s, patch, country }) {
                 value={s.gstin} maxLength={15}
                 onChange={(e) => patch({ gstin: e.target.value.toUpperCase() })} placeholder="29ABCDE1234F1Z5" />
             </div>
-            <div>
-              <label className={LABEL_CLASS}>CIN <span className="text-gray-400 font-normal">(optional)</span></label>
-              <input className={INPUT_CLASS} value={s.cin} maxLength={21}
-                onChange={(e) => patch({ cin: e.target.value.toUpperCase() })} placeholder="U72900KA2020PTC123456" />
-            </div>
+            {spec.primaryId.show && (
+              <div>
+                <label className={LABEL_CLASS}>{spec.primaryId.label} <span className="text-gray-400 font-normal">(optional)</span></label>
+                <input className={INPUT_CLASS} value={s.cin} maxLength={21}
+                  onChange={(e) => patch({ cin: e.target.value.toUpperCase() })} placeholder={spec.primaryId.placeholder} />
+                <p className="mt-1 text-xs text-gray-400">{spec.primaryId.hint}</p>
+              </div>
+            )}
           </>
         ) : (
           <>

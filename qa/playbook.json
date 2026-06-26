@@ -1247,6 +1247,62 @@
           "sortOrder": 2
         }
       ]
+    },
+    {
+      "key": "business-type-setup",
+      "title": "Business-Type-Aware Company Setup",
+      "portal": "HR Admin",
+      "summary": "Anyone — proprietor, partnership, LLP, company, trust — can set up DriftHR. The company profile and onboarding ask the business type first, then show ONLY the registration fields that apply to that structure.",
+      "howItWorks": "A single business-type picker (Sole Proprietorship, Partnership Firm, LLP, Private Limited, OPC, Public Limited, Section 8, HUF, Trust, Society, Cooperative) drives the legal-registration block. The primary registration id is polymorphic: CIN for companies, LLPIN for an LLP, a Registrar-of-Firms number for a partnership, a state registration number for a trust/society — and it is hidden entirely for a proprietorship/HUF (which use the proprietor's/HUF PAN). PAN, TAN and GSTIN are universal with type-aware labels. Onboarding asks the type first and persists it onto the company profile.",
+      "notes": "No DB migration — businessType is stored in the existing companyProfile JSON; registrationNo holds whichever primary id the type implies. Field rules were web-researched and adversarially fact-checked.",
+      "sortOrder": 19,
+      "useCases": [
+        {
+          "key": "proprietor-hides-cin",
+          "title": "A sole proprietorship is not asked for a CIN",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/settings/company-profile",
+          "steps": [
+            "Open Settings → Company profile (Profile tab).",
+            "In Legal & registration, set Business type = Sole Proprietorship.",
+            "Observe the fields that appear."
+          ],
+          "expected": "The CIN field disappears. The form shows Business/trade name, Proprietor's name, and \"Proprietor's PAN (used as business PAN)\" with example ABCPK1234E, plus universal GSTIN/TAN. No CIN/LLPIN is requested. Save persists the businessType.",
+          "sortOrder": 1
+        },
+        {
+          "key": "llp-shows-llpin",
+          "title": "An LLP shows LLPIN (not CIN)",
+          "kind": "EDGE",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/settings/company-profile",
+          "steps": [
+            "In Company profile, set Business type = Limited Liability Partnership (LLP).",
+            "Check the primary registration field label and PAN label."
+          ],
+          "expected": "The primary id field is labelled LLPIN (placeholder AAB-1234), and PAN is labelled \"LLP PAN\" (4th char F). CIN is not shown.",
+          "sortOrder": 2
+        },
+        {
+          "key": "onboarding-asks-type-first",
+          "title": "Onboarding asks business type first and adapts",
+          "kind": "HAPPY",
+          "loginLabels": [],
+          "openUrl": "https://staging.drifthr.com/onboarding",
+          "steps": [
+            "Start the company setup wizard and reach the Legal entity step.",
+            "Note that Business type is the first field and is required.",
+            "Pick Private Limited, then Sole Proprietorship, and watch the registration field change."
+          ],
+          "expected": "Business type is the first, required field. Choosing a company shows a CIN field; choosing a proprietorship hides it and relabels PAN as the proprietor's PAN. You cannot continue until a business type is chosen. The chosen type is saved onto the company profile.",
+          "sortOrder": 3
+        }
+      ]
     }
   ]
 }

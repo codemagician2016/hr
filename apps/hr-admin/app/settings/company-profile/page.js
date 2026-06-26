@@ -21,6 +21,7 @@ import { permissionsFromSession, hasPermission } from '@/lib/nav';
 // Feature 14 — the locked, single-country setup/badge for this tenant.
 import CountrySetupCard from '@/components/CountrySetupCard';
 import ModuleGuide from '@/components/ModuleGuide';
+import { BUSINESS_TYPES, specForBusinessType } from '@/lib/businessTypes';
 
 // India-first document categories (mirrors the backend BusinessDocumentCategory enum).
 const DOC_CATEGORIES = [
@@ -121,20 +122,56 @@ function ProfileTab({ canEdit }) {
         </p>
       )}
 
-      <section className="space-y-4">
-        <SectionTitle tip="Your company's legal identity. Everything here is optional — fill in what you have.">
-          Legal &amp; registration
-        </SectionTitle>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <ProfileField label="Legal name" tip="The registered legal name of the company (as on your incorporation certificate)." value={profile?.legalName} onChange={(v) => set('legalName', v)} disabled={ro} placeholder="Acme Technologies Private Limited" />
-          <ProfileField label="Trade name" tip="The brand / trading name you operate under, if different from the legal name." value={profile?.tradeName} onChange={(v) => set('tradeName', v)} disabled={ro} placeholder="Acme" />
-          <ProfileField label="Registration no. (CIN)" tip="Corporate Identity Number issued by the MCA on incorporation (21 characters, e.g. U72900KA2020PTC123456)." value={profile?.registrationNo} onChange={(v) => set('registrationNo', v)} disabled={ro} placeholder="U72900KA2020PTC123456" />
-          <ProfileField label="GSTIN" tip="Your 15-character Goods & Services Tax Identification Number." value={profile?.gstin} onChange={(v) => set('gstin', v)} disabled={ro} placeholder="29ABCDE1234F1Z5" />
-          <ProfileField label="PAN" tip="The company's 10-character Permanent Account Number." value={profile?.pan} onChange={(v) => set('pan', v)} disabled={ro} placeholder="ABCDE1234F" />
-          <ProfileField label="TAN" tip="Tax Deduction & Collection Account Number — needed when you deduct TDS." value={profile?.tan} onChange={(v) => set('tan', v)} disabled={ro} placeholder="BLRA12345C" />
-          <ProfileField label="Date of incorporation" tip="When the company was registered." type="date" value={profile?.incorporationDate} onChange={(v) => set('incorporationDate', v)} disabled={ro} />
-        </div>
-      </section>
+      {(() => {
+        // Pick the business type first; the rest of this section adapts to it
+        // (a proprietorship has no CIN, an LLP shows an LLPIN, etc.).
+        const spec = specForBusinessType(profile?.businessType);
+        return (
+          <section className="space-y-4">
+            <SectionTitle tip="Your organisation's legal identity. Pick your business type first — the right registration fields then appear. Everything is optional; fill in what you have.">
+              Legal &amp; registration
+            </SectionTitle>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="sm:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  <span className="inline-flex items-center">Business type<InfoTip text="The legal structure of your organisation. This decides which registration numbers apply — e.g. a sole proprietorship has no CIN, an LLP has an LLPIN, a partnership firm has a Registrar-of-Firms number." /></span>
+                </label>
+                <select
+                  value={profile?.businessType || ''}
+                  onChange={(e) => set('businessType', e.target.value)}
+                  disabled={ro}
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none text-sm bg-white disabled:bg-gray-50 disabled:text-gray-500"
+                >
+                  <option value="">Select your business type…</option>
+                  {BUSINESS_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+              </div>
+
+              <ProfileField label={spec.legalNameLabel} tip="The registered legal name as it appears on your incorporation / registration certificate." value={profile?.legalName} onChange={(v) => set('legalName', v)} disabled={ro} placeholder={spec.legalNamePlaceholder} />
+              <ProfileField label="Trade name" tip="The brand / trading name you operate under, if different from the legal name." value={profile?.tradeName} onChange={(v) => set('tradeName', v)} disabled={ro} placeholder="Acme" />
+
+              {spec.proprietor && (
+                <ProfileField label="Proprietor's name" tip="The individual who owns the sole proprietorship." value={profile?.proprietorName} onChange={(v) => set('proprietorName', v)} disabled={ro} placeholder="Anil Sharma" />
+              )}
+
+              {spec.primaryId.show && (
+                <ProfileField label={spec.primaryId.label} tip={spec.primaryId.hint} value={profile?.registrationNo} onChange={(v) => set('registrationNo', v)} disabled={ro} placeholder={spec.primaryId.placeholder} />
+              )}
+
+              <ProfileField label={spec.pan.label} tip={spec.pan.hint} value={profile?.pan} onChange={(v) => set('pan', v)} disabled={ro} placeholder={spec.pan.placeholder} />
+              <ProfileField label="GSTIN" tip="15-character Goods & Services Tax Identification Number, if you're registered for GST." value={profile?.gstin} onChange={(v) => set('gstin', v)} disabled={ro} placeholder="27AABCU9603R1ZM" />
+              <ProfileField label="TAN" tip="Tax Deduction & Collection Account Number — required to deduct TDS and run payroll." value={profile?.tan} onChange={(v) => set('tan', v)} disabled={ro} placeholder="MUMC12345D" />
+
+              {spec.incorporation.show && (
+                <ProfileField label={spec.incorporation.label} tip="When the organisation was registered / formed." type="date" value={profile?.incorporationDate} onChange={(v) => set('incorporationDate', v)} disabled={ro} />
+              )}
+            </div>
+            {!profile?.businessType && (
+              <p className="text-xs text-gray-400">Tip: choose your business type above to see the exact registration fields for your structure.</p>
+            )}
+          </section>
+        );
+      })()}
 
       <section className="space-y-4">
         <SectionTitle tip="The company's official registered address — used on letters and statutory documents.">
