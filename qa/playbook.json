@@ -1164,6 +1164,46 @@
           "sortOrder": 5
         }
       ]
+    },
+    {
+      "key": "signup-verification",
+      "title": "Public Signup, Email Verification & Disposable-Email Guard",
+      "portal": "Public Signup",
+      "summary": "The front door: a prospect creates a DriftHR account, proves they own the email via a 6-digit OTP, and throwaway/disposable inboxes are refused. No usable account exists until the email is verified.",
+      "howItWorks": "Signup is atomic and verification-gated:\n\n- The /api/auth/register endpoint validates the email with a Zod schema that rejects ~121k known disposable domains (yopmail.com, mailinator.com, 10minutemail.com, …) BEFORE anything is persisted.\n- The 6-digit OTP email is sent via SES FIRST; only if the provider accepts the address is the user row written. A mail-provider rejection returns an error and creates no orphan account.\n- register issues NO session cookie — the account is unusable until the OTP is verified at /api/auth/verify-otp, which then issues the session.\n- Sender identity is no-reply@mail.drifthr.com (a DKIM-verified SES identity). In production the code reaches the real inbox; on staging all mail is rerouted to the QA override inbox.",
+      "notes": "Disposable-email blocking is a static list lookup (no MX/DNS call), so it is deterministic and offline-safe. A genuine config gap (missing sender identity) now surfaces as a transient 'temporary problem' error rather than wrongly blaming the recipient's inbox.",
+      "sortOrder": 17,
+      "useCases": [
+        {
+          "key": "real-email-signup-sends-otp",
+          "title": "Signup with a real email creates the account and sends a verification code",
+          "kind": "HAPPY",
+          "loginLabels": [],
+          "openUrl": "https://staging.drifthr.com/signup",
+          "steps": [
+            "Open the signup page.",
+            "Enter a full name, a REAL (non-disposable) email address you can access, and a password meeting the rule (8+ chars, one uppercase, one lowercase, one number).",
+            "Tick the Terms of Service / Privacy Policy checkbox.",
+            "Click \"Create account\"."
+          ],
+          "expected": "The form is accepted and advances to the 6-digit code-entry screen with the message 'Account created. Check your email for the 6-digit verification code.' A verification email from no-reply@mail.drifthr.com arrives (on staging it lands in the QA override inbox). Entering the correct code verifies the account and signs you in; no session exists before verification.",
+          "sortOrder": 1
+        },
+        {
+          "key": "disposable-email-is-refused",
+          "title": "A disposable/temporary email is refused at signup",
+          "kind": "EDGE",
+          "loginLabels": [],
+          "openUrl": "https://staging.drifthr.com/signup",
+          "steps": [
+            "Open the signup page.",
+            "Enter a name and a disposable address such as test@yopmail.com (or anyone@mailinator.com), a valid password, and accept the terms.",
+            "Click \"Create account\"."
+          ],
+          "expected": "Signup is blocked with an email error: 'Please use a permanent email address — temporary / disposable email providers are not allowed.' No account is created and no verification email is sent.",
+          "sortOrder": 2
+        }
+      ]
     }
   ]
 }

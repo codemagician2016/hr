@@ -112,6 +112,12 @@ async function register(req, res) {
       locale: resolveRecipientLocale({ business, cookieLocale: req.cookies?.NEXT_LOCALE }),
     });
   } catch (err) {
+    if (err?.code === 'EMAIL_CONFIG') {
+      console.error('[customer/register] OTP email config error (SES_FROM_EMAIL?):', err.message);
+      return res.status(500).json({
+        message: 'We’re having a temporary problem sending verification emails. Please try again in a few minutes.',
+      });
+    }
     console.error('[customer/register] OTP email failed:', err.message);
     return res.status(502).json({
       message: "We couldn't deliver a verification code to that address. Check the spelling and try again, or use a different email.",

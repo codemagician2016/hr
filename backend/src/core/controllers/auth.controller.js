@@ -66,6 +66,15 @@ async function register(req, res) {
       metadata: { otpLength: otp.length, flow: 'register' },
     });
   } catch (err) {
+    // A missing/misconfigured sender identity is OUR fault, not the visitor's.
+    // Don't tell them to "use a different email" — surface a transient-error
+    // message and let it page us via the error log instead.
+    if (err?.code === 'EMAIL_CONFIG') {
+      console.error('Signup OTP email config error (SES_FROM_EMAIL?):', err.message);
+      return res.status(500).json({
+        message: 'We’re having a temporary problem sending verification emails. Please try again in a few minutes.',
+      });
+    }
     console.error('Signup OTP email failed:', err.message);
     return res.status(502).json({
       message: "We couldn't deliver a verification code to that address. Check the spelling and try again, or use a different email.",

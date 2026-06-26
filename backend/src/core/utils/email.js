@@ -166,6 +166,17 @@ async function sendEmail(to, subject, htmlBody, options = {}) {
     };
   }
 
+  // Fail loudly and UNAMBIGUOUSLY if the sender identity is unconfigured. SES
+  // is about to be handed `Source: undefined`, which it rejects with a generic
+  // error — and callers like signup then surface that to the user as "use a
+  // real inbox", wrongly blaming the recipient for our own missing config.
+  // The tagged code lets callers branch on a config fault vs a true reject.
+  if (!process.env.SES_FROM_EMAIL) {
+    const err = new Error('SES_FROM_EMAIL is not set; refusing to send via SES');
+    err.code = 'EMAIL_CONFIG';
+    throw err;
+  }
+
   if (attachments.length > 0) {
     const rawCommand = new SendRawEmailCommand({
       RawMessage: {
