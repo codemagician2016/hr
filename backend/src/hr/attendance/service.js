@@ -265,9 +265,14 @@ async function recompute(businessId, employeeId, fromDate, toDate, tx) {
 
   const empRow = await db.employee.findFirst({
     where: { id: employeeId, businessId, deletedAt: null },
-    select: { id: true },
+    // hireDate (joining) + terminationDate (exit) bound the employment window:
+    // attendance only exists between them. A new joiner has no days before
+    // hireDate; an exited employee none after terminationDate.
+    select: { id: true, hireDate: true, terminationDate: true },
   });
   if (!empRow) return { employeeId, days: 0, written: 0, skippedLocked: 0, notFound: true };
+  const hireDay = empRow.hireDate ? utcDay(empRow.hireDate) : null;
+  const exitDay = empRow.terminationDate ? utcDay(empRow.terminationDate) : null;
 
   // Employee entity/location live on the CURRENT EmploymentRecord (there is no
   // entityId/locationId column on Employee). Resolve them so holiday-scope
@@ -392,9 +397,23 @@ async function recompute(businessId, employeeId, fromDate, toDate, tx) {
   let skippedLocked = 0;
   const days = eachDay(from, to);
 
+  let skippedOutOfEmployment = 0;
   for (const day of days) {
     const key = dayKey(day);
     if (lockedKeys.has(key)) { skippedLocked += 1; continue; }
+
+    // Outside the employment window → not the employee's day. A new joiner has
+    // NO attendance before hireDate; an exited employee none after exit. Skip the
+    // day AND clear any stale row a prior recompute wrote, so it never shows as
+    // ABSENT. Migrated history is unaffected — it lives on/after the real hireDate.
+    if ((hireDay && day.getTime() < hireDay.getTime()) ||
+        (exitDay && day.getTime() > exitDay.getTime())) {
+      if (!lockedKeys.has(key)) {
+        await db.attendance.deleteMany({ where: { businessId, employeeId, date: utcDay(day), isLocked: false } });
+      }
+      skippedOutOfEmployment += 1;
+      continue;
+    }
 
     // Feature 29 — a PUBLISHED roster cell for THIS day wins (precedence over the
     // covering ShiftAssignment). resolveSchedule returns the { __off:true } sentinel
@@ -525,7 +544,7 @@ async function recompute(businessId, employeeId, fromDate, toDate, tx) {
     written += 1;
   }
 
-  return { employeeId, days: days.length, written, skippedLocked };
+  return { employeeId, days: days.length, written, skippedLocked, skippedOutOfEmployment };
 }
 
 module.exports = {

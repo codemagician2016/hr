@@ -125,6 +125,8 @@ const STATUS_META = {
   ABSENT: { label: 'ABSENT', fg: '#B91C1C', bg: '#FEF2F2', bd: '#FECACA' },
   WEEKLY_OFF: { label: 'WEEKOFF', fg: '#475569', bg: '#F8FAFC', bd: '#E2E8F0' },
   HOLIDAY: { label: 'HOLIDAY', fg: '#1D4ED8', bg: '#EFF6FF', bd: '#BFDBFE' },
+  // Before the employee's joining date — not their day. Muted, no action.
+  NA: { label: 'NA', fg: '#94A3B8', bg: '#F8FAFC', bd: '#E2E8F0' },
 };
 function statusMeta(status) {
   return STATUS_META[String(status || '').toUpperCase()] || { label: status || '—', fg: '#475569', bg: '#F8FAFC', bd: '#E2E8F0' };
@@ -454,6 +456,17 @@ function AttendanceDetailsSection({ canAct }) {
     return { year: d.getFullYear(), month: d.getMonth() }; // month 0-11
   });
 
+  // The employee's date of joining — days before it are not their days, so we
+  // show them blank instead of ABSENT (a new joiner has no attendance history).
+  // Defensive across the profile shape; null → no guard (safe degradation).
+  const { profile } = useProfile();
+  const joiningRaw = profile?.employment?.dateOfJoining?.value
+    || profile?.professional?.dateOfJoining?.value
+    || profile?.dateOfJoining?.value
+    || profile?.dateOfJoining
+    || null;
+  const hireKey = joiningRaw ? String(joiningRaw).slice(0, 10) : null; // YYYY-MM-DD
+
   const range = useMemo(() => {
     const first = new Date(cursor.year, cursor.month, 1, 0, 0, 0, 0);
     const last = new Date(cursor.year, cursor.month + 1, 0, 23, 59, 59, 999);
@@ -539,11 +552,14 @@ function AttendanceDetailsSection({ canAct }) {
       const holiday = holidayByDay[key] || null;
       const isWeeklyOff = weeklyOff.has(WEEKDAY_ISO[dateObj.getDay()]);
 
-      // Status precedence: rollup (authoritative) → holiday → weekly-off → (past
-      // working day with no record = ABSENT) → blank for future days.
+      // Before the joining date the employee didn't exist here → show NA, never ABSENT.
+      const isPreJoin = hireKey && key < hireKey;
+      // Status precedence: rollup (authoritative) → pre-join NA → holiday →
+      // weekly-off → (past working day with no record = ABSENT) → blank for future.
       let status = rollup?.status || null;
       if (!status) {
-        if (holiday) status = 'HOLIDAY';
+        if (isPreJoin) status = 'NA';
+        else if (holiday) status = 'HOLIDAY';
         else if (isWeeklyOff) status = 'WEEKLY_OFF';
         else if (!isFuture) status = pairs.length ? 'PRESENT' : 'ABSENT';
       }
@@ -577,7 +593,7 @@ function AttendanceDetailsSection({ canAct }) {
       });
     }
     return out;
-  }, [cursor, rollupByDay, punchesByDay, holidayByDay, weeklyOff, shiftDefaultLabel, todayKey]);
+  }, [cursor, rollupByDay, punchesByDay, holidayByDay, weeklyOff, shiftDefaultLabel, todayKey, hireKey]);
 
   const hasAnyData = rows.some((r) => r.pairs.length || (r.status && r.status !== 'WEEKLY_OFF' && r.status !== 'HOLIDAY'));
 
@@ -612,7 +628,7 @@ function AttendanceDetailsSection({ canAct }) {
   // Reg request: any past/today non-locked, non-weekoff/holiday/leave working day.
   function showRegBtn(r) {
     if (r.isFuture || r.locked || !canAct) return false;
-    return !['WEEKLY_OFF', 'HOLIDAY', 'ON_LEAVE'].includes(r.statusKey);
+    return !['WEEKLY_OFF', 'HOLIDAY', 'ON_LEAVE', 'NA'].includes(r.statusKey);
   }
 
   return (

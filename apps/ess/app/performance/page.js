@@ -20,6 +20,8 @@ function GrowthInner() {
   const [tab, setTab] = useState('hub');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [selfRating, setSelfRating] = useState(0);
+  const [selfComments, setSelfComments] = useState('');
 
   const { data: overview, loading: ovLoading } = useApi('/api/hr/ess/performance/overview');
   const { data: goals, loading: goalsLoading } = useApi('/api/hr/ess/performance/goals', {
@@ -34,9 +36,15 @@ function GrowthInner() {
   const { data: dev, loading: devLoading } = useApi('/api/hr/ess/performance/development', { enabled: tab === 'development' });
 
   async function submitSelf() {
+    if (!selfRating) { setError('Please choose your self-rating before submitting.'); return; }
     setBusy(true); setError('');
-    try { await apiPost('/api/hr/ess/performance/review/self', { selfRating: 4 }); reloadReview(); }
-    catch (e) { setError(e.message || 'Failed to submit self-review.'); }
+    try {
+      await apiPost('/api/hr/ess/performance/review/self', {
+        selfRating,
+        selfComments: selfComments.trim() || undefined,
+      });
+      reloadReview();
+    } catch (e) { setError(e.message || 'Failed to submit self-review.'); }
     finally { setBusy(false); }
   }
   async function acknowledge() {
@@ -108,14 +116,41 @@ function GrowthInner() {
             ) : (
               <p className="text-xs" style={{ color: 'var(--theme-muted)' }}>Your final rating is not yet released.</p>
             )}
-            <div className="flex gap-2 pt-2">
-              {review.status === 'NOT_STARTED' ? (
-                <button disabled={busy} onClick={submitSelf}
+            {review.status === 'NOT_STARTED' ? (
+              <div className="space-y-3 pt-3 border-t" style={{ borderColor: 'var(--theme-border)' }}>
+                <div>
+                  <p className="text-sm font-medium mb-1.5" style={{ color: 'var(--theme-text)' }}>Your self-rating</p>
+                  <div className="flex gap-2">
+                    {[1, 2, 3, 4, 5].map((n) => {
+                      const on = selfRating === n;
+                      return (
+                        <button key={n} type="button" onClick={() => setSelfRating(n)}
+                          className="h-9 w-9 rounded-lg text-sm font-semibold transition"
+                          style={on
+                            ? { background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }
+                            : { background: 'var(--theme-primary-soft)', color: 'var(--theme-text)' }}>
+                          {n}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs mt-1" style={{ color: 'var(--theme-muted)' }}>1 = Needs improvement · 5 = Outstanding</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium mb-1.5" style={{ color: 'var(--theme-text)' }}>Your comments <span style={{ color: 'var(--theme-muted)' }}>(optional)</span></p>
+                  <textarea value={selfComments} onChange={(e) => setSelfComments(e.target.value)} rows={3}
+                    placeholder="What went well, what you're proud of, where you want to grow…"
+                    className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
+                    style={{ borderColor: 'var(--theme-border)' }} />
+                </div>
+                <button disabled={busy || !selfRating} onClick={submitSelf}
                   className="rounded-lg px-3.5 py-2 text-sm font-semibold transition disabled:opacity-60"
                   style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}>
-                  Submit self-review
+                  {busy ? 'Submitting…' : 'Submit self-review'}
                 </button>
-              ) : null}
+              </div>
+            ) : null}
+            <div className="flex gap-2 pt-2">
               {review.status === 'CALIBRATED' && review.releasedAt ? (
                 <button disabled={busy} onClick={acknowledge}
                   className="rounded-lg px-3.5 py-2 text-sm font-semibold transition disabled:opacity-60"
