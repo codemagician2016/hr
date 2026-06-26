@@ -14,6 +14,7 @@ import { get, post, patch, del } from '@/lib/api';
 import { DataTable, PageHeader, StatusBadge, ActionButton, ServerPagination } from '@/lib/ui';
 import { InfoTip, LabelWithTip } from '../letters/lib';
 import ModuleGuide from '@/components/ModuleGuide';
+import EmployeeSearchSelect, { employeeName } from '@/components/EmployeeSearchSelect';
 
 const STATUSES = ['', 'DRAFT', 'PUBLISHED', 'ARCHIVED'];
 const CATEGORIES = ['NEWS', 'POLICY', 'EVENT', 'HOLIDAY', 'CELEBRATION', 'GENERAL'];
@@ -34,6 +35,9 @@ const EMPTY_FORM = {
   audienceEntityIds: [],
   audienceDeptIds: [],
   audienceEmployeeIds: [],
+  // Display-name cache for the specific-employee chips, keyed by employee id.
+  // Not sent to the API — only IDs are persisted; this is purely for the UI.
+  audienceEmployeeLabels: {},
   pinned: false,
   publishedAt: '',
   expiresAt: '',
@@ -98,6 +102,10 @@ export default function AnnouncementsPage() {
       audienceEntityIds: row.audienceEntityIds || [],
       audienceDeptIds: row.audienceDeptIds || [],
       audienceEmployeeIds: row.audienceEmployeeIds || [],
+      // The list endpoint returns IDs only; resolve friendly names lazily as the
+      // admin re-picks. Seed any labels the row already carries (if the API ever
+      // expands them), else chips fall back to the raw ID.
+      audienceEmployeeLabels: row.audienceEmployeeLabels || {},
       pinned: !!row.pinned,
       publishedAt: toLocalInputValue(row.publishedAt),
       expiresAt: toLocalInputValue(row.expiresAt),
@@ -367,16 +375,27 @@ function Editor({ form, setForm, entities, departments, onClose, onSave, saving,
             />
           )}
           {form.audienceScope === 'SPECIFIC' && (
-            <div>
-              <LabelWithTip label="Employee IDs" tip="Comma-separated employee IDs to target individually. Use for narrow, specific notices." htmlFor="ann-emps" />
-              <input
-                id="ann-emps"
-                value={(form.audienceEmployeeIds || []).join(', ')}
-                onChange={(e) => set('audienceEmployeeIds', e.target.value.split(',').map((s) => s.trim()).filter(Boolean))}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                placeholder="emp-id-1, emp-id-2"
-              />
-            </div>
+            <EmployeeMultiPicker
+              ids={form.audienceEmployeeIds || []}
+              labels={form.audienceEmployeeLabels || {}}
+              onAdd={(emp) => setForm((f) => {
+                if ((f.audienceEmployeeIds || []).includes(emp.id)) return f;
+                return {
+                  ...f,
+                  audienceEmployeeIds: [...(f.audienceEmployeeIds || []), emp.id],
+                  audienceEmployeeLabels: { ...(f.audienceEmployeeLabels || {}), [emp.id]: employeeName(emp) },
+                };
+              })}
+              onRemove={(id) => setForm((f) => {
+                const nextLabels = { ...(f.audienceEmployeeLabels || {}) };
+                delete nextLabels[id];
+                return {
+                  ...f,
+                  audienceEmployeeIds: (f.audienceEmployeeIds || []).filter((x) => x !== id),
+                  audienceEmployeeLabels: nextLabels,
+                };
+              })}
+            />
           )}
 
           <div className="grid grid-cols-2 gap-4">
@@ -432,6 +451,53 @@ function ChipPicker({ label, options, selected, onToggle, emptyHint }) {
             );
           })}
         </div>
+      )}
+    </div>
+  );
+}
+
+// Specific-employee targeting: search the (F1-scoped) directory via the reusable
+// EmployeeSearchSelect, add each pick to a removable chip list. Only the IDs are
+// persisted (audienceEmployeeIds); names are a display-only cache. The picker is
+// remounted via `key` after every add so its internal "chosen" chip resets and
+// the operator can immediately search for the next person.
+function EmployeeMultiPicker({ ids, labels, onAdd, onRemove }) {
+  const [pickCount, setPickCount] = useState(0);
+  return (
+    <div>
+      <LabelWithTip
+        label="Specific employees"
+        tip="Search the directory by name, code or work email and add each person you want to target. Only people you're allowed to see appear."
+        htmlFor="ann-emps"
+      />
+      <EmployeeSearchSelect
+        key={pickCount}
+        id="ann-emps"
+        status="ACTIVE"
+        placeholder="Search by name, code or email…"
+        onSelect={(emp) => { if (emp) { onAdd(emp); setPickCount((n) => n + 1); } }}
+      />
+      {ids.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {ids.map((id) => (
+            <span
+              key={id}
+              className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700"
+            >
+              {labels[id] || id}
+              <button
+                type="button"
+                onClick={() => onRemove(id)}
+                className="text-gray-400 hover:text-gray-700"
+                aria-label={`Remove ${labels[id] || id}`}
+              >
+                ✕
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-2 text-xs text-gray-400">No employees added yet — search above to target people individually.</p>
       )}
     </div>
   );

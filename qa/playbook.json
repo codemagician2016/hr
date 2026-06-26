@@ -303,6 +303,21 @@
           ],
           "expected": "A rotation template is created/edited/toggled/deleted and can be applied (previously the tab could only list + apply, so it was empty on a fresh tenant).",
           "sortOrder": 5
+        },
+        {
+          "key": "admin-comp-off-settings",
+          "title": "Admin configures comp-off settings",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/comp-off-admin",
+          "steps": [
+            "Open Comp-off admin and the new Settings tab.",
+            "Adjust e.g. expiry days / require-approval and Save."
+          ],
+          "expected": "The comp-off config loads and saves via GET/PUT /api/hr/comp-off/config (previously the endpoints had no UI).",
+          "sortOrder": 6
         }
       ]
     },
@@ -955,6 +970,21 @@
           ],
           "expected": "Simple mode shows preset cards with plain-English summaries; Advanced mode exposes the granular permission grid + scope band picker. You cannot remove your own role-management permission or strip the last Owner.",
           "sortOrder": 3
+        },
+        {
+          "key": "reject-reason-reaches-employee",
+          "title": "A rejection reason entered by HR reaches the employee",
+          "kind": "EDGE",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/comp-off-admin",
+          "steps": [
+            "Open Comp-off > Approvals and Reject a credit, entering a reason in the prompt.",
+            "Confirm the employee sees that reason (the credit is voided with the reason)."
+          ],
+          "expected": "The reason typed by HR is persisted on the approval request and surfaced to the employee (previously dropped on the engine reject path). Leave/expense reject flows are unaffected.",
+          "sortOrder": 4
         }
       ]
     },
@@ -1196,6 +1226,19 @@
           ],
           "expected": "A SELF-band employee sees an empty team (their sub-tree minus self = nothing) — a graceful empty state, never an error and never another person's data. The My Team nav item is hidden/empty for non-managers.",
           "sortOrder": 5
+        },
+        {
+          "key": "edit-governed-personal-and-bank-fields",
+          "title": "Employee edits governed personal/bank fields",
+          "kind": "HAPPY",
+          "loginLabels": [],
+          "openUrl": "https://app-staging.drifthr.com/profile",
+          "steps": [
+            "In the Employee Portal open Profile.",
+            "Edit Middle name (Personal) and, for NZ, the NZ bank account (Bank)."
+          ],
+          "expected": "These governed fields are now editable and route through the HR-approval change-request queue (previously omitted from the rail).",
+          "sortOrder": 6
         }
       ]
     },

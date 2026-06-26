@@ -31,6 +31,7 @@ const REQUEST_KIND_CATEGORY = {
   OFFER_LETTER: 'CONTRACT',
   PROMOTION_LETTER: 'EMPLOYMENT_PROOF',
   WARNING_LETTER: 'CUSTOM',
+  OTHER: 'CUSTOM', // ESS "Other" request → pre-select a generic/custom template (else falls through gracefully)
 };
 
 function IssueLetterPageInner() {

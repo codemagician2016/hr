@@ -12,7 +12,7 @@
 //  - Holidays:        GET/POST/DELETE /holidays + POST /holidays/import.
 //  - Timesheets:      GET /timesheets with approve/reject (canManageAttendance).
 //  - Regularizations: GET /regularizations (real status/decidedBy); approve/reject
-//                     only on PENDING. Route uses :requestId, not :id.
+//                     only on PENDING. Route uses :id (the request id).
 //  - Period close:    POST /period/close — preview blockers (409) then lock.
 //                     Hidden for operators without canManageAttendance.
 //
@@ -1502,7 +1502,7 @@ export default function AttendancePage() {
       {tab === 'regularizations' && (
         <ApprovalListTab
           endpoint="regularizations"
-          idField="requestId"
+          idField="id"
           pending="PENDING"
           noun="requests"
           emptyText="No correction requests."

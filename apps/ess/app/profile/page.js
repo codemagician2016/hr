@@ -225,7 +225,9 @@ function ProfileInner() {
           {active === 'personal' && (
             <Section title="Personal" hint="Your identity details. Some (name, date of birth) need HR approval to change.">
               <FieldRow fieldKey="firstName" label="First name" hint="Your legal first name." field={sections.personal.firstName} pending={pending.firstName} onSave={saveField} />
+              <FieldRow fieldKey="middleName" label="Middle name" hint="Your legal middle name; changing it needs HR approval." field={sections.personal.middleName} pending={pending.middleName} onSave={saveField} />
               <FieldRow fieldKey="lastName" label="Last name" hint="Your legal last name." field={sections.personal.lastName} pending={pending.lastName} onSave={saveField} />
+              <FieldRow fieldKey="preferredName" label="Preferred name" hint="The name you'd like to be called — managed by HR." field={{ value: sections.personal.preferredName?.value ?? null, policy: 'read-only', optional: true }} onSave={saveField} />
               <FieldRow fieldKey="dateOfBirth" label="Date of birth" hint="Used for statutory records; changing it needs HR approval." field={sections.personal.dateOfBirth} pending={pending.dateOfBirth} onSave={saveField} />
               <FieldRow fieldKey="gender" label="Gender" hint="As you identify; changing it needs HR approval." field={sections.personal.gender} options={GENDER_OPTS} pending={pending.gender} onSave={saveField} />
               <FieldRow fieldKey="maritalStatus" label="Marital status" hint="Your current marital status." field={sections.personal.maritalStatus} options={MARITAL_OPTS} pending={pending.maritalStatus} onSave={saveField} />
@@ -265,6 +267,9 @@ function ProfileInner() {
                   <FieldRow fieldKey="bank.accountName" label="Account holder name" hint="Name on the bank account." field={sections.bank.accountName} pending={pending['bank.accountName']} onSave={saveField} />
                   <FieldRow fieldKey="bank.accountNumber" label="Account number" hint="Your salary account number — change needs HR approval." field={sections.bank.accountNumber} pending={pending['bank.accountNumber']} onSave={saveField} />
                   <FieldRow fieldKey="bank.ifsc" label="IFSC" hint="11-character IFSC of your branch — change needs HR approval." field={sections.bank.ifsc} pending={pending['bank.ifsc']} onSave={saveField} />
+                  {(sections.bank.currencyCode === 'NZD' || sections.bank.nzBankAccount?.value) && (
+                    <FieldRow fieldKey="bank.nzBankAccount" label="NZ bank account" hint="Your New Zealand bank account number — change needs HR approval." field={sections.bank.nzBankAccount} pending={pending['bank.nzBankAccount']} onSave={saveField} />
+                  )}
                   <FieldRow fieldKey="bank.bankName" label="Bank name" hint="Your bank's name." field={sections.bank.bankName} pending={pending['bank.bankName']} onSave={saveField} />
                 </>
               ) : <Empty text="No bank account on file yet. Contact HR to add one." />}
@@ -297,14 +302,14 @@ function ProfileInner() {
           {active === 'professional' && (
             <Section title="Professional" hint="Your role and reporting details — managed by HR / your manager.">
               {[
-                ['Employee code', sections.professional.employeeCode],
-                ['Designation', sections.professional.designation],
-                ['Department', sections.professional.department],
-                ['Location', sections.professional.location],
-                ['Date of joining', { value: sections.professional.dateOfJoining?.value ? formatDate(sections.professional.dateOfJoining.value) : null, policy: 'read-only' }],
-                ['Manager', sections.professional.manager],
-                ['Status', sections.professional.status],
-              ].map(([label, f]) => <FieldRow key={label} fieldKey={label} label={label} hint="Managed by HR / your manager." field={f} onSave={saveField} />)}
+                ['code', 'Employee code', sections.professional.employeeCode],
+                ['employment.designation', 'Designation', sections.professional.designation],
+                ['employment.department', 'Department', sections.professional.department],
+                ['employment.location', 'Location', sections.professional.location],
+                ['employment.dateOfJoining', 'Date of joining', { value: sections.professional.dateOfJoining?.value ? formatDate(sections.professional.dateOfJoining.value) : null, policy: 'read-only' }],
+                ['manager', 'Manager', sections.professional.manager],
+                ['status', 'Status', sections.professional.status],
+              ].map(([fieldKey, label, f]) => <FieldRow key={fieldKey} fieldKey={fieldKey} label={label} hint="Managed by HR / your manager." field={f} pending={pending[fieldKey]} onSave={saveField} />)}
             </Section>
           )}
           {active === 'nomination' && (

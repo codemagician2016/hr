@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Spinner, ErrorBanner, PrimaryButton, TextInput } from '@hr/ui';
-import { get, post } from '@/lib/api';
+import { get, post, put } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, employeeLabel, ServerPagination } from '@/lib/ui';
 import ModuleGuide from '@/components/ModuleGuide';
 
@@ -18,6 +18,7 @@ const TABS = [
   { key: 'queue', label: 'Approvals' },
   { key: 'ledger', label: 'Ledger' },
   { key: 'grant', label: 'Grant' },
+  { key: 'settings', label: 'Settings' },
 ];
 
 function fmtDate(d) {
@@ -90,7 +91,7 @@ export default function CompOffAdminPage() {
       key: 'actions', header: '', render: (r) => (
         <div className="flex gap-2">
           <ActionButton tone="positive" onClick={() => decide(r.id, 'approve')}>Approve</ActionButton>
-          <ActionButton tone="danger" onClick={() => decide(r.id, 'reject', '')}>Reject</ActionButton>
+          <ActionButton tone="danger" onClick={() => { const reason = prompt('Reason for rejection?'); if (reason === null) return; decide(r.id, 'reject', reason || ''); }}>Reject</ActionButton>
         </div>
       ),
     },
@@ -190,7 +191,94 @@ export default function CompOffAdminPage() {
       )}
 
       {tab === 'grant' && <GrantForm onGranted={(msg) => { setNotice(msg); }} onError={setError} />}
+
+      {tab === 'settings' && <SettingsForm onSaved={(msg) => { setNotice(msg); }} onError={setError} />}
     </div>
+  );
+}
+
+// Comp-off config editor — loads GET /config and PUTs changes. canManageOrg is
+// enforced backend-side (the route gates both GET and PUT); this is UX only.
+const NUMBER_FIELDS = [
+  { key: 'expiryDays', label: 'Expiry window (days)', hint: 'Days after the earned date before an unused credit lapses.' },
+  { key: 'minWorkedMinutesForCredit', label: 'Min minutes worked for a credit', hint: 'Below this, a worked off-day earns nothing.' },
+  { key: 'fullDayMinutes', label: 'Minutes for a full-day credit', hint: 'At/above this earns 1.0 day; below (but above the minimum) earns 0.5 when half-day is allowed.' },
+  { key: 'expiryReminderDays', label: 'Expiry reminder lead (days)', hint: 'How many days ahead to flag a credit as "expiring soon".' },
+];
+const BOOL_FIELDS = [
+  { key: 'requireApproval', label: 'Require approval for earned credits' },
+  { key: 'autoEarn', label: 'Auto-earn from worked off-days' },
+  { key: 'allowHalfDay', label: 'Allow half-day (0.5) credits' },
+  { key: 'earnFromWeeklyOff', label: 'Earn from working a weekly-off' },
+  { key: 'earnFromHoliday', label: 'Earn from working a holiday' },
+  { key: 'allowEncash', label: 'Allow encashment' },
+];
+
+function SettingsForm({ onSaved, onError }) {
+  const [loading, setLoading] = useState(true);
+  const [configured, setConfigured] = useState(false);
+  const [config, setConfig] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    get('/api/hr/comp-off/config')
+      .then((res) => {
+        setConfigured(!!(res && res.configured));
+        setConfig((res && res.config) || null);
+      })
+      .catch((e) => onError(e.message))
+      .finally(() => setLoading(false));
+  }, [onError]);
+
+  useEffect(() => { load(); }, [load]);
+
+  function setField(key, value) { setConfig((c) => ({ ...(c || {}), [key]: value })); }
+
+  async function save(e) {
+    e.preventDefault();
+    onError(''); setBusy(true);
+    try {
+      // Send only the editable knobs; the backend merges over stored config.
+      const body = {};
+      for (const f of NUMBER_FIELDS) if (config[f.key] != null && config[f.key] !== '') body[f.key] = Number(config[f.key]);
+      for (const f of BOOL_FIELDS) body[f.key] = config[f.key] === true;
+      const res = await put('/api/hr/comp-off/config', body);
+      if (res && res.config) setConfig(res.config);
+      onSaved('Comp-off settings saved.');
+    } catch (err) { onError(err.data?.message || err.message); } finally { setBusy(false); }
+  }
+
+  if (loading) return <div className="mt-4"><Spinner /></div>;
+  if (!configured || !config) {
+    return (
+      <div className="mt-4 max-w-lg rounded-2xl border border-gray-200 bg-white p-4 text-sm text-gray-600">
+        No comp-off leave type is configured for this company yet. Grant a comp-off credit (or run earn) to seed it, then return here to tune the knobs.
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={save} className="mt-4 max-w-2xl rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {NUMBER_FIELDS.map((f) => (
+          <div key={f.key}>
+            <label className="mb-1 block text-sm font-medium text-gray-700">{f.label}</label>
+            <TextInput type="number" min="0" value={config[f.key] == null ? '' : config[f.key]} onChange={(e) => setField(f.key, e.target.value)} />
+            <p className="mt-1 text-xs text-gray-500">{f.hint}</p>
+          </div>
+        ))}
+      </div>
+      <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {BOOL_FIELDS.map((f) => (
+          <label key={f.key} className="flex items-center gap-2 text-sm text-gray-700">
+            <input type="checkbox" checked={config[f.key] === true} onChange={(e) => setField(f.key, e.target.checked)} />
+            {f.label}
+          </label>
+        ))}
+      </div>
+      <PrimaryButton type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save settings'}</PrimaryButton>
+    </form>
   );
 }
 

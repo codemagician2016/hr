@@ -550,9 +550,16 @@ function ReconciliationTab() {
   }, []);
   const [employee, setEmployee] = useState(null);
   const [periodCode, setPeriodCode] = useState(defaultPeriod);
+  const [leaveTypeId, setLeaveTypeId] = useState('');
+  const [types, setTypes] = useState([]);
   const [groups, setGroups] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Leave types for the optional filter (same source the Policies tab uses).
+  useEffect(() => {
+    get('/api/hr/leave/types').then((r) => setTypes(asList(r))).catch(() => setTypes([]));
+  }, []);
 
   const load = useCallback(() => {
     if (!employee?.id || !periodCode.trim()) {
@@ -561,14 +568,16 @@ function ReconciliationTab() {
     }
     setLoading(true);
     setError('');
-    get(`/api/hr/leave/employees/${employee.id}/reconciliation`, { periodCode: periodCode.trim() })
+    const params = { periodCode: periodCode.trim() };
+    if (leaveTypeId) params.leaveTypeId = leaveTypeId;
+    get(`/api/hr/leave/employees/${employee.id}/reconciliation`, params)
       .then((r) => setGroups(asList(r)))
       .catch((e) => {
         setError(e.data?.message || e.message || 'Failed to load the reconciliation.');
         setGroups([]);
       })
       .finally(() => setLoading(false));
-  }, [employee, periodCode]);
+  }, [employee, periodCode, leaveTypeId]);
 
   useEffect(() => {
     load();
@@ -596,6 +605,20 @@ function ReconciliationTab() {
             placeholder='e.g. "2026-27"'
             className="w-44 px-4 py-2.5 border border-gray-300 rounded-lg text-sm"
           />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="recon-type">Leave type</label>
+          <select
+            id="recon-type"
+            value={leaveTypeId}
+            onChange={(e) => setLeaveTypeId(e.target.value)}
+            className="w-56 px-4 py-2.5 border border-gray-300 rounded-lg text-sm bg-white"
+          >
+            <option value="">All leave types</option>
+            {(types || []).map((t) => (
+              <option key={t.id} value={t.id}>{t.name}{t.code ? ` (${t.code})` : ''}</option>
+            ))}
+          </select>
         </div>
       </div>
 

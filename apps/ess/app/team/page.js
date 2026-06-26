@@ -7,7 +7,8 @@
 // rooted at the manager). All data is scoped SERVER-SIDE to the manager's reporting
 // sub-tree (/api/hr/me/team/*); a non-manager simply sees empty tabs.
 
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import AppShell from '@/components/AppShell';
 import { Spinner, Centered, ErrorBanner, Empty } from '@hr/ui';
 import { useApi } from '@/lib/useApi';
@@ -165,7 +166,7 @@ function DirectoryTab() {
 // drills DOWN through the sub-tree (lazy + paginated + virtualized). "Go to top of
 // org" lists the tenant roots as cards (branches outside your own sub-tree are
 // card-only under the default policy). Search locates a person in your tree.
-function OrgTab() {
+function OrgTab({ focusEmployeeId }) {
   const [mode, setMode] = useState('self'); // 'self' | 'top'
   const [breadcrumb, setBreadcrumb] = useState([]);
   const [bootError, setBootError] = useState('');
@@ -215,6 +216,27 @@ function OrgTab() {
     return () => clearTimeout(t);
   }, [query]);
 
+  // Deep-link re-root (?root=<id> from the directory "View in the org chart" link).
+  // The ESS chart is employee-centric (no admin-style viewport re-root), so we reuse
+  // the scope-walled ancestor chain: fetch root→target (server clamps it to the
+  // actor's allowed tree), then synthesize the same {node, ancestorIds} a search hit
+  // produces so OrgTree expands EXACTLY that branch and rings the person. Only honored
+  // in 'self' mode (the manager's own tree); a bad/out-of-scope id 404s → no-op.
+  useEffect(() => {
+    if (!focusEmployeeId || mode !== 'self') return undefined;
+    let alive = true;
+    apiGet(`/api/hr/me/team/org/nodes/${encodeURIComponent(focusEmployeeId)}/ancestors`)
+      .then((res) => {
+        const path = res.path || [];
+        const target = path[path.length - 1];
+        if (!alive || !target) return;
+        setQuery('');
+        setSearchResults([{ node: target, ancestorIds: path.slice(0, -1).map((n) => n.id) }]);
+      })
+      .catch(() => { /* out-of-scope or unlinked — leave the self view as-is */ });
+    return () => { alive = false; };
+  }, [focusEmployeeId, mode]);
+
   if (booting) return <Centered><Spinner /></Centered>;
   if (bootError) return <ErrorBanner message={bootError} />;
 
@@ -253,7 +275,12 @@ function OrgTab() {
 }
 
 function TeamInner() {
-  const [tab, setTab] = useState('roster');
+  const searchParams = useSearchParams();
+  // Deep links land on a specific tab (?tab=org) and may re-root the org chart on a
+  // person (?root=<employeeId>, from the directory "View in the org chart" link).
+  const paramTab = searchParams.get('tab');
+  const focusEmployeeId = searchParams.get('root') || null;
+  const [tab, setTab] = useState(() => (TABS.some((t) => t.key === paramTab) ? paramTab : 'roster'));
   // Show the "My Team" page even to non-managers; the tabs just render empty.
   return (
     <div className="mx-auto max-w-5xl space-y-5">
@@ -274,11 +301,17 @@ function TeamInner() {
       {tab === 'attendance' && <AttendanceTab />}
       {tab === 'approvals' && <ApprovalsTab />}
       {tab === 'directory' && <DirectoryTab />}
-      {tab === 'org' && <OrgTab />}
+      {tab === 'org' && <OrgTab focusEmployeeId={focusEmployeeId} />}
     </div>
   );
 }
 
 export default function TeamPage() {
-  return <AppShell><TeamInner /></AppShell>;
+  return (
+    <AppShell>
+      <Suspense fallback={<Centered><Spinner /></Centered>}>
+        <TeamInner />
+      </Suspense>
+    </AppShell>
+  );
 }

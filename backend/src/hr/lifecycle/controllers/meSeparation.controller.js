@@ -196,6 +196,7 @@ async function getMySeparation(req, res, next) {
     res.json({
       separation: {
         id: sep.id, code: sep.code, type: sep.type, status: sep.status,
+        currencyCode: sep.currencyCode,
         initiatedAt: sep.initiatedAt, resignationDate: sep.resignationDate,
         lastWorkingDay: sep.lastWorkingDay, relievingDate: sep.relievingDate,
         clearanceJson: sep.clearanceJson || {},

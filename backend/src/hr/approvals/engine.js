@@ -325,11 +325,16 @@ async function recordDecision(input, tx) {
       },
     });
 
-    // REJECTED → terminal REJECTED (fires onReject).
+    // REJECTED → terminal REJECTED (fires onReject). Persist the actor's reject reason
+    // into payloadJson.rejectReason (MERGE — never clobber other payload keys like _ctx/
+    // _chain/_active) so consumers (e.g. consumers.compOff onReject) can surface it.
     if (decision === 'REJECTED') {
+      const rejectPayload = comment
+        ? { ...(request.payloadJson || {}), rejectReason: comment }
+        : (request.payloadJson || {});
       const flip = await t.approvalRequest.updateMany({
         where: { id: request.id, status: 'PENDING', version: request.version },
-        data: { status: 'REJECTED', decidedBy: actorUserId, completedAt: now, slaDueAt: null, version: { increment: 1 } },
+        data: { status: 'REJECTED', decidedBy: actorUserId, completedAt: now, slaDueAt: null, payloadJson: rejectPayload, version: { increment: 1 } },
       });
       if (flip.count === 0) throw err('CONCURRENT_UPDATE', 'Approval request changed concurrently', 409);
       const fresh = await t.approvalRequest.findUnique({ where: { id: request.id } });

@@ -22,6 +22,7 @@ export default function LearningCompliancePage() {
   const [error, setError] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  const [nudged, setNudged] = useState({});
 
   const canManage = hasPermission(perms, 'canManageLearning');
 
@@ -46,7 +47,11 @@ export default function LearningCompliancePage() {
   useEffect(() => { if (tab === 'overdue') loadOverdue(); }, [tab, loadOverdue]);
 
   async function nudge(enrollmentId) {
-    try { await post(`/api/hr/learning/dashboard/overdue/${enrollmentId}/nudge`, {}); }
+    try {
+      await post(`/api/hr/learning/dashboard/overdue/${enrollmentId}/nudge`, {});
+      setNudged((n) => ({ ...n, [enrollmentId]: true }));
+      setTimeout(() => setNudged((n) => { const c = { ...n }; delete c[enrollmentId]; return c; }), 4000);
+    }
     catch (e) { setError(e.data?.message || e.message); }
   }
   async function waive(enrollmentId) {
@@ -80,7 +85,9 @@ export default function LearningCompliancePage() {
     { key: 'progress', header: 'Progress', render: (r) => `${r.progressPct}%` },
     { key: 'actions', header: '', render: (r) => canManage ? (
       <div className="flex justify-end gap-2 text-xs">
-        <button className="text-blue-600 hover:underline" onClick={() => nudge(r.enrollmentId)}>Nudge</button>
+        {nudged[r.enrollmentId]
+          ? <span className="text-green-600">Reminder sent ✓</span>
+          : <button className="text-blue-600 hover:underline" onClick={() => nudge(r.enrollmentId)}>Nudge</button>}
         <button className="text-amber-600 hover:underline" onClick={() => waive(r.enrollmentId)}>Waive</button>
       </div>
     ) : null },

@@ -2,8 +2,13 @@
 
 // Employee documents against /api/hr/documents/*. The document + request
 // resources are per-employee (/employees/:employeeId/documents|requests), so
-// the page takes an employee id, lists both, and supports uploading a document
-// (POST .../documents) and fulfilling a request (POST .../requests/:id/fulfil).
+// the page takes an employee id and lists both. Documents tab: upload
+// (POST .../documents), verify (POST .../documents/:id/verify) and delete
+// (DELETE .../documents/:id). Requests tab: list, cancel a PENDING request
+// (POST .../requests/:id/cancel), and a "Fulfil in Letters" deep link — there
+// is no fulfil endpoint under documents/*; a request is actually fulfilled on
+// the Letters issue screen (POST /api/hr/letters/issue with the
+// documentRequestId, which mints the letter AND closes the request).
 // A tenant-wide "expiring soon" report (GET /expiring) anchors the top.
 
 import { useCallback, useEffect, useState } from 'react';

@@ -345,7 +345,7 @@ async function detail(req, res, next) {
       reportsCount,
       // F19 org-chart deep link rooted at this person (the ESS lazy org endpoints live
       // under /me/team/org; the client can re-root the chart on this node).
-      orgChart: { rootEmployeeId: row.id, href: '/team?tab=org' },
+      orgChart: { rootEmployeeId: row.id, href: `/team?tab=org&root=${encodeURIComponent(row.id)}` },
     });
   } catch (e) { next(e); }
 }
