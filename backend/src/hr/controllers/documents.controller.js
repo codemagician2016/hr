@@ -413,6 +413,70 @@ async function getMyDocument(req, res, next) {
   } catch (e) { next(e); }
 }
 
+// POST /me/documents — the employee uploads their OWN document (e.g. an ID proof
+// or certificate) for HR to verify. The subject is derived ENTIRELY from the
+// session (resolveSelfEmployeeId) — a client-supplied employeeId is NEVER trusted.
+// The upload is FORCED isEmployeeUploaded:true and left UNVERIFIED (verifiedAt /
+// verifiedBy null = pending HR verification), mirroring the admin verify flow.
+// File handling mirrors createDocument: base64 data-URL → s3.uploadDataUrl,
+// fileHash = SHA-256(decoded bytes) server-side, ≤10 MB + PDF/PNG/JPG allow-list.
+async function createMyDocument(req, res, next) {
+  try {
+    const { businessId } = req.customer;
+    const employeeId = await resolveSelfEmployeeId(businessId, req.customer);
+    if (!employeeId) return res.status(404).json({ message: 'Employee not found' });
+
+    const body = req.body || {};
+    const { category, name } = body;
+    const dataUrl = body.fileBase64 || body.dataUrl;
+    if (!category) return res.status(400).json({ message: 'A document category is required' });
+    if (!DOCUMENT_CATEGORIES.has(category)) {
+      return res.status(422).json({ message: `Invalid document category: ${category}` });
+    }
+
+    // Validate the payload (MIME + ≤10 MB) BEFORE storing; decode + hash server-side.
+    const docCheck = validateDocDataUrl(dataUrl);
+    if (!docCheck.ok) return res.status(docCheck.status).json({ message: docCheck.message });
+    const mimeType = docCheck.mime;
+    const sizeBytes = docCheck.bytes;
+    const fileHash = sha256(docCheck.buffer);
+
+    // Store the bytes (S3 when configured, else embed the data URL — same as the
+    // admin path so the row always carries REAL schema fields).
+    let fileUrl;
+    if (s3.isConfigured()) {
+      const up = await s3.uploadDataUrl({ dataUrl, businessId, scope: 'employee-doc' });
+      fileUrl = up.url;
+    } else {
+      fileUrl = dataUrl;
+    }
+
+    const doc = await prisma.employeeDocument.create({
+      data: {
+        businessId,
+        employeeId,
+        category,
+        name: name || 'Document',
+        fileUrl,
+        fileHash,
+        mimeType,
+        sizeBytes,
+        documentNumber: body.documentNumber || null,
+        expiresAt: body.expiresAt ? new Date(body.expiresAt) : null,
+        // The employee's own upload is visible to them and awaits HR verification.
+        visibility: 'EMPLOYEE_VISIBLE',
+        isEmployeeUploaded: true,
+        verifiedAt: null,
+        verifiedBy: null,
+      },
+    });
+    res.status(201).json(publicDoc(doc));
+  } catch (e) {
+    if (e.code === 'P2002') return res.status(409).json({ message: 'A document with that identity already exists' });
+    next(e);
+  }
+}
+
 // ── DocumentRequest (employee asks HR for a letter/certificate) ──────────────
 // Rewritten against the REAL model (schema L8584): templateKind(TemplateKind),
 // purpose, status(RequestStatus PENDING/APPROVED/REJECTED/CANCELLED),
@@ -501,6 +565,7 @@ module.exports = {
   // ESS self-service
   listMyDocuments,
   getMyDocument,
+  createMyDocument,
   // DocumentRequest (schema-correct minimal surface; generation lands in 4f)
   listRequests,
   getRequest,

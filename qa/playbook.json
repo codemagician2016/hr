@@ -789,6 +789,23 @@
           ],
           "expected": "Meera's session returns 404 for Priya's payslip — payslips are self-scoped and a forged id never leaks another employee's data.",
           "sortOrder": 3
+        },
+        {
+          "key": "employee-uploads-a-document-for-hr-to-verify",
+          "title": "Employee uploads a document for HR to verify",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "Employee (Priya)"
+          ],
+          "openUrl": "https://demo-staging.drifthr.com/documents",
+          "steps": [
+            "Log in as priya.nair@demo.test on the Employee portal.",
+            "Open Documents.",
+            "In the 'Upload a document' card, pick a document type (e.g. ID proof), then click/drop a PDF, PNG or JPG (up to 10 MB).",
+            "Wait for the 'Uploaded — pending HR verification.' confirmation and confirm the new document appears in her list."
+          ],
+          "expected": "The file uploads and the list refreshes with the new document. The upload is self-scoped (no employeeId sent), forced employee-uploaded and left unverified — HR can then verify it from the admin Documents view.",
+          "sortOrder": 4
         }
       ]
     },
@@ -988,7 +1005,7 @@
       "title": "Profile, Field Governance & Manager Self-Service",
       "portal": "Employee (ESS)",
       "summary": "A rich, sectioned employee profile the employee can edit, with per-field governance (self-edit / HR-approval / read-only), plus Manager Self-Service so a manager runs their team from the employee portal, and an org/reporting tree.",
-      "howItWorks": "Self profile + governance + manager team view, all on the employee portal:\n- The profile is sectioned (Personal, Contact, Address with 'same as', Family, Bank, Education, Professional, Nomination, Photo ID). Each field carries a policy: self-edit commits immediately; HR-approval routes a change request HR must approve (shown as a 'Pending approval' chip); read-only is display only.\n- The server classifies every field, so a client can never smuggle a gated field (name/DOB/bank/PAN/UAN/IRD) through a self-edit endpoint.\n- Manager Self-Service (My Team): a manager sees their reporting sub-tree's roster, today's attendance board, a merged leave + reimbursement approval inbox (self excluded), and a comp-masked directory — without leaving ESS.\n- An org/reporting tree (Photo | Name | Position) is drillable, rooted at the signed-in employee on ESS.",
+      "howItWorks": "Self profile + governance + manager team view, all on the employee portal:\n- The profile is sectioned (Personal, Contact, Address with 'same as', Family, Bank, Statutory, Education, Professional, Nomination, Photo ID). Each field carries a policy: self-edit commits immediately; HR-approval routes a change request HR must approve (shown as a 'Pending approval' chip); read-only is display only.\n- The Statutory section is country-gated: PAN + UAN show for India employees, IRD number for New Zealand; all three are HR-approval, so an employee originates the edit but HR approves before it writes. Aadhaar shows only a Verified flag (never the number).\n- The server classifies every field, so a client can never smuggle a gated field (name/DOB/bank/PAN/UAN/IRD) through a self-edit endpoint.\n- Manager Self-Service (My Team): a manager sees their reporting sub-tree's roster, today's attendance board, a merged leave + reimbursement approval inbox (self excluded), and a comp-masked directory — without leaving ESS.\n- An org/reporting tree (Photo | Name | Position) is drillable, rooted at the signed-in employee on ESS.",
       "notes": "Live. Subject is always the session employee (no employeeId in any ESS path); gated edits go through ProfileChangeRequest + HR approval with SoD.",
       "sortOrder": 14,
       "useCases": [
@@ -1026,6 +1043,24 @@
           "sortOrder": 2
         },
         {
+          "key": "employee-requests-a-statutory-id-change-pan-uan-ird",
+          "title": "Employee requests a statutory ID change (PAN/UAN/IRD)",
+          "kind": "EDGE",
+          "loginLabels": [
+            "Employee (Priya)",
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://demo-staging.drifthr.com/profile",
+          "steps": [
+            "Log in as priya.nair@demo.test on the Employee portal and open Profile.",
+            "Open the Statutory section; for an India employee edit PAN or UAN (for a New Zealand employee edit the IRD number) and Send request.",
+            "Note the 'Pending HR approval' chip on the field.",
+            "Log in as operator@demo.test on the HR Admin portal and approve the profile change request."
+          ],
+          "expected": "The Statutory section is country-gated (PAN/UAN for India, IRD for NZ) and Aadhaar shows only a Verified flag. The edit does not write immediately — it files a ProfileChangeRequest shown as Pending; HR approval atomically writes the validated value, and an operator cannot approve a request for their own linked employee (SoD).",
+          "sortOrder": 3
+        },
+        {
           "key": "manager-runs-their-team-from-ess-manager-self-service",
           "title": "Manager runs their team from ESS (Manager Self-Service)",
           "kind": "HAPPY",
@@ -1039,7 +1074,7 @@
             "Review the team roster, today's attendance board, and the merged leave + reimbursement approval inbox; open the team org tree."
           ],
           "expected": "Aarav sees only his reporting sub-tree: roster, attendance, and an approvals inbox (his own requests excluded). The directory masks compensation to ranges. He never leaves ESS for the daily team loop.",
-          "sortOrder": 3
+          "sortOrder": 4
         },
         {
           "key": "non-manager-gets-an-empty-team-not-an-error",
@@ -1054,7 +1089,7 @@
             "Attempt to open My Team."
           ],
           "expected": "A SELF-band employee sees an empty team (their sub-tree minus self = nothing) — a graceful empty state, never an error and never another person's data. The My Team nav item is hidden/empty for non-managers.",
-          "sortOrder": 4
+          "sortOrder": 5
         }
       ]
     },
@@ -1346,6 +1381,52 @@
           ],
           "expected": "Business type is the first, required field. Choosing a company shows a CIN field; choosing a proprietorship hides it and relabels PAN as the proprietor's PAN. You cannot continue until a business type is chosen. The chosen type is saved onto the company profile.",
           "sortOrder": 3
+        }
+      ]
+    },
+    {
+      "key": "ess-shift-swap",
+      "title": "ESS Shift Swap — request a swap",
+      "portal": "Employee (ESS)",
+      "summary": "An employee can request a shift swap from their My Shifts page: pick a colleague, choose the day they give and the day they take, add a reason, and send it. The colleague must consent before it goes to a manager.",
+      "howItWorks": "On /shifts the employee sees a \"Request a shift swap\" form. The counterparty is chosen from the tenant-wide company directory (the SELF-scoped /api/hr/me/directory search), whose item id is the employee id sent as counterpartyEmployeeId. The form POSTs { counterpartyEmployeeId, requesterDate, counterpartyDate, reason } to POST /api/hr/me/shifts/swaps; the requester is resolved server-side from the session (never client-supplied). The \"your day\" picker is seeded from the published roster; the backend rejects unpublished/locked days and self-swaps. On success the swaps list refreshes and the new request shows as PENDING consent.",
+      "notes": "Frontend-only change in apps/ess/app/shifts/page.js; reuses the existing createMySwap controller/route (no new endpoint) and the existing directory read for the counterparty picker.",
+      "sortOrder": 20,
+      "useCases": [
+        {
+          "key": "create-shift-swap",
+          "title": "An employee requests a shift swap with a colleague",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "Employee (Priya)"
+          ],
+          "openUrl": "https://demo-staging.drifthr.com/shifts",
+          "steps": [
+            "Open My Shifts.",
+            "Under Swap requests, click \"Request a shift swap\".",
+            "In \"Swap with\", search a colleague by name and select them.",
+            "Pick one of your published days under \"Your day to give\".",
+            "Pick the colleague’s day under \"Their day to take\" and enter a reason.",
+            "Click \"Send swap request\"."
+          ],
+          "expected": "The form submits, a success notice appears, and the new request shows in the swap list as Sent, with Consent = PENDING and Status = PENDING. No employeeId is sent for yourself — the requester is taken from your session.",
+          "sortOrder": 1
+        },
+        {
+          "key": "swap-self-blocked",
+          "title": "You cannot swap a shift with yourself",
+          "kind": "EDGE",
+          "loginLabels": [
+            "Employee (Priya)"
+          ],
+          "openUrl": "https://demo-staging.drifthr.com/shifts",
+          "steps": [
+            "Open My Shifts and start a \"Request a shift swap\".",
+            "Attempt to select yourself as the counterparty (or submit with your own identity).",
+            "Submit the form."
+          ],
+          "expected": "The backend rejects the request (400 \"Cannot swap with yourself\"); the form shows the error and no swap is created.",
+          "sortOrder": 2
         }
       ]
     }

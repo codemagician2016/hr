@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { ErrorBanner, Empty, Spinner, Centered, PrimaryButton } from '@hr/ui';
-import { apiGet, apiPost } from '@/lib/api';
+import { apiGet, apiPost, fetchDirectory } from '@/lib/api';
 import InfoTip from '@/components/InfoTip';
 
 function todayISO() { return new Date().toISOString().slice(0, 10); }
@@ -51,6 +51,177 @@ function StatusChip({ status }) {
   };
   const [bg, fg] = map[status] || ['#E5E7EB', '#374151'];
   return <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ background: bg, color: fg }}>{status}</span>;
+}
+
+// "Request a shift swap" form. The counterparty is chosen from the tenant-wide
+// company directory (the same SELF-scoped /api/hr/me/directory read the Directory
+// page uses); its `id` is the employee id the backend expects as
+// counterpartyEmployeeId. We POST { counterpartyEmployeeId, requesterDate,
+// counterpartyDate, reason } to /api/hr/me/shifts/swaps — the backend resolves the
+// requester from the session, so we never send our own id. The "your day" picker is
+// seeded from the published roster (only published cells are swappable); the
+// counterparty's day is a free date input (the backend validates it is published).
+function SwapForm({ roster, onCreated }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const [debouncedQ, setDebouncedQ] = useState('');
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [counterparty, setCounterparty] = useState(null); // { id, name, code }
+  const [requesterDate, setRequesterDate] = useState('');
+  const [counterpartyDate, setCounterpartyDate] = useState('');
+  const [reason, setReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState('');
+
+  // Your own swappable days = the published WORK/OFF cells already on the roster.
+  const myDays = useMemo(() => (roster || []).filter((c) => c && c.date), [roster]);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(q.trim()), 250);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  useEffect(() => {
+    if (!open || debouncedQ.length < 2) { setResults([]); return; }
+    let alive = true;
+    setSearching(true);
+    fetchDirectory(`?page=1&pageSize=8&q=${encodeURIComponent(debouncedQ)}`)
+      .then((res) => { if (alive) setResults((res && res.items) || []); })
+      .catch(() => { if (alive) setResults([]); })
+      .finally(() => { if (alive) setSearching(false); });
+    return () => { alive = false; };
+  }, [open, debouncedQ]);
+
+  function reset() {
+    setQ(''); setDebouncedQ(''); setResults([]); setCounterparty(null);
+    setRequesterDate(''); setCounterpartyDate(''); setReason(''); setFormError('');
+  }
+
+  async function submit(e) {
+    e.preventDefault();
+    setFormError('');
+    if (!counterparty) { setFormError('Pick a colleague to swap with.'); return; }
+    if (!requesterDate || !counterpartyDate || !reason.trim()) {
+      setFormError('Choose both days and add a reason.'); return;
+    }
+    setSubmitting(true);
+    try {
+      await apiPost('/api/hr/me/shifts/swaps', {
+        counterpartyEmployeeId: counterparty.id,
+        requesterDate,
+        counterpartyDate,
+        reason: reason.trim(),
+      });
+      reset();
+      setOpen(false);
+      onCreated();
+    } catch (err) {
+      setFormError(err.message || 'Could not file the swap request.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <button type="button" onClick={() => setOpen(true)}
+              className="px-3 py-1.5 text-sm rounded border font-medium"
+              style={{ borderColor: 'var(--theme-primary)', color: 'var(--theme-primary)' }}>
+        Request a shift swap
+      </button>
+    );
+  }
+
+  return (
+    <form onSubmit={submit} className="rounded-lg border px-4 py-3 space-y-3" style={{ borderColor: 'var(--theme-border)' }}>
+      {formError ? <div className="rounded px-3 py-2 text-sm" style={{ background: '#FEE2E2', color: '#991B1B' }}>{formError}</div> : null}
+
+      {/* counterparty picker — search the company directory */}
+      <div>
+        <label className="block text-xs font-medium mb-1" style={{ color: 'var(--theme-muted)' }}>Swap with</label>
+        {counterparty ? (
+          <div className="flex items-center justify-between rounded border px-3 py-2 text-sm" style={{ borderColor: 'var(--theme-border)' }}>
+            <span>{counterparty.name || counterparty.code}{counterparty.code ? <span className="text-xs text-gray-500"> · {counterparty.code}</span> : null}</span>
+            <button type="button" className="text-xs underline" style={{ color: 'var(--theme-primary)' }}
+                    onClick={() => { setCounterparty(null); setQ(''); }}>Change</button>
+          </div>
+        ) : (
+          <div className="relative">
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search a colleague by name, code or email…"
+              aria-label="Search a colleague to swap with"
+              className="w-full rounded border px-3 py-2 text-sm"
+              style={{ borderColor: 'var(--theme-border)' }}
+            />
+            {debouncedQ.length >= 2 ? (
+              <div className="mt-1 rounded border divide-y" style={{ borderColor: 'var(--theme-border)' }}>
+                {searching ? (
+                  <div className="px-3 py-2 text-xs text-gray-500">Searching…</div>
+                ) : results.length === 0 ? (
+                  <div className="px-3 py-2 text-xs text-gray-500">No colleagues match.</div>
+                ) : results.map((r) => (
+                  <button key={r.id} type="button"
+                          onClick={() => { setCounterparty(r); setResults([]); }}
+                          className="block w-full text-left px-3 py-2 text-sm hover:bg-gray-50">
+                    {r.name || r.code}
+                    <span className="text-xs text-gray-500"> · {r.code}{r.designation ? ` · ${r.designation}` : ''}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs font-medium mb-1" style={{ color: 'var(--theme-muted)' }}>
+            Your day to give
+          </label>
+          {myDays.length > 0 ? (
+            <select value={requesterDate} onChange={(e) => setRequesterDate(e.target.value)}
+                    aria-label="Your day to swap"
+                    className="w-full rounded border px-3 py-2 text-sm bg-white" style={{ borderColor: 'var(--theme-border)' }}>
+              <option value="">Select a published day…</option>
+              {myDays.map((c) => {
+                const v = cellView(c);
+                return <option key={c.date} value={c.date}>{fmtDate(c.date)} · {v.label}</option>;
+              })}
+            </select>
+          ) : (
+            <input type="date" value={requesterDate} onChange={(e) => setRequesterDate(e.target.value)}
+                   aria-label="Your day to swap"
+                   className="w-full rounded border px-3 py-2 text-sm" style={{ borderColor: 'var(--theme-border)' }} />
+          )}
+        </div>
+        <div>
+          <label className="block text-xs font-medium mb-1" style={{ color: 'var(--theme-muted)' }}>
+            Their day to take
+          </label>
+          <input type="date" value={counterpartyDate} onChange={(e) => setCounterpartyDate(e.target.value)}
+                 aria-label="Their day to swap"
+                 className="w-full rounded border px-3 py-2 text-sm" style={{ borderColor: 'var(--theme-border)' }} />
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-xs font-medium mb-1" style={{ color: 'var(--theme-muted)' }}>Reason</label>
+        <input value={reason} onChange={(e) => setReason(e.target.value)}
+               placeholder="Why do you need this swap?"
+               aria-label="Reason for the swap"
+               className="w-full rounded border px-3 py-2 text-sm" style={{ borderColor: 'var(--theme-border)' }} />
+      </div>
+
+      <div className="flex gap-2">
+        <PrimaryButton type="submit" disabled={submitting}>{submitting ? 'Sending…' : 'Send swap request'}</PrimaryButton>
+        <button type="button" className="px-3 py-1.5 text-sm rounded border" style={{ borderColor: 'var(--theme-border)' }}
+                onClick={() => { reset(); setOpen(false); }}>Cancel</button>
+      </div>
+    </form>
+  );
 }
 
 export default function MyShiftsPage() {
@@ -135,6 +306,9 @@ export default function MyShiftsPage() {
               <InfoTip text="Shift swaps you sent or received. A received swap needs your consent before it goes to a manager; the 11-hour rest rule is re-checked at approval." />
             </h2>
             <PrimaryButton onClick={loadSwaps}>Refresh</PrimaryButton>
+          </div>
+          <div className="mb-3">
+            <SwapForm roster={roster} onCreated={() => { setNotice('Swap request sent — your colleague must consent before it goes to a manager.'); loadSwaps(); }} />
           </div>
           {swapsLoading ? <Centered><Spinner /></Centered> : (
             swaps.length === 0 ? <Empty text="No swap requests." /> : (

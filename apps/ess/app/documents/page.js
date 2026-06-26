@@ -10,11 +10,27 @@
 
 import { useState } from 'react';
 import AppShell from '@/components/AppShell';
-import { ErrorBanner, Empty, Spinner, Centered } from '@hr/ui';
+import { ErrorBanner, Empty, Spinner, Centered, DocumentDropzone } from '@hr/ui';
 import { useApi } from '@/lib/useApi';
+import { apiPost } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 
 const DOCS_PATH = '/api/hr/me/documents';
+
+// Categories an employee may self-upload for HR to verify (a friendly subset of
+// the DocumentCategory enum — the backend re-validates against the full enum).
+const UPLOAD_CATEGORIES = [
+  { value: 'ID_PROOF', label: 'ID proof' },
+  { value: 'ADDRESS_PROOF', label: 'Address proof' },
+  { value: 'PAN', label: 'PAN' },
+  { value: 'AADHAAR', label: 'Aadhaar' },
+  { value: 'PASSPORT', label: 'Passport' },
+  { value: 'EDUCATION', label: 'Education certificate' },
+  { value: 'EXPERIENCE', label: 'Experience letter' },
+  { value: 'BANK_PROOF', label: 'Bank proof' },
+  { value: 'MEDICAL', label: 'Medical' },
+  { value: 'OTHER', label: 'Other' },
+];
 
 // Friendly labels for the raw EmployeeDocument.category enum (Feature 24 adds the
 // "Form 16 · Tax" label so the issued TDS certificate reads cleanly in the vault).
@@ -45,8 +61,69 @@ function expiryTone(doc) {
   return { label: `Valid till ${formatDate(exp)}`, color: 'var(--theme-muted)' };
 }
 
+// The upload card: pick a category, drop a file → POST /api/hr/me/documents
+// (forced isEmployeeUploaded + unverified server-side), then refresh the list.
+function UploadCard({ onUploaded }) {
+  const [category, setCategory] = useState(UPLOAD_CATEGORIES[0].value);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState('');
+
+  async function handleFile(payload) {
+    setError('');
+    setBusy(true);
+    setDone(false);
+    try {
+      await apiPost(DOCS_PATH, {
+        category,
+        name: payload.name,
+        mimeType: payload.mimeType,
+        sizeBytes: payload.sizeBytes,
+        fileHash: payload.fileHash,
+        fileBase64: payload.fileBase64,
+      });
+      setDone(true);
+      if (onUploaded) await onUploaded();
+    } catch (e) {
+      setError(e.message || 'Upload failed. Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border bg-white p-4 shadow-sm" style={{ borderColor: 'var(--theme-border)' }}>
+      <div className="mb-3 text-sm font-medium" style={{ color: 'var(--theme-text)' }}>Upload a document</div>
+      <label className="mb-1 block text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>Document type</label>
+      <select
+        value={category}
+        onChange={(e) => setCategory(e.target.value)}
+        className="mb-3 w-full rounded-lg border px-3 py-2 text-sm"
+        style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-text)' }}
+      >
+        {UPLOAD_CATEGORIES.map((c) => (
+          <option key={c.value} value={c.value}>{c.label}</option>
+        ))}
+      </select>
+      <DocumentDropzone
+        category={category}
+        label=""
+        busy={busy}
+        done={done}
+        onFile={handleFile}
+      />
+      {done && !error && (
+        <p className="mt-2 text-xs font-medium" style={{ color: 'var(--theme-primary)' }}>
+          Uploaded — pending HR verification.
+        </p>
+      )}
+      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+    </div>
+  );
+}
+
 function DocumentsInner() {
-  const { data, loading, error } = useApi(DOCS_PATH, {
+  const { data, loading, error, reload } = useApi(DOCS_PATH, {
     select: (b) => (Array.isArray(b) ? b : b?.items || b?.documents || []),
   });
   const allDocs = data || [];
@@ -85,6 +162,8 @@ function DocumentsInner() {
           </div>
         )}
       </div>
+
+      <UploadCard onUploaded={reload} />
 
       {docs.length === 0 ? (
         <Empty text="No documents available." />

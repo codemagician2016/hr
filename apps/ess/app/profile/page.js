@@ -135,6 +135,7 @@ const SECTIONS = [
   { key: 'address', label: 'Address' },
   { key: 'family', label: 'Family' },
   { key: 'bank', label: 'Bank' },
+  { key: 'statutory', label: 'Statutory' },
   { key: 'education', label: 'Education' },
   { key: 'professional', label: 'Professional' },
   { key: 'nomination', label: 'Nomination' },
@@ -267,6 +268,29 @@ function ProfileInner() {
                   <FieldRow fieldKey="bank.bankName" label="Bank name" hint="Your bank's name." field={sections.bank.bankName} pending={pending['bank.bankName']} onSave={saveField} />
                 </>
               ) : <Empty text="No bank account on file yet. Contact HR to add one." />}
+            </Section>
+          )}
+          {active === 'statutory' && (
+            <Section title="Statutory" hint="Your tax / provident-fund identifiers. Changes need HR approval (they drive statutory filings).">
+              {sections.statutory ? (
+                <>
+                  {(sections.statutory.countryCode === 'IN' || sections.statutory.pan?.value || sections.statutory.uan?.value) && (
+                    <>
+                      <FieldRow fieldKey="statutory.pan" label="PAN" hint="Your 10-character Permanent Account Number — change needs HR approval." field={sections.statutory.pan} pending={pending['statutory.pan']} onSave={saveField} />
+                      <FieldRow fieldKey="statutory.uan" label="UAN" hint="Your 12-digit Universal Account Number (EPF) — change needs HR approval." field={sections.statutory.uan} pending={pending['statutory.uan']} onSave={saveField} />
+                    </>
+                  )}
+                  {(sections.statutory.countryCode === 'NZ' || sections.statutory.irdNumber?.value) && (
+                    <FieldRow fieldKey="statutory.irdNumber" label="IRD number" hint="Your New Zealand IRD number — change needs HR approval." field={sections.statutory.irdNumber} pending={pending['statutory.irdNumber']} onSave={saveField} />
+                  )}
+                  {sections.statutory.aadhaarVerified && (
+                    <div className="flex items-center gap-2 border-b py-3 text-sm last:border-b-0" style={{ borderColor: 'var(--theme-border)' }}>
+                      <span style={{ color: 'var(--theme-muted)' }}>Aadhaar</span>
+                      <span className="rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: '#dcfce7', color: '#166534' }}>Verified</span>
+                    </div>
+                  )}
+                </>
+              ) : <Empty text="No statutory record on file yet. Contact HR to add one." />}
             </Section>
           )}
           {active === 'education' && <EducationSection education={sections.education} reload={reload} flash={flash} readOnly={readOnly} />}

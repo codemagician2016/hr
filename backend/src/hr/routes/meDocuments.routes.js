@@ -20,6 +20,7 @@ const c = require('../controllers/documents.controller');
 router.use(requireCustomer);
 
 router.get('/', c.listMyDocuments);
+router.post('/', c.createMyDocument);
 router.get('/:id', c.getMyDocument);
 
 module.exports = router;
