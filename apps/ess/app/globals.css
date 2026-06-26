@@ -9,10 +9,10 @@
    tenant's resolved brand (5 styles x 12 colors) via @hr/theme-engine.
    ============================================================================ */
 :root {
-  --theme-primary: #4F46E5;
-  --theme-primary-dark: #3730A3;
-  --theme-primary-soft: #4F46E514;
-  --theme-accent: #4F46E5;
+  --theme-primary: #16B6A6;
+  --theme-primary-dark: #0E9C8E;
+  --theme-primary-soft: #16B6A614;
+  --theme-accent: #16B6A6;
   --theme-bg: #F8FAFC;
   --theme-surface: #FFFFFF;
   --theme-text: #0F172A;

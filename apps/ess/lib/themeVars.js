@@ -47,7 +47,7 @@ function darken(hex, amount = 0.18) {
 // defaults (matching globals.css :root) for any missing palette field.
 export function themeVarsFromResolved(theme) {
   const palette = theme?.palette || {};
-  const primary = isHex(palette.primary) ? palette.primary : '#4F46E5';
+  const primary = isHex(palette.primary) ? palette.primary : '#16B6A6';
   const accent = isHex(palette.accent) ? palette.accent : primary;
   const bg = isHex(palette.background) ? palette.background : '#F8FAFC';
   const surface = '#FFFFFF';

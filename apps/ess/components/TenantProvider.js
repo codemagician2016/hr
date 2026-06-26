@@ -41,10 +41,16 @@ function brandInputFromResolve(data) {
   if (typeof legacy.themeColors === 'string') {
     try { subPrimary = JSON.parse(legacy.themeColors)?.primary; } catch { subPrimary = undefined; }
   }
+  const explicitPrimary = wl.primaryColor || subPrimary;
+  const explicitKey = legacy.colorKey || legacy.color;
+  // A tenant who hasn't picked a brand colour shouldn't land on the engine's
+  // harsh indigo default — give them a premium, friendly teal so their employees
+  // get a polished portal out of the box. Any chosen colour/key still wins.
+  const DEFAULT_PRIMARY = '#16B6A6';
   return {
     styleKey: legacy.styleKey || legacy.theme || legacy.themeStyle,
-    colorKey: legacy.colorKey || legacy.color,
-    primary: wl.primaryColor || subPrimary,
+    colorKey: explicitKey,
+    primary: explicitPrimary || (explicitKey ? undefined : DEFAULT_PRIMARY),
     logoUrl: wl.logoUrl || legacy.logoUrl || legacy.logo || data?.business?.logoUrl,
   };
 }
