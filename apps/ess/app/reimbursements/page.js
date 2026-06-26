@@ -181,14 +181,26 @@ function ClaimDetail({ id, ref_, onChanged }) {
   async function cancel() { try { await api.cancelClaim(id); reload(); onChanged && onChanged(); } catch (e) { setErr(e.message); } }
   async function removeLine(lineId) { try { await api.removeClaimLine(id, lineId); reload(); } catch (e) { setErr(e.message); } }
 
+  // A returned-for-changes claim comes back as DRAFT with the approver's note on
+  // rejectReason; surface it as a clear "sent back — fix & resubmit" banner so the
+  // employee knows why the edit/resubmit controls (which only show for a DRAFT) re-lit.
+  const returnReason = isDraft && claim.rejectReason ? claim.rejectReason : null;
+
   return (
     <div className="border-t bg-white p-3">
       {err && <ErrorBanner message={err} />}
+      {returnReason && (
+        <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          <div className="font-medium">Returned for changes</div>
+          <div className="mt-0.5">{returnReason}</div>
+          <div className="mt-1 text-xs text-amber-700">Update the claim below and submit it again for approval.</div>
+        </div>
+      )}
       {/* Status timeline */}
       <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
         <span className="text-gray-500">Status:</span> {statusBadge(claim.status)}
         {claim.policyVerdict && claim.policyVerdict !== 'NO_POLICY' ? verdictBadge(claim.policyVerdict) : null}
-        {claim.rejectReason ? <span className="text-red-600">— {claim.rejectReason}</span> : null}
+        {claim.rejectReason && !returnReason ? <span className="text-red-600">— {claim.rejectReason}</span> : null}
       </div>
 
       {/* Bills */}

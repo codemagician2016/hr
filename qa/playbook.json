@@ -272,6 +272,37 @@
           ],
           "expected": "The period locks; further punches/regularizations in that range are blocked, and the payable result (payable days, LOP, overtime) is frozen for payroll. Locked rows do not retro-mutate.",
           "sortOrder": 3
+        },
+        {
+          "key": "admin-generate-timesheets",
+          "title": "Admin generates draft timesheets for a period",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/attendance",
+          "steps": [
+            "Open Attendance and the Timesheets area.",
+            "Pick a period and click Generate timesheets."
+          ],
+          "expected": "DRAFT timesheets + entries are created from the attendance rollup for in-scope employees (idempotent: re-running skips those already generated; employees with no attendance are skipped).",
+          "sortOrder": 4
+        },
+        {
+          "key": "admin-author-rotation",
+          "title": "Admin creates a shift-rotation template",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/roster",
+          "steps": [
+            "Open Roster > Rotations and click New rotation.",
+            "Build the work/off cycle (pick a shift for each work day), set name + anchor date, Save.",
+            "Apply the rotation to a roster."
+          ],
+          "expected": "A rotation template is created/edited/toggled/deleted and can be applied (previously the tab could only list + apply, so it was empty on a fresh tenant).",
+          "sortOrder": 5
         }
       ]
     },
@@ -612,6 +643,50 @@
           ],
           "expected": "Only sub-tree reviews are listed; an out-of-team review id returns 404. A manager can never rate their own review (SoD).",
           "sortOrder": 3
+        },
+        {
+          "key": "manager-review-lifecycle",
+          "title": "Manager submits, calibrates and signs off a review",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/performance",
+          "steps": [
+            "Open Performance > My Team Reviews after an employee has self-submitted.",
+            "Click Open on a review, enter a manager rating + comments, Submit.",
+            "Calibrate, then Sign off (calibrate/sign-off require the calibrate-ratings permission)."
+          ],
+          "expected": "The review advances SELF_SUBMITTED -> MANAGER_SUBMITTED -> CALIBRATED -> signed off, instead of stalling. Each control appears only for the right status + permission.",
+          "sortOrder": 4
+        },
+        {
+          "key": "ess-create-goal-and-checkin",
+          "title": "Employee creates a goal and checks in on a key result",
+          "kind": "HAPPY",
+          "loginLabels": [],
+          "openUrl": "https://app-staging.drifthr.com/performance",
+          "steps": [
+            "In the Employee Portal open Performance > My Goals and click New goal.",
+            "Add a key result to the goal.",
+            "Open the goal and Check in on the key result with a new value."
+          ],
+          "expected": "The goal and key result are created and the check-in updates progress (previously the tab was read-only).",
+          "sortOrder": 5
+        },
+        {
+          "key": "ess-peer-feedback",
+          "title": "Employee requests and gives peer feedback",
+          "kind": "HAPPY",
+          "loginLabels": [],
+          "openUrl": "https://app-staging.drifthr.com/performance",
+          "steps": [
+            "Open Performance > Feedback in the Employee Portal.",
+            "Request feedback from a colleague (picked from the directory).",
+            "Respond to a feedback request owed to you."
+          ],
+          "expected": "Feedback requests can be raised and answered from the portal (previously orphaned with only a count).",
+          "sortOrder": 6
         }
       ]
     },
@@ -671,6 +746,21 @@
           ],
           "expected": "Priya sees only her own issued (non-voided) letters with an integrity/tamper badge derived from the file hash; she can download the PDF. She cannot access another employee's letters.",
           "sortOrder": 3
+        },
+        {
+          "key": "fulfil-document-request",
+          "title": "HR fulfils an employee document request via Letters",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/documents",
+          "steps": [
+            "Open Documents > Requests.",
+            "On a pending request click \"Fulfil in Letters\"."
+          ],
+          "expected": "You land on the Letters issuance screen pre-targeted to that request, where the letter is generated (fulfilment lives in Letters, not a phantom action on the Documents tab).",
+          "sortOrder": 4
         }
       ]
     },
@@ -938,6 +1028,22 @@
           ],
           "expected": "The receipt uploads with the bill and is stored against that line; HR sees the 📎 receipt on the claim line in the admin Expenses screen, so 'return for missing receipt' is resolvable.",
           "sortOrder": 4
+        },
+        {
+          "key": "return-for-changes-loop",
+          "title": "Approver returns a claim for changes; employee fixes and resubmits",
+          "kind": "EDGE",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/expenses",
+          "steps": [
+            "As approver, open a submitted claim and choose Return for changes with a reason.",
+            "In the Employee Portal the claim is back to Draft with a \"Returned for changes\" banner.",
+            "Employee edits the bill and resubmits."
+          ],
+          "expected": "The claim flips SUBMITTED -> DRAFT with the reason shown; on resubmit a single fresh approval request is opened (no duplicate). Other approval types are unaffected.",
+          "sortOrder": 5
         }
       ]
     },

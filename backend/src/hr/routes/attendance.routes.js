@@ -55,8 +55,11 @@ router.post('/shifts/:id/assign', requirePermission('canManageAttendance'), with
 router.get('/assignments', requirePermission('canViewEmployees'), withEmployeeScope('canViewEmployees'), c.listAssignments);
 router.delete('/assignments/:id', requirePermission('canManageAttendance'), withEmployeeScope('canManageAttendance'), c.removeAssignment);
 
-/* Timesheets — read + state transitions. Submit is a self/manager action (the
-   owning employee may submit their own); approve/reject/lock require management. */
+/* Timesheets — admin-triggered producer + read + state transitions. Generate
+   materializes DRAFT timesheets for a period from the Attendance rollup (idempotent,
+   management-gated). Submit is a self/manager action (the owning employee may submit
+   their own); approve/reject/lock require management. */
+router.post('/timesheets/generate', requirePermission('canManageAttendance'), withEmployeeScope('canManageAttendance'), c.generateTimesheets);
 router.get('/timesheets', requirePermission('canViewEmployees'), withEmployeeScope('canViewEmployees'), c.listTimesheets);
 router.get('/timesheets/:id', requirePermission('canViewEmployees'), withEmployeeScope('canViewEmployees'), c.getTimesheet);
 router.post('/timesheets/:id/submit', requirePermission('canViewEmployees'), withEmployeeScope('canViewEmployees'), c.submitTimesheet);

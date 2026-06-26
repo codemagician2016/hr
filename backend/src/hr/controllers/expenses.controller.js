@@ -315,6 +315,14 @@ async function submit(req, res, next) {
       if (flip.count === 0) {
         const err = new Error('Claim changed concurrently'); err.code = 'DECISION_RACE'; throw err;
       }
+      // Returned-claim resubmit: supersede any stale OPEN request left PENDING by a
+      // prior REQUESTED_CHANGES return (which sent the claim back to DRAFT) WITHOUT
+      // firing onCancel — the claim is authoritatively SUBMITTED here, so it must not
+      // flip to CANCELLED. Prevents two open EXPENSE requests gating one claim.
+      await tx.approvalRequest.updateMany({
+        where: { businessId, module: 'EXPENSE', entityType: 'ExpenseClaim', entityId: claim.id, status: { in: ['PENDING', 'ESCALATED'] } },
+        data: { status: 'WITHDRAWN', completedAt: new Date(), slaDueAt: null },
+      });
       await engine.openRequest({
         businessId,
         module: 'EXPENSE',

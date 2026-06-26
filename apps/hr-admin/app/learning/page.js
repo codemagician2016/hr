@@ -29,6 +29,16 @@ export default function LearningCoursesPage() {
   const [showNew, setShowNew] = useState(false);
   const [draft, setDraft] = useState({ code: '', title: '', category: 'POSH', description: '' });
   const [saving, setSaving] = useState(false);
+  // Certificate recovery: a completed enrollment whose certificate failed to mint sits
+  // on "being prepared…" forever. This modal wires the documented recovery endpoint
+  // POST /enrollments/:id/reissue-cert (server gates on canManageLearning) so an admin
+  // can re-mint it. We can't list enrollments here (this page lists courses), so the
+  // admin pastes the stuck enrollment id; the server validates + returns a clear 409
+  // ("No certificate has been issued for this enrollment") which we surface verbatim.
+  const [reissue, setReissue] = useState(null); // { enrollmentId, reason } | null
+  const [reissuing, setReissuing] = useState(false);
+  const [reissueErr, setReissueErr] = useState('');
+  const [reissueOk, setReissueOk] = useState('');
 
   const canManage = hasPermission(perms, 'canManageLearning');
 
@@ -48,6 +58,23 @@ export default function LearningCoursesPage() {
   }, [status, page, pageSize]);
 
   useEffect(() => { load(); }, [load]);
+
+  async function reissueCert() {
+    const id = String(reissue?.enrollmentId || '').trim();
+    if (!id) { setReissueErr('Enrollment id is required.'); return; }
+    setReissuing(true);
+    setReissueErr('');
+    setReissueOk('');
+    try {
+      const r = await post(`/api/hr/learning/enrollments/${id}/reissue-cert`, { reason: reissue.reason || undefined });
+      setReissueOk(r?.referenceNo ? `Certificate re-issued (${r.referenceNo}).` : 'Certificate re-issued.');
+      await load();
+    } catch (e) {
+      setReissueErr(e.data?.message || e.message || 'Failed to re-issue certificate.');
+    } finally {
+      setReissuing(false);
+    }
+  }
 
   async function createCourse() {
     if (!draft.code.trim() || !draft.title.trim()) { setError('Code and title are required.'); return; }
@@ -81,6 +108,9 @@ export default function LearningCoursesPage() {
     } },
     { key: 'actions', header: '', render: (c) => (
       <div className="flex justify-end gap-1.5">
+        {canManage ? (
+          <ActionButton onClick={() => { setReissueErr(''); setReissueOk(''); setReissue({ enrollmentId: '', reason: '' }); }}>Reissue cert</ActionButton>
+        ) : null}
         <ActionButton onClick={() => router.push(`/learning/${c.id}`)}>{canManage ? 'Edit' : 'View'}</ActionButton>
       </div>
     ) },
@@ -153,6 +183,36 @@ export default function LearningCoursesPage() {
           <ModalActions>
             <button className="rounded-md px-3 py-1.5 text-sm text-gray-600" onClick={() => setShowNew(false)}>Cancel</button>
             <PrimaryButton onClick={createCourse} loading={saving}>Create &amp; build</PrimaryButton>
+          </ModalActions>
+        </Modal>
+      ) : null}
+
+      {canManage && reissue ? (
+        <Modal title="Reissue certificate" onClose={() => setReissue(null)} size="sm">
+          <div className="space-y-3">
+            <p className="text-sm text-gray-600">
+              When a completed learner is stuck on &ldquo;certificate being prepared…&rdquo;, the original mint failed.
+              Paste the stuck enrollment id to re-mint the certificate into the learner&rsquo;s document vault.
+            </p>
+            <TextInput
+              label="Enrollment id"
+              value={reissue.enrollmentId}
+              onChange={(v) => setReissue({ ...reissue, enrollmentId: v })}
+              required
+              hint="The enrollment that completed but is missing its certificate."
+            />
+            <TextInput
+              label="Reason (optional)"
+              value={reissue.reason}
+              onChange={(v) => setReissue({ ...reissue, reason: v })}
+              hint="Logged on the reissued certificate for the audit trail."
+            />
+            {reissueErr ? <ErrorBanner message={reissueErr} /> : null}
+            {reissueOk ? <p className="text-sm font-medium text-emerald-700">{reissueOk}</p> : null}
+          </div>
+          <ModalActions>
+            <button className="rounded-md px-3 py-1.5 text-sm text-gray-600" onClick={() => setReissue(null)}>Close</button>
+            <PrimaryButton onClick={reissueCert} loading={reissuing}>Reissue certificate</PrimaryButton>
           </ModalActions>
         </Modal>
       ) : null}

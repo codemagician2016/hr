@@ -5,7 +5,7 @@
  * semantics. Each consuming module registers a callback bundle keyed by its
  * WorkflowModule; the engine fires the matching callback at the right transition.
  *
- *   register(module, { onApprove, onReject, onCancel })
+ *   register(module, { onApprove, onReject, onCancel, onChangesRequested? })
  *   get(module) -> bundle | null
  *
  * Callback contract — each is `(approvalRequest, tx) => Promise<void>`, called
@@ -15,6 +15,9 @@
  *   onApprove(req, tx)  fired when the whole chain completes APPROVED.
  *   onReject(req, tx)   fired when any level REJECTS (terminal).
  *   onCancel(req, tx)   fired on requester cancel/withdraw (release holds).
+ *   onChangesRequested(req, tx)  OPTIONAL — fired on a REQUESTED_CHANGES decision so a
+ *     module can hand the entity back to the requester for edits (expense only today).
+ *     Modules that don't register it are wholly unaffected — the engine no-ops it.
  *
  * Leave + expense are wired here in slice 10c (NOT 10a/10b). Registering is
  * idempotent + side-effect-free at module load. A module with no registered
@@ -30,6 +33,9 @@ function register(module, bundle) {
     onApprove: (bundle && bundle.onApprove) || null,
     onReject: (bundle && bundle.onReject) || null,
     onCancel: (bundle && bundle.onCancel) || null,
+    // OPTIONAL hook — fired by the engine on a REQUESTED_CHANGES decision. Modules
+    // that don't register it are unaffected (engine.fire no-ops a missing hook).
+    onChangesRequested: (bundle && bundle.onChangesRequested) || null,
   });
   return registry.get(module);
 }

@@ -274,6 +274,16 @@ function buildPolicySnapshot(policy, evaluatedLines) {
 
 // ── open the F10 approval request for a claim (EXPENSE module) ──────────────
 async function openClaimApproval(tx, { businessId, claim }) {
+  // Returned-claim resubmit: a REQUESTED_CHANGES return sends the claim back to DRAFT
+  // (consumers.expense.onChangesRequested) but leaves its engine request PENDING. When
+  // the employee fixes & resubmits we MUST close that stale request, else two open
+  // EXPENSE requests would gate one claim (duplicate approver inbox + ambiguous
+  // findOpenApprovalRequest). Supersede it WITHOUT firing onCancel — the claim is
+  // already authoritatively SUBMITTED here, so we must not flip it to CANCELLED.
+  await tx.approvalRequest.updateMany({
+    where: { businessId, module: 'EXPENSE', entityType: 'ExpenseClaim', entityId: claim.id, status: { in: ['PENDING', 'ESCALATED'] } },
+    data: { status: 'WITHDRAWN', completedAt: new Date(), slaDueAt: null },
+  });
   const result = await engine.openRequest({
     businessId,
     module: 'EXPENSE',

@@ -107,6 +107,128 @@ function CreateCycleModal({ scales, onClose, onCreated }) {
   );
 }
 
+// ── Review-detail modal (manager rating · calibrate · sign-off) ───────────────
+// The reviewer's action surface for a single team review. Which controls render
+// is gated on BOTH the instance status (mirrors the backend state machine) and the
+// caller's permission (calibrate/sign-off require canCalibrateRatings — the exact
+// key the routes enforce: POST /reviews/:id/calibrate|sign-off → requirePermission
+// ('canCalibrateRatings')). The server is the real boundary; this gating only keeps
+// the operator from posting a transition that would 403/409.
+function ReviewDetailModal({ review, canCalibrate, onClose, onActed }) {
+  // managerRating + managerComments → POST /reviews/:id/manager (from SELF_SUBMITTED).
+  const [managerRating, setManagerRating] = useState(review.managerRating ?? '');
+  const [managerComments, setManagerComments] = useState(review.managerComments || '');
+  // calibratedRating + reason → POST /reviews/:id/calibrate (from MANAGER_SUBMITTED/CALIBRATED).
+  const [calibratedRating, setCalibratedRating] = useState(review.calibratedRating ?? '');
+  const [calibrationReason, setCalibrationReason] = useState('');
+  // finalRating → POST /reviews/:id/sign-off (from CALIBRATED). Optional; the server
+  // defaults it to calibratedRating ?? managerRating when omitted.
+  const [finalRating, setFinalRating] = useState(review.finalRating ?? '');
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+
+  const status = review.status;
+  const canSubmitManager = status === 'SELF_SUBMITTED' || status === 'NOT_STARTED';
+  const canDoCalibrate = canCalibrate && (status === 'MANAGER_SUBMITTED' || status === 'CALIBRATED');
+  const canSignOff = canCalibrate && status === 'CALIBRATED';
+
+  // POST a transition; body is built per-action to match the controller contract.
+  async function act(action, body) {
+    setBusy(action); setError('');
+    try {
+      await post(`/api/hr/performance/reviews/${review.id}/${action}`, body);
+      onActed();
+    } catch (e) { setError(e.data?.message || e.message || `Failed to ${action}.`); }
+    finally { setBusy(''); }
+  }
+
+  const numOrUndef = (v) => (v === '' || v === null || v === undefined ? undefined : Number(v));
+
+  return (
+    <Modal title="Review detail" onClose={onClose}>
+      <div className="space-y-4">
+        {error && <ErrorBanner message={error} />}
+
+        <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+          <div><span className="text-gray-500">Employee</span><div className="font-medium text-gray-900">{review.employee ? employeeLabel(review.employee) : review.employeeId}</div></div>
+          <div><span className="text-gray-500">Status</span><div><StatusBadge status={review.status} /></div></div>
+          <div><span className="text-gray-500">Self rating</span><div className="font-medium text-gray-900">{review.selfRating ?? '—'}</div></div>
+          <div><span className="text-gray-500">Manager rating</span><div className="font-medium text-gray-900">{review.managerRating ?? '—'}</div></div>
+        </div>
+        {review.selfComments && (
+          <div className="text-sm">
+            <span className="text-gray-500">Self comments</span>
+            <p className="mt-0.5 text-gray-800 whitespace-pre-wrap rounded-lg bg-gray-50 px-3 py-2">{review.selfComments}</p>
+          </div>
+        )}
+
+        {/* Manager rating — POST /reviews/:id/manager (assigned reviewer or HR) */}
+        {canSubmitManager && (
+          <section className="border-t border-gray-100 pt-3 space-y-2">
+            <h3 className="text-sm font-semibold text-gray-900">Submit manager review</h3>
+            <TextInput label="Manager rating" type="number" min={1} max={5} step={0.5}
+              value={managerRating} onChange={setManagerRating} />
+            <label className="block text-sm">
+              <span className="text-gray-700 font-medium">Manager comments</span>
+              <textarea value={managerComments} onChange={(e) => setManagerComments(e.target.value)} rows={3}
+                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+            </label>
+            <ModalActions>
+              <PrimaryButton type="button" loading={busy === 'manager'}
+                onClick={() => act('manager', { managerRating: numOrUndef(managerRating), managerComments: managerComments || undefined })}>
+                Submit manager rating
+              </PrimaryButton>
+            </ModalActions>
+          </section>
+        )}
+
+        {/* Calibrate — POST /reviews/:id/calibrate (canCalibrateRatings) */}
+        {canDoCalibrate && (
+          <section className="border-t border-gray-100 pt-3 space-y-2">
+            <h3 className="text-sm font-semibold text-gray-900">Calibrate</h3>
+            <TextInput label="Calibrated rating" type="number" min={1} max={5} step={0.5}
+              value={calibratedRating} onChange={setCalibratedRating} />
+            <TextInput label="Reason" value={calibrationReason} onChange={setCalibrationReason}
+              hint="Recorded on the calibration ledger." />
+            <ModalActions>
+              <PrimaryButton type="button" loading={busy === 'calibrate'}
+                onClick={() => act('calibrate', { calibratedRating: numOrUndef(calibratedRating), reason: calibrationReason || undefined })}>
+                Calibrate
+              </PrimaryButton>
+            </ModalActions>
+          </section>
+        )}
+
+        {/* Sign-off — POST /reviews/:id/sign-off (canCalibrateRatings). Locks the
+            final rating; the org-wide cycle Release is what publishes it. */}
+        {canSignOff && (
+          <section className="border-t border-gray-100 pt-3 space-y-2">
+            <h3 className="text-sm font-semibold text-gray-900">Sign off</h3>
+            <TextInput label="Final rating" type="number" min={1} max={5} step={0.5}
+              value={finalRating} onChange={setFinalRating}
+              hint="Optional — defaults to the calibrated (or manager) rating." />
+            <p className="text-xs text-gray-400">Sign-off locks the rating; it stays hidden from the employee until you Release the cycle.</p>
+            <ModalActions>
+              <PrimaryButton type="button" loading={busy === 'sign-off'}
+                onClick={() => act('sign-off', { finalRating: numOrUndef(finalRating) })}>
+                Sign off
+              </PrimaryButton>
+            </ModalActions>
+          </section>
+        )}
+
+        {!canSubmitManager && !canDoCalibrate && !canSignOff && (
+          <p className="border-t border-gray-100 pt-3 text-sm text-gray-500">No actions are available for this review at its current status{canCalibrate ? '.' : ' with your permissions.'}</p>
+        )}
+
+        <ModalActions>
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50">Close</button>
+        </ModalActions>
+      </div>
+    </Modal>
+  );
+}
+
 // ── Setup tab: rating scales + review templates ──────────────────────────────
 function SetupTab({ canConfig }) {
   const [scales, setScales] = useState(null);
@@ -245,8 +367,10 @@ export default function PerformancePage() {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState('');
   const [showNew, setShowNew] = useState(false);
+  const [openReview, setOpenReview] = useState(null);
 
   const canConfig = hasPermission(perms, 'canManagePerformanceCycle');
+  const canCalibrate = hasPermission(perms, 'canCalibrateRatings');
 
   const loadCycles = useCallback(async () => {
     setLoading(true); setError('');
@@ -324,6 +448,13 @@ export default function PerformancePage() {
     { key: 'manager', header: 'Manager', render: (r) => (r.managerRating ?? '—') },
     // finalRating is ABSENT pre-release (server omits it) — shown only when present.
     { key: 'final', header: 'Final', render: (r) => (r.finalRating ?? (r.releasedAt ? '—' : 'pending release')) },
+    {
+      key: 'actions', header: '', render: (r) => (
+        <div className="flex items-center justify-end">
+          <ActionButton tone="neutral" onClick={() => setOpenReview(r)}>Open</ActionButton>
+        </div>
+      ),
+    },
   ];
 
   return (
@@ -376,6 +507,16 @@ export default function PerformancePage() {
           scales={scales}
           onClose={() => setShowNew(false)}
           onCreated={() => { setShowNew(false); loadCycles(); }}
+        />
+      )}
+
+      {openReview && (
+        <ReviewDetailModal
+          review={openReview}
+          canCalibrate={canCalibrate}
+          onClose={() => setOpenReview(null)}
+          // Refresh the queue after a transition so status/ratings reflect the change.
+          onActed={() => { setOpenReview(null); loadReviews(); }}
         />
       )}
     </div>

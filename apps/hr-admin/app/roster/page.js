@@ -15,8 +15,8 @@
 // hidden from derive/pay until Publish (the muster "exhibit").
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Spinner, ErrorBanner, PrimaryButton } from '@hr/ui';
-import { get, post, put } from '@/lib/api';
+import { Spinner, ErrorBanner, PrimaryButton, Modal, ModalActions, TextInput, DateField } from '@hr/ui';
+import { get, post, put, patch, del } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, employeeLabel } from '@/lib/ui';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
 import ModuleGuide from '@/components/ModuleGuide';
@@ -116,6 +116,10 @@ export default function RosterPage() {
   const [rotations, setRotations] = useState([]);
   const [rotLoading, setRotLoading] = useState(false);
   const [applyResult, setApplyResult] = useState(null);
+  // Rotation-template editor: `editor` holds the draft for the New/Edit modal.
+  const [editor, setEditor] = useState(null);
+  const [editorErr, setEditorErr] = useState('');
+  const [saving, setSaving] = useState(false);
   const loadRotations = useCallback(() => {
     setRotLoading(true);
     get('/api/hr/attendance/rotations')
@@ -123,7 +127,9 @@ export default function RosterPage() {
       .catch((e) => setError(e.message))
       .finally(() => setRotLoading(false));
   }, []);
-  useEffect(() => { if (tab === 'rotations') loadRotations(); }, [tab, loadRotations]);
+  // The editor's WORK slots reference active shift patterns; load them when the
+  // Rotations tab is shown so the slot picker has options to choose from.
+  useEffect(() => { if (tab === 'rotations') { loadRotations(); loadShifts(); } }, [tab, loadRotations, loadShifts]);
 
   async function applyRotation(id) {
     setError(''); setNotice(''); setApplyResult(null);
@@ -134,13 +140,98 @@ export default function RosterPage() {
     } catch (e) { setError(e.message); }
   }
 
+  // Open the editor for a new template, or seed it from an existing row.
+  function openNewRotation() {
+    setEditorErr('');
+    setEditor({ id: null, code: '', name: '', anchorDate: todayISO(), slots: [{ kind: 'WORK', shiftPatternId: '' }] });
+  }
+  function openEditRotation(r) {
+    setEditorErr('');
+    const slots = (r.slotsJson || []).map((s) => ({ kind: s.kind === 'OFF' ? 'OFF' : 'WORK', shiftPatternId: s.shiftPatternId || '' }));
+    setEditor({
+      id: r.id, code: r.code || '', name: r.name || '',
+      anchorDate: r.anchorDate ? String(r.anchorDate).slice(0, 10) : todayISO(),
+      slots: slots.length ? slots : [{ kind: 'WORK', shiftPatternId: '' }],
+    });
+  }
+  function setSlot(i, patch) {
+    setEditor((ed) => ({ ...ed, slots: ed.slots.map((s, j) => (j === i ? { ...s, ...patch } : s)) }));
+  }
+  function addSlot(kind) {
+    setEditor((ed) => ({ ...ed, slots: [...ed.slots, { kind, shiftPatternId: '' }] }));
+  }
+  function removeSlot(i) {
+    setEditor((ed) => ({ ...ed, slots: ed.slots.filter((_, j) => j !== i) }));
+  }
+
+  // Build the slotsJson the backend expects: each slot is { kind:'WORK'|'OFF', shiftPatternId? }.
+  function buildSlotsJson(ed) {
+    return ed.slots.map((s) => (s.kind === 'WORK'
+      ? { kind: 'WORK', shiftPatternId: s.shiftPatternId || null }
+      : { kind: 'OFF' }));
+  }
+
+  async function saveRotation() {
+    if (!editor) return;
+    setEditorErr('');
+    if (!editor.name.trim()) { setEditorErr('Name is required.'); return; }
+    if (!editor.id && !editor.code.trim()) { setEditorErr('Code is required.'); return; }
+    if (!editor.anchorDate) { setEditorErr('Anchor date is required.'); return; }
+    if (!editor.slots.length) { setEditorErr('Add at least one day to the cycle.'); return; }
+    if (editor.slots.some((s) => s.kind === 'WORK' && !s.shiftPatternId)) { setEditorErr('Every WORK day needs a shift.'); return; }
+    const slotsJson = buildSlotsJson(editor);
+    setSaving(true);
+    try {
+      if (editor.id) {
+        await patch(`/api/hr/attendance/rotations/${editor.id}`, {
+          name: editor.name.trim(), anchorDate: editor.anchorDate, slotsJson, cycleLength: slotsJson.length,
+        });
+        setNotice('Rotation updated.');
+      } else {
+        await post('/api/hr/attendance/rotations', {
+          code: editor.code.trim(), name: editor.name.trim(), anchorDate: editor.anchorDate, slotsJson, cycleLength: slotsJson.length,
+        });
+        setNotice('Rotation created.');
+      }
+      setEditor(null);
+      loadRotations();
+    } catch (e) { setEditorErr(e.message); } finally { setSaving(false); }
+  }
+
+  async function toggleRotation(r) {
+    setError(''); setNotice('');
+    try {
+      await patch(`/api/hr/attendance/rotations/${r.id}`, { isActive: !r.isActive });
+      setNotice(`Rotation ${r.isActive ? 'deactivated' : 'activated'}.`);
+      loadRotations();
+    } catch (e) { setError(e.message); }
+  }
+  async function deleteRotation(r) {
+    setError(''); setNotice('');
+    if (typeof window !== 'undefined' && !window.confirm(`Delete rotation "${r.name}"? This cannot be undone.`)) return;
+    try {
+      await del(`/api/hr/attendance/rotations/${r.id}`);
+      setNotice('Rotation deleted.');
+      loadRotations();
+    } catch (e) { setError(e.message); }
+  }
+
   const rotationCols = useMemo(() => [
     { key: 'code', header: 'Code' },
     { key: 'name', header: 'Name' },
     { key: 'cycleLength', header: 'Cycle', render: (r) => `${r.cycleLength} days` },
     { key: 'anchorDate', header: 'Anchor', render: (r) => fmtDate(r.anchorDate) },
     { key: 'isActive', header: 'Active', render: (r) => <StatusBadge status={r.isActive ? 'ACTIVE' : 'INACTIVE'} /> },
-    { key: 'actions', header: '', render: (r) => (canManage ? <ActionButton onClick={() => applyRotation(r.id)}>Apply</ActionButton> : null) },
+    {
+      key: 'actions', header: '', render: (r) => (canManage ? (
+        <div className="flex gap-2">
+          <ActionButton onClick={() => applyRotation(r.id)}>Apply</ActionButton>
+          <ActionButton onClick={() => openEditRotation(r)}>Edit</ActionButton>
+          <ActionButton onClick={() => toggleRotation(r)}>{r.isActive ? 'Deactivate' : 'Activate'}</ActionButton>
+          <ActionButton tone="danger" onClick={() => deleteRotation(r)}>Delete</ActionButton>
+        </div>
+      ) : null),
+    },
   ], [canManage, from, to]);
 
   // ── Swaps ──
@@ -264,7 +355,10 @@ export default function RosterPage() {
 
       {tab === 'rotations' && (
         <div className="space-y-3">
-          <div className="text-xs text-gray-500">Apply a rotation ring to the in-scope population for the grid window ({from} → {to}). Generates DRAFT cells; resolve violations (rest &lt;11h, night-consent) before publishing.</div>
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-xs text-gray-500">Apply a rotation ring to the in-scope population for the grid window ({from} → {to}). Generates DRAFT cells; resolve violations (rest &lt;11h, night-consent) before publishing.</div>
+            {canManage ? <PrimaryButton onClick={openNewRotation}>New rotation</PrimaryButton> : null}
+          </div>
           <DataTable columns={rotationCols} rows={rotations} loading={rotLoading} emptyText="No rotation templates yet." rowKey={(r) => r.id} />
           {applyResult ? (
             <div className="rounded border p-3 text-sm">
@@ -278,6 +372,68 @@ export default function RosterPage() {
           ) : null}
         </div>
       )}
+
+      {canManage && editor ? (
+        <Modal title={editor.id ? 'Edit rotation' : 'New rotation'} onClose={() => setEditor(null)} size="lg">
+          <div className="space-y-3">
+            <TextInput
+              label="Code"
+              value={editor.code}
+              onChange={(v) => setEditor({ ...editor, code: v })}
+              required={!editor.id}
+              hint={editor.id ? 'Code is fixed after creation.' : 'A short, unique code, e.g. 4ON-2OFF.'}
+              maxLength={editor.id ? undefined : 32}
+            />
+            <TextInput label="Name" value={editor.name} onChange={(v) => setEditor({ ...editor, name: v })} required hint="Display name, e.g. 4-on / 2-off support rotation." />
+            <DateField label="Anchor date" value={editor.anchorDate} onChange={(v) => setEditor({ ...editor, anchorDate: v })} required hint="Day 1 of the cycle — phase aligns to this date." />
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Cycle pattern ({editor.slots.length} day{editor.slots.length === 1 ? '' : 's'})</label>
+              <p className="text-xs text-gray-500 mb-2">The repeating ring of work / off days. A WORK day needs a shift; an OFF day is a weekly off.</p>
+              <div className="space-y-2">
+                {editor.slots.map((s, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400 w-10">Day {i + 1}</span>
+                    <select
+                      className="rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                      value={s.kind}
+                      onChange={(e) => setSlot(i, e.target.value === 'OFF' ? { kind: 'OFF', shiftPatternId: '' } : { kind: 'WORK' })}
+                    >
+                      <option value="WORK">Work</option>
+                      <option value="OFF">Off</option>
+                    </select>
+                    {s.kind === 'WORK' ? (
+                      <select
+                        className="flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                        value={s.shiftPatternId}
+                        onChange={(e) => setSlot(i, { shiftPatternId: e.target.value })}
+                      >
+                        <option value="">Select shift…</option>
+                        {shifts.map((sp) => <option key={sp.id} value={sp.id}>{sp.code}{sp.name ? ` — ${sp.name}` : ''}</option>)}
+                      </select>
+                    ) : <span className="flex-1 text-sm text-gray-400">Weekly off</span>}
+                    <button
+                      type="button"
+                      className="rounded-md px-2 py-1 text-sm text-red-600 disabled:text-gray-300"
+                      onClick={() => removeSlot(i)}
+                      disabled={editor.slots.length <= 1}
+                      title="Remove this day"
+                    >×</button>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2 mt-2">
+                <ActionButton onClick={() => addSlot('WORK')}>+ Work day</ActionButton>
+                <ActionButton onClick={() => addSlot('OFF')}>+ Off day</ActionButton>
+              </div>
+            </div>
+            {editorErr ? <ErrorBanner message={editorErr} onDismiss={() => setEditorErr('')} /> : null}
+          </div>
+          <ModalActions>
+            <button className="rounded-md px-3 py-1.5 text-sm text-gray-600" onClick={() => setEditor(null)}>Cancel</button>
+            <PrimaryButton onClick={saveRotation} loading={saving}>{editor.id ? 'Save changes' : 'Create rotation'}</PrimaryButton>
+          </ModalActions>
+        </Modal>
+      ) : null}
 
       {tab === 'swaps' && (
         <div className="space-y-3">

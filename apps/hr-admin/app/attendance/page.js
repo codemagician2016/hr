@@ -1122,7 +1122,7 @@ function HolidaysTab({ canManage }) {
 
 // ─── Approval lists (timesheets + regularizations) ──────────────────────────
 
-function ApprovalListTab({ endpoint, idField, pending, columnsFor, emptyText, noun }) {
+function ApprovalListTab({ endpoint, idField, pending, columnsFor, emptyText, noun, header }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -1189,6 +1189,7 @@ function ApprovalListTab({ endpoint, idField, pending, columnsFor, emptyText, no
   return (
     <div>
       {error && <ErrorBanner message={error} />}
+      {typeof header === 'function' ? header({ reload: load }) : header}
       <DataTable
         columns={columns}
         rows={items}
@@ -1205,6 +1206,66 @@ function ApprovalListTab({ endpoint, idField, pending, columnsFor, emptyText, no
         onPageChange={setPage}
         onPageSizeChange={(ps) => { setPage(1); setPageSize(ps); }}
       />
+    </div>
+  );
+}
+
+// ─── Generate timesheets (admin-triggered producer) ──────────────────────────
+
+// Header block for the Timesheets tab: picks a period and POSTs
+// /timesheets/generate, which materializes DRAFT timesheets from the Attendance
+// rollup (idempotent — already-generated employees are skipped). On success it
+// reloads the list so the new DRAFTs appear. Only rendered for canManageAttendance.
+function GenerateTimesheets({ canManage, onGenerated }) {
+  const monthStart = useMemo(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
+  }, []);
+  const [from, setFrom] = useState(monthStart);
+  const [to, setTo] = useState(todayISO());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState(null);
+
+  if (!canManage) return null;
+
+  async function generate() {
+    setBusy(true);
+    setError('');
+    setResult(null);
+    try {
+      const res = await post('/api/hr/attendance/timesheets/generate', { periodStart: from, periodEnd: to });
+      setResult(res);
+      if (typeof onGenerated === 'function') onGenerated();
+    } catch (e) {
+      setError(e.data?.message || e.message || 'Failed to generate timesheets.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-5 mb-5">
+      <h3 className="text-sm font-semibold text-gray-900 mb-1">Generate timesheets</h3>
+      <p className="text-xs text-gray-500 mb-4">
+        Builds DRAFT timesheets for everyone in scope from the derived attendance rollup for the chosen period.
+        Re-running is safe — employees who already have a timesheet for the period are skipped.
+      </p>
+      {error && <div className="mb-3"><ErrorBanner message={error} /></div>}
+      <div className="flex flex-wrap items-end gap-3">
+        <DateField label="Period start" value={from} onChange={(v) => { setFrom(v); setResult(null); }} required />
+        <DateField label="Period end" value={to} onChange={(v) => { setTo(v); setResult(null); }} required />
+        <PrimaryButton onClick={generate} loading={busy} disabled={!from || !to}>
+          Generate timesheets
+        </PrimaryButton>
+      </div>
+      {result && (
+        <p className="mt-4 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+          Generated <span className="font-medium tabular-nums">{result.created ?? 0}</span> DRAFT timesheet{(result.created ?? 0) === 1 ? '' : 's'}
+          {' '}({result.entriesWritten ?? 0} day entr{(result.entriesWritten ?? 0) === 1 ? 'y' : 'ies'})
+          {result.skipped ? `, ${result.skipped} skipped (already present or no attendance)` : ''} for {formatAdminDate(result.periodStart || from)} – {formatAdminDate(result.periodEnd || to)}.
+        </p>
+      )}
     </div>
   );
 }
@@ -1430,6 +1491,7 @@ export default function AttendancePage() {
           pending="SUBMITTED"
           noun="timesheets"
           emptyText="No timesheets awaiting action."
+          header={({ reload }) => <GenerateTimesheets canManage={canManage} onGenerated={reload} />}
           columnsFor={() => [
             { key: 'employee', header: 'Employee', render: (r) => <span className="font-medium text-gray-900">{employeeLabel(r)}</span> },
             { key: 'period', header: 'Period', render: (r) => `${formatAdminDate(r.periodStart || r.weekStart)} – ${formatAdminDate(r.periodEnd || r.weekEnd)}` },

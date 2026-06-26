@@ -13,6 +13,9 @@
  *   onApprove(req, tx) — SUBMITTED → APPROVED, stamp decidedAt/decidedBy.
  *   onReject(req, tx)  — SUBMITTED → REJECTED, stamp decidedAt/decidedBy.
  *   onCancel(req, tx)  — requester cancel of an open claim → CANCELLED.
+ *   onChangesRequested(req, tx) — approver returns the claim: SUBMITTED → DRAFT +
+ *     store the return reason, so the employee can edit + resubmit (ESS controls
+ *     only show for a DRAFT). OPTIONAL engine hook — other modules don't register it.
  *
  * Each flip is a conditional `updateMany(where status='SUBMITTED')` so a duplicate/
  * re-fired hook is a safe no-op (the row is no longer SUBMITTED).
@@ -64,7 +67,23 @@ async function onCancel(approvalRequest, tx) {
   });
 }
 
-const bundle = { onApprove, onReject, onCancel };
+// onChangesRequested — an approver returned the claim for edits. SUBMITTED → DRAFT so
+// the ESS edit/resubmit controls light up again, and we store the return reason (the
+// engine hands it to us on approvalRequest._changesReason) on rejectReason — the field
+// the ESS already surfaces — so the employee can see what to fix. Conditional updateMany
+// (where status='SUBMITTED') keeps a re-fired hook a safe no-op.
+async function onChangesRequested(approvalRequest, tx) {
+  const claim = await loadClaim(tx, approvalRequest);
+  if (!claim || claim.status !== 'SUBMITTED') return;
+  const returnReason = approvalRequest._changesReason || null;
+  await tx.expenseClaim.updateMany({
+    where: { id: claim.id, status: 'SUBMITTED' },
+    data: { status: 'DRAFT', rejectReason: returnReason, decidedAt: new Date(), decidedBy: approvalRequest.decidedBy || null },
+  });
+  notify.fanOutApprovalDecided({ businessId: approvalRequest.businessId, request: approvalRequest, outcome: 'CHANGES_REQUESTED' }).catch(() => {});
+}
+
+const bundle = { onApprove, onReject, onCancel, onChangesRequested };
 
 function registerExpenseConsumer() {
   return consumers.register('EXPENSE', bundle);

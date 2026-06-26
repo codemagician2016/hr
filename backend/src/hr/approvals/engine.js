@@ -347,6 +347,13 @@ async function recordDecision(input, tx) {
       });
       if (flip.count === 0) throw err('CONCURRENT_UPDATE', 'Approval request changed concurrently', 409);
       const fresh = await t.approvalRequest.findUnique({ where: { id: request.id } });
+      // OPTIONAL consumer hook (backward compatible): a module may want to hand the
+      // request back to the requester for editing (e.g. expense: SUBMITTED → DRAFT so
+      // the ESS edit/resubmit controls light up). Modules WITHOUT this hook are wholly
+      // unaffected — the request simply stays PENDING as before. We carry the actor's
+      // reason in-memory on the request (NOT persisted to the engine row) so the hook
+      // can store it as a return reason; fired INSIDE the engine tx like every other hook.
+      await consumers.fire(request.module, 'onChangesRequested', { ...fresh, _changesReason: comment || null }, t);
       return { approvalRequest: fresh, terminal: null, levelComplete: false, changesRequested: true };
     }
 

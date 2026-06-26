@@ -635,8 +635,156 @@ async function removeAssignment(req, res, next) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Timesheets (read + state transitions)                              */
+/* Timesheets (producer + read + state transitions)                   */
 /* ------------------------------------------------------------------ */
+
+// Worked/overtime minutes on the Attendance rollup are Ints; Timesheet/Entry hours
+// are Decimal(.,2). Convert to a 2-dp hours number (Prisma accepts a JS number for
+// a Decimal column). null/undefined minutes → 0.
+function minutesToHours(min) {
+  const n = Number(min || 0);
+  return Math.round((n / 60) * 100) / 100;
+}
+
+// Presence statuses whose worked minutes count as a timesheet day-entry. ABSENT /
+// ON_LEAVE / WEEKLY_OFF / HOLIDAY contribute no hours (no entry row written) but the
+// employee still gets a (possibly empty) DRAFT timesheet for the period.
+const TIMESHEET_PRESENT_STATUSES = new Set([
+  'PRESENT', 'HALF_DAY', 'WORK_FROM_HOME', 'ON_DUTY', 'HOLIDAY_WORKED', 'MISSING_PUNCH',
+]);
+
+// POST /timesheets/generate { periodStart, periodEnd, employeeId? } —
+// admin-TRIGGERED (NOT a cron) producer that materializes DRAFT Timesheets for the
+// period from the existing Attendance rollup. Idempotent: an employee that already
+// has a Timesheet for (businessId, periodStart) is skipped (the @@unique key). For
+// each in-scope employee with Attendance rows in [periodStart, periodEnd] we sum
+// worked/overtime minutes → hours, write one DRAFT Timesheet + a TimesheetEntry per
+// present day. Tenant-walled by businessId and filtered to req.scope; gated on
+// canManageAttendance by the route. canManageAttendance.
+async function generateTimesheets(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const { employeeId } = req.body;
+    if (!req.body.periodStart || !req.body.periodEnd) {
+      return res.status(400).json({ message: 'periodStart and periodEnd are required' });
+    }
+    const periodStart = utcDay(req.body.periodStart);
+    const periodEnd = utcDay(req.body.periodEnd);
+    if (Number.isNaN(periodStart.getTime()) || Number.isNaN(periodEnd.getTime())) {
+      return res.status(400).json({ message: 'periodStart and periodEnd must be valid dates' });
+    }
+    if (periodEnd.getTime() < periodStart.getTime()) {
+      return res.status(400).json({ message: 'periodEnd must be on or after periodStart' });
+    }
+
+    // Resolve the in-scope target employees (mirrors recomputeRange): a single
+    // client-supplied employeeId is only honored when in scope (→ 404 if not);
+    // otherwise every employee in the actor's sub-tree.
+    let targets;
+    if (employeeId) {
+      if (!scopeAllows(req.scope, employeeId)) return res.status(404).json({ message: 'Employee not found' });
+      targets = [employeeId];
+    } else {
+      const where = { businessId, deletedAt: null, ...scopeWhere(req.scope, 'id') };
+      const emps = await prisma.employee.findMany({ where, select: { id: true } });
+      targets = emps.map((e) => e.id);
+    }
+
+    let created = 0;
+    let skipped = 0;
+    let entriesWritten = 0;
+    const createdIds = [];
+
+    for (const empId of targets) {
+      // Idempotency: skip an employee that already has a timesheet for this period
+      // start (matches the @@unique([businessId, employeeId, periodStart])).
+      const existing = await prisma.timesheet.findFirst({
+        where: { businessId, employeeId: empId, periodStart },
+        select: { id: true },
+      });
+      if (existing) { skipped += 1; continue; }
+
+      // Pull the daily Attendance rollup for the period (tenant- + employee-scoped).
+      const days = await prisma.attendance.findMany({
+        where: { businessId, employeeId: empId, date: { gte: periodStart, lte: periodEnd } },
+        select: { date: true, status: true, workedMinutes: true, overtimeMinutes: true },
+        orderBy: { date: 'asc' },
+      });
+      // No attendance recorded for this employee in the period → nothing to produce
+      // (don't create empty shells for people with zero rows).
+      if (days.length === 0) { skipped += 1; continue; }
+
+      const entries = [];
+      let totalHours = 0;
+      let overtimeHours = 0;
+      for (const d of days) {
+        const hrs = minutesToHours(d.workedMinutes);
+        const ot = minutesToHours(d.overtimeMinutes);
+        totalHours += hrs;
+        overtimeHours += ot;
+        // Only days with worked time (present-ish) become entry rows; absence/leave
+        // days are reflected in the rollup but carry no billable timesheet line.
+        if (hrs > 0 && TIMESHEET_PRESENT_STATUSES.has(String(d.status))) {
+          entries.push({
+            businessId,
+            date: utcDay(d.date),
+            hours: hrs,
+            isOvertime: ot > 0,
+            isBillable: false,
+            notes: null,
+          });
+        }
+      }
+      totalHours = Math.round(totalHours * 100) / 100;
+      overtimeHours = Math.round(overtimeHours * 100) / 100;
+
+      // Create the DRAFT timesheet + its entries in one transaction. The @@unique
+      // makes a concurrent double-generate fail with P2002 → treat as a skip.
+      try {
+        const ts = await prisma.timesheet.create({
+          data: {
+            businessId,
+            employeeId: empId,
+            periodStart,
+            periodEnd,
+            status: 'DRAFT',
+            totalHours,
+            overtimeHours,
+            billableHours: 0,
+            entries: entries.length ? { create: entries } : undefined,
+          },
+          select: { id: true },
+        });
+        created += 1;
+        entriesWritten += entries.length;
+        createdIds.push(ts.id);
+      } catch (e) {
+        if (e.code === 'P2002') { skipped += 1; continue; } // raced — already exists
+        throw e;
+      }
+    }
+
+    await writeAudit({
+      businessId, actorId: req.user.id, action: 'attendance.timesheets.generate',
+      entityType: 'Timesheet', entityId: null,
+      meta: {
+        periodStart: periodStart.toISOString().slice(0, 10),
+        periodEnd: periodEnd.toISOString().slice(0, 10),
+        employees: targets.length, created, skipped, entriesWritten,
+      },
+    });
+
+    res.status(201).json({
+      periodStart: periodStart.toISOString().slice(0, 10),
+      periodEnd: periodEnd.toISOString().slice(0, 10),
+      employees: targets.length,
+      created,
+      skipped,
+      entriesWritten,
+      createdIds,
+    });
+  } catch (e) { next(e); }
+}
 
 async function listTimesheets(req, res, next) {
   try {
@@ -982,7 +1130,7 @@ module.exports = {
   // assignments
   assignShift, listAssignments, removeAssignment,
   // timesheets
-  listTimesheets, getTimesheet, submitTimesheet, approveTimesheet, rejectTimesheet, lockTimesheet,
+  generateTimesheets, listTimesheets, getTimesheet, submitTimesheet, approveTimesheet, rejectTimesheet, lockTimesheet,
   // payroll feed (read only)
   listPayInputs,
   // regularization

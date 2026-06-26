@@ -12,8 +12,8 @@
 //
 // The server is the real enforcement boundary; this is the maker UX.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { ErrorBanner, PrimaryButton, TextInput, TextArea, DateField, Spinner } from '@hr/ui';
 import { get, post } from '@/lib/api';
 import { PageHeader, asList, employeeLabel, Tabs } from '@/lib/ui';
@@ -33,9 +33,15 @@ const REQUEST_KIND_CATEGORY = {
   WARNING_LETTER: 'CUSTOM',
 };
 
-export default function IssueLetterPage() {
+function IssueLetterPageInner() {
   const router = useRouter();
-  const [tab, setTab] = useState('issue');
+  const searchParams = useSearchParams();
+  // Deep-link target from the Documents → Requests tab: /letters/issue?tab=requests&requestId=<id>.
+  // We open the Requests tab and, once the queue is loaded, pre-fill the Issue
+  // form for that request (same path as clicking "Issue this").
+  const targetRequestId = searchParams.get('requestId') || '';
+  const wantRequestsTab = searchParams.get('tab') === 'requests' || Boolean(targetRequestId);
+  const [tab, setTab] = useState(wantRequestsTab ? 'requests' : 'issue');
 
   const [templates, setTemplates] = useState(null);
   const [templatesErr, setTemplatesErr] = useState('');
@@ -65,6 +71,8 @@ export default function IssueLetterPage() {
   const [issuing, setIssuing] = useState(false);
   const [result, setResult] = useState(null);
   const previewObjUrl = useRef('');
+  // Guard so the deep-link pre-fill (?requestId=) only fires once per landing.
+  const deepLinkHandled = useRef(false);
 
   // the ESS request being fulfilled by this issue (set by "Issue this")
   const [documentRequestId, setDocumentRequestId] = useState(null);
@@ -210,6 +218,21 @@ export default function IssueLetterPage() {
     if (reqRow.purpose) setExtPurpose(''); // purpose only applies to external mode
     setTab('issue');
   }
+
+  // Deep-link from Documents → Requests: when we arrive with ?requestId=<id>,
+  // wait for the queue (and templates, so the kind→template match can land) and
+  // then pre-fill the Issue form exactly as "Issue this" would. If the id isn't
+  // in the (scope-constrained, open-only) queue, we stay on the Requests tab so
+  // HR can see why (already fulfilled / out of scope) rather than guessing.
+  useEffect(() => {
+    if (deepLinkHandled.current) return;
+    if (!targetRequestId) return;
+    if (requests === null || templates === null) return; // wait for both loads
+    deepLinkHandled.current = true;
+    const match = (requests || []).find((r) => r.id === targetRequestId);
+    if (match) issueFromRequest(match);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetRequestId, requests, templates]);
 
   return (
     <div className="max-w-6xl">
@@ -473,6 +496,15 @@ export default function IssueLetterPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// useSearchParams requires a Suspense boundary in the app router.
+export default function IssueLetterPage() {
+  return (
+    <Suspense fallback={<div className="max-w-6xl text-sm text-gray-400">Loading…</div>}>
+      <IssueLetterPageInner />
+    </Suspense>
   );
 }
 

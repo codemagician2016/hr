@@ -7,6 +7,7 @@
 // A tenant-wide "expiring soon" report (GET /expiring) anchors the top.
 
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { ErrorBanner, PrimaryButton, TextInput, DateField, formatAdminDate, DocumentDropzone, maskDocumentNumber } from '@hr/ui';
 import { get, post, del } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, employeeLabel, ServerPagination } from '@/lib/ui';
@@ -197,6 +198,7 @@ function DocumentsTab({ employeeId }) {
 }
 
 function RequestsTab({ employeeId }) {
+  const router = useRouter();
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState('');
@@ -240,14 +242,25 @@ function RequestsTab({ employeeId }) {
       header: '',
       render: (r) => {
         const s = String(r.status || '').toUpperCase();
-        // Letter GENERATION (fulfilment → EmployeeDocument) lands in slice 4f; here
-        // a PENDING request can be cancelled.
+        // A document/letter request is actually FULFILLED on the Letters issue
+        // screen (POST /api/hr/letters/issue with the documentRequestId — which
+        // mints the letter AND closes the request). There is no fulfil endpoint
+        // under documents/*, so a PENDING row deep-links to that screen
+        // pre-targeted to this request; Cancel is the only lifecycle action here.
         return (
           <div className="flex gap-2">
             {s === 'PENDING' && (
-              <ActionButton tone="danger" disabled={busyId === r.id} onClick={() => act(r.id, 'cancel')}>
-                Cancel
-              </ActionButton>
+              <>
+                <ActionButton
+                  tone="positive"
+                  onClick={() => router.push(`/letters/issue?tab=requests&requestId=${encodeURIComponent(r.id)}`)}
+                >
+                  Fulfil in Letters
+                </ActionButton>
+                <ActionButton tone="danger" disabled={busyId === r.id} onClick={() => act(r.id, 'cancel')}>
+                  Cancel
+                </ActionButton>
+              </>
             )}
           </div>
         );
@@ -308,7 +321,7 @@ export default function DocumentsPage() {
           "Search for an employee by name, code or work email to open their file.",
           "On the Documents tab, pick a Category (PAN, AADHAAR, FORM16, OFFER_LETTER, etc.), set Visibility (HR only / Manager & HR / Employee visible) and an optional expiry date, then drop the file to upload.",
           "Click Verify on an uploaded document once you've checked it; the green '✓ hashed' badge confirms the file's integrity hash was stored.",
-          "Switch to the Requests tab to see letters the employee has raised, and Cancel any PENDING request that's no longer needed.",
+          "Switch to the Requests tab to see letters the employee has raised. Click 'Fulfil in Letters' on a PENDING request to issue the letter on the Letters → Issue screen (which closes the request so they can download it), or Cancel one that's no longer needed.",
         ]}
         example={<>For <b>Aarav Sharma</b> (code EMP-2041) you upload his <b>FORM16</b> for FY 2025-26 as <b>HR only</b>, and his <b>PASSPORT</b> with an expiry of <b>14 Mar 2027</b> set to <b>Employee visible</b>. The passport then surfaces in 'Expiring soon' a few months before it lapses, and the document number shows masked as <b>•••••567</b>.</>}
         tips={[
