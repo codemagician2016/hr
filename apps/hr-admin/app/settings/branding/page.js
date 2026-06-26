@@ -28,6 +28,7 @@ import { get, put, post } from '@/lib/api';
 import { PageHeader } from '@/lib/ui';
 import { FieldLabel, SectionTitle, InfoTip } from '@/lib/widgets';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const BRANDING_KEYS = ['canEditBranding', 'canEditDomain', 'canManageCompanyProfile'];
 const HEX = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
@@ -355,6 +356,24 @@ export default function BrandingPage() {
           </span>
         )}
         subtitle="Make the portal yours — logo, colours, and display name."
+      />
+
+      <ModuleGuide
+        id="settings-branding"
+        title="White-label your portal"
+        what="Branding makes the HR console, the employee self-service portal, and both login pages carry your company's identity — logo, colours and name — instead of DriftHR's. The brand applies tenant-wide and re-themes the portal the moment you save."
+        steps={[
+          'Set the Display name (e.g. Acme India Pvt Ltd) — this shows in the portal header, on the login page, and as the sender on payslip/letter emails.',
+          'Upload your Logo (PNG or SVG with transparency, under 2 MB) and a square Favicon (16×16 or 32×32) for the browser tab.',
+          'Pick your Primary colour as a hex value (e.g. #1D4ED8) — it themes buttons, links and active nav; add Secondary and Accent if you want them.',
+          'Fill in Email from-name (e.g. Acme India HR) and Support email (e.g. hr@acmeindia.in) so employee emails look like they come from you.',
+          'Watch the Live preview update, then click Save branding and reload the portal to see your brand everywhere.',
+        ]}
+        example={<>Acme India Pvt Ltd uploads its logo, sets Primary <b>#1D4ED8</b>, Display name <b>Acme India Pvt Ltd</b> and from-name <b>Acme India HR</b>. On save, every employee — from <b>Aarav Sharma</b> in Bengaluru downloading his June 2026 payslip to a new hire on the login page — sees the Acme brand, never the DriftHR mark.</>}
+        tips={[
+          'If you skip the logo, your display name is shown as a styled wordmark in your primary colour — so set the colour even when you have no logo.',
+          'Changes are tenant-wide and need the branding permission; without it you get a read-only view. After saving, do a hard reload as colours are cached in the theme engine.',
+        ]}
       />
 
       {!canEdit && (

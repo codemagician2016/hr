@@ -23,6 +23,7 @@ import {
 } from '@hr/ui';
 import { get, post } from '@/lib/api';
 import { PageHeader } from '@/lib/ui';
+import ModuleGuide from '@/components/ModuleGuide';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
 
 // Ordered onboarding stages — mirrors journeyEngine.ONBOARDING_STAGES. The board
@@ -446,6 +447,24 @@ export default function OnboardingPage() {
             ← People
           </Link>
         }
+      />
+
+      <ModuleGuide
+        id="onboarding"
+        title="Run new hires through the onboarding pipeline"
+        what="A Kanban board of every new hire's onboarding journey, grouped by lifecycle stage — from Pre-join to Probation. Each card tracks blocking tasks, due dates, provisioning and probation confirmation so nobody starts day one with missing paperwork or system access."
+        steps={[
+          "A journey is created automatically when a candidate accepts an offer — find their card in the stage column they're currently in.",
+          "Click a card to open the checklist: tasks are grouped by stage with an owner (HR / Manager / IT) and status — Complete or Skip each one.",
+          "Clear all blocking, mandatory tasks at the current stage, then hit Advance stage (it stays disabled with a tooltip until the gate is clear).",
+          "At the Provisioning stage, click Provision employee to create the actual employee record and trigger system/payroll access.",
+          "Once probation ends, open the card and click Confirm probation to move the hire to active.",
+        ]}
+        example={<>Aarav Sharma joins <b>Acme India Pvt Ltd</b> as a Senior Engineer on <b>1 July 2026</b> at <b>₹18,00,000 CTC</b>. His card sits in <b>Docs / e-sign</b> with <b>2 blocking</b> tasks — uploading his PAN/Aadhaar and e-signing the appointment letter. Once HR completes both, Advance moves him to <b>Provisioning</b>, where one click creates his employee record so EPF/ESI enrolment and his first payroll run can proceed.</>}
+        tips={[
+          "Advance is gated only by blocking + mandatory tasks at the CURRENT stage — non-mandatory tasks can be skipped with a recorded reason.",
+          "Managers (TEAM band) see only their reporting sub-tree and a 'your team' banner; Provision / Confirm probation need the canManageOnboarding permission.",
+        ]}
       />
 
       {scoped && (

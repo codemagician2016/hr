@@ -12,6 +12,7 @@ import { ErrorBanner, formatAdminDate } from '@hr/ui';
 import { get, post } from '@/lib/api';
 import { DataTable, PageHeader, StatusBadge, ActionButton, employeeLabel, moneyish, ServerPagination } from '@/lib/ui';
 import { InfoTip } from '@/lib/widgets';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const STATUSES = ['', 'DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED', 'REIMBURSED', 'CANCELLED'];
 const VERDICTS = ['', 'OK', 'FLAGGED', 'AUTO_REJECTED', 'NO_POLICY'];
@@ -99,6 +100,24 @@ export default function ExpensesPage() {
   return (
     <div>
       <PageHeader title="Reimbursements" subtitle="Employee expense claims — approve, return, reimburse" />
+
+      <ModuleGuide
+        id="expenses"
+        title="Review and settle employee expense claims"
+        what="This is the reimbursement approval queue. Employees submit expense claims (travel, food, hotel) against your policy; you approve, return for fixes, or reject them, then Finance marks the approved ones reimbursed. The policy engine pre-checks every bill so you see what's within budget before deciding."
+        steps={[
+          "Pick a status — the queue opens on Submitted (claims waiting on you).",
+          "Use the Policy filter to surface only Flagged or Over-hard-cap claims when you're short on time.",
+          "Click a claim number to open the bill-by-bill breakdown, each line's cap, and any receipts (📎).",
+          "Approve a clean claim, or Return for changes when a receipt is missing, or Reject with a reason.",
+          "Once approved, Finance hits Reimburse and records the payment reference (UTR/NEFT).",
+        ]}
+        example={<>Aarav Sharma submits a <b>₹18,400</b> Bengaluru trip claim against travel <b>TRV-2026-0142</b>: a ₹6,200 hotel night (cap ₹5,000) shows <b>Flagged</b>. You open it, see the amber line, Return it for a corporate-rate invoice, then Approve the revised <b>₹17,200</b>. Finance reimburses it with NEFT ref <b>HDFC0001234</b> in the June 2026 cycle.</>}
+        tips={[
+          "Flagged = over a soft limit (you can still approve with judgement); Over-hard-cap bills were already blocked at submit.",
+          "You only see claims in your reporting sub-tree as a Manager — Finance and HR see the whole tenant.",
+        ]}
+      />
 
       <div className="mb-4 flex items-center gap-3">
         <select value={status} onChange={(e) => { setPage(1); setStatus(e.target.value); }} className="rounded-lg border border-gray-300 px-4 py-2.5 text-sm">

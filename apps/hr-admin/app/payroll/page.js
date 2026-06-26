@@ -31,6 +31,7 @@ import { DataTable, PageHeader, StatusBadge, ActionButton, employeeLabel, moneyi
 import EmployeeSearchSelect from '@/components/EmployeeSearchSelect';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
 import { InfoTip, usePagination, Pagination } from '@/lib/widgets';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const PAGE_SIZE = 20;
 
@@ -257,6 +258,23 @@ function RunsList({ onOpen }) {
   return (
     <div>
       <PageHeader title="Payroll" subtitle="Pay runs" actions={<PrimaryButton onClick={() => setShowNew(true)}>New pay run</PrimaryButton>} />
+      <ModuleGuide
+        id="payroll"
+        title="Run monthly payroll, end to end"
+        what="The payroll console drives each pay run through its full lifecycle — Draft → Computed → In review → Approved → Paid → Filed — with maker-checker approval, pre-run health checks, and India statutory filing exports (EPF ECR, ESIC, Form 24Q)."
+        steps={[
+          'Click New pay run, pick the legal entity and its pay calendar, and set the period (e.g. 1–30 June 2026) to create a Draft.',
+          'Open the run and work the inputs checklist: stage one-time items (bonus, arrear, recovery, reimbursement), then Freeze attendance & compute.',
+          'Review the variance report and Payroll health — net/gross deltas vs last month, plus blockers, warnings and flagged employees.',
+          'Resolve or acknowledge any blockers (an approver can override with a reason), then Submit for approval.',
+          'A different reviewer (maker ≠ checker) approves, then Pay to publish payslips, and File to generate EPF/ESIC/24Q exports.',
+        ]}
+        example={<>For <b>Acme India Pvt Ltd</b>, June 2026, monthly calendar: <b>Aarav Sharma</b> (₹12,00,000 CTC) takes 2 LOP days, so net pay drops ~9% — flagged as a warning, not a blocker. After a checker approves, payslips publish and the <b>Form 24Q</b> + <b>EPF ECR</b> files are ready to download for filing.</>}
+        tips={[
+          'Compute runs even with warnings, but unresolved BLOCKERs gate Submit and Approve — clear or acknowledge them first.',
+          'The person who computes/submits a run cannot approve it; line up a second reviewer to avoid being stuck in review.',
+        ]}
+      />
       <div className="flex items-center gap-2 mb-3">
         <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }} className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm">
           <option value="">All statuses</option>

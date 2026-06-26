@@ -13,6 +13,7 @@ import { Spinner, ErrorBanner, Empty, Modal, ModalActions, PrimaryButton } from 
 import { get, post } from '@/lib/api';
 import { ServerPagination } from '@/lib/ui';
 import { InfoTip } from '@/lib/widgets';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const STATUSES = [
   { value: '', label: 'All statuses' },
@@ -248,6 +249,24 @@ function PeopleInner() {
           </Link>
         </div>
       </div>
+
+      <ModuleGuide
+        id="people"
+        title="Find, onboard and give employees portal access"
+        what="This is your master employee directory — every person on the payroll, searchable by name, code or email and filterable by status. From here you onboard new joiners and send each person their employee self-service portal login."
+        steps={[
+          'Search by name, employee code or email, or filter by status (Active, On leave, Terminated) to find a person.',
+          'Click "Add employee" to onboard a new joiner with their CTC in one step, or use "Add without pay (advanced)" for a pay-less record.',
+          'Click a name to open the full profile (pay, statutory IDs, documents).',
+          'In the Portal column, use "Send invite" to email/WhatsApp a set-password link so the employee can log in.',
+          'Tick the checkboxes and use "Send portal invites" to invite several people at once.',
+        ]}
+        example={<>You add <b>Aarav Sharma</b> (code <b>ACM-0142</b>) at Acme India Pvt Ltd on a <b>₹12,00,000 CTC</b> joining <b>June 2026</b>. He shows as <b>Active</b> with portal <b>Not invited</b>; you send the invite and he gets a link at his work email to set his password and view payslips.</>}
+        tips={[
+          'A person with no work email cannot be invited — add a work email on their profile first.',
+          'Resending an invite invalidates the earlier link; if the email/WhatsApp fails, copy the link shown and share it manually.',
+        ]}
+      />
 
       <div className="flex flex-wrap gap-3 mb-4">
         <form

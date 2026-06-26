@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { get, post } from '@/lib/api';
 import { PageHeader, DataTable, StatusBadge, ActionButton, ServerPagination } from '@/lib/ui';
 import { Spinner, ErrorBanner, PrimaryButton, TextInput, TextArea, Modal, ModalActions } from '@hr/ui';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const API = '/api/hr/proofs';
 
@@ -74,6 +75,22 @@ export default function ProofVerificationPage() {
       <PageHeader
         title="Proof verification"
         subtitle="Accept or reject each uploaded investment proof. After the proof deadline, only the accepted amounts reduce the employee's TDS."
+      />
+      <ModuleGuide
+        id="tax-proof-verification"
+        title="Verify investment proofs before they cut TDS"
+        what="This is the HR queue of uploaded investment proofs (80C, 80D, HRA rent, home-loan interest, and more) for the financial year. Each verdict you record here decides what feeds into the employee's TDS — only ACCEPTED amounts reduce tax at the proof deadline; declared-but-unverified amounts are dropped and TDS is recomputed on the higher taxable income."
+        steps={[
+          "Open a proof: click View to see the uploaded document, then check it matches the declared claim, amount and financial year.",
+          "Accept it: the Verified amount pre-fills to the declared amount — trim it down if the proof supports less (it can never exceed declared), then confirm.",
+          "Reject it: choose Reject and enter a mandatory reason (e.g. blurred, amount mismatch, wrong FY) so the employee can re-upload before the deadline.",
+          "Use the PENDING / ACCEPTED / REJECTED tabs to work the queue and review past verdicts.",
+        ]}
+        example={<>Aarav Sharma (EMP-1042) declared <b>₹1,50,000</b> under 80C but his uploaded ELSS + PPF statements total only <b>₹1,20,000</b>. You set Verified amount to <b>₹1,20,000</b> and Accept. At the proof deadline only ₹1,20,000 reduces his taxable income, so his TDS for the remaining months of FY 2025-26 is recomputed upward.</>}
+        tips={[
+          "Verified amount can never exceed the declared amount — if the proof shows more, the employee must revise the declaration, not you.",
+          "Rejections need a clear reason: it is shown to the employee and is their only cue to re-upload before the proof-submission deadline.",
+        ]}
       />
       <div className="flex items-center gap-2">
         {['PENDING', 'ACCEPTED', 'REJECTED'].map((s) => (

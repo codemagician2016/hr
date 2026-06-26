@@ -17,6 +17,7 @@ import { Spinner, ErrorBanner, PrimaryButton, Modal, ModalActions } from '@hr/ui
 import { get, post, patch } from '@/lib/api';
 import { PageHeader, Tabs } from '@/lib/ui';
 import { InfoTip } from '@/lib/widgets';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const PAGE_SIZE = 50;
 
@@ -53,6 +54,24 @@ export default function CompliancePage() {
       <PageHeader
         title="Compliance Calendar"
         subtitle="India statutory due dates — PF · ESI · PT · TDS · Form 24Q/Form 16 · LWF — with reminders + proof of filing"
+      />
+      <ModuleGuide
+        id="payroll-compliance"
+        title="Never miss a PF, ESI, PT or TDS deadline"
+        what="This is your per-entity statutory compliance calendar for India. It tracks every EPF ECR, ESI, Professional Tax, TDS deposit and Form 24Q/Form 16 due date derived from your registrations, fires reminders, and stores proof of filing so you stay audit-ready."
+        steps={[
+          'On the Calendar tab, filter by Entity, Form, Status or Horizon (60 / 120 days / 12 months) to focus on what is due.',
+          'Watch the banner: "due this week", "overdue" (click it to filter) and "filed/waived" give you the at-a-glance position.',
+          'Click a form name to open the detail drawer — amount, challan ref, penalty hint and audit trail.',
+          'After paying on the government portal, click Mark filed, enter the Challan/CRN reference and filed date, and attach the proof (PDF/PNG/JPG ≤10 MB).',
+          'If a period does not apply (e.g. nil filing), click Waive with a reason instead.',
+          'Use Schedule settings → Re-derive from registrations to populate or refresh obligations after adding an EPFO/ESIC/PT/TAN registration.',
+        ]}
+        example={<>For <b>Acme India Pvt Ltd</b>, the <b>EPF ECR</b> for <b>June 2026</b> (amount <b>₹2,84,500</b>) is due <b>15 Jul 2026</b>. Reminders fire at T-7/T-3/T-1. After paying, you Mark filed with CRN <b>2706260012345</b> and upload the challan — the chip turns green and the reminder stops.</>}
+        tips={[
+          'File on time: a late EPF deposit attracts 12% p.a. interest plus damages, and late TDS carries 1.5% per month interest.',
+          'Mutations (Mark filed / Waive / Re-derive) need the canManageStatutory permission; viewing needs canViewPayrollReports.',
+        ]}
       />
       <Tabs
         tabs={[{ key: 'calendar', label: 'Calendar' }, { key: 'schedule', label: 'Schedule settings' }]}

@@ -17,6 +17,7 @@ import { ErrorBanner, PrimaryButton, TextInput, TextArea, Modal, ModalActions } 
 import { get, post, patch } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton } from '@/lib/ui';
 import { Info, FieldLabel, Pager, NumberInput } from './_components';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const EMPLOYMENT_TYPES = ['FULL_TIME', 'PART_TIME', 'CONTRACT', 'INTERN', 'TEMPORARY'];
 const TABS = [
@@ -32,6 +33,24 @@ export default function RecruitmentPage() {
       <PageHeader
         title="Recruitment"
         subtitle="Post jobs, screen + score candidates objectively, and rank them on a merit list."
+      />
+      <ModuleGuide
+        id="recruitment"
+        title="Post a role and rank candidates on a merit list"
+        what="The Recruitment console (ATS) is where you post jobs, screen applicants, and score them objectively so every candidate ends up on one ranked merit list. It keeps hiring auditable and removes gut-feel by blending a screening score with an interview score."
+        steps={[
+          'On the Jobs tab, click New job. Set a unique job code (e.g. ENG-001), title, country (India), employment type and number of openings.',
+          'Set the merit weighting — the two sliders (Application % and Interview %) must total 100. The default is 40% application / 60% interview.',
+          'Tick "Post to the public careers page" if you want a shareable apply link once the job is OPEN; leave it off for an internal-only requisition.',
+          'Open the new job to add screening questions and attach an interview scorecard, then move candidates through the pipeline.',
+          'Use the Scorecard templates tab to build reusable skill sets (each skill rated 1–10, optionally weighted) so panels score consistently across roles.',
+          'Interviewers use the My interviews tab to open their assigned panels and fill only their own scorecard.',
+        ]}
+        example={<>For <b>Backend Engineer (ENG-001)</b> at <b>Acme India Pvt Ltd</b>, Bengaluru, 2 openings, you keep the default <b>40% application / 60% interview</b> blend. Candidate <b>Aarav Sharma</b> scores <b>72%</b> on screening and his panel (mean of three cards) gives <b>85%</b> on interview, so his merit = 0.40×72 + 0.60×85 = <b>79.8%</b> — ranking him above a stronger-on-paper candidate who interviewed weakly.</>}
+        tips={[
+          'The Application % + Interview % sliders are linked and must sum to 100 — the Create button blocks an invalid blend.',
+          'Pick the right multi-interviewer aggregation on a template: TRIMMED MEAN drops the highest and lowest card (needs ≥4 panelists) to soften an outlier rating.',
+        ]}
       />
       <Tabs tabs={TABS} active={tab} onChange={setTab} />
       {tab === 'jobs' && <JobsTab />}

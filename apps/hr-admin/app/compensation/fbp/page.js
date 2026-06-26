@@ -13,6 +13,7 @@ import { PrimaryButton, ErrorBanner, TextInput } from '@hr/ui';
 import { get, post, patch, del } from '@/lib/api';
 import { PageHeader } from '@/lib/ui';
 import { InfoTip } from '@/lib/widgets';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const FY_DEFAULT = '2026-27';
 
@@ -122,6 +123,26 @@ export default function FbpPlansPage() {
       />
       {error && <ErrorBanner message={error} />}
 
+      {!editing && (
+        <ModuleGuide
+          id="compensation-fbp"
+          title="Build the Flexi Benefit Plan basket"
+          what="A Flexi Benefit Plan (FBP) lets an employee split part of their CTC into tax-advantaged heads — LTA, meal card, fuel, telephone, books and more — instead of taking it as fully-taxable salary. Here you author the basket: pick the single CTC envelope component that funds it, then add heads with their statutory caps and proof rules so payroll and TDS compute correctly."
+          steps={[
+            'Click “Start from India template” to seed the standard seven heads (LTA, Meal Card, Fuel & Car, Telephone & Internet, Books, Prof. Dev, Uniform) with default caps.',
+            'Set the Code, Name and Financial year (e.g. FY 2026-27).',
+            'Pick the Envelope component — the one CTC earning line (e.g. “Flexi Benefit Allowance”) whose monthly amount the heads allocate within.',
+            'For each head, choose the pay component it maps to and set a Monthly or Annual cap in ₹.',
+            'Toggle “Proof required” on for heads that need bills (Meal Card, Fuel, LTA); leave off for fixed allowances.',
+            'Click “Save plan” — it is country-stamped and validated server-side, then employees allocate against it in the FBP allocation console.',
+          ]}
+          example={<>For <b>Acme India Pvt Ltd</b>, <b>Aarav Sharma</b> on <b>₹18,00,000 CTC</b> has a <b>₹1,80,000/yr</b> FBP envelope. The plan caps <b>Meal Card at ₹2,200/mo</b> (§17 perquisite, proof via cards), <b>Fuel & Car at ₹2,400/mo</b> (proof required), and <b>LTA at ₹60,000/yr</b> (§10(5), proof on travel). For June 2026 payroll, that moves ~₹4,600/mo out of taxable salary and lowers his monthly TDS.</>}
+          tips={[
+            'One envelope only: the heads must allocate within the envelope component’s resolved monthly amount, so set the envelope first.',
+            'Caps that beat the Income-tax exemption limit (e.g. meal card ₹50/meal, ₹2,200/mo) keep the benefit tax-free — over-cap amounts become taxable in Form 16/24Q.',
+          ]}
+        />
+      )}
       {!editing && (
         <div className="mt-4 space-y-3">
           {loading && <p className="text-sm text-gray-500">Loading…</p>}

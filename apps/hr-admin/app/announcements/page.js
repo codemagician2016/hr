@@ -13,6 +13,7 @@ import { ErrorBanner, formatAdminDate } from '@hr/ui';
 import { get, post, patch, del } from '@/lib/api';
 import { DataTable, PageHeader, StatusBadge, ActionButton, ServerPagination } from '@/lib/ui';
 import { InfoTip, LabelWithTip } from '../letters/lib';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const STATUSES = ['', 'DRAFT', 'PUBLISHED', 'ARCHIVED'];
 const CATEGORIES = ['NEWS', 'POLICY', 'EVENT', 'HOLIDAY', 'CELEBRATION', 'GENERAL'];
@@ -208,6 +209,25 @@ export default function AnnouncementsPage() {
             + New announcement
           </button>
         }
+      />
+
+      <ModuleGuide
+        id="announcements"
+        title="Post a company announcement and choose who sees it"
+        what="The company news feed your people see on their portal. Author a note once, target the right audience (everyone, an entity, a department, or named employees), then publish to push it live and notify them."
+        steps={[
+          'Click "+ New announcement" and write a clear Title and Message.',
+          'Pick a Category (News, Policy, Event, Holiday, Celebration) so employees can filter the feed.',
+          'Set the Audience — Everyone, by legal entity, by department, or specific employees.',
+          'Optionally set "Go live at" to schedule it and "Expires at" to auto-drop it off the feed.',
+          'Save the draft, then use Publish on the list row to go live and fan-out the notification.',
+          'Pin time-sensitive notices to keep them at the top; Archive once they are no longer relevant.',
+        ]}
+        example={<>HR at <b>Acme India Pvt Ltd</b> posts <b>"Diwali holiday — office closed 21 Oct 2026"</b> under <b>Holiday</b>, targets <b>Everyone</b>, pins it, and schedules <b>Go live at</b> 20 Oct 09:00 (Asia/Kolkata) with <b>Expires at</b> 22 Oct. After publishing, <b>Aarav Sharma</b> and every colleague get a feed note and notification.</>}
+        tips={[
+          'Only Owner and HR-Admin can manage announcements; an employee only sees PUBLISHED, in-audience, not-yet-expired notes whose go-live time has passed.',
+          'Saving alone keeps it a DRAFT — you must Publish for anyone to see it. Leave "Go live at" blank to publish instantly.',
+        ]}
       />
 
       <div className="mb-4 flex items-center gap-3">

@@ -20,6 +20,7 @@ import {
   PageHeader, DataTable, StatusBadge, ActionButton, asList, ServerPagination,
 } from '@/lib/ui';
 import { getPdf, downloadBlob, LETTER_CATEGORIES, LETTER_STATUSES, InfoTip } from '../lib';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const PAGE_SIZES = [25, 50, 100];
 
@@ -127,6 +128,26 @@ export default function RegisterPage() {
             <PrimaryButton onClick={() => router.push('/letters/issue')}>Issue a letter</PrimaryButton>
           </div>
         )}
+      />
+
+      <ModuleGuide
+        id="letters-register"
+        title="Track and govern every HR letter you issue"
+        what="The Letter Register is the tenant-wide ledger of every letter your company has generated — experience and relieving letters, bonafide certificates, offer/appointment letters, increment and warning letters. Each entry is a tamper-evident legal record with its own reference number and PDF, so you always have an auditable single source of truth."
+        steps={[
+          'Use Search to find a letter by its reference number or the employee’s name/code (e.g. "Aarav Sharma" or EMP0142).',
+          'Narrow the list with the Type and Status filters (Draft, Pending signature, Issued, Delivered, Voided).',
+          'Click View to open the detail drawer and verify the reference, template version, issued-by and the File SHA-256 hash.',
+          'Click Download to pull the signed PDF, or Export CSV to hand the current filtered view to audit/compliance.',
+          'Use Re-issue to mint a fresh reference and supersede an old letter, or Revoke (with an audited reason) to void one.',
+        ]}
+        example={(
+          <>HR issues an experience letter to <b>Aarav Sharma (EMP0142)</b> of <b>Acme India Pvt Ltd</b>, ref <b>ACME/EXP/2026/0042</b>, on <b>26 Jun 2026</b>. He later spots a typo in his designation, so you click <b>Re-issue</b> — the register marks the original <b>superseded</b> and chains a new ref <b>ACME/EXP/2026/0061</b>, preserving the full history for any future verification.</>
+        )}
+        tips={[
+          'Revoke voids a letter but never deletes it — it stays as a legal record and disappears from the employee’s portal; the reason is mandatory and audited.',
+          'Quote the File SHA-256 from the detail drawer when a bank or background-verification agency wants to confirm a letter is genuine and unaltered.',
+        ]}
       />
 
       {error && <div className="mb-4"><ErrorBanner message={error} /></div>}

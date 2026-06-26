@@ -21,6 +21,7 @@ import { permissionsFromSession, hasPermission } from '@/lib/nav';
 import { InfoTip, PROCESSES, moduleLabel } from '@/lib/widgets';
 import ChainBuilder from './ChainBuilder';
 import { describeChain } from './describe';
+import ModuleGuide from '@/components/ModuleGuide';
 
 function StatusPill({ status }) {
   const map = {
@@ -154,6 +155,24 @@ export default function ApprovalsPage() {
           </span>
         }
         subtitle="Pick a process to choose who approves it, in what order, and what happens if nobody acts."
+      />
+
+      <ModuleGuide
+        id="approvals"
+        title="Build the approval chain for each request type"
+        what="Each tile below is a process — Leave, Reimbursement, Travel, Salary change, Loan, Profile edit, Attendance fix, Exit. The chain decides who must say yes, in what order, before that request takes effect. ‘Off’ means DriftHR’s built-in default applies (usually the employee’s manager approves)."
+        steps={[
+          'Find the process you want to control (e.g. Reimbursement) and click its card.',
+          'Add approval steps in order — the first approver acts before the request reaches the next.',
+          'Add a condition where it matters, e.g. send to Finance only when the amount is above ₹50,000.',
+          'Set what happens if nobody acts (auto-escalate or auto-approve after N days) so requests never stall.',
+          'Publish the chain — the status pill flips from Off/Draft to Default or Custom and it goes live.',
+        ]}
+        example={<>For <b>Reimbursement</b> at <b>Acme India Pvt Ltd</b>: step 1 is <b>Reporting Manager</b>; step 2 routes to <b>Finance</b> only when the claim exceeds <b>₹50,000</b>. When <b>Aarav Sharma</b> files a <b>₹18,000</b> travel claim it stops at his manager; a <b>₹72,000</b> claim also needs Finance sign-off before payout in the <b>June 2026</b> run.</>}
+        tips={[
+          'Only Leave and Reimbursement (Expense) run live through the engine today — other chains are saved but not yet enforced.',
+          'You need the “Build approval chains” permission; without it the page is read-only, so ask an Owner or HR-Admin to grant it.',
+        ]}
       />
 
       {error && <ErrorBanner message={error} />}

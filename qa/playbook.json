@@ -1204,6 +1204,49 @@
           "sortOrder": 2
         }
       ]
+    },
+    {
+      "key": "setup-guidance",
+      "title": "Guided Setup & In-App Help",
+      "portal": "HR Admin",
+      "summary": "A guided onboarding layer: a Setup tab that tracks how far the workspace is configured and what to do next, plus a 'How this works' guide panel on every module with steps and a worked example.",
+      "howItWorks": "Two surfaces:\n- Setup tab (/setup): probes live state (country, legal entity, departments, people, CTC policy, payroll run) and shows a completion % with ordered next-step cards, each deep-linking to the right screen.\n- ModuleGuide: a dismissible, on-brand panel under each module's title with what-it-is, ordered steps, an India example and tips. Collapsed state is remembered per module.",
+      "notes": "The Setup completion % is derived on every load from the same endpoints the modules use, so it never drifts. Guide panels are presentational only and never change module behaviour.",
+      "sortOrder": 18,
+      "useCases": [
+        {
+          "key": "setup-tab-shows-progress",
+          "title": "Setup tab shows completion % and next step",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/setup",
+          "steps": [
+            "Log in as the HR Admin and open Setup guide from the top of the left nav.",
+            "Note the completion % and which steps are ticked vs pending.",
+            "Click the next pending step (e.g. \"Set your payroll country\") and confirm it deep-links to the right screen."
+          ],
+          "expected": "The Setup page shows a progress bar with an X-of-6 / % complete, ticked steps for whatever is already configured, and a 'Continue →' button that jumps to the first unfinished step. Each step card shows what to do and a worked example.",
+          "sortOrder": 1
+        },
+        {
+          "key": "module-guide-panel",
+          "title": "Every module shows a guide panel with an example",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/org",
+          "steps": [
+            "Open a module such as Org structure (or People, Payroll, Leave, CTC policies…).",
+            "Read the \"How this works\" panel under the title.",
+            "Click Hide — reload — confirm it stays hidden for that module."
+          ],
+          "expected": "Under the page title there is a collapsible guide with a one-line what-it-is, numbered steps, an India-context Example block and tips. Hiding it is remembered per module across reloads.",
+          "sortOrder": 2
+        }
+      ]
     }
   ]
 }

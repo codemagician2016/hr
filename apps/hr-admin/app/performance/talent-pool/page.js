@@ -15,6 +15,7 @@ import { ReadinessBadge, TalentTagChip } from '@hr/ui';
 import { get, post, patch } from '@/lib/api';
 import { asList, PageHeader, Tabs, DataTable, ActionButton, employeeLabel } from '@/lib/ui';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const KINDS = ['HIPO', 'FLIGHT_RISK', 'PROMOTION_READY', 'SUCCESSOR', 'KEY_PERSON'];
 const READINESS = ['', 'READY_NOW', 'READY_1_2_YR', 'READY_3_PLUS_YR'];
@@ -108,6 +109,25 @@ export default function TalentPoolPage() {
         title="Talent pool & succession"
         subtitle="High-potential, flight-risk, promotion-ready + successor nominations"
         actions={canSucceed ? <PrimaryButton onClick={() => setShow(true)}>New tag</PrimaryButton> : null}
+      />
+      <ModuleGuide
+        id="performance-talent-pool"
+        title="Tag your high-potentials and build a succession bench"
+        what="A confidential HR/manager-only surface to flag key talent — high-potential (HIPO), flight-risk, promotion-ready, key persons — and nominate successors for critical positions. Tags never reach the employee; they help you plan promotions, retention and cover for the next CTC review or org change."
+        steps={[
+          'Use the Talent pool tab to see existing tags; filter by kind (HIPO, Flight risk, Promotion ready, Key person, Successor).',
+          'Click New tag, enter the Employee ID, and pick a Kind.',
+          'For a Successor or Promotion-ready tag, add the Position and a Readiness (Ready now / 1–2 yr / 3+ yr).',
+          'Add an optional confidential Note (e.g. retention risk, comp gap) and Create tag.',
+          'Switch to the Succession tab to view the bench grouped by position with readiness chips.',
+          'Retire a tag from the pool list when it no longer applies (e.g. after the promotion lands).',
+        ]}
+        example={<>HR tags <b>Aarav Sharma</b> (Sr. Engineer, Acme India Pvt Ltd, <b>₹24,00,000 CTC</b>) as <b>FLIGHT_RISK</b> with a note "comp 12% below market — review in June 2026 cycle", and as a <b>SUCCESSOR</b> for <b>Engineering Manager — Pune</b> with readiness <b>Ready 1–2 yr</b>. The Succession tab then shows him on the Engineering Manager bench.</>}
+        tips={[
+          'Tags are server-confidential — the employee never sees them, so be candid but professional in notes.',
+          'Only the SUCCESSOR kind requires a Position; readiness shows for Successor and Promotion-ready tags.',
+          'You need canManageSuccession to create or retire tags; canViewTeamPerformance is read-only and scoped to your reporting sub-tree.',
+        ]}
       />
       {error ? <ErrorBanner message={error} /> : null}
       <Tabs tabs={TABS} active={tab} onChange={setTab} />

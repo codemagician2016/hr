@@ -11,6 +11,7 @@ import { get, post } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, ServerPagination } from '@/lib/ui';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
 import { InfoTip, FieldLabel } from '@/lib/widgets';
+import ModuleGuide from '@/components/ModuleGuide';
 import { ErrorBanner, PrimaryButton, TextInput, TextArea, Modal, ModalActions } from '@hr/ui';
 
 const CATEGORIES = ['POSH', 'SAFETY', 'COMPLIANCE', 'ONBOARDING', 'SKILL', 'CODE_OF_CONDUCT', 'GENERAL'];
@@ -93,6 +94,23 @@ export default function LearningCoursesPage() {
         title="Learning"
         subtitle="Author training courses, assign them (POSH, safety, ISMS…), and track compliance."
         actions={canManage ? <PrimaryButton onClick={() => setShowNew(true)}>New course</PrimaryButton> : null}
+      />
+
+      <ModuleGuide
+        id="learning"
+        title="Build & track training courses"
+        what="This is your training catalogue. Author courses (POSH, safety, ISMS, onboarding), publish them, assign them to employees, and track who has completed each one — the evidence you need for India compliance audits like annual POSH training."
+        steps={[
+          'Click New course, give it a unique code (e.g. POSH-2026), a title, and a category — POSH is the India compliance anchor.',
+          'On the 3-pane builder, add modules and content, then change status from Draft to Published — drafts stay hidden from learners.',
+          'Assign the published course to employees or departments so it appears on their learning queue.',
+          'Use the Status filter to find Draft / Published / Archived courses, and open the Compliance dashboard to see who is overdue.',
+        ]}
+        example={<>Acme India Pvt Ltd creates course <b>POSH-2026</b> (category <b>POSH</b>), publishes it in <b>June 2026</b>, and assigns it to all 240 staff. The catalogue row shows <b>Enrolled 240</b>, <b>Completed 188/240 (78%)</b> — so Aarav Sharma and 51 others still need a nudge before the annual deadline.</>}
+        tips={[
+          'A course must be Published before you can assign it — a Draft is invisible to learners.',
+          'The course code drives the certificate category and calendar grouping, so keep it stable; archive instead of deleting old versions to preserve completion records.',
+        ]}
       />
 
       <div className="flex items-center gap-3">

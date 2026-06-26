@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Spinner, ErrorBanner, PrimaryButton, TextInput } from '@hr/ui';
 import { get, post } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, employeeLabel, ServerPagination } from '@/lib/ui';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const TABS = [
   { key: 'queue', label: 'Approvals' },
@@ -133,6 +134,23 @@ export default function CompOffAdminPage() {
             <PrimaryButton onClick={() => runJob('expiry')}>Run expiry</PrimaryButton>
           </div>
         )}
+      />
+
+      <ModuleGuide
+        id="comp-off-admin"
+        title="Approve, grant and expire comp-off credits"
+        what="Comp-off is paid time-off employees earn for working on a holiday or weekly off (e.g. weekend on-call). This console is where HR approves earned credits, manually grants them, and watches them expire — employees actually apply for comp-off leave on the Leave console."
+        steps={[
+          "On the Approvals tab, review each PENDING credit — check the employee, what they were earned for, and the date worked — then Approve or Reject.",
+          "Use the Ledger tab to track every credit (earned/used/left/expiring/lapsed); filter by status and Void an ACTIVE credit if it was granted in error.",
+          "Use the Grant tab to add a manual credit (HR_GRANT) for off-system work: enter the employee, days, an optional expiry source date, and a reason.",
+          "Run earn re-scans worked holidays/weekly-offs to mint new credits; Run expiry lapses credits past their window — trigger these if the nightly job didn't.",
+        ]}
+        example={<>Aarav Sharma at Acme India Pvt Ltd worked a Republic-Day shift on <b>26 Jan 2026</b>, earning <b>1 day</b> of comp-off. HR approves it in the queue; it now shows ACTIVE in the ledger with <b>1 left</b> and an expiry of <b>26 Apr 2026</b>. If he hasn't availed it on the Leave console by then, Run expiry lapses it to EXPIRED.</>}
+        tips={[
+          "Comp-off credits expire — approve promptly so employees get the full availment window before lapse.",
+          "Dates and the 'Worked on' / 'Expires' columns are in Asia/Kolkata; the en-IN format shows day-month-year.",
+        ]}
       />
 
       {error ? <ErrorBanner message={error} /> : null}

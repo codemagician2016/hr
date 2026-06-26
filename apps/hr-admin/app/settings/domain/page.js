@@ -27,6 +27,7 @@ import {
 } from '@hr/ui';
 import { get, request } from '@/lib/api';
 import { PageHeader } from '@/lib/ui';
+import ModuleGuide from '@/components/ModuleGuide';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
 
 // ─── Small local hooks / helpers (none exist app-wide yet) ───────────────────
@@ -977,6 +978,24 @@ export default function DomainSettingsPage() {
             ← Settings
           </Link>
         }
+      />
+
+      <ModuleGuide
+        id="settings-domain"
+        title="Set your portal's web address"
+        what="This is the URL employees use to sign in to DriftHR. You get an instant DriftHR subdomain, and can optionally connect your own custom domain so the portal lives on your brand."
+        steps={[
+          'Pick your DriftHR subdomain under "DriftHR subdomain" — type a slug and watch the live availability check (Available / Taken / Reserved).',
+          'Click "Change address" and confirm — the new address goes live instantly, with no DNS to configure.',
+          'To use your own brand, enter a subdomain like hr.acme.com under "Custom domain" and click "Connect domain".',
+          'Add the CNAME and TXT records shown at your domain registrar (GoDaddy, Cloudflare, etc.), then click "Check now".',
+          'Wait for the Add records → Secure it → Live timeline to reach "Live" — the SSL padlock is set up automatically.',
+        ]}
+        example={<>Acme India Pvt Ltd picks the slug <b>acme</b>, so employees sign in at <b>acme.drifthr.com</b> immediately. Later they connect <b>hr.acme.com</b>: HR admin Aarav Sharma adds the <b>CNAME</b> and <b>TXT</b> records at their registrar, and within an hour the portal goes <b>Live</b> on the company's own domain.</>}
+        tips={[
+          'You can only change the DriftHR subdomain once every 30 days, and the old address stops working immediately — bookmarks and saved links will break.',
+          'Connect a subdomain (hr.acme.com), not the root domain (acme.com), so your main website keeps working. Connecting a custom domain needs the canEditDomain permission.',
+        ]}
       />
 
       {!canEdit && <ReadOnlyBanner />}

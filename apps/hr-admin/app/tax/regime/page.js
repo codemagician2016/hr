@@ -15,6 +15,7 @@ import { get, put, post } from '@/lib/api';
 import { PageHeader, DataTable, StatusBadge, ActionButton, ServerPagination } from '@/lib/ui';
 import { Spinner, ErrorBanner, PrimaryButton, DateField, formatAdminDate } from '@hr/ui';
 import EmployeeSearchSelect from '@/components/EmployeeSearchSelect';
+import ModuleGuide from '@/components/ModuleGuide';
 
 // Default FY = the current India financial year (FY starts 1 April).
 function currentFy() {
@@ -156,6 +157,23 @@ export default function RegimePage() {
             Lock all for FY {fy}
           </PrimaryButton>
         }
+      />
+
+      <ModuleGuide
+        id="tax-regime"
+        title="Set the year's tax regime and lock elections"
+        what="Each India employee's TDS can run under the New or Old regime. Here you set the employer default for the financial year, the window in which employees may self-elect, and you freeze (lock) elections so the regime that drove the year's TDS can't be flipped after the fact."
+        steps={[
+          `Open the FY ${fy} employer policy panel and pick the Default regime (New is the statutory default) — this is what an un-elected employee is withheld under.`,
+          'Set "Election opens" and "Election locks" dates to bound the window employees may self-elect in, then Save policy.',
+          'Use "Find an employee" to check any person\'s Elected vs Effective (withheld) regime and its source (ELECTED / DEFAULT / STATUTORY).',
+          'Lock individuals from the table, or use "Lock all for FY" once payroll for the year is final so no one can retroactively change their regime.',
+        ]}
+        example={<>Acme India Pvt Ltd sets the FY {fy} default to <b>New</b>, opens elections <b>1 Apr 2026</b> and locks them <b>30 Jun 2026</b>. Aarav Sharma (₹12,00,000 CTC) never elects, so his TDS runs under the <b>Effective: New (DEFAULT)</b> regime; Priya Nair elects <b>Old</b> to claim her 80C + HRA, showing <b>Effective: Old (ELECTED)</b>.</>}
+        tips={[
+          'Lock all only after Form 16/24Q figures are settled — unlocking after filing means the year\'s TDS no longer matches the elected regime.',
+          'A blank "Election locks" date means no deadline; set it so the New default doesn\'t silently apply to employees who meant to choose Old.',
+        ]}
       />
 
       {error && <ErrorBanner message={error} />}

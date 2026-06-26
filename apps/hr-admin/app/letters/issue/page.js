@@ -19,6 +19,7 @@ import { get, post } from '@/lib/api';
 import { PageHeader, asList, employeeLabel, Tabs } from '@/lib/ui';
 import { postForPdf, InfoTip } from '../lib';
 import EmployeeSearchSelect from '@/components/EmployeeSearchSelect';
+import ModuleGuide from '@/components/ModuleGuide';
 
 // Map an ESS request templateKind → a hint for matching a template by category.
 const REQUEST_KIND_CATEGORY = {
@@ -216,6 +217,25 @@ export default function IssueLetterPage() {
         title="Issue a letter"
         subtitle="Pick a template and a recipient (an employee or an external party), review the live preview, then issue. A reference number is minted on issue."
         actions={<button type="button" onClick={() => router.push('/letters/register')} className="text-sm text-gray-500 hover:text-gray-700">View register →</button>}
+      />
+
+      <ModuleGuide
+        id="letters-issue"
+        title="Issue a letter and mint its reference number"
+        what="Generate an official HR letter — offer, appointment, confirmation, experience, relieving or salary certificate — by merging a template with an employee or external recipient. On issue, a reference number is minted and the letter is logged to the register; employee-linked letters also appear in the worker's My Letters portal."
+        steps={[
+          'On the Issue tab, pick a Template (only your country’s active templates are shown, e.g. India salary certificate).',
+          'Choose who the letter is for — An employee (links it to their record + My Letters), or an External party such as a bank or authority (type the recipient name + address).',
+          'Set the Issue date (defaults to today) and optionally override the subject or append a custom paragraph.',
+          'Check the live watermarked preview on the right — open Full screen to read it before committing.',
+          'Click Issue now to mint the reference number, or for a signature template route it to an e-sign envelope.',
+          'Use the Requests tab to clear pending ESS letter requests — "Issue this" pre-fills the form and marks the request fulfilled on issue.',
+        ]}
+        example={<>HR raises a salary certificate for <b>Aarav Sharma</b> (code EMP1042) at <b>Acme India Pvt Ltd</b>, stating a CTC of <b>₹12,00,000</b>, addressed to <b>The Manager, HDFC Bank</b> for a home-loan verification, dated <b>26 June 2026</b>. On issue it gets reference <b>ACME/LTR/2026/0087</b> and lands in the register.</>}
+        tips={[
+          'If you can’t view compensation, salary figures render masked (••••) on both preview and the issued letter — it can still be issued.',
+          'A 422 "missing required fields" means the template needs data the employee record lacks (e.g. date of joining or designation) — fill those in before issuing.',
+        ]}
       />
 
       <Tabs

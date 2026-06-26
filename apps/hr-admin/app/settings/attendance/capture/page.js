@@ -22,6 +22,7 @@ import { ErrorBanner, PrimaryButton, Spinner, formatAdminDateTime } from '@hr/ui
 import { get, post, del } from '@/lib/api';
 import { PageHeader, Tabs, DataTable, StatusBadge, ActionButton } from '@/lib/ui';
 import { SectionTitle, InfoTip } from '@/lib/widgets';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const SCOPES = [
   { value: 'TENANT', label: 'Whole company (default)' },
@@ -42,6 +43,23 @@ export default function AttendanceCapturePage() {
       <PageHeader
         title="Attendance capture"
         subtitle="Choose how employees prove an on-site punch — geo-fence, office network (IP), and/or face match — per company, entity, location or department."
+      />
+      <ModuleGuide
+        id="settings-attendance-capture"
+        title="Decide how staff prove an on-site punch"
+        what="Set the rules that an employee's clock-in must satisfy — being inside a location's geo-fence, on an approved office network (IP), and/or passing a selfie face match. Rules can be company-wide or narrowed to an entity, location or department, and each method can simply flag a bad punch or hard-reject it."
+        steps={[
+          "On Policies, pick who it applies to (whole company, or a specific entity / location / department) and the target.",
+          "For each method — Geo-fence, Office network (IP), Face match — tick Required, then tick Enforce only if a failing punch should be rejected (leave Enforce off to merely flag for review).",
+          "For Face match, set the Match threshold (e.g. 0.70); selfies scoring below it land in the Review queue.",
+          "Add your office ranges under Office IPs (per location) before enforcing IP, e.g. 203.0.113.0/24 labelled 'HQ wifi'.",
+          "Save the policy, then clear or reject flagged punches under Review queue using the stored selfie and geo/IP/face evidence.",
+        ]}
+        example={<>Acme India Pvt Ltd sets a <b>Location</b> policy for its Pune office: <b>Geo-fence Required + Enforce</b> and <b>Face match Required</b> at threshold <b>0.70</b> (flag only). When <b>Aarav Sharma</b> punches in at 9:32 IST from 120 m outside the fence, the punch is rejected; a face score of 0.61 instead routes to the Review queue for an HR admin to clear or reject.</>}
+        tips={[
+          "Most specific policy wins: Department → Location → Entity → Company, so a department rule overrides the company default.",
+          "Enforce IP only after adding the location's CIDR ranges — otherwise every on-site punch from that office looks off-network and gets blocked.",
+        ]}
       />
       {error ? <ErrorBanner message={error} /> : null}
       {notice ? <div className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">{notice}</div> : null}

@@ -19,6 +19,7 @@ import { NineBoxGrid, TalentTagChip } from '@hr/ui';
 import { get, post } from '@/lib/api';
 import { asList, PageHeader, StatusBadge, ActionButton, employeeLabel } from '@/lib/ui';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
+import ModuleGuide from '@/components/ModuleGuide';
 
 function Tooltip({ text }) {
   return (
@@ -173,6 +174,24 @@ export default function NineBoxPage() {
         title="9-box talent grid"
         subtitle="Performance × potential — a development view, not a ranking"
         actions={canConfig && cycleId ? <PrimaryButton onClick={seed} disabled={busy}>Seed placements</PrimaryButton> : null}
+      />
+      <ModuleGuide
+        id="performance-nine-box"
+        title="Map your team on the 9-box talent grid"
+        what="The 9-box grid plots each employee on two axes — Performance (horizontal, locked from their calibrated review rating) against Potential (vertical, which you set) — so a review cycle becomes a development and succession view rather than a stack-rank."
+        steps={[
+          "Pick the review Cycle (e.g. FY 2025-26 Annual) from the dropdown at the top.",
+          "If the board is empty and you can configure cycles, click Seed placements to pull in everyone with a manager-submitted, calibrated review.",
+          "Drag a chip up or down to set or change a person's Potential — a reason prompt opens for every move and is recorded in the audit ledger.",
+          "Click an Unplaced chip to author its potential for the first time.",
+          "Click Open calibration to start a skip-level session, watch the over-target banner, then Finalize all once the distribution looks right.",
+        ]}
+        example={<>For the <b>FY 2025-26 Annual</b> cycle, <b>Aarav Sharma</b> (Engineering Manager, ₹28,00,000 CTC) comes in with a calibrated performance band of <b>5/5</b> on the X-axis. You drag him up to high potential — Box 9, "Star" — and type the required reason "Ready for Senior EM in 2 quarters." His horizontal position never changes, only the vertical.</>}
+        tips={[
+          "You can never edit Performance here — it is derived from the F8 calibrated rating. Only Potential moves a chip.",
+          "The over-target / concentration banner is advisory only: it never blocks Finalize, so a genuinely strong team can still be finalized.",
+          "Segregation of duties is enforced server-side — a manager cannot move their own box, and only the calibrated tree they own is visible.",
+        ]}
       />
       {error ? <ErrorBanner message={error} /> : null}
 

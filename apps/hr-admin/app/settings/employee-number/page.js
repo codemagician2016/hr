@@ -16,6 +16,7 @@ import { get, patch } from '@/lib/api';
 import { PageHeader } from '@/lib/ui';
 import { FieldLabel, SectionTitle, InfoTip } from '@/lib/widgets';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
+import ModuleGuide from '@/components/ModuleGuide';
 
 // Client-side preview that mirrors the backend `format(prefix, value, padding)`.
 function previewCode(prefix, nextValue, padding) {
@@ -105,6 +106,24 @@ export default function EmployeeNumberPage() {
           </span>
         )}
         subtitle="Choose how new employee numbers are generated."
+      />
+
+      <ModuleGuide
+        id="settings-employee-number"
+        title="Set your auto employee-number format"
+        what="This screen defines the scheme DriftHR uses to mint an employee ID automatically whenever you add a new joiner without typing a code. A prefix, a padding width, and a running counter together produce stable, sortable codes like EMP-000042 — used across payroll, Form 16/24Q, and EPF/ESI records."
+        steps={[
+          'Set the Prefix — the fixed text at the start of every code (e.g. "EMP-" or "ACME-IN-").',
+          'Set the Number length (padding) — how many digits to zero-pad to, so 6 gives 000042 and 4 gives 0042.',
+          'Set the Next number — the next counter value to issue; bump it to continue an existing series.',
+          'Check the "Next will be" live preview to confirm the exact code the next hire gets.',
+          'Click Save format to lock it in (requires the company-profile permission).',
+        ]}
+        example={<>For <b>Acme India Pvt Ltd</b> joining 50 staff in June 2026, set Prefix <b>EMP-IN-</b>, padding <b>5</b>, Next number <b>1</b>. The first hire, <b>Aarav Sharma</b>, is auto-assigned <b>EMP-IN-00001</b>; the counter advances to 2 for the next employee.</>}
+        tips={[
+          'You can always type a code by hand when creating an employee to override the auto scheme.',
+          'If you migrated from another HRMS and already used up to 41, set Next number to 42 so codes never collide.',
+        ]}
       />
 
       <div className="max-w-2xl space-y-8 mt-2">

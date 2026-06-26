@@ -17,6 +17,7 @@ import { Spinner, ErrorBanner, PrimaryButton, Modal, ModalActions } from '@hr/ui
 import { get, post } from '@/lib/api';
 import { DataTable, PageHeader, StatusBadge, ActionButton, Tabs } from '@/lib/ui';
 import { InfoTip } from '@/lib/widgets';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const PAGE_SIZE = 25;
 const inr = (minor) => `₹${(Number(minor || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -33,6 +34,23 @@ export default function Form16Page() {
   return (
     <div>
       <PageHeader title="Year-end → Form 16 / 24Q" subtitle="TDS certificates (§203) + the quarterly e-TDS return. India only." />
+      <ModuleGuide
+        id="payroll-form16"
+        title="Generate & issue Form 16 / 24Q for the financial year"
+        what="This is your year-end TDS-on-salary workstation. The Form 16 tab builds each employee's §203 certificate — Part B (the annual tax computation) plus Part A (quarter-wise TDS deposited) — and issues it into their ESS document vault. The Form 24Q tab builds the quarterly e-TDS return (FVU file), with Q4 carrying Annexure-II. India entities only."
+        steps={[
+          'On the Form 16 tab, click "New Form 16 batch", pick the India legal entity (its PAN/TAN is snapshotted as the deductor) and the financial year (e.g. 2026-27), then Create.',
+          'Open the batch and click Generate to compute Part A + Part B and a certificate number for every employee. Review the per-employee taxable, tax, TDS deducted vs deposited, and any anomaly flags.',
+          'Get a second person to click Approve (maker-checker: you cannot approve a batch you generated).',
+          'Click Issue to bulk-deliver the PDFs into each employee\'s ESS vault; optionally tick "Digitally sign" to route through e-sign.',
+          'On the Form 24Q tab, select entity / FY / quarter, click Preview, then Download FVU file for upload to the TRACES utility — and Persist to mark it filed-ready.',
+        ]}
+        example={<>For FY <b>2026-27</b>, you run a batch for <b>Acme India Pvt Ltd</b> (TAN <b>BLRA01234F</b>). <b>Aarav Sharma</b>'s certificate shows taxable income <b>₹11,40,000</b>, tax <b>₹1,04,000</b>, TDS deducted <b>₹1,04,000</b> and deposited <b>₹1,04,000</b> under the <b>new regime</b> — reconciled, so it issues cleanly.</>}
+        tips={[
+          'If a quarter shows TDS deducted but not deposited, the batch is "Not reconciled" (§201 exposure) and Issue is blocked — you must tick force-acknowledge to override.',
+          'FY ≥ 2026-27 auto-issues the Form 130 successor instead of Form 16; the Form column tells you which one each batch produced.',
+        ]}
+      />
       <Tabs
         tabs={[{ key: 'form16', label: 'Form 16' }, { key: 'form24q', label: 'Form 24Q' }]}
         active={tab}

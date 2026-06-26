@@ -28,6 +28,7 @@ import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, employe
 import { useTenantCountries } from '@/lib/useTenantCountries';
 import { InfoTip } from '@/lib/widgets';
 import EmployeeSearchSelect from '@/components/EmployeeSearchSelect';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const TABS = [
   { key: 'requests', label: 'Requests' },
@@ -1094,6 +1095,24 @@ function LeaveInner() {
   return (
     <div>
       <PageHeader title="Leave" subtitle="Requests, balances, calendar, reports, year-end and config" />
+      <ModuleGuide
+        id="leave"
+        title="Run leave end-to-end: approve, balance, reconcile"
+        what="The leave console is where you action pending leave requests, manage each employee's balances and history, see who's off across the team, report on taken/pending/LOP, and run year-end carry-forward. Config tabs let you define leave types and policies (with India statutory floors enforced)."
+        steps={[
+          "On Requests, filter by PENDING and Approve or Reject each request — decisions are audited and balances update on hold immediately.",
+          "On Balances, pick an employee to see Opening / Accrued / Taken / On hold / Available per type; use Adjust to post an audited credit or debit with a reason.",
+          "Use Reconciliation to prove a period statement balances (Opening + Accrued − Taken − Encashed − Lapsed + Adjusted = Closing) and catch any drift.",
+          "Check Calendar for overlaps before approving, then use Reports to roll up taken, pending and Loss-of-Pay by leave type.",
+          "At year-end, open the Year-end tab, Preview the carry-forward run for the closing period, review carried vs lapsed, then Apply.",
+          "Configure Leave types and Policies (accrual method, entitlement/yr, carry-forward cap) under the last two tabs before onboarding employees.",
+        ]}
+        example={<>Aarav Sharma at Acme India Pvt Ltd applies for <b>3 days Earned Leave</b> (10–12 June 2026). You approve it on Requests; his Balances show <b>Available</b> drop by 3. At year-end you Preview carry-forward for period <b>2025-26</b>: his closing <b>18 EL</b> rolls forward capped at <b>15</b>, with <b>3 lapsing</b>.</>}
+        tips={[
+          "Always Preview the carry-forward before Apply — the run is idempotent, so already-rolled balances are safely skipped on re-run.",
+          "Period codes use India FY format like \"2026-27\"; LWP/UNPAID types affect LOP and reduce pay pro-rata rather than deducting a balance.",
+        ]}
+      />
       <Tabs tabs={TABS} active={tab} onChange={setTab} />
       {tab === 'requests' && <RequestsTab />}
       {tab === 'balances' && <BalancesTab />}

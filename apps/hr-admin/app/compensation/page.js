@@ -21,6 +21,7 @@ import { get, post, patch, del, downloadFile } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, moneyish } from '@/lib/ui';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
 import { InfoTip } from '@/lib/widgets';
+import ModuleGuide from '@/components/ModuleGuide';
 // Entities (and their authoritative countryCode) back the structure form's
 // country/currency derivation; imported directly via /api/hr/payroll/entities.
 
@@ -630,6 +631,23 @@ export default function CompensationPage() {
   return (
     <div>
       <PageHeader title="Compensation" subtitle="Pay components, salary structures and revisions" />
+      <ModuleGuide
+        id="compensation"
+        title="Build pay structures and revise salaries"
+        what="This is your compensation control room: define reusable pay components (Basic, HRA, Special Allowance), assemble them into India-compliant salary structures with a live CTC preview, and run effective-dated employee salary revisions through a maker-checker approval queue."
+        steps={[
+          "On Pay components, add each building block (e.g. code BASIC, kind Basic, calc method Percent-of) so payslips and structures can reference it.",
+          "On Salary structures, pick the legal entity (country and currency are derived from it), add component lines in the builder, and enter a target CTC to see the live waterfall.",
+          "Watch the India 50% chip — Basic + DA must be at least 50% of gross (Code on Wages) or the save is blocked.",
+          "On Employee revisions, load an employee ID, set the effective-from date and new CTC, then propose the revision.",
+          "On Approvals, a different checker approves or rejects proposed revisions — you cannot approve your own.",
+        ]}
+        example={<>For <b>Aarav Sharma</b> at <b>Acme India Pvt Ltd</b>, you build a structure on a <b>₹12,00,000 CTC</b> with Basic at <b>50%</b> (₹50,000/mo), HRA at 50% of Basic, and Special Allowance as the balancing line — the 50% chip shows <b>OK</b>. You then raise an <b>ANNUAL_REVISION</b> effective <b>1 June 2026</b> and propose it for approval.</>}
+        tips={[
+          "Component Code and a structure's component lines are immutable after creation — get them right the first time.",
+          "Range-only viewers see compa-ratios instead of absolute amounts, and the PDF statement is banded — masking is enforced server-side.",
+        ]}
+      />
       <Tabs tabs={TABS} active={tab} onChange={setTab} />
       {tab === 'components' && <ComponentsTab canManage={canManage} />}
       {tab === 'structures' && <StructuresTab canManage={canManage} />}

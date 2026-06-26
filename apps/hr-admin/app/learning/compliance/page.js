@@ -11,6 +11,7 @@ import { DataTable, PageHeader, ServerPagination } from '@/lib/ui';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
 import { InfoTip } from '@/lib/widgets';
 import { ErrorBanner } from '@hr/ui';
+import ModuleGuide from '@/components/ModuleGuide';
 
 export default function LearningCompliancePage() {
   const [perms, setPerms] = useState(null);
@@ -91,6 +92,23 @@ export default function LearningCompliancePage() {
         title="Training compliance"
         subtitle="Who's done, who's overdue, who never started — audit-ready (POSH)."
         actions={canManage ? <a className="rounded-md border border-gray-300 px-3 py-1.5 text-sm" href="/api/hr/learning/reports/export.csv">Export CSV</a> : null}
+      />
+      <ModuleGuide
+        id="learning-compliance"
+        title="Track who has finished mandatory training — and chase who hasn't"
+        what="This is your audit-ready training compliance dashboard. It shows, per course, how many assigned learners have completed, are in progress, never started, or are overdue — plus a drill-in to chase individual overdue learners and a CSV export for POSH/statutory audits."
+        steps={[
+          'Start on the "By course" tab to scan each course\'s coverage % and overdue count — red numbers flag courses falling behind.',
+          'Switch to the "Overdue learners" tab to see each person who has missed their due date, with days overdue and progress %.',
+          'Use Nudge to send an automated reminder, or Waive (with a mandatory reason) when training is genuinely not applicable.',
+          'Click Export CSV to download the full matrix for an auditor or your compliance file.',
+          'Remember scope: as a manager you only see your reporting sub-tree; HR-Admin sees the whole tenant.',
+        ]}
+        example={<>For <b>Acme India Pvt Ltd</b>, the mandatory <b>POSH Awareness</b> course shows <b>240 assigned</b>, <b>198 completed</b> (<b>82.5% coverage</b>) and <b>11 overdue</b>. On the Overdue tab, <b>Aarav Sharma (EMP1042)</b> is <b>9 days overdue</b> at <b>40% progress</b> — you hit <b>Nudge</b>, and Waive him only if he is on long leave with a written reason.</>}
+        tips={[
+          'Aim for 100% coverage on POSH and other statutory courses before any audit — overdue learners are the first thing inspectors ask about.',
+          'Always type a real reason when waiving; it is logged and shows up in the CSV export as your audit trail.',
+        ]}
       />
       <div className="flex items-center gap-2">
         <a href="/learning" className="text-sm text-gray-500 hover:underline">← Courses</a>

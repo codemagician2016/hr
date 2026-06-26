@@ -15,6 +15,7 @@ import { GapBar } from '@hr/ui';
 import { get, post, patch, del } from '@/lib/api';
 import { asList, PageHeader, Tabs, DataTable, StatusBadge, ActionButton } from '@/lib/ui';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const CATEGORIES = ['CORE', 'LEADERSHIP', 'FUNCTIONAL', 'BEHAVIOURAL', 'TECHNICAL'];
 const TABS = [{ key: 'library', label: 'Library' }, { key: 'rolemap', label: 'Role map' }];
@@ -151,6 +152,23 @@ export default function CompetenciesPage() {
         title="Competency framework"
         subtitle="The library + role expectations behind the 9-box and review competency scores"
         actions={tab === 'library' && canConfig ? <PrimaryButton onClick={() => setDrawer({})}>New competency</PrimaryButton> : null}
+      />
+      <ModuleGuide
+        id="performance-competencies"
+        title="Build your competency framework"
+        what="This is the org-wide competency catalog plus the role expectations that feed your 9-box and review competency scores. The Library tab holds each competency (code, name, category); the Role map tab sets the expected proficiency everyone in a role is rated against."
+        steps={[
+          "On the Library tab, click New competency and add a code, name and category (CORE, LEADERSHIP, FUNCTIONAL, BEHAVIOURAL or TECHNICAL).",
+          "Repeat until the catalog covers what you actually assess — keep it tight so reviewers aren't overwhelmed.",
+          "Switch to the Role map tab and enter a role key (ALL, a designationId or a grade).",
+          "Click Add competency, pick one, set the Expected proficiency level (e.g. 3) and an optional Weight.",
+          "The expected level becomes the bar — the gap shown later is expected minus the employee's actual rating from their review.",
+        ]}
+        example={<>For <b>Acme India Pvt Ltd</b>, add competency <b>BEH-OWN · Ownership</b> (BEHAVIOURAL) and <b>LEAD-COACH · Coaching</b> (LEADERSHIP). On the Role map for grade <b>M2 (Engineering Manager)</b>, set <b>Ownership</b> to expected level <b>4</b> (weight 30) and <b>Coaching</b> to <b>3</b>. When <b>Aarav Sharma</b>'s June 2026 review scores him 3 on Ownership, the gap bar shows a <b>−1</b> shortfall to coach against.</>}
+        tips={[
+          "Once a review cycle that consumes this map goes live, the role map is read-locked — finish your edits before launching the cycle (or clone to change it).",
+          "Codes are permanent: you can edit a competency's name, category and description later, but not its code.",
+        ]}
       />
       {error ? <ErrorBanner message={error} /> : null}
       <Tabs tabs={TABS} active={tab} onChange={setTab} />

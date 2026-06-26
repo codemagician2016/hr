@@ -19,6 +19,7 @@ import { Spinner, ErrorBanner, PrimaryButton } from '@hr/ui';
 import { get, post, put } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, employeeLabel } from '@/lib/ui';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const TABS = [
   { key: 'grid', label: 'Roster grid' },
@@ -184,6 +185,24 @@ export default function RosterPage() {
   return (
     <div className="space-y-4">
       <PageHeader title="Roster" subtitle="Shift rosters, rotation patterns & swaps. Published rosters drive attendance; drafts do not." />
+      <ModuleGuide
+        id="roster"
+        title="Plan and publish shift rosters"
+        what="The Roster console is where you assign daily shifts (Morning, Afternoon, Night, OFF) to employees, apply repeating rotation rings, and approve shift swaps. Only published cells feed attendance derivation and payroll — drafts stay invisible to pay until you publish them."
+        steps={[
+          "On the Roster grid tab, set the From / To window (defaults to a fortnight) and click Refresh to load employees as rows and days as columns.",
+          "Click any cell and pick a shift code (e.g. M/A/N) or OFF — this writes a MANUAL DRAFT. Night shifts show in amber.",
+          "Use the Rotations tab to Apply a rotation ring across the in-scope population for the window; it bulk-generates DRAFT cells and reports any rest/night-consent violations.",
+          "Resolve every violation (rest under 11h, missing night consent) before publishing.",
+          "Back on the grid, click Publish window — only then do cells reach attendance and pay.",
+          "On the Swaps tab, review pending swap requests and Approve (only when the counterparty has ACCEPTED) or Reject.",
+        ]}
+        example={<>For Acme India Pvt Ltd's Bengaluru support floor in June 2026, you apply the <b>4-on / 2-off rotation</b> across 18 agents for 1–14 Jun. The system writes <b>252 DRAFT cells</b> but flags <b>2 violations</b> — <b>Aarav Sharma</b> has only <b>9h rest</b> between a Night (N) and a Morning (M) shift. You swap his 5 Jun to OFF, clear the violation, then <b>Publish window</b> so attendance and the muster pick up the roster.</>}
+        tips={[
+          "Drafts never affect attendance or pay — if a shift looks wrong in payroll, check whether the cell was actually published.",
+          "Times and dates render in Asia/Kolkata; a Night shift crossing midnight needs employee consent before it can be published.",
+        ]}
+      />
       <Tabs tabs={TABS} active={tab} onChange={setTab} />
       {error ? <ErrorBanner message={error} onDismiss={() => setError('')} /> : null}
       {notice ? <div className="rounded bg-emerald-50 text-emerald-800 px-3 py-2 text-sm">{notice}</div> : null}

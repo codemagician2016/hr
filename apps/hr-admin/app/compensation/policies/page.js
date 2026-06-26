@@ -15,6 +15,7 @@ import Link from 'next/link';
 import { TextInput, PrimaryButton, ErrorBanner } from '@hr/ui';
 import { get, post, patch, del } from '@/lib/api';
 import { InfoTip } from '@/lib/widgets';
+import ModuleGuide from '@/components/ModuleGuide';
 import CtcStatement from './CtcStatement';
 
 const SAMPLE_CTC = 1200000; // ₹12,00,000 default sample
@@ -259,6 +260,7 @@ export default function CtcPoliciesPage() {
   const [currency, setCurrency] = useState('INR');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [countryNotSetUp, setCountryNotSetUp] = useState(false);
   const [editing, setEditing] = useState(null); // null | {} (new) | policy (edit)
 
   const load = useCallback(async () => {
@@ -267,11 +269,18 @@ export default function CtcPoliciesPage() {
       const [pol, comps, ctx] = await Promise.all([
         get('/api/hr/ctc-policies').catch(() => ({ items: [] })),
         get('/api/hr/compensation/components', { pageSize: 100 }).catch(() => ({ items: [] })),
-        get('/api/hr/country-context').catch(() => null),
+        // 409 = HR country not chosen yet → flag it so we can point the user at setup.
+        get('/api/hr/country-context').catch((e) => (e?.status === 409 ? { __notSetUp: true } : null)),
       ]);
       setPolicies(asList(pol));
       setComponents(asList(comps));
-      if (ctx) { setCountry(ctx.country || ctx.countryCode || 'IN'); setCurrency(ctx.currency || ctx.currencyCode || 'INR'); }
+      if (ctx?.__notSetUp) {
+        setCountryNotSetUp(true);
+      } else if (ctx) {
+        setCountryNotSetUp(false);
+        setCountry(ctx.country || ctx.countryCode || 'IN');
+        setCurrency(ctx.currency || ctx.currencyCode || 'INR');
+      }
     } catch (e) {
       setError(e.data?.message || e.message || 'Could not load CTC policies.');
     } finally { setLoading(false); }
@@ -321,7 +330,37 @@ export default function CtcPoliciesPage() {
         </div>
       </div>
 
-      {error && <ErrorBanner message={error} />}
+      <ModuleGuide
+        id="compensation-policies"
+        title="Build a reusable CTC policy"
+        what="A CTC policy is a salary template that says how to split any annual CTC into Basic, HRA, allowances and statutory costs (PF/ESI/Gratuity). Build it once, then onboard people by picking a policy and a target CTC — the numbers fill in automatically."
+        steps={[
+          'Click "Start from India template" for a compliant starter, or "New policy" to build from scratch.',
+          'Give the policy a friendly name and a short unique code (e.g. "Staff CTC 2026" / STAFF-2026).',
+          'Add a rule for each pay component: pick the component, then choose "% of …", "Fixed ₹/month", "Auto-balance", or "Statutory (auto by law)".',
+          'Keep an eye on the live CTC statement on the right — the chip must stay green (Basic ≥ 50% of CTC) or Save stays blocked.',
+          'Drag the sample-CTC slider to sanity-check the split at different pay levels, then click Create policy.',
+          'Use "Onboard with this" on a saved policy card to hire someone against it.',
+        ]}
+        example={<>For <b>Acme India Pvt Ltd</b> at a <b>₹12,00,000</b> CTC: Basic = <b>50% of CTC</b> (₹6,00,000), HRA = <b>50% of Basic</b> (₹3,00,000), Conveyance = <b>Fixed ₹1,600/month</b>, and a <b>Special Allowance</b> set to <b>Auto-balance</b> to absorb the remainder. PF and Gratuity are added as <b>Statutory</b> rows — computed by law, not typed in.</>}
+        tips={[
+          'Keep Basic at 50% of CTC: it satisfies the Code on Wages and keeps PF/gratuity correct — the red chip blocks Save until you do.',
+          'Only one Auto-balance row is allowed; it soaks up whatever is left so every component adds up exactly to the CTC.',
+        ]}
+      />
+
+      {countryNotSetUp && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-amber-900">Your company HR country isn’t set up yet</p>
+            <p className="text-sm text-amber-800 mt-0.5">Choose your payroll country once to unlock CTC policies, payroll and statutory features.</p>
+          </div>
+          <Link href="/settings/company-profile" className="shrink-0 inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg bg-[color:var(--theme-primary)] text-white hover:opacity-90">
+            Set it up in Company profile →
+          </Link>
+        </div>
+      )}
+      {error && !countryNotSetUp && <ErrorBanner message={error} />}
       {loading ? (
         <p className="text-sm text-gray-400">Loading…</p>
       ) : policies.length === 0 ? (

@@ -17,6 +17,7 @@ import { Spinner, ErrorBanner, PrimaryButton } from '@hr/ui';
 import { get, post, downloadFile } from '@/lib/api';
 import { PageHeader, Tabs } from '@/lib/ui';
 import { InfoTip } from '@/lib/widgets';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const GROUP_ORDER = ['Attendance', 'Wages', 'Leave', 'Annual', 'Employees', 'Other'];
 
@@ -47,6 +48,23 @@ export default function RegistersPage() {
       <PageHeader
         title="Statutory Registers"
         subtitle="India muster roll + wage / overtime / leave / fines / employee + PF-3A/ESI registers — generated from the frozen attendance, payroll & leave data"
+      />
+      <ModuleGuide
+        id="payroll-registers"
+        title="Generate inspection-ready statutory registers"
+        what="Statutory Registers produces the muster roll and the wage, overtime, leave, fines, employee, EPF Form 3A and ESI registers your factory/shops-act inspector asks for. It is a read-only projection over FROZEN attendance, payroll and leave — so the numbers always match what you actually filed."
+        steps={[
+          "Pick the India Entity and its State (e.g. MH) — the register catalogue follows that entity's statutory registrations.",
+          "Choose a Register from the grouped list (Attendance / Wages / Leave / Annual / Employees), e.g. Form B Wage Register.",
+          "Set the Period in the cadence the form needs — month 2026-06, FY 2025-26, half-year 2026-H1, or an as-of date.",
+          "Click Preview to check the title block and control totals, then export PDF (inspector-ready A4 landscape), XLSX or CSV.",
+          "Every export is logged in History with a SHA-256 file hash; manage the per-state form schedule under Definitions.",
+        ]}
+        example={<>For <b>Acme India Pvt Ltd</b> (Maharashtra, state <b>MH</b>), pick the <b>Wage Register (Form B)</b> for period <b>2026-06</b> and Preview. It lists workers like <b>Aarav Sharma</b> with gross <b>₹68,000</b>, EPF <b>₹1,800</b>, ESI and PT deductions, and net paid — all read from the frozen June 2026 run. Export PDF for the inspector and the audit log records the file hash.</>}
+        tips={[
+          "If a register shows the amber \"reads frozen data\" empty state, lock/freeze the payroll run and attendance for that period first — registers never recompute live numbers.",
+          "Export and view need canViewPayrollReports; editing the form schedule under Definitions needs canManageStatutory.",
+        ]}
       />
       <Tabs
         tabs={[{ key: 'registers', label: 'Registers' }, { key: 'history', label: 'History' }, { key: 'definitions', label: 'Definitions' }]}

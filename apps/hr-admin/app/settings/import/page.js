@@ -27,6 +27,7 @@ import { ErrorBanner } from '@hr/ui';
 import { get, post, downloadFile } from '@/lib/api';
 import { PageHeader } from '@/lib/ui';
 import { InfoTip, SectionTitle } from '@/lib/widgets';
+import ModuleGuide from '@/components/ModuleGuide';
 
 // The five import kinds, in dependency order, with plain-English descriptions +
 // the "what you need first" hint the spec asks for.
@@ -131,6 +132,24 @@ export default function ImportCenterPage() {
       <PageHeader
         title="Import / Migrate data"
         subtitle="Bring your prior-period data into DriftHR. Upload a CSV, preview exactly what will happen (nothing is saved until you commit), then let the engine rebuild payslips and claims."
+      />
+
+      <ModuleGuide
+        id="settings-import"
+        title="Migrate your prior-period data into DriftHR"
+        what="The Data Migration Center brings your existing HR and payroll records into DriftHR mid-year. You upload a CSV, preview the exact result through the real payroll engine (nothing is saved), then commit — and for payroll history the system auto-generates the payslips for you."
+        steps={[
+          'Import in dependency order: Employees first, then Salary / CTC, then Attendance, then Payroll history. Reimbursements can go any time after Employees.',
+          'On the kind you want, click Download template, fill it in your spreadsheet, then click Upload CSV.',
+          'Click Preview (dry-run) — this runs the real import + payroll engine inside a rolled-back transaction so the numbers match a true commit, but nothing is saved.',
+          'Review the per-row grid: green PASS, amber WARN, red ERROR. Fix red rows in your file and re-upload.',
+          'Click Commit (for Payroll history this is Commit + generate payslips). Download the annotated report to reconcile against your old records.',
+        ]}
+        example={<>For <b>Acme India Pvt Ltd</b>, you first import 48 employees including <b>Aarav Sharma</b> with his PAN and UAN, then his <b>₹12,00,000</b> CTC (DriftHR derives the Basic/HRA/Special breakup). When you import <b>April–June 2026</b> payroll history, the engine rebuilds his payslips — applying the EPF wage cap, the Karnataka PT slab and TDS as of each month — so his June net pay matches the old payslip to the rupee.</>}
+        tips={[
+          'The preview net-pay figures come straight from the payroll engine (PF cap, PT slab, TDS per period) — compare them to your legacy payslips before you commit.',
+          'Payroll-history autogen also requires the canRunPayroll permission; make sure CTC and attendance are imported first or the payslips will be incomplete.',
+        ]}
       />
 
       {error && <ErrorBanner message={error} onDismiss={() => setError('')} />}

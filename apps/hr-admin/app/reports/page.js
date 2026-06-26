@@ -15,6 +15,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Spinner, ErrorBanner, formatAdminDate } from '@hr/ui';
 import { get } from '@/lib/api';
 import { DataTable, PageHeader, StatusBadge, Tabs, moneyish } from '@/lib/ui';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const TABS = [
   { key: 'register', label: 'Payroll register' },
@@ -256,6 +257,23 @@ function ReportsInner() {
   return (
     <div>
       <PageHeader title="Reports" subtitle="Payroll register, statutory summary, and headcount analytics" />
+      <ModuleGuide
+        id="reports"
+        title="Pull payroll & headcount reports"
+        what="A read-only analytics console over your locked pay runs. Use it to reconcile a payroll register, get India statutory totals (EPF/ESI/PT/TDS) for a filing, and track headcount and attrition — without touching live data."
+        steps={[
+          "Pick the tab you need: Payroll register, Statutory summary, or Headcount.",
+          "On Register or Statutory, choose the pay run from the Pay run dropdown (e.g. JUN-2026 · Acme India Pvt Ltd · 01 Jun–30 Jun).",
+          "Read the Register to see each employee's gross, deductions, net and employer cost, with column totals up top that reconcile to the pay-run header.",
+          "Switch to Statutory summary for the EPF/ESI/PT/TDS contribution breakup for that run before you file your challans.",
+          "On Headcount, set From/To dates and Group by Department or Entity to see joiners, exits and the attrition rate.",
+        ]}
+        example={<>For the <b>JUN-2026</b> run of <b>Acme India Pvt Ltd</b>, the Register shows <b>Aarav Sharma</b> at <b>₹1,00,000</b> gross / <b>₹12,360</b> deductions / <b>₹87,640</b> net, and the Statutory tab totals <b>₹21,600</b> employer EPF and <b>₹2,250</b> ESI across <b>48 employees</b>.</>}
+        tips={[
+          "The selected pay run and tab live in the URL, so you can bookmark or share a specific view (e.g. ?tab=statutory&run=…).",
+          "Reports cover finalised pay runs only — if a run is missing here, lock it on the Payroll screen first.",
+        ]}
+      />
       <Tabs tabs={TABS} active={tab} onChange={setTab} />
       {tab === 'register' && <RegisterTab runId={runId} onRun={setRun} />}
       {tab === 'statutory' && <StatutoryTab runId={runId} onRun={setRun} />}

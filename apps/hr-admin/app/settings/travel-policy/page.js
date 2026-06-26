@@ -19,6 +19,7 @@ import { get, post, patch, put, del } from '@/lib/apiExt';
 import { PageHeader, Tabs } from '@/lib/ui';
 import { InfoTip, FieldLabel, SectionTitle } from '@/lib/widgets';
 import { useTenantCountries } from '@/lib/useTenantCountries';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const TIERS = ['TIER_1', 'TIER_2', 'TIER_3'];
 const BANDS = [['FULL_24H', 'Full day (24h)'], ['HALF_12H', 'Half (12h)'], ['HALF_DAY', 'Half-day']];
@@ -74,6 +75,25 @@ export default function TravelPolicyPage() {
   return (
     <div className="mx-auto max-w-5xl">
       <PageHeader title="Travel & Expense policy" subtitle="Set the allowances and rules — every submitted bill is checked against them automatically." />
+      <ModuleGuide
+        id="settings-travel-policy"
+        title="Build the travel policy your expense engine enforces"
+        what="This is where you define, in plain tables, the allowances for business travel — daily meal/incidental caps, nightly hotel budgets, transport fare rules and city tiers. Every reimbursement bill an employee submits is auto-checked against these caps, so you stop policing receipts by hand."
+        steps={[
+          'Click + New policy (or pick an existing one) — it defaults to India / INR.',
+          'In the header, set the Default tier (for unlisted cities) and Enforcement: Flag for approver (soft) or Auto-reject over hard cap.',
+          'Per-diem tab: set Food and Incidentals caps for each trip length (Full 24h, Half 12h, Half-day).',
+          'Hotel budget tab: fill the nightly cap grid for each employee level (Grade) × city tier — add Grades under People & Org first if the grid is empty.',
+          'Transport tab: toggle which modes are Allowed and set fare caps, per-km rate (own car), class (train/flight) and the min journey hours for flights.',
+          'City tiers tab: map metros to Tier 1, large cities to Tier 2, the rest Tier 3.',
+          'Preview tab: run a sample trip to see the exact OK / FLAGGED / AUTO_REJECTED verdicts before you rely on it.',
+        ]}
+        example={<>For <b>Acme India Pvt Ltd</b>, you tag <b>Mumbai</b> and <b>Bengaluru</b> as Tier 1 and set the L3 manager hotel cap there to <b>₹6,500/night</b>. Aarav Sharma (L3) books a <b>₹7,200/night</b> hotel in Mumbai for 2 nights — with Enforcement on <b>Flag</b>, the bill is auto-FLAGGED at ₹700/night over and routed to his approver instead of silently passing.</>}
+        tips={[
+          'Hard enforcement blocks the employee from even submitting an over-cap bill; Flag still lets the approver decide — start with Flag.',
+          'A city with no tier mapping falls back to the policy Default tier, so set that deliberately (Tier 3 is the safe, lowest-cap default).',
+        ]}
+      />
       {error && <ErrorBanner message={error} />}
 
       <div className="mb-5 flex items-center gap-3">

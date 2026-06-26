@@ -39,6 +39,7 @@ import { get, post, del, request } from '@/lib/api';
 const put = (path, data) => request(path, { method: 'PUT', body: JSON.stringify(data ?? {}) });
 import { asList, PageHeader, StatusBadge, ActionButton } from '@/lib/ui';
 import { InfoTip } from '../lib';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const CATEGORIES = [
   ['EXPERIENCE', 'Experience / Service'],
@@ -486,6 +487,24 @@ export default function TemplatesPage() {
         title="Letter templates"
         subtitle="System (India) and custom letter templates with merge fields, versioning and publish state."
         actions={<PrimaryButton onClick={() => setEditing(null)}>New template</PrimaryButton>}
+      />
+
+      <ModuleGuide
+        id="letters-templates"
+        title="Build reusable HR letter templates with merge fields"
+        what="This is your letter library. Each template (an Experience Certificate, Bonafide, Salary Proof, Appointment letter…) holds the body text plus {{merge fields}} that get auto-filled from the employee, their CTC and your company details when the letter is issued. India system templates ship ready-made; you can clone or add your own."
+        steps={[
+          "Pick a starting point: edit a built-in System (India) template, or click New template to start fresh.",
+          "Set the Category (Experience, Bonafide, Salary proof…), Country = India and Locale en-IN so dates show as dd/mm/yyyy and amounts in ₹.",
+          "Write the body and click fields in the Merge fields palette to drop tokens like {{employee.name}}, {{date.issueDate}} or {{comp.ctcAnnual}} at the cursor — no HTML.",
+          "Use Preview to see the merged text with sample data before going live.",
+          "Tick 'Route through e-sign' for contracts/appointments, then Save & publish to make it issuable.",
+        ]}
+        example={<>For <b>Aarav Sharma</b> (EMP-1042) at <b>Acme India Pvt Ltd</b>, an Experience Certificate body of "This is to certify that {'{{employee.name}}'} was employed as {'{{employee.designation}}'} from {'{{employee.dateOfJoining}}'} to {'{{employee.lastWorkingDay}}'}…" renders as "…employed as <b>Senior Engineer</b> from <b>01/04/2022</b> to <b>31/03/2026</b>…" with a <b>₹18,00,000</b> CTC line when you add {'{{comp.ctcAnnual}}'}.</>}
+        tips={[
+          "System (India) templates are badged 'system' and cannot be deleted — clone one instead of editing it heavily.",
+          "🔒 merge fields (salary/CTC) only resolve for admins who can view compensation; for everyone else they render blank.",
+        ]}
       />
 
       {/* filters */}

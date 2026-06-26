@@ -26,6 +26,7 @@ import { get, post, patch } from '@/lib/api';
 import { asList, DataTable, PageHeader, StatusBadge, moneyish } from '@/lib/ui';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
 import ManagerPicker from '@/components/ManagerPicker';
+import ModuleGuide from '@/components/ModuleGuide';
 
 // SeparationType enum (mirrors the controller's SEPARATION_TYPES set).
 const SEPARATION_TYPES = [
@@ -522,6 +523,24 @@ export default function SeparationsPage() {
             <PrimaryButton onClick={() => setInitiating(true)}>Initiate separation</PrimaryButton>
           ) : null
         }
+      />
+
+      <ModuleGuide
+        id="separations"
+        title="Run a clean exit, from notice to full-and-final"
+        what="This is the console for employee separations. You initiate an exit case, drive it through IT/Finance/Admin/manager clearance lanes, compute and approve the full-and-final (FnF) settlement, settle it as a pay run, and generate the relieving and experience letters — all permission-gated and audited."
+        steps={[
+          'Click "Initiate separation", pick the employee, choose a type (e.g. RESIGNATION), and set the notice/resignation date, last working day (LWD) and relieving date.',
+          'Open the case and clear each exit lane — IT, Finance, Admin, Knowledge transfer and Asset return — once each team signs off; lanes you lack permission for stay read-only.',
+          'Click "Compute FnF"; if a lane is open or an asset is un-returned the 422 blockers show as a checklist to resolve first.',
+          'Have a second person (not the initiator) "Approve FnF" — this creates the FnF pay run; then "Settle" to finalise and reassign any direct reports.',
+          'Once SETTLED, generate the relieving and experience letters.',
+        ]}
+        example={<>Aarav Sharma (<b>₹12,00,000 CTC</b>) resigns from Acme India Pvt Ltd on <b>1 June 2026</b> with LWD <b>30 June 2026</b>. He serves only 20 of 30 notice days, so a <b>10-day notice shortfall</b> is recovered. FnF nets leave encashment and <b>gratuity</b> against the shortfall and any un-returned laptop, after EPF/TDS, into one settlement pay run.</>}
+        tips={[
+          'Separation of duties: the person who initiated a case cannot approve its FnF — that needs canApprovePayroll and a different user.',
+          'Managers see only their departing reports and can clear just the knowledge-transfer and asset-return lanes; HR sees the whole tenant and can initiate and settle.',
+        ]}
       />
 
       {isScoped && (

@@ -37,6 +37,7 @@ import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, employe
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
 import { useTenantCountries } from '@/lib/useTenantCountries';
 import EmployeeSearchSelect from '@/components/EmployeeSearchSelect';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const PAGE_SIZES = [50, 100];
 
@@ -1399,6 +1400,23 @@ export default function AttendancePage() {
   return (
     <div>
       <PageHeader title="Attendance" subtitle="Dashboard, punches, shifts, holidays, timesheets and regularizations" />
+      <ModuleGuide
+        id="attendance"
+        title="Run attendance and lock each period for payroll"
+        what="This is the attendance console: it derives daily statuses (Present, On Leave, Absent, LOP) from raw punches against each shift pattern, and lets you sign off the period so payroll computes against frozen, immutable inputs. Getting it right protects LOP deductions and overtime on the salary run."
+        steps={[
+          'Dashboard: check today’s present% and the by-status breakdown (Asia/Kolkata). Managers see only their reporting sub-tree.',
+          'Shifts: define each shift pattern (start/end, grace, full-day minutes, weekly-off days), then open Assignments to map employees to it with an effective-from date.',
+          'Holidays: pick the year and Import statutory set to seed India’s national + restricted holidays, or Add holiday for a company-specific day.',
+          'Timesheets & Regularizations: approve or reject the pending rows — only PENDING/SUBMITTED items are actionable.',
+          'Period close: set the month range, Check for blockers, clear any flagged items, then Lock period to freeze it for payroll.',
+        ]}
+        example={<>For <b>June 2026</b> at <b>Acme India Pvt Ltd</b>, you import the FY2026 holiday set, assign <b>Aarav Sharma</b> to the <b>General 09:30–18:30</b> shift, and approve his missing-punch regularization for 12 June. On the 30th you run Period close for <b>01–30 Jun 2026</b>: one unsubmitted timesheet blocks it, you clear it, re-check, then lock — freezing <b>1 LOP day</b> so payroll deducts it correctly.</>}
+        tips={[
+          'Locking a period cannot be undone — always run Check for blockers first and confirm the rows that will freeze.',
+          'A wrong full-day-minutes or grace value on a shift silently mis-derives Half Day and LOP; verify the shift before assigning a whole team to it.',
+        ]}
+      />
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
 
       {tab === 'dashboard' && <DashboardTab />}

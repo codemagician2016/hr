@@ -30,6 +30,7 @@ import { get, post, patch, del } from '@/lib/api';
 import { PageHeader, Tabs, DataTable, StatusBadge, ActionButton } from '@/lib/ui';
 import { SectionTitle, InfoTip } from '@/lib/widgets';
 import EmployeeSearchSelect from '@/components/EmployeeSearchSelect';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const HEALTH_DOT = { green: 'bg-green-500', amber: 'bg-amber-500', red: 'bg-red-500' };
 const HEALTH_TIP = {
@@ -58,6 +59,23 @@ export default function BiometricDevicesPage() {
   return (
     <div className="space-y-5">
       <PageHeader title="Biometric devices" subtitle="Register your eSSL / ZKTeco / Matrix terminals, map enroll numbers to people, and watch punches flow into attendance." />
+      <ModuleGuide
+        id="settings-attendance-biometric"
+        title="Wire your punch terminals into attendance"
+        what="This is where you connect physical biometric / RFID terminals (eSSL, ZKTeco, Matrix) so every fingerprint or card punch lands as an attendance record. You register each device, map its enroll numbers to employees, and watch raw punches flow in — with a triage queue to fix anything that doesn't auto-resolve."
+        steps={[
+          'On the Devices tab, click Add device — name it (e.g. "Plant-A Main Gate"), pick the vendor, the entity/site, and the device serial number, then Save.',
+          'Click Generate secret on the new device and copy the shared secret + push URL immediately — it is shown only once. Configure them on the terminal (or its ADMS/SFTP agent).',
+          'Leave Direction handling on "Derive from punch order" unless the terminal is wired with separate IN/OUT readers.',
+          'On Employee mapping, link each device code (enroll-no / PIN) to an employee — use the amber banner to clear codes seen in the last 7 days in one click.',
+          'Check Ingest activity to confirm punches arrive as MATERIALISED, and use Triage to fix any UNMAPPED / LOCKED / ERROR rows.',
+        ]}
+        example={<>At <b>Acme India Pvt Ltd</b>, you register the <b>Plant-A Main Gate</b> eSSL terminal under the <b>Pune</b> entity with serial <b>ZK-4412</b>. Worker <b>Aarav Sharma</b> enrolls on the device as PIN <b>1087</b>, so you map device code <b>1087 → Aarav Sharma (EMP0142)</b>. His 09:02 IST fingerprint punch on <b>15 June 2026</b> now flows straight into June attendance — no manual marking, and it feeds his overtime and LOP for payroll.</>}
+        tips={[
+          'The secret is hashed on our side and shown once — if you lose it, use Rotate secret and re-apply it to the device.',
+          'Set Expected silence (min) per device so a dead terminal turns the health dot red instead of silently dropping punches; the De-bounce (sec) field collapses accidental double-taps.',
+        ]}
+      />
       {error ? <ErrorBanner message={error} /> : null}
       {notice ? <div className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">{notice}</div> : null}
       <Tabs

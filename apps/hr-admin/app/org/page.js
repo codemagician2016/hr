@@ -18,6 +18,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Spinner, ErrorBanner, Empty, PrimaryButton, TextInput, Modal, ModalActions } from '@hr/ui';
 import { get, post, patch, del } from '@/lib/api';
+import ModuleGuide from '@/components/ModuleGuide';
 
 function asList(res) {
   if (Array.isArray(res)) return res;
@@ -83,6 +84,50 @@ const TIMEZONES = [
 ];
 
 const EMPTY_ENTITY = { legalName: '', tradeName: '', code: '', countryCode: 'IN', payCurrency: 'INR', timezone: 'Asia/Kolkata' };
+
+// Hoisted to module scope. If this lived inside EntitySection it would be a NEW
+// function identity on every render, so React would unmount/remount the inputs
+// on each keystroke — the field would lose focus after one character.
+function EntityFields({ value, onChange }) {
+  return (
+    <>
+      <TextInput
+        label="Legal name"
+        value={value.legalName}
+        onChange={(v) => onChange('legalName', v)}
+        required
+        hint="The registered legal name of the entity."
+      />
+      <div className="grid grid-cols-2 gap-3">
+        <TextInput label="Trade name" value={value.tradeName} onChange={(v) => onChange('tradeName', v)} hint="Optional" />
+        <TextInput label="Code" value={value.code} onChange={(v) => onChange('code', v)} required hint="e.g. IN-HQ" />
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <SelectField
+          label="Country"
+          value={value.countryCode}
+          onChange={(v) => onChange('countryCode', v)}
+          options={COUNTRIES.map((c) => ({ value: c.value, label: c.label }))}
+          required
+        />
+        <SelectField
+          label="Pay currency"
+          value={value.payCurrency}
+          onChange={(v) => onChange('payCurrency', v)}
+          options={CURRENCIES}
+          required
+        />
+        <SelectField
+          label="Timezone"
+          value={value.timezone}
+          onChange={(v) => onChange('timezone', v)}
+          options={TIMEZONES}
+          required
+        />
+      </div>
+    </>
+  );
+}
 
 function EntitySection() {
   const [rows, setRows] = useState(null);
@@ -201,47 +246,6 @@ function EntitySection() {
     } finally {
       setDeletingId(null);
     }
-  }
-
-  function EntityFields({ value, onChange }) {
-    return (
-      <>
-        <TextInput
-          label="Legal name"
-          value={value.legalName}
-          onChange={(v) => onChange('legalName', v)}
-          required
-          hint="The registered legal name of the entity."
-        />
-        <div className="grid grid-cols-2 gap-3">
-          <TextInput label="Trade name" value={value.tradeName} onChange={(v) => onChange('tradeName', v)} hint="Optional" />
-          <TextInput label="Code" value={value.code} onChange={(v) => onChange('code', v)} required hint="e.g. IN-HQ" />
-        </div>
-        <div className="grid grid-cols-3 gap-3">
-          <SelectField
-            label="Country"
-            value={value.countryCode}
-            onChange={(v) => onChange('countryCode', v)}
-            options={COUNTRIES.map((c) => ({ value: c.value, label: c.label }))}
-            required
-          />
-          <SelectField
-            label="Pay currency"
-            value={value.payCurrency}
-            onChange={(v) => onChange('payCurrency', v)}
-            options={CURRENCIES}
-            required
-          />
-          <SelectField
-            label="Timezone"
-            value={value.timezone}
-            onChange={(v) => onChange('timezone', v)}
-            options={TIMEZONES}
-            required
-          />
-        </div>
-      </>
-    );
   }
 
   return (
@@ -513,6 +517,43 @@ function OrgSection({ title, resource, fields, displayKey = 'name' }) {
 // /api/hr/org/entities — a fresh tenant must create an entity first.
 const EMPTY_LOCATION = { entityId: '', code: '', name: '', city: '', countryCode: 'IN', timezone: 'Asia/Kolkata' };
 
+// Hoisted to module scope (see EntityFields note). entityOptions is passed in as
+// a prop because it derives from LocationSection's own state.
+function LocationFields({ value, onChange, entityOptions }) {
+  return (
+    <>
+      <SelectField
+        label="Legal entity"
+        value={value.entityId}
+        onChange={(v) => onChange('entityId', v)}
+        options={entityOptions}
+        required
+      />
+      <div className="grid grid-cols-2 gap-3">
+        <TextInput label="Location name" value={value.name} onChange={(v) => onChange('name', v)} required hint="e.g. Bangalore HQ" />
+        <TextInput label="Code" value={value.code} onChange={(v) => onChange('code', v)} required hint="e.g. BLR" />
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <TextInput label="City" value={value.city} onChange={(v) => onChange('city', v)} hint="Optional" />
+        <SelectField
+          label="Country"
+          value={value.countryCode}
+          onChange={(v) => onChange('countryCode', v)}
+          options={COUNTRIES.map((c) => ({ value: c.value, label: c.label }))}
+          required
+        />
+        <SelectField
+          label="Timezone"
+          value={value.timezone}
+          onChange={(v) => onChange('timezone', v)}
+          options={TIMEZONES}
+          required
+        />
+      </div>
+    </>
+  );
+}
+
 function LocationSection() {
   const [rows, setRows] = useState(null);
   const [entities, setEntities] = useState([]);
@@ -646,41 +687,6 @@ function LocationSection() {
     ...entities.map((e) => ({ value: e.id, label: e.tradeName || e.legalName })),
   ];
 
-  function LocationFields({ value, onChange }) {
-    return (
-      <>
-        <SelectField
-          label="Legal entity"
-          value={value.entityId}
-          onChange={(v) => onChange('entityId', v)}
-          options={entityOptions}
-          required
-        />
-        <div className="grid grid-cols-2 gap-3">
-          <TextInput label="Location name" value={value.name} onChange={(v) => onChange('name', v)} required hint="e.g. Bangalore HQ" />
-          <TextInput label="Code" value={value.code} onChange={(v) => onChange('code', v)} required hint="e.g. BLR" />
-        </div>
-        <div className="grid grid-cols-3 gap-3">
-          <TextInput label="City" value={value.city} onChange={(v) => onChange('city', v)} hint="Optional" />
-          <SelectField
-            label="Country"
-            value={value.countryCode}
-            onChange={(v) => onChange('countryCode', v)}
-            options={COUNTRIES.map((c) => ({ value: c.value, label: c.label }))}
-            required
-          />
-          <SelectField
-            label="Timezone"
-            value={value.timezone}
-            onChange={(v) => onChange('timezone', v)}
-            options={TIMEZONES}
-            required
-          />
-        </div>
-      </>
-    );
-  }
-
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-5">
       <div className="flex items-center justify-between mb-4">
@@ -725,7 +731,7 @@ function LocationSection() {
 
       {open && (
         <form onSubmit={onCreate} className="border-t border-gray-100 pt-4 space-y-3">
-          <LocationFields value={draft} onChange={set} />
+          <LocationFields value={draft} onChange={set} entityOptions={entityOptions} />
           <div className="flex gap-2 pt-1">
             <PrimaryButton type="submit" loading={saving}>
               Add location
@@ -749,7 +755,7 @@ function LocationSection() {
         <Modal title="Edit location" onClose={() => { setEditId(null); setError(''); }}>
           <form onSubmit={onSaveEdit} className="space-y-3">
             {error && <ErrorBanner message={error} />}
-            <LocationFields value={editDraft} onChange={setEdit} />
+            <LocationFields value={editDraft} onChange={setEdit} entityOptions={entityOptions} />
             <ModalActions>
               <button
                 type="button"
@@ -784,6 +790,23 @@ export default function OrgPage() {
           View org chart
         </Link>
       </div>
+
+      <ModuleGuide
+        id="org"
+        title="Set up your org structure"
+        what="This is the backbone every other DriftHR module reads from: the legal entities you run payroll under, plus the departments, designations and work locations you slot employees into. Get it right once and hiring, payroll, PF/ESI registers and the org chart all line up."
+        steps={[
+          "Add a legal entity first (legal name, code, country IN, pay currency INR, Asia/Kolkata) — nothing else can be created until one exists.",
+          "Add departments (e.g. Engineering, Finance) and designations (e.g. Senior Engineer) with short codes for reuse across the org.",
+          "Add locations, picking the legal entity each one belongs to plus its city and code.",
+          "Use Edit / Delete on any row to correct a record; open View org chart to see the reporting tree.",
+        ]}
+        example={<>Onboarding <b>Acme India Pvt Ltd</b>: create the entity (code <b>IN-HQ</b>, INR, Asia/Kolkata), add departments <b>Engineering</b> and <b>Finance</b>, the designation <b>Senior Engineer</b>, then a location <b>Bangalore HQ</b> (code <b>BLR</b>). Now <b>Aarav Sharma</b> on ₹18,00,000 CTC can be hired into Engineering at Bangalore HQ.</>}
+        tips={[
+          "Locations need an entity to attach to — if the picker says 'No entities', add a legal entity above first.",
+          "Codes (IN-HQ, BLR) flow into payroll registers and Form 24Q output, so keep them stable once employees are mapped.",
+        ]}
+      />
 
       <div className="grid md:grid-cols-2 gap-4">
         <EntitySection />

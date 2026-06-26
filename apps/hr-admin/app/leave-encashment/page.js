@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Spinner, ErrorBanner } from '@hr/ui';
 import { get, post } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, employeeLabel, moneyish } from '@/lib/ui';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const TABS = [
   { key: 'queue', label: 'Approvals' },
@@ -106,6 +107,23 @@ export default function LeaveEncashmentAdminPage() {
       <PageHeader
         title="Leave encashment"
         subtitle="In-service leave encashment — approve requests (debits the leave balance and queues a fully-taxable payout on the next pay run) and track the register. Employees raise requests on their portal."
+      />
+
+      <ModuleGuide
+        id="leave-encashment"
+        title="Approve in-service leave encashment"
+        what="This is where you clear employee requests to cash out unused leave while still employed. Approving debits the leave balance and queues a fully-taxable payout on the next pay run; the Register tab is your audit trail of every request and computed amount."
+        steps={[
+          'Open the Approvals tab to see requests awaiting your decision (employees raise these from their ESS portal — not here).',
+          'Check the employee, leave type, days and the period before deciding.',
+          'Click Approve to debit the leave balance and snapshot the payout amount, or Reject (the balance stays unchanged).',
+          'Switch to the Register tab to track approved, paid, rejected and cancelled requests; filter by status for audit or Section 89(1) figures.',
+        ]}
+        example={<>Aarav Sharma at <b>Acme India Pvt Ltd</b> requests encashment of <b>10 days</b> of earned leave for period <b>JUN-2026</b>. On Approve, the amount is snapshotted (e.g. <b>₹38,460</b>), his leave balance drops by 10 days, and the payout rides the June 2026 pay run as a <b>fully-taxable</b> earning with TDS applied.</>}
+        tips={[
+          'In-service encashment is fully taxable as salary under §17 — the §10(10AA) exit exemption does NOT apply here.',
+          'The amount is null until you approve; it is locked in at approval time, so review days and period carefully first.',
+        ]}
       />
 
       {error ? <ErrorBanner message={error} /> : null}

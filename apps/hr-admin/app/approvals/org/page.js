@@ -22,6 +22,7 @@ import { get, request } from '@/lib/api';
 import { PageHeader } from '@/lib/ui';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
 import { InfoTip } from '@/lib/widgets';
+import ModuleGuide from '@/components/ModuleGuide';
 
 // Build a parent→children tree from the flat node list.
 function buildTree(nodes) {
@@ -223,6 +224,24 @@ export default function OrgEditorPage() {
         title={<span className="inline-flex items-center">Reporting tree<InfoTip text="This is your org chart: who reports to whom. Drag a person onto their new manager to change it. The approval engine routes ‘my manager’ steps along these exact lines." /></span>}
         subtitle={total ? `${total} ${total === 1 ? 'person' : 'people'} — drag a person onto a new manager to re-assign` : 'Set up who reports to whom'}
         actions={<Link href="/approvals" className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium hover:bg-gray-50">← Approvals</Link>}
+      />
+
+      <ModuleGuide
+        id="approvals-org"
+        title="Build your reporting tree to drive ‘my manager’ approvals"
+        what="This is your live org chart — who reports to whom. The approval engine uses these exact lines whenever a workflow routes a request to ‘my manager’, so the tree you build here decides who signs off on leave, expense and payroll requests."
+        steps={[
+          "Use the search box to find a person by name or employee code.",
+          "Drag a person’s card onto their new manager’s card to re-assign the reporting line.",
+          "Drag a card onto ‘Drop here to make someone top-level’ to detach them from any manager.",
+          "Confirm the toast (e.g. ‘Aarav now reports to Priya’) — the change is instant across every module.",
+          "Expand or collapse a manager with the +/− toggle to inspect their team.",
+        ]}
+        example={<>At <b>Acme India Pvt Ltd</b>, <b>Aarav Sharma</b> (EMP1042) is moved under <b>Priya Nair</b>, the Bengaluru Finance Manager. From now on, Aarav’s <b>₹18,500</b> travel-reimbursement and June 2026 leave requests route to Priya for first approval under any ‘my manager’ step.</>}
+        tips={[
+          "We block any move that would create a reporting loop (nobody can become their own manager’s manager).",
+          "No tree yet? Leave it flat and point approval chains at a named person or role in the builder instead.",
+        ]}
       />
 
       {error && <ErrorBanner message={error} />}

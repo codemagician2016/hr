@@ -16,6 +16,7 @@ import { Spinner, ErrorBanner, PrimaryButton, Modal, ModalActions } from '@hr/ui
 import { get, post, patch } from '@/lib/api';
 import { DataTable, PageHeader, StatusBadge, ActionButton } from '@/lib/ui';
 import { InfoTip } from '@/lib/widgets';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const inr = (minor) => `₹${(Number(minor || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const thisPeriod = () => new Date().toISOString().slice(0, 7); // "YYYY-MM"
@@ -26,6 +27,24 @@ export default function ArrearsPage() {
   return (
     <div>
       <PageHeader title="Arrears" subtitle="Auto-arrear engine — back-dated salary revisions paid as current-period income (India)" />
+      <ModuleGuide
+        id="payroll-arrears"
+        title="Settle back-dated salary revisions as arrears"
+        what="This is the auto-arrear console for retro pay. When a salary revision takes effect in a month that's already been paid, it computes the shortfall per month and rides it through your payroll pipeline as current-period income."
+        steps={[
+          "Pick the legal entity and open period (YYYY-MM), then Refresh to detect back-dated revisions effective before this period.",
+          "Click 'Create arrear cycle' for an employee to open a DRAFT cycle.",
+          "Hit 'Compute diffs' to recompute each retro month at the new comp vs the frozen paid slip and see the per-month arrear, PF and ESI.",
+          "Set the 'ESI on arrears' toggle — on for a late increment, off for a retrospective wage-revision settlement.",
+          "A different operator clicks 'Approve & pay' (maker-checker), choosing to inject into this month's run or mint a separate ARREAR run.",
+          "Once APPROVED/PAID, 'Publish slip' fans out the arrear slip with the Section 89(1) relief figure.",
+        ]}
+        example={<>Aarav Sharma at <b>Acme India Pvt Ltd</b> gets a promotion effective <b>Apr 2026</b> approved only in <b>Jun 2026</b> — base up from ₹80,000 to ₹95,000/mo. The console computes ₹15,000 arrear for each of Apr, May, Jun = <b>₹45,000 gross arrear</b>, plus PF/ESI on it, and estimates the <b>Section 89(1)</b> relief (via <b>Form 10E</b>) since the pay belongs to earlier months.</>}
+        tips={[
+          "A negative cycle is a recovery (revision reduces past pay) — it is never auto-deducted; handle it via an explicit correction run.",
+          "You cannot approve a cycle you computed yourself — segregation of duties is enforced server-side.",
+        ]}
+      />
       <DetectBanner onOpenCycle={setOpenId} />
       <ArrearCycles onOpenCycle={setOpenId} />
     </div>

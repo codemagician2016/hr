@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ErrorBanner, formatAdminDate } from '@hr/ui';
 import { get, post } from '@/lib/api';
 import { DataTable, PageHeader, StatusBadge, ActionButton, employeeLabel, moneyish, ServerPagination } from '@/lib/ui';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const STATUSES = ['', 'DRAFT', 'PENDING', 'APPROVED', 'DISBURSED', 'CLOSED', 'REJECTED', 'CANCELLED'];
 const PAGE_SIZES = [25, 50, 100];
@@ -93,6 +94,23 @@ export default function LoansPage() {
   return (
     <div>
       <PageHeader title="Loans" subtitle="Employee loans and salary advances" />
+
+      <ModuleGuide
+        id="loans"
+        title="Track employee loans & salary advances through their lifecycle"
+        what="This screen lists every employee loan and salary advance, with its principal, outstanding balance and monthly EMI. You move each one through its lifecycle (Draft → Pending → Approved → Disbursed → Closed) so the EMI is deducted from payroll and the books stay accurate."
+        steps={[
+          'Use the status filter to find the loans you care about — e.g. PENDING to see what needs your approval.',
+          'On a PENDING loan, click Approve (or Reject) once you have verified the principal, tenure and EMI.',
+          'After approval, click Disburse when the money has actually been paid out to the employee.',
+          'Once all EMIs are recovered and Outstanding reaches ₹0, click Close to retire the loan.',
+        ]}
+        example={<>Aarav Sharma requests a <b>₹1,20,000</b> personal loan over 12 months. After approval and disbursal, payroll deducts an EMI of <b>₹10,000</b> each month; by June 2026 the <b>Outstanding</b> column shows the remaining balance until you Close it.</>}
+        tips={[
+          'EMI deductions only flow into payroll once the loan is DISBURSED — an Approved-but-not-disbursed loan deducts nothing.',
+          'A loan needs canManageCompensation to action; canViewCompensation is enough to view this list.',
+        ]}
+      />
 
       <div className="flex items-center gap-3 mb-4">
         <select

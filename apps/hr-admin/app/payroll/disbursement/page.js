@@ -18,6 +18,7 @@ import { Spinner, ErrorBanner, PrimaryButton } from '@hr/ui';
 import { get, post, downloadFile } from '@/lib/api';
 import { PageHeader, StatusBadge } from '@/lib/ui';
 import { InfoTip } from '@/lib/widgets';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const LINE_PAGE_SIZE = 50;
 
@@ -55,6 +56,24 @@ export default function DisbursementPage() {
       <PageHeader
         title="Salary Disbursement"
         subtitle="Turn a frozen / approved pay run into a bank salary-advice file (HDFC, ICICI, Axis, Kotak, SBI or generic NEFT/RTGS), then reconcile the bank UTRs back onto each employee."
+      />
+
+      <ModuleGuide
+        id="payroll-disbursement"
+        title="Pay a committed run into employees' bank accounts"
+        what="This screen turns a frozen/approved pay run into a bank salary-advice file (HDFC, ICICI, Axis, Kotak, SBI or generic NEFT/RTGS), then reconciles the bank's UTRs back onto each employee. It only pays — the Payroll console computes and locks the run; here you disburse it."
+        steps={[
+          'Pick a disbursable pay run — only LOCKED, APPROVED, PAID or FILED runs appear (freeze/approve it on the Payroll console first)',
+          'Choose your bank format and (optionally) the company debit account and value date, then Create batch',
+          'Review any skipped employees (missing/invalid bank details), fix them, and re-create the batch if needed',
+          'Open the batch and Download advice file, then upload that file to your corporate net-banking',
+          'Once the bank credits salaries, paste or upload its UTR/status CSV under Reconcile UTRs to mark each line CREDITED / FAILED / RETURNED',
+        ]}
+        example={<>For the <b>June 2026</b> run at <b>Acme India Pvt Ltd</b>, you create an <b>HDFC</b> batch debiting current account <b>00060350001234</b> with value date <b>30 Jun 2026</b>. <b>Aarav Sharma</b> (net <b>₹98,750</b>) lands in the file; you upload it, then reconcile HDFC's export so his line shows status <b>CREDITED</b> with UTR <b>HDFCN52026063012345</b>.</>}
+        tips={[
+          'Employees with no/invalid IFSC or account number are skipped, not failed — fix their bank details and create a fresh batch to include them.',
+          'Reconcile is idempotent: re-uploading a corrected UTR file just re-applies it, so you can run it again after the bank returns/retries a credit.',
+        ]}
       />
 
       {error && <div className="mt-4"><ErrorBanner message={error} /></div>}

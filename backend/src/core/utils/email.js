@@ -30,16 +30,17 @@ function currentEmailProvider() {
 }
 
 function buildEmailPalette() {
-  // Light, airy palette. Primary is the indigo accent used across the app
-  // UI — it only appears on buttons, the OTP block, and small highlights.
-  // Hero is a soft white panel instead of a dark gradient, keeping the
-  // reading surface bright and friendly in any mail client.
-  const primary = '#4F46E5';
-  const primaryAlt = '#6366F1';
+  // DriftHR brand palette. Primary is brand teal (#16B6A6); primaryAlt is the
+  // brand blue (#3B6FE3) that the teal pairs into on the logo gradient. Text is
+  // brand ink (#16243B). Primary only appears on buttons, the OTP block, the
+  // brand pill and small highlights; the hero is a soft white panel so the
+  // reading surface stays bright and friendly in any mail client.
+  const primary = '#16B6A6';   // DriftHR teal
+  const primaryAlt = '#3B6FE3'; // DriftHR blue (gradient pair)
   const accent = '#10B981';
   const surface = '#FFFFFF';
   const bg = '#F5F7FB';
-  const text = '#0F172A';
+  const text = '#16243B';      // DriftHR ink
   const muted = '#64748B';
 
   return {
@@ -48,6 +49,8 @@ function buildEmailPalette() {
     accent,
     accentSoft: '#ECFDF5',
     accentBorder: '#A7F3D0',
+    primarySoft: '#E6FAF6',     // teal tint — pill / notice / OTP backgrounds
+    primaryBorder: '#A8E5DE',   // teal tint border
     onPrimary: '#FFFFFF',
     bg,
     surface,
@@ -395,12 +398,13 @@ function escapeHtml(value) {
 
 function emailStyles(palette) {
   return `
-    body { margin: 0; padding: 32px 0; background: ${palette.bg}; font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; color: ${palette.text}; }
+    @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
+    body { margin: 0; padding: 32px 0; background: ${palette.bg}; font-family: 'Manrope', -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; color: ${palette.text}; }
     .shell { width: 100%; padding: 0 14px; box-sizing: border-box; }
     .container { max-width: 620px; margin: 0 auto; background: ${palette.surface}; border-radius: 20px; overflow: hidden; border: 1px solid ${palette.border}; box-shadow: 0 4px 24px rgba(15, 23, 42, 0.06); }
     .hero { padding: 28px 32px 24px; background: ${palette.surface}; border-bottom: 1px solid ${palette.subtle}; }
     .hero-top { margin-bottom: 16px; }
-    .brand-pill { display: inline-block; padding: 6px 12px; border-radius: 999px; background: #EEF2FF; border: 1px solid #C7D2FE; color: ${palette.primary}; font-size: 11px; line-height: 1; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 700; }
+    .brand-pill { display: inline-block; padding: 6px 12px; border-radius: 999px; background: ${palette.primarySoft}; border: 1px solid ${palette.primaryBorder}; color: ${palette.primary}; font-size: 11px; line-height: 1; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 700; }
     .hero-kicker { margin: 0 0 8px; font-size: 11px; line-height: 1.4; letter-spacing: 0.14em; text-transform: uppercase; color: ${palette.muted}; font-weight: 700; }
     .hero h1 { margin: 0; font-size: 26px; line-height: 1.2; letter-spacing: -0.02em; color: ${palette.text}; font-weight: 700; }
     .hero-copy { margin: 10px 0 0; max-width: 500px; font-size: 15px; line-height: 1.65; color: ${palette.muted}; }
@@ -418,7 +422,7 @@ function emailStyles(palette) {
     .check-item { display: block; margin-bottom: 10px; }
     .check-dot { display: inline-block; width: 6px; height: 6px; margin-right: 10px; border-radius: 999px; background: ${palette.accent}; vertical-align: middle; }
     .check-copy { display: inline; color: ${palette.text}; font-size: 14px; line-height: 1.6; }
-    .notice { margin: 18px 0; padding: 14px 16px; background: #EEF2FF; border: 1px solid #C7D2FE; border-radius: 12px; }
+    .notice { margin: 18px 0; padding: 14px 16px; background: ${palette.primarySoft}; border: 1px solid ${palette.primaryBorder}; border-radius: 12px; }
     .notice.notice-success { background: ${palette.successSoft}; border-color: ${palette.successBorder}; }
     .notice.notice-danger { background: ${palette.dangerSoft}; border-color: ${palette.dangerBorder}; }
     .notice-title { margin: 0 0 4px; font-size: 12px; line-height: 1.4; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 700; color: ${palette.primary}; }
@@ -433,7 +437,7 @@ function emailStyles(palette) {
     .status-success { background: ${palette.successSoft}; color: ${palette.success}; border: 1px solid ${palette.successBorder}; }
     .status-danger { background: ${palette.dangerSoft}; color: ${palette.danger}; border: 1px solid ${palette.dangerBorder}; }
     .btn { display: inline-block; margin: 18px 0 6px; padding: 12px 22px; border-radius: 10px; background: ${palette.primary}; color: ${palette.onPrimary} !important; text-decoration: none; font-size: 14px; font-weight: 600; letter-spacing: 0.01em; }
-    .otp-shell { margin: 20px 0 12px; padding: 20px 16px; border-radius: 14px; background: #EEF2FF; border: 1px solid #C7D2FE; text-align: center; }
+    .otp-shell { margin: 20px 0 12px; padding: 20px 16px; border-radius: 14px; background: ${palette.primarySoft}; border: 1px solid ${palette.primaryBorder}; text-align: center; }
     .otp-label { margin: 0 0 10px; font-size: 11px; line-height: 1.4; letter-spacing: 0.14em; text-transform: uppercase; color: ${palette.muted}; font-weight: 700; }
     .otp { margin: 0; font-size: 32px; font-weight: 700; letter-spacing: 10px; color: ${palette.primary}; text-align: center; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
     .signature { margin-top: 24px; padding-top: 16px; border-top: 1px solid ${palette.subtle}; }
@@ -641,24 +645,24 @@ function buildAppointmentMarkup(ctx, options = {}) {
 }
 
 async function sendWelcomeEmail(to, name, options = {}) {
-  const platformUrl = process.env.FRONTEND_URL || 'https://sitepresso.com';
+  const platformUrl = process.env.FRONTEND_URL || 'https://drifthr.com';
   const safeName = escapeHtml(name);
   const subject = `Welcome to DriftHR, ${name}`;
   const html = renderEmail({
     eyebrow: 'Welcome',
     title: `You’re in, ${name}`,
-    lead: 'Your account is verified. Next stop: set up your booking page in a few minutes.',
+    lead: 'Your account is verified. Next stop: set up your organisation and run payroll in minutes.',
     introHtml: `
       <p>Hi ${safeName},</p>
-      <p class="lead">Thanks for joining DriftHR. We built this to get your booking page live fast — so let&rsquo;s finish setup and get you ready to take your first appointment.</p>
+      <p class="lead">Thanks for joining DriftHR. Let&rsquo;s finish setup so you can onboard your team, track attendance and leave, and run your first compliant payroll.</p>
     `,
     bodyHtml: `
       ${renderChecklist([
-        '<strong>Finish onboarding</strong> — your business name, address, and a couple of services.',
-        '<strong>Add your team</strong> (or just yourself) and set your hours.',
-        '<strong>Share your booking link</strong> with customers — you can always tweak later.',
+        '<strong>Set up your company</strong> — legal entity, work locations and pay calendar.',
+        '<strong>Add your people</strong> — employees, departments and the reporting structure.',
+        '<strong>Run your first payroll</strong> — compensation, statutory deductions and payslips.',
       ])}
-      ${renderNotice('Tip', 'Most people finish setup in one sitting — it takes about 5 minutes. You can change anything later from your admin dashboard.')}
+      ${renderNotice('Tip', 'Most teams finish the core setup in one sitting — about 5 minutes. You can change anything later from your admin dashboard.')}
       <a href="${escapeHtml(platformUrl)}/onboarding" class="btn">Finish setup →</a>
       <p class="muted">Already started? Your progress is saved — just head back to <a href="${escapeHtml(platformUrl)}/onboarding">${escapeHtml(platformUrl)}/onboarding</a>.</p>
       ${renderSignature('The DriftHR team', 'Reply to this email anytime — a real person will get back to you.')}
@@ -795,7 +799,7 @@ async function sendUserSignupOtpEmail(to, name, otp, options = {}) {
         <p class="otp-label">Email verification code</p>
         <div class="otp">${safeOtp}</div>
       </div>
-      ${renderNotice('Why verify?', 'A verified email keeps your account secure and makes sure booking confirmations and reminders reach you.')}
+      ${renderNotice('Why verify?', 'A verified email keeps your account secure and makes sure payslips, approvals and important account notifications reach you.')}
       ${renderSignature('The DriftHR team', 'See you on the other side of the form.')}
     `,
     footerHtml: 'Didn&rsquo;t sign up? You can safely ignore this email.',
@@ -824,11 +828,11 @@ async function sendUserSignupOtpEmail(to, name, otp, options = {}) {
 function renderMeetingLink(meetingUrl) {
   if (!meetingUrl) return '';
   return `
-    <div style="margin:20px 0; padding:16px; border:1px solid #C7D2FE; background:#EEF2FF; border-radius:12px;">
-      <p style="margin:0 0 8px; font-size:11px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; color:#4F46E5;">Online appointment</p>
-      <p style="margin:0 0 12px; font-size:14px; color:#1E1B4B;">Join via the link below at your appointment time.</p>
-      <a href="${meetingUrl}" class="btn-primary" style="display:inline-block; padding:10px 22px; background:#4F46E5; color:#fff; text-decoration:none; border-radius:10px; font-weight:600; font-size:13px;">Join the meeting</a>
-      <p style="margin:10px 0 0; font-size:11px; color:#6B7280; word-break:break-all;">Or paste this link into your browser: <span style="color:#4F46E5;">${escapeHtml(meetingUrl)}</span></p>
+    <div style="margin:20px 0; padding:16px; border:1px solid #A8E5DE; background:#E6FAF6; border-radius:12px;">
+      <p style="margin:0 0 8px; font-size:11px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; color:#16B6A6;">Online appointment</p>
+      <p style="margin:0 0 12px; font-size:14px; color:#16243B;">Join via the link below at your appointment time.</p>
+      <a href="${meetingUrl}" class="btn-primary" style="display:inline-block; padding:10px 22px; background:#16B6A6; color:#fff; text-decoration:none; border-radius:10px; font-weight:600; font-size:13px;">Join the meeting</a>
+      <p style="margin:10px 0 0; font-size:11px; color:#6B7280; word-break:break-all;">Or paste this link into your browser: <span style="color:#16B6A6;">${escapeHtml(meetingUrl)}</span></p>
     </div>
   `;
 }
@@ -1824,7 +1828,7 @@ async function sendAppointmentCompletedEmail(to, ctx) {
 
   const ctaHtml = `
     <div style="text-align:center; margin:28px 0 6px;">
-      <a href="${primaryHref}" class="btn-primary" style="display:inline-block; padding:12px 28px; background:#4F46E5; color:#fff; text-decoration:none; border-radius:10px; font-weight:600; font-size:14px;">
+      <a href="${primaryHref}" class="btn-primary" style="display:inline-block; padding:12px 28px; background:#16B6A6; color:#fff; text-decoration:none; border-radius:10px; font-weight:600; font-size:14px;">
         ${escapeHtml(primaryLabel)}
       </a>
     </div>
@@ -1898,7 +1902,7 @@ async function sendPrescriptionReadyEmail(to, ctx) {
       + renderAppointmentInvoiceBlock(ctx)
       + `
         <div style="text-align:center; margin:28px 0 6px;">
-          <a href="${escapeHtml(appointmentUrl)}" class="btn-primary" style="display:inline-block; padding:12px 28px; background:#4F46E5; color:#fff; text-decoration:none; border-radius:10px; font-weight:600; font-size:14px;">
+          <a href="${escapeHtml(appointmentUrl)}" class="btn-primary" style="display:inline-block; padding:12px 28px; background:#16B6A6; color:#fff; text-decoration:none; border-radius:10px; font-weight:600; font-size:14px;">
             View appointment
           </a>
         </div>
@@ -1940,7 +1944,7 @@ async function sendAppointmentNoShowEmail(to, ctx) {
 
   const rebookButtonHtml = `
     <div style="text-align:center; margin:28px 0;">
-      <a href="${rebookUrl}" class="btn-primary" style="display:inline-block; padding:12px 28px; background:#4F46E5; color:#fff; text-decoration:none; border-radius:10px; font-weight:600; font-size:14px;">
+      <a href="${rebookUrl}" class="btn-primary" style="display:inline-block; padding:12px 28px; background:#16B6A6; color:#fff; text-decoration:none; border-radius:10px; font-weight:600; font-size:14px;">
         ${escapeHtml(t('appointmentNoShow.ctaRebook'))}
       </a>
     </div>
@@ -1990,7 +1994,7 @@ async function sendAppointmentReviewRequestEmail(to, ctx) {
 
   const reviewButtonHtml = `
     <div style="text-align:center; margin:28px 0;">
-      <a href="${ctx.reviewLink}" class="btn-primary" style="display:inline-block; padding:12px 28px; background:#4F46E5; color:#fff; text-decoration:none; border-radius:10px; font-weight:600; font-size:14px;">
+      <a href="${ctx.reviewLink}" class="btn-primary" style="display:inline-block; padding:12px 28px; background:#16B6A6; color:#fff; text-decoration:none; border-radius:10px; font-weight:600; font-size:14px;">
         ${escapeHtml(t('appointmentReviewRequest.ctaReview'))}
       </a>
     </div>
@@ -2042,7 +2046,7 @@ async function sendOrderReviewRequestEmail(to, ctx) {
 
   const reviewButtonHtml = `
     <div style="text-align:center; margin:28px 0;">
-      <a href="${ctx.reviewLink}" class="btn-primary" style="display:inline-block; padding:12px 28px; background:#4F46E5; color:#fff; text-decoration:none; border-radius:10px; font-weight:600; font-size:14px;">
+      <a href="${ctx.reviewLink}" class="btn-primary" style="display:inline-block; padding:12px 28px; background:#16B6A6; color:#fff; text-decoration:none; border-radius:10px; font-weight:600; font-size:14px;">
         ${escapeHtml(t('appointmentReviewRequest.ctaReview'))}
       </a>
     </div>
@@ -2091,7 +2095,7 @@ async function sendAppointmentAutoCancelledEmail(to, ctx) {
 
   const rebookButtonHtml = `
     <div style="text-align:center; margin:28px 0;">
-      <a href="${rebookUrl}" class="btn-primary" style="display:inline-block; padding:12px 28px; background:#4F46E5; color:#fff; text-decoration:none; border-radius:10px; font-weight:600; font-size:14px;">
+      <a href="${rebookUrl}" class="btn-primary" style="display:inline-block; padding:12px 28px; background:#16B6A6; color:#fff; text-decoration:none; border-radius:10px; font-weight:600; font-size:14px;">
         ${escapeHtml(t('appointmentAutoCancelled.ctaRebook'))}
       </a>
     </div>
@@ -2099,7 +2103,7 @@ async function sendAppointmentAutoCancelledEmail(to, ctx) {
 
   // Hand-stitch the directLink so {url} becomes a real <a>.
   const directLinkTemplate = t('appointmentAutoCancelled.directLink', { url: '__URL__' });
-  const directLinkHtml = `<p class="muted" style="text-align:center; font-size:12px;">${escapeHtml(directLinkTemplate).replace('__URL__', `<a href="${rebookUrl}" style="color:#4F46E5;">${escapeHtml(rebookUrl)}</a>`)}</p>`;
+  const directLinkHtml = `<p class="muted" style="text-align:center; font-size:12px;">${escapeHtml(directLinkTemplate).replace('__URL__', `<a href="${rebookUrl}" style="color:#16B6A6;">${escapeHtml(rebookUrl)}</a>`)}</p>`;
 
   const html = renderEmail({
     eyebrow: t('appointmentAutoCancelled.eyebrow'),
@@ -2184,7 +2188,7 @@ async function sendWaitlistSlotOpenEmail(to, ctx) {
 
   const buttonHtml = `
     <div style="text-align:center; margin:28px 0;">
-      <a href="${bookHref}" class="btn-primary" style="display:inline-block; padding:12px 28px; background:#4F46E5; color:#fff; text-decoration:none; border-radius:10px; font-weight:600; font-size:14px;">
+      <a href="${bookHref}" class="btn-primary" style="display:inline-block; padding:12px 28px; background:#16B6A6; color:#fff; text-decoration:none; border-radius:10px; font-weight:600; font-size:14px;">
         Book this slot
       </a>
     </div>
@@ -2206,7 +2210,7 @@ async function sendWaitlistSlotOpenEmail(to, ctx) {
         ['Time',    `${escapeHtml(ctx.startTime || '')}${ctx.endTime ? ` – ${escapeHtml(ctx.endTime)}` : ''}`],
       ], { title: 'Available slot' })
       + buttonHtml
-      + `<p class="muted" style="text-align:center; font-size:12px;">Or open <a href="${bookHref}" style="color:#4F46E5;">${escapeHtml(bookHref)}</a> directly.</p>`
+      + `<p class="muted" style="text-align:center; font-size:12px;">Or open <a href="${bookHref}" style="color:#16B6A6;">${escapeHtml(bookHref)}</a> directly.</p>`
       + renderSignature(ctx.businessName, 'Thanks for waiting — we appreciate it.'),
     footerHtml: `You’re receiving this because you joined the waitlist for ${escapeHtml(ctx.businessName)}.`,
   });

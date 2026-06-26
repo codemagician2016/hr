@@ -11,6 +11,10 @@
 
 export const NAV_ITEMS = [
   { key: 'dashboard', label: 'Dashboard', href: '/', icon: 'dashboard' },
+  // Guided setup hub (top-level, ungrouped → renders standalone near the top).
+  // Shows live setup completion + ordered next steps. Visible to the people who
+  // configure the workspace (Owner / HR-Admin); links inside are themselves gated.
+  { key: 'setup', label: 'Setup guide', href: '/setup', permission: 'canManageCompanyProfile', icon: 'onboarding' },
   { key: 'people', label: 'People', href: '/people', feature: 'hr', permission: 'canViewEmployees', icon: 'people' },
   // Employee lifecycle (Feature 4). The onboarding pipeline + checklist tasks are
   // visible to anyone who can view employees (a Manager sees only their reporting

@@ -20,6 +20,7 @@ import { get, post } from '@/lib/api';
 import ManagerPicker from '@/components/ManagerPicker';
 import { InfoTip, FieldLabel } from '@/lib/widgets';
 import CtcStatement from '../../compensation/policies/CtcStatement';
+import ModuleGuide from '@/components/ModuleGuide';
 
 function asList(res) {
   if (Array.isArray(res)) return res;
@@ -127,6 +128,22 @@ function OnboardInner() {
       <p className="text-sm text-gray-500 mb-6">Add a new hire and assign their pay in one go.
         <Link href="/people/new" className="ml-2 text-[color:var(--theme-primary)] hover:underline">Add without pay (advanced) →</Link>
       </p>
+
+      <ModuleGuide
+        id="people-onboard"
+        title="Onboard a new hire and assign pay in one flow"
+        what="A 3-step wizard that creates the employee and their salary in a single atomic step: capture who they are, enter their annual CTC against a salary policy, and confirm. The policy auto-splits the CTC into Basic, HRA, allowances and statutory costs (EPF/ESI/PT) so the new joiner has live compensation from day one."
+        steps={[
+          'Who — fill first/last name and date of joining (required); add email so they can use self-service (ESS) login. Optionally set department, designation, location and reporting manager.',
+          'How much — pick a CTC policy and enter the annual CTC in ₹. Watch the live CTC statement preview on the right and the Basic ≥ 50% of CTC chip — Next stays disabled while the chip is red.',
+          'Confirm — review the read-only summary, then click Create employee & assign pay to POST it and land on the new employee profile.',
+        ]}
+        example={<>Onboarding <b>Aarav Sharma</b> at <b>Acme India Pvt Ltd</b> with a DOJ of <b>1 July 2026</b> on the <b>Standard India CTC</b> policy at <b>₹12,00,000</b> CTC. The policy splits it into a Basic ≥ 50% (≈ <b>₹6,00,000</b>), HRA, and special allowance, with employer EPF/ESI baked into the cost — the green chip confirms the Basic floor is met before you can proceed.</>}
+        tips={[
+          'If the Basic chip is red, the policy puts less than 50% of CTC into Basic — pick a policy with a higher Basic or raise the CTC; this also avoids EPF wage-base issues.',
+          'No CTC policy yet? Create one under Compensation → Policies first. Need to add someone without pay (contractor/advisor)? Use Add without pay (advanced).',
+        ]}
+      />
 
       <Steps step={step} />
       {error && <div className="mb-4"><ErrorBanner message={error} /></div>}

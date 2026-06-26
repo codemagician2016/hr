@@ -17,6 +17,7 @@ import { ErrorBanner, PrimaryButton, TextInput, DocumentDropzone } from '@hr/ui'
 import { get, post, del, request } from '@/lib/api';
 import { asList, PageHeader, DataTable, StatusBadge, ActionButton } from '@/lib/ui';
 import { InfoTip } from '../lib';
+import ModuleGuide from '@/components/ModuleGuide';
 
 // PUT helper (the shared api lib exposes get/post/patch/del + request; the
 // letterheads endpoints use PUT for both layout and metadata updates).
@@ -228,6 +229,24 @@ export default function LetterheadsPage() {
       <PageHeader
         title="Letterheads"
         subtitle="Upload A4 stationery PDFs and place the writing area + field anchors with the visual picker. Resolution: template override → category binding → tenant default."
+      />
+      <ModuleGuide
+        id="letters-letterheads"
+        title="Set up letterhead stationery for HR letters"
+        what="Letterheads are the A4 PDF stationery (logo, address, footer) drawn behind every HR letter — experience, bonafide, salary-proof and the rest. Upload your printed stationery once and DriftHR lays the letter body cleanly on top, so every generated letter looks on-brand without re-pasting a header each time."
+        steps={[
+          "In 'Upload a letterhead', enter a short unique Code (e.g. ACME-DEFAULT) and a friendly Name (e.g. 'Acme India default stationery').",
+          "Drop in your A4 letterhead PDF (≤10 MB) — page 1 becomes the background underlay.",
+          "Click 'Upload letterhead'; the new row appears in the table below.",
+          "Open 'Position picker' to place the writing area and the 5 field anchors over your logo and footer.",
+          "Bind it: pick a Letter category (e.g. Experience / Service) so those letters use this stationery, or click 'Make default' for a tenant-wide fallback.",
+          "Use Activate / Deactivate to control which letterheads HR can pick, and Delete to retire one.",
+        ]}
+        example={<>HR at <b>Acme India Pvt Ltd</b> uploads <b>ACME-DEFAULT</b> and clicks <b>Make default</b>, then uploads <b>ACME-SALARY</b> and binds it to <b>Salary proof</b>. When they generate a salary-proof letter for <b>Aarav Sharma</b> (<b>₹12,00,000 CTC</b>) in <b>June 2026</b>, DriftHR resolves stationery as <b>template override → category binding → tenant default</b>, so the salary letter prints on ACME-SALARY and every other letter falls back to ACME-DEFAULT.</>}
+        tips={[
+          "Resolution order is template override → category binding → tenant default, so always keep at least one Default set as the safety net.",
+          "Only one letterhead can be bound to each category — re-binding a category moves it off the previous letterhead.",
+        ]}
       />
       {error && <ErrorBanner message={error} />}
       <UploadPanel onCreated={load} />

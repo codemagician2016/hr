@@ -22,6 +22,7 @@ import { ErrorBanner, PrimaryButton, TextInput, DateField, Modal, ModalActions, 
 import { get, post } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, employeeLabel } from '@/lib/ui';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const REVIEW_STATUSES = ['', 'NOT_STARTED', 'SELF_SUBMITTED', 'MANAGER_SUBMITTED', 'CALIBRATED', 'ACKNOWLEDGED', 'CLOSED'];
 const CYCLE_TYPES = ['ANNUAL', 'HALF_YEARLY', 'QUARTERLY', 'PROBATION', 'PROJECT', 'CONTINUOUS'];
@@ -331,6 +332,23 @@ export default function PerformancePage() {
         title="Performance & Goals"
         subtitle="Review cycles, ratings, and your team's reviews"
         actions={tab === 'cycles' && canConfig ? <PrimaryButton onClick={() => setShowNew(true)}>New cycle</PrimaryButton> : null}
+      />
+      <ModuleGuide
+        id="performance"
+        title="Run a review cycle, then release ratings to your team"
+        what="This is where you set up appraisal cycles, track how many reviews are done, and work your own queue of team reviews. A cycle bundles a rating scale and review template over a period, then mints a review for every in-scope employee."
+        steps={[
+          'On the Cycles tab, click New cycle — give it a code, name, type (Annual, Half-yearly, Probation…), period start/end, and pick a rating scale (or keep the default 5-point scale).',
+          'Use Launch to bulk-mint a review for every in-scope employee; the Completion column then tracks done-vs-total as self and manager submissions come in.',
+          'Open My Team Reviews to work your own reviewer queue — filter by status (Self submitted, Manager submitted, Calibrated…) and see employee names, self and manager ratings.',
+          'When ratings are final, click Release on the cycle to publish final ratings — Final stays "pending release" until you do this.',
+          'Use Setup to define rating scales and review templates; the More tab signposts calibration, goals/OKRs, 1:1s, and merit (live via API, console UI later).',
+        ]}
+        example={<>For <b>Acme India Pvt Ltd</b>, you create cycle <b>FY25-ANNUAL</b> (Annual, 01 Apr 2025 – 31 Mar 2026) on the default 5-point scale, then <b>Launch</b> it — minting a review for <b>Aarav Sharma</b> and 240 others. Aarav self-rates <b>4</b>, his manager submits <b>4</b>; completion shows <b>180/241</b>. Once calibration is done you hit <b>Release</b> and his <b>Final</b> rating publishes.</>}
+        tips={[
+          'Launch and Release only appear if you hold canManagePerformanceCycle — a Manager sees the list read-only and their cycles/reviews are already scoped to their team.',
+          'Final rating is intentionally hidden until you Release — don\'t expect a number in the Final column before then, even if manager ratings are in.',
+        ]}
       />
       {error ? <ErrorBanner message={error} /> : null}
       <Tabs tabs={TABS} active={tab} onChange={setTab} />

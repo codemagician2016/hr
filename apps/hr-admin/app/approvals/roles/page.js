@@ -20,6 +20,7 @@ import { get, post, request } from '@/lib/api';
 import { PageHeader, Tabs } from '@/lib/ui';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
 import { InfoTip, FieldLabel, SectionTitle, usePagination, Pagination } from '@/lib/widgets';
+import ModuleGuide from '@/components/ModuleGuide';
 
 // ─── plain-language metadata ─────────────────────────────────────────────────
 
@@ -555,6 +556,25 @@ export default function RoleManagerPage() {
         title={<span className="inline-flex items-center">Roles &amp; access<InfoTip text="A role bundles ‘what they can do’ (permissions) with ‘what they can see’ (data scope). Assign a ready-made preset, or build a custom one in Advanced." /></span>}
         subtitle="Give people the right access — simple presets for small teams, a full builder when you need it."
         actions={<Link href="/approvals" className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium hover:bg-gray-50">← Approvals</Link>}
+      />
+
+      <ModuleGuide
+        id="approvals-roles"
+        title="Set up who can see and do what"
+        what="Roles bundle permissions (what a person can do) with data scope (how much of the company they can see) and salary visibility. Assign a ready-made preset for a small team, or build a custom role when you need finer control over EPF/payroll, leave and approvals access."
+        steps={[
+          "Stay on ‘Simple — presets’ to use the five built-ins: Owner, HR-Admin, Manager, Finance and Employee.",
+          "On a preset card, click ‘Assign to a person’, search by name or employee code, and assign — it takes effect on their next action, no re-login.",
+          "Need something custom? Click ‘Make a custom copy’ (or open Advanced → New custom role) to clone a preset.",
+          "In the builder, set the role name, ‘What can they see?’ (scope), salary visibility, then tick exactly the permissions under People / Time & Leave / Pay & Payroll.",
+          "Use ‘Who has which role’ to review every person’s assigned role and change or clear it.",
+        ]}
+        example={<>For Acme India Pvt Ltd, give <b>Aarav Sharma</b> (Mumbai payroll lead) the <b>Finance</b> preset so he can run and approve the June 2026 payroll, file <b>24Q</b> TDS returns and see exact salary figures (₹12,00,000 CTC). His manager <b>Priya Nair</b> gets the <b>Manager</b> preset — scoped to ‘Their team’, with pay bands only, so she approves her reports’ leave without seeing exact pay.</>}
+        tips={[
+          "Presets can’t be edited directly — clone to a custom copy so a stray click never breaks the built-in Owner/HR/Finance setups.",
+          "Set salary visibility to the least each role needs: ‘Pay bands only’ for managers, ‘Exact figures’ only for Finance/Owner.",
+          "Use a temporary scoped grant (in Advanced) for cover, e.g. ‘acting Finance approver for Mumbai until 31 Aug 2026’ — it expires on its own.",
+        ]}
       />
 
       {error && <ErrorBanner message={error} />}

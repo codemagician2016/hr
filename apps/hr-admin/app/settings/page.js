@@ -21,6 +21,7 @@ import { get, request } from '@/lib/api';
 import { asList, PageHeader, Tabs, DataTable } from '@/lib/ui';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
 import BillingTab from '@/components/BillingTab';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const STYLE_OPTIONS = FIXED_STYLE_KEYS.map((key) => ({
   key,
@@ -569,6 +570,23 @@ export default function SettingsPage() {
             Domain &amp; address
           </Link>
         }
+      />
+      <ModuleGuide
+        id="settings"
+        title="Brand your portal and govern who can do what"
+        what="Settings is the tenant control panel: brand the employee self-service portal (style, colour, logo), manage your subscription &amp; billing, and review the roles that decide which admins can run payroll, edit branding, or manage people."
+        steps={[
+          'On the Branding tab, pick a Style and a Brand colour (or paste an exact hex like #4F46E5 to match your corporate identity).',
+          'Add your Logo by uploading a PNG/SVG/JPG (up to 1 MB) or pasting a public image URL.',
+          'Check the live Preview — it shows exactly what your employees see on the sign-in screen — then click Save branding.',
+          'Open the Billing tab to review or change your subscription plan and invoices.',
+          'Open the Roles tab to see each role, its permission count and members; use Manage roles & access to edit who can do what.',
+        ]}
+        example={<>Acme India Pvt Ltd sets the style to <b>Indigo</b>, pastes their brand hex <b>#4F46E5</b>, and uploads their logo. Now when <b>Aarav Sharma</b> signs in to the employee portal to view his June 2026 payslip, he sees the Acme logo and colours. On the Roles tab, the admin confirms only the <b>Payroll Manager</b> role carries <b>canRunPayroll</b>, so finance can&apos;t accidentally edit branding.</>}
+        tips={[
+          'No Save button on Branding? You have read-only access — editing needs the canEditBranding permission.',
+          'A custom hex overrides the curated swatch; clear the field to fall back to a curated brand colour.',
+        ]}
       />
       <Tabs tabs={tabs} active={active} onChange={setTab} />
       {active === 'branding' && <BrandingTab />}

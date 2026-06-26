@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react';
 import { Spinner, ErrorBanner } from '@hr/ui';
 import { get } from '@/lib/api';
 import { PageHeader } from '@/lib/ui';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const POLICY_META = {
   'self-edit': { label: 'Self-service', color: '#16a34a', desc: 'The employee edits this freely.' },
@@ -35,6 +36,24 @@ export default function ProfilePolicyPage() {
   return (
     <div className="space-y-5">
       <PageHeader title="Profile field policy" subtitle="Which profile fields employees can edit, which need HR approval, and which are read-only. (v1 is a sensible default; a per-tenant editor is on the roadmap.)" />
+
+      <ModuleGuide
+        id="profile-policy"
+        title="Read the profile-field governance map"
+        what="This page shows the system's rule for every employee-profile field: who can change it. Each field is sorted into Self-service (the employee edits it freely), HR approval (a change files a request HR must clear first), or Read-only (HR / lifecycle owns it). It tells you, at a glance, which edits will quietly self-apply and which will land in your approvals queue."
+        steps={[
+          'Scan the three columns — HR approval, Self-service, Read-only — to see how each field is governed.',
+          'Read each field’s key (e.g. bankAccount, panNumber) and the count badge on its column header.',
+          'Note the optional and private tags on a row: private fields hold sensitive data and stay masked.',
+          'Use the HR approval column to anticipate what will show up in your pending-approvals work — these are the changes you must review.',
+          'Treat Read-only fields (e.g. employeeId, CTC, date of joining) as owned by HR/payroll — employees only view them.',
+        ]}
+        example={<>When <b>Aarav Sharma</b> updates his <b>bankAccount</b> for salary credit, that field sits under <b>HR approval</b>, so his edit files a request you must approve before the June 2026 payroll run picks it up. But when he fixes his <b>personal email</b> (a <b>Self-service</b> field), it saves instantly with no approval. His <b>PAN</b> and <b>CTC</b> are <b>Read-only</b> — owned by HR/payroll for Form 16 and TDS accuracy.</>}
+        tips={[
+          'Anything affecting pay or statutory filings — bank details, PAN, name as per PAN — should sit under HR approval so a typo can’t derail EPF/TDS or salary credit.',
+          'v1 is a fixed default map in code; a per-tenant editor is on the roadmap, so flag any field you’d want governed differently for that change.',
+        ]}
+      />
 
       {loading ? <Spinner /> : error ? <ErrorBanner message={error.message || 'Could not load the policy'} /> : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">

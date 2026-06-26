@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { get, post } from '@/lib/api';
 import { PageHeader, DataTable, StatusBadge, ActionButton } from '@/lib/ui';
 import { Spinner, ErrorBanner, PrimaryButton, TextInput, DateField, Modal, ModalActions, formatAdminDate } from '@hr/ui';
+import ModuleGuide from '@/components/ModuleGuide';
 
 // Default FY suggestion = the current India financial year.
 function currentFy() {
@@ -91,6 +92,23 @@ export default function DeclarationWindowPage() {
         title="Declaration window"
         subtitle="Set the per-FY investment-proof window. After the proof deadline, only HR-verified amounts reduce TDS (Form 12BB / §192(2D) control)."
         actions={<PrimaryButton onClick={() => setShowForm(true)}>New / edit window</PrimaryButton>}
+      />
+      <ModuleGuide
+        id="tax-declaration-window"
+        title="Open the investment-proof window for the financial year"
+        what="This screen sets the per-FY window in which employees declare and upload investment proofs (80C, HRA, home-loan interest, etc.). After the proof deadline, the TDS engine stops trusting unverified declarations and only HR-verified amounts reduce tax — the Form 12BB / §192(2D) control."
+        steps={[
+          "Click New / edit window and enter the financial year as YYYY-YY (e.g. 2026-27).",
+          "Set Opens at — the date employees can start uploading proofs.",
+          "Set Closes at — after this, no new uploads, but HR keeps verifying.",
+          "Set Proof deadline (usually Jan–Feb) — on/after this date TDS counts only HR-verified amounts.",
+          "Save, then use Open to go live; later Close, then Lock once verification is final.",
+        ]}
+        example={<>For FY <b>2026-27</b> at <b>Acme India Pvt Ltd</b>, HR opens the window on <b>1 Apr 2026</b>, closes uploads on <b>15 Jan 2027</b>, and sets the proof deadline to <b>31 Jan 2027</b>. <b>Aarav Sharma</b> (₹18,00,000 CTC) declares ₹1,50,000 under 80C but uploads proof for only ₹1,10,000 — after 31 Jan his TDS is recomputed on the verified ₹1,10,000.</>}
+        tips={[
+          "Statuses move one way: DRAFT → OPEN → CLOSED → LOCKED. Lock only after every proof is verified — it is final.",
+          "Set the proof deadline a few days before your Feb payroll run so the TDS flip lands in the right month.",
+        ]}
       />
       {error && <ErrorBanner message={error} />}
       {loading ? <Spinner /> : (

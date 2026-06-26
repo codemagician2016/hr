@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Spinner, ErrorBanner, Empty } from '@hr/ui';
 import { get, post } from '@/lib/api';
 import { PageHeader, asList, ActionButton } from '@/lib/ui';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'ALL'];
 
@@ -41,6 +42,23 @@ export default function ProfileChangeRequestsPage() {
   return (
     <div className="space-y-4">
       <PageHeader title="Profile change requests" subtitle="Employee-requested changes to governed fields (name, date of birth, bank, statutory IDs). Approving applies the change; you cannot approve a request for your own profile." />
+
+      <ModuleGuide
+        id="profile-change-requests"
+        title="Approve employee edits to governed profile fields"
+        what="This is your approval queue for self-service (ESS) edits to locked, compliance-sensitive fields — legal name, date of birth, bank account, and statutory IDs like PAN, UAN/PF and Aadhaar. These can't be self-edited because they flow into payroll, Form 16/24Q and EPF/ESI filings, so HR must verify and approve each change before it takes effect."
+        steps={[
+          'Use the status pills (Pending / Approved / Rejected / All) to filter — start with Pending.',
+          'For each row, compare the From and To values and the field, and verify the employee uploaded supporting proof (e.g. cancelled cheque for bank, PAN card for a name fix).',
+          'Click Approve to apply the new value to the live profile, or Reject to leave the record untouched.',
+          'Re-check the Approved tab to confirm the change landed before the next payroll run.',
+        ]}
+        example={<>Aarav Sharma (EMP-1042) at Acme India Pvt Ltd submits a bank-account change from <b>HDFC ...8821</b> to <b>ICICI ...4507</b> after switching banks. You confirm his cancelled cheque, click <b>Approve</b>, and the new account is used for his <b>June 2026</b> ₹1,04,500 net salary credit — no manual master-data edit needed.</>}
+        tips={[
+          'You cannot approve a request linked to your own employee profile (separation of duties) — ask another HR admin to action it.',
+          'Bank and statutory-ID changes approved after payroll is locked will only apply from the next cycle, so action them before the cut-off.',
+        ]}
+      />
 
       <div className="flex gap-2">
         {STATUSES.map((s) => (

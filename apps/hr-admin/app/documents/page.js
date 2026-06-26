@@ -11,6 +11,7 @@ import { ErrorBanner, PrimaryButton, TextInput, DateField, formatAdminDate, Docu
 import { get, post, del } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, employeeLabel, ServerPagination } from '@/lib/ui';
 import EmployeeSearchSelect from '@/components/EmployeeSearchSelect';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const PAGE_SIZES = [25, 50, 100];
 
@@ -297,6 +298,24 @@ export default function DocumentsPage() {
   return (
     <div>
       <PageHeader title="Documents" subtitle="Employee documents and document requests" />
+
+      <ModuleGuide
+        id="documents"
+        title="Manage employee documents and requests"
+        what="A per-employee document vault with integrity hashing, verification and visibility controls — plus the requests an employee has raised (e.g. an experience or salary letter). The 'Expiring soon' panel at the top flags time-bound IDs across the company so nothing lapses unnoticed."
+        steps={[
+          "Review the 'Expiring soon' panel — it lists documents (passports, visas, work permits) nearing expiry across all employees.",
+          "Search for an employee by name, code or work email to open their file.",
+          "On the Documents tab, pick a Category (PAN, AADHAAR, FORM16, OFFER_LETTER, etc.), set Visibility (HR only / Manager & HR / Employee visible) and an optional expiry date, then drop the file to upload.",
+          "Click Verify on an uploaded document once you've checked it; the green '✓ hashed' badge confirms the file's integrity hash was stored.",
+          "Switch to the Requests tab to see letters the employee has raised, and Cancel any PENDING request that's no longer needed.",
+        ]}
+        example={<>For <b>Aarav Sharma</b> (code EMP-2041) you upload his <b>FORM16</b> for FY 2025-26 as <b>HR only</b>, and his <b>PASSPORT</b> with an expiry of <b>14 Mar 2027</b> set to <b>Employee visible</b>. The passport then surfaces in 'Expiring soon' a few months before it lapses, and the document number shows masked as <b>•••••567</b>.</>}
+        tips={[
+          "Document numbers (PAN/Aadhaar) are always masked in the table — only verify against the opened file, never paste the full number into the Name field.",
+          "Set an Expires at date on passports, visas and work permits so they roll up into the company-wide 'Expiring soon' report.",
+        ]}
+      />
 
       <ExpiringPanel />
 

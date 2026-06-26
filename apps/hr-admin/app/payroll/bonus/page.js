@@ -17,6 +17,7 @@ import { Spinner, ErrorBanner, PrimaryButton, Modal, ModalActions } from '@hr/ui
 import { get, post } from '@/lib/api';
 import { DataTable, PageHeader, StatusBadge, ActionButton, Tabs } from '@/lib/ui';
 import { InfoTip } from '@/lib/widgets';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const PAGE_SIZE = 25;
 const inr = (minor) => `₹${(Number(minor || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -29,6 +30,23 @@ export default function BonusPage() {
   return (
     <div>
       <PageHeader title="Statutory Bonus" subtitle="Payment of Bonus Act 1965 — annual cycles + Labour Welfare Fund" />
+      <ModuleGuide
+        id="payroll-bonus"
+        title="Run the annual statutory bonus & check LWF"
+        what="This screen runs your Payment of Bonus Act 1965 cycle for a financial year per legal entity, and (on the second tab) shows the read-only Labour Welfare Fund rates for a state. Bonus rides the normal pay-run pipeline — it is computed, maker-checker approved into a PayRun, then published to employee slips."
+        steps={[
+          'On "Bonus cycles", click New bonus cycle: pick the entity, accounting year (e.g. 2025-26), and declared rate (8.33%–20%); add a monthly minimum wage only if it exceeds ₹7,000.',
+          'Open the draft cycle and click Compute — it flags eligibility (Basic+DA ≤ ₹21,000/mo) and the capped base, then computes gross/net bonus per employee.',
+          'Have a different approver click Approve (mint pay run) — maker-checker blocks the person who computed it from approving.',
+          'Once approved/paid, click Publish slips to show bonus on ESS and notify employees; use Form C register for the statutory Form C / Form D summary.',
+          'Switch to the Labour Welfare Fund tab to look up a state’s employee/employer share and deduction months as of a date.',
+        ]}
+        example={<>Acme India Pvt Ltd declares the minimum <b>8.33%</b> for FY <b>2025-26</b>. Aarav Sharma earns Basic+DA of ₹18,000/mo — under the ₹21,000 ceiling, so he is eligible. His base is capped at <b>₹7,000</b>, giving roughly ₹7,000 × 8.33% × 12 ≈ <b>₹7,000</b> gross bonus for the year, payable by <b>30 Nov 2026</b> (within 8 months of FY close).</>}
+        tips={[
+          'Bonus is India-only — the server 404s for a non-IN tenant; the calculation base is capped at ₹7,000 (or the state minimum wage, if higher), not the full salary.',
+          'For Maharashtra, LWF is only deducted in June & December — check the Deduction months field before expecting it on every payslip.',
+        ]}
+      />
       <Tabs
         tabs={[{ key: 'cycles', label: 'Bonus cycles' }, { key: 'lwf', label: 'Labour Welfare Fund' }]}
         active={tab}

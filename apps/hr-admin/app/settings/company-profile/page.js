@@ -20,6 +20,7 @@ import { FieldLabel, SectionTitle, InfoTip } from '@/lib/widgets';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
 // Feature 14 — the locked, single-country setup/badge for this tenant.
 import CountrySetupCard from '@/components/CountrySetupCard';
+import ModuleGuide from '@/components/ModuleGuide';
 
 // India-first document categories (mirrors the backend BusinessDocumentCategory enum).
 const DOC_CATEGORIES = [
@@ -405,6 +406,24 @@ export default function CompanyProfilePage() {
           </span>
         )}
         subtitle="Your business's legal details and an optional document vault."
+      />
+      <ModuleGuide
+        id="settings-company-profile"
+        title="Set up your company's legal identity and document vault"
+        what="This is your tenant's single source of truth for legal/registration details (legal name, CIN, GSTIN, PAN, TAN, registered address) and an optional vault for company documents. These details flow into payslips, Form 16/24Q filings, offer letters and other statutory paperwork, so getting them right here saves rework everywhere else."
+        steps={[
+          "On the Profile tab, fill in Legal & registration — legal name, trade name, CIN, GSTIN, PAN, TAN and date of incorporation. Every field is optional, so add what you have.",
+          "Add your registered office address (line 1/2, city, state, PIN, country) and a primary contact for statutory correspondence.",
+          "Click Save company profile.",
+          "Open the Country tab to confirm the locked India setup (₹ INR, Asia/Kolkata) that drives EPF/ESI/PT/TDS behaviour.",
+          "On the Documents tab, pick a category, optionally name it and set an expiry, then upload a PDF/PNG/JPG (max 10 MB).",
+        ]}
+        example={<>For <b>Acme India Pvt Ltd</b>, enter Legal name <b>Acme Technologies Private Limited</b>, CIN <b>U72900KA2020PTC123456</b>, GSTIN <b>29ABCDE1234F1Z5</b>, PAN <b>ABCDE1234F</b> and TAN <b>BLRA12345C</b>, with a registered office in <b>Bengaluru 560001</b> and authorised signatory <b>Aarav Sharma</b>. Then upload the <b>GST certificate 2026</b> under "GST certificate" with an expiry of <b>31 Mar 2027</b>.</>}
+        tips={[
+          "TAN is mandatory before you can deduct and deposit TDS or file 24Q — fill it in early.",
+          "If your Save button is missing, you have read-only access; ask for the canManageCompanyProfile permission.",
+          "Set expiry dates on licences and certificates so the vault badges them 'Expiring soon' before they lapse.",
+        ]}
       />
       <div className="mt-4">
         <Tabs

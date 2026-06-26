@@ -12,6 +12,7 @@ import { ErrorBanner, Modal, ModalActions, PrimaryButton, TextArea, Spinner, for
 import { get, post, patch } from '@/lib/api';
 import { DataTable, PageHeader, ServerPagination, employeeLabel } from '@/lib/ui';
 import { InfoTip } from '@/lib/widgets';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const PAGE_SIZES = [25, 50, 100];
 const STATUS_OPTIONS = ['', 'OPEN', 'IN_PROGRESS', 'WAITING_ON_EMPLOYEE', 'RESOLVED', 'CLOSED', 'REOPENED', 'CANCELLED'];
@@ -119,6 +120,25 @@ export default function HelpdeskPage() {
         title="Helpdesk"
         subtitle="HR support ticket queue — assign, respond, and resolve employee cases against SLA."
         actions={<HelpdeskInfo />}
+      />
+
+      <ModuleGuide
+        id="helpdesk"
+        title="Work the HR support queue against SLA"
+        what="The Helpdesk is your agent console for employee HR cases — payslip queries, EPF/ESI corrections, Form 16 requests, leave disputes, and more. Tickets employees raise from their portal land here so you can assign, respond, and resolve each one before its SLA clock runs out."
+        steps={[
+          "Narrow the queue with the Status, Priority, Category and Assignee filters, or type a ticket code/subject in the search box.",
+          "Watch the SLA column — a ticket past its due time turns red as 'SLA breached'; clear Urgent/High first.",
+          "Click a ticket code to open the drawer and read the full thread (employee messages plus HR-only internal notes).",
+          "Use 'Assign to me' (or route to a teammate) to pick it up — assigning an OPEN ticket moves it to IN PROGRESS.",
+          "Reply to the employee, or tick 'Internal note (HR-only)' for a handoff note they never see.",
+          "Move the ticket through the lifecycle (IN PROGRESS → WAITING → RESOLVED → CLOSED); the employee rates it on close.",
+        ]}
+        example={<>Aarav Sharma at <b>Acme India Pvt Ltd</b> raises ticket <b>HD-1042</b>: "PF not deducted in my June 2026 payslip". You filter Category = <b>Payroll</b>, Priority = <b>HIGH</b> (4-hour SLA), assign it to yourself, add an internal note tagging the payroll owner to check the <b>EPF</b> wage cut-off, then reply that the ₹1,800 employee PF will reflect in the July run, and move it to <b>RESOLVED</b>.</>}
+        tips={[
+          "An 'Unassigned' filter surfaces tickets sitting unowned — sweep it so nothing silently breaches SLA.",
+          "Only legal next statuses appear; the lifecycle is enforced server-side, so you can't skip RESOLVED before CLOSED.",
+        ]}
       />
 
       {stats && (
