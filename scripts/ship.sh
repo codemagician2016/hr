@@ -75,3 +75,10 @@ else
   echo "   aws ssm get-command-invocation --command-id $CID --instance-id $IID --query StandardOutputContent --output text"
   exit 1
 fi
+
+# ── Playbook lockstep: auto-sync the QA playbook after a successful deploy ──
+# Runs LOCALLY (reads the token from the gitignored qa/.env), so no secret on the
+# box. Non-fatal — a sync hiccup never affects the deploy that already succeeded.
+if [ -f qa/sync.sh ]; then
+  bash qa/sync.sh >/dev/null 2>&1 && echo "   ✓ playbook synced" || echo "   ⚠ playbook sync skipped (set qa/.env token)"
+fi
