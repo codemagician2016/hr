@@ -473,7 +473,19 @@ async function getSeparation(req, res, next) {
       where: { businessId: req.user.businessId, separationId: sep.id, deletedAt: null },
       include: { tasks: { orderBy: [{ stageKey: 'asc' }, { dueDate: 'asc' }] } },
     });
-    return res.json({ separation: sep, journey });
+    // The leaving employee's OPEN asset assignments (still OUT — returnedAt null).
+    // Surfaced so the asset-return lane is actionable: the admin can mark each one
+    // returned or record a recovery via POST /assets/assignments/:id/return,
+    // which is what assetReturnState (the compute/settle guard) keys off.
+    const openAssets = await prisma.assetAssignment.findMany({
+      where: { businessId: req.user.businessId, employeeId: sep.employeeId, returnedAt: null },
+      select: {
+        id: true, status: true, assignedAt: true, recoveryAmount: true,
+        asset: { select: { id: true, code: true, name: true, category: true } },
+      },
+      orderBy: { assignedAt: 'asc' },
+    });
+    return res.json({ separation: sep, journey, openAssets });
   } catch (e) { return next(e); }
 }
 

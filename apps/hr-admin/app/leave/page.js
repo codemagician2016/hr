@@ -112,6 +112,16 @@ function RequestsTab() {
     }
   }
 
+  // Post-approval withdraw (APPROVED/AVAILED → WITHDRAWN): reverses the −units,
+  // credits the balance back and re-credits comp-off lots, server-side. Blocked
+  // (422 PAYRUN_CLOSED) when the covered day sits in a closed pay run — the server
+  // message is surfaced via decide()'s catch rather than crashing. Mirrors the
+  // approve/reject wiring (same ActionButton + busyId + load-on-success).
+  async function withdraw(id) {
+    if (!window.confirm('Withdraw this approved leave? The balance will be credited back.')) return;
+    await decide(id, 'withdraw');
+  }
+
   const items = data?.items || [];
   const total = data?.total ?? items.length;
 
@@ -128,17 +138,29 @@ function RequestsTab() {
       header: '',
       className: 'text-right',
       cellClassName: 'text-right',
-      render: (r) =>
-        String(r.status).toUpperCase() === 'PENDING' ? (
-          <div className="inline-flex gap-2">
-            <ActionButton tone="positive" disabled={busyId === r.id} onClick={() => decide(r.id, 'approve')}>
-              Approve
+      render: (r) => {
+        const st = String(r.status).toUpperCase();
+        if (st === 'PENDING') {
+          return (
+            <div className="inline-flex gap-2">
+              <ActionButton tone="positive" disabled={busyId === r.id} onClick={() => decide(r.id, 'approve')}>
+                Approve
+              </ActionButton>
+              <ActionButton tone="danger" disabled={busyId === r.id} onClick={() => decide(r.id, 'reject')}>
+                Reject
+              </ActionButton>
+            </div>
+          );
+        }
+        if (st === 'APPROVED' || st === 'AVAILED') {
+          return (
+            <ActionButton tone="danger" disabled={busyId === r.id} onClick={() => withdraw(r.id)}>
+              Withdraw
             </ActionButton>
-            <ActionButton tone="danger" disabled={busyId === r.id} onClick={() => decide(r.id, 'reject')}>
-              Reject
-            </ActionButton>
-          </div>
-        ) : null,
+          );
+        }
+        return null;
+      },
     },
   ];
 

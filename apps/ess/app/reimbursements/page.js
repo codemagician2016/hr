@@ -225,10 +225,21 @@ function ClaimDetail({ id, ref_, onChanged }) {
 
 function AddBill({ claimId, ref_, travelRequestId, onAdded }) {
   const [form, setForm] = useState({ amount: '', categoryId: '', description: '', transportMode: '', distanceKm: '', nights: '', durationBand: '' });
+  const [receipt, setReceipt] = useState(null); // { name, dataUrl }
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  function onPickReceipt(e) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-picking the same file later
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setReceipt({ name: file.name, dataUrl: reader.result });
+    reader.onerror = () => setErr('Could not read that file. Please try another.');
+    reader.readAsDataURL(file);
+  }
 
   async function doPreview() {
     if (!form.amount) return;
@@ -250,8 +261,10 @@ function AddBill({ claimId, ref_, travelRequestId, onAdded }) {
         amount: Number(form.amount), categoryId: form.categoryId || undefined, description: form.description || undefined,
         transportMode: form.transportMode || undefined, distanceKm: form.distanceKm || undefined,
         nights: form.nights || undefined, durationBand: form.durationBand || undefined,
+        fileBase64: receipt?.dataUrl || undefined,
       });
       setForm({ amount: '', categoryId: '', description: '', transportMode: '', distanceKm: '', nights: '', durationBand: '' });
+      setReceipt(null);
       setPreview(null);
       onAdded();
     } catch (e) { setErr(e.message); } finally { setBusy(false); }
@@ -278,6 +291,16 @@ function AddBill({ claimId, ref_, travelRequestId, onAdded }) {
           <input type="number" value={form.nights} onChange={set('nights')} onBlur={doPreview} className="w-full rounded border px-2 py-1" /></label>
         <label className="block text-xs"><FieldLabel tip="For a daily allowance (food + incidentals), the trip-duration band.">Per-diem band</FieldLabel>
           <select value={form.durationBand} onChange={(e) => { set('durationBand')(e); }} onBlur={doPreview} className="w-full rounded border px-2 py-1">{DURATION_BANDS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}</select></label>
+        <div className="block text-xs sm:col-span-3"><FieldLabel tip="Optionally attach the bill / receipt (image or PDF) so an approver can verify it. You can submit without one, but a claim may be returned if a receipt is required.">Receipt (optional)</FieldLabel>
+          {receipt ? (
+            <div className="flex items-center gap-2">
+              <span className="truncate rounded border bg-white px-2 py-1 text-gray-700">{receipt.name}</span>
+              <button type="button" onClick={() => setReceipt(null)} className="text-red-600">Clear</button>
+            </div>
+          ) : (
+            <input type="file" accept="image/*,application/pdf" onChange={onPickReceipt} className="block w-full text-xs file:mr-2 file:rounded file:border-0 file:bg-blue-600 file:px-3 file:py-1 file:text-white" />
+          )}
+        </div>
       </div>
       <div className="mt-2 flex items-center gap-3">
         <button onClick={add} disabled={busy || !form.amount} className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50">{busy ? 'Adding…' : 'Add bill'}</button>

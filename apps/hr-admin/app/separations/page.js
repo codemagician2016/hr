@@ -209,6 +209,111 @@ function ClearanceLanes({ sep, perms, isScoped, busy, onClear }) {
   );
 }
 
+// ─── Open assets (asset-return lane action) ──────────────────────────────────
+// The leaving employee's still-OUT asset assignments. Each row offers a clear
+// action: "Mark returned" (clean return) or "Record recovery" (return parking a
+// recovery amount for the FnF). Both call the Assets module's return endpoint;
+// once every asset is resolved the asset lane can be cleared and FnF computed.
+function RecoveryModal({ asset, busy, onClose, onSubmit }) {
+  const [amount, setAmount] = useState('');
+  const [notes, setNotes] = useState('');
+  const major = Number(amount);
+  const valid = amount !== '' && Number.isFinite(major) && major > 0;
+  return (
+    <Modal title={`Record recovery · ${asset.asset?.name || asset.asset?.code || 'asset'}`} onClose={onClose} size="sm">
+      <div className="space-y-4">
+        <p className="text-sm text-gray-600">
+          The asset is not coming back (lost/damaged/retained). Record the amount to recover from the
+          full-and-final settlement; this also marks the assignment returned so the lane can clear.
+        </p>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Recovery amount</label>
+          <input
+            type="number" min="0" step="0.01" value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm bg-white"
+            placeholder="0.00"
+          />
+        </div>
+        <TextArea label="Notes (optional)" value={notes} onChange={setNotes} rows={2} />
+      </div>
+      <div className="mt-5">
+        <ModalActions>
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+          <PrimaryButton onClick={() => onSubmit({ recoveryAmount: major, notes: notes.trim() || undefined })} loading={busy} disabled={!valid}>Record recovery</PrimaryButton>
+        </ModalActions>
+      </div>
+    </Modal>
+  );
+}
+
+function OpenAssets({ assets, canManage, busy, onResolve }) {
+  const [recoverFor, setRecoverFor] = useState(null);
+  if (!Array.isArray(assets) || assets.length === 0) {
+    return <p className="text-sm text-gray-500">No assets are still assigned to this employee.</p>;
+  }
+  return (
+    <>
+      <div className="rounded-xl border border-gray-200 bg-white divide-y divide-gray-50">
+        {assets.map((a) => (
+          <div key={a.id} className="flex items-center justify-between gap-3 px-4 py-3">
+            <div>
+              <p className="text-sm font-medium text-gray-900">
+                {a.asset?.name || a.asset?.code || 'Asset'}
+                {a.asset?.code && a.asset?.name ? <span className="ml-2 font-mono text-[11px] text-gray-400">{a.asset.code}</span> : null}
+              </p>
+              <p className="text-[11px] text-gray-500">
+                {a.asset?.category ? `${String(a.asset.category).replace(/_/g, ' ')} · ` : ''}
+                Assigned {a.assignedAt ? formatAdminDate(a.assignedAt) : '—'}
+                {a.recoveryAmount != null ? ` · recovery ${a.recoveryAmount}` : ''}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center rounded-full border bg-amber-50 text-amber-700 border-amber-200 px-2 py-0.5 text-[11px] font-medium">Out</span>
+              {canManage && (
+                <>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onResolve(a.id, {}, 'Asset marked returned.')}
+                    className="px-2.5 py-1 text-[11px] font-medium border border-emerald-300 text-emerald-700 rounded-md hover:bg-emerald-50 disabled:opacity-40"
+                  >
+                    Mark returned
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => setRecoverFor(a)}
+                    className="px-2.5 py-1 text-[11px] font-medium border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 disabled:opacity-40"
+                  >
+                    Record recovery
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+      {!canManage && (
+        <p className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+          <span aria-hidden="true">🔒 </span>Returning assets or recording a recovery requires the canManageEmployees permission (Assets module).
+        </p>
+      )}
+      {recoverFor && (
+        <RecoveryModal
+          asset={recoverFor}
+          busy={busy}
+          onClose={() => setRecoverFor(null)}
+          onSubmit={async (body) => {
+            const ok = await onResolve(recoverFor.id, body, 'Recovery recorded; asset returned.');
+            if (ok) setRecoverFor(null);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
 // ─── Status timeline ─────────────────────────────────────────────────────────
 const SEP_FLOW = ['INITIATED', 'NOTICE_SERVING', 'CLEARANCE_PENDING', 'FNF_PENDING', 'FNF_COMPUTED', 'FNF_APPROVED', 'SETTLED'];
 function Timeline({ status }) {
@@ -232,7 +337,7 @@ function Timeline({ status }) {
 
 // ─── Case runner ─────────────────────────────────────────────────────────────
 function CaseModal({ caseId, perms, isScoped, onClose, onChanged }) {
-  const [data, setData] = useState(null); // { separation, journey }
+  const [data, setData] = useState(null); // { separation, journey, openAssets }
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -244,6 +349,9 @@ function CaseModal({ caseId, perms, isScoped, onClose, onChanged }) {
   const canRunSeparation = hasPermission(perms, 'canRunSeparation');
   const canApprovePayroll = hasPermission(perms, 'canApprovePayroll');
   const canGenerateLetters = hasPermission(perms, 'canGenerateLetters');
+  // Returning an asset / recording a recovery hits the Assets module
+  // (POST /api/hr/assets/assignments/:id/return — requires canManageEmployees).
+  const canManageEmployees = hasPermission(perms, 'canManageEmployees');
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
@@ -309,6 +417,12 @@ function CaseModal({ caseId, perms, isScoped, onClose, onChanged }) {
   function cancelCase() {
     return act(() => post(`/api/hr/separations/${caseId}/cancel`), 'Case cancelled.');
   }
+  // Resolve an open asset: a clean return (no recovery) or a return that parks a
+  // recovery amount for the FnF. Reloads so the asset-return lane / FnF guards
+  // (assetReturnState) reflect the new state.
+  function resolveAsset(assignmentId, body, okMsg) {
+    return act(() => post(`/api/hr/assets/assignments/${assignmentId}/return`, body), okMsg, { clearBlockers: false });
+  }
   async function generateLetter(letterType) {
     const out = await act(() => post(`/api/hr/separations/${caseId}/letters`, { type: letterType }), `${letterType} letter generated.`);
     if (out?.document) setDocs((d) => [...d, out.document]);
@@ -348,6 +462,15 @@ function CaseModal({ caseId, perms, isScoped, onClose, onChanged }) {
           <div>
             <h3 className="text-sm font-semibold text-gray-900 mb-2">Exit clearance</h3>
             <ClearanceLanes sep={sep} perms={perms} isScoped={isScoped} busy={busy} onClear={clearLane} />
+          </div>
+
+          {/* Open assets — make the asset-return lane actionable */}
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900 mb-2">Exit assets</h3>
+            <p className="text-[11px] text-gray-500 mb-2">
+              Assets still assigned to this employee. Mark each one returned, or record a recovery for the FnF — then the Asset return lane can be cleared.
+            </p>
+            <OpenAssets assets={data?.openAssets} canManage={canManageEmployees} busy={busy} onResolve={resolveAsset} />
           </div>
 
           {/* Compute blockers (422 checklist) */}

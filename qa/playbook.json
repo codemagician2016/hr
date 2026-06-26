@@ -197,6 +197,21 @@
           ],
           "expected": "Approve is disabled/blocked for the initiator — FnF approval requires a different actor (a Finance/checker holding payroll-approval). The system never lets the maker approve their own settlement.",
           "sortOrder": 3
+        },
+        {
+          "key": "admin-clear-exit-assets",
+          "title": "Admin clears exit assets during separation",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/separations",
+          "steps": [
+            "Open a separation case for a leaving employee.",
+            "In the Exit assets section, for each outstanding asset click Mark returned, or Record recovery to log a non-recovered amount."
+          ],
+          "expected": "Each open asset is resolved; the asset-return lane clears and the exit can proceed to FnF compute/settle (which was previously blocked with no UI path).",
+          "sortOrder": 4
         }
       ]
     },
@@ -318,6 +333,22 @@
           ],
           "expected": "Aarav cannot approve his own leave — the approve action is absent for his own request and it routes up to his manager/HR instead.",
           "sortOrder": 3
+        },
+        {
+          "key": "admin-withdraw-approved-leave",
+          "title": "Admin withdraws an already-approved leave",
+          "kind": "EDGE",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/leave",
+          "steps": [
+            "Open Leave > Requests as the HR admin.",
+            "Find a request whose status is APPROVED or AVAILED.",
+            "Click Withdraw and confirm."
+          ],
+          "expected": "The leave is withdrawn (status WITHDRAWN), the balance is credited back, and any comp-off is re-credited. If the pay run for that month is closed, a clear 'closed pay run' message appears and nothing changes.",
+          "sortOrder": 4
         }
       ]
     },
@@ -876,6 +907,20 @@
           ],
           "expected": "The four policy tables render as editable grids and the enforcement switch (Flag over-budget for the approver vs Hard-reject over the cap) is present. Seeded IN/NZ defaults are visible.",
           "sortOrder": 3
+        },
+        {
+          "key": "ess-attach-receipt",
+          "title": "Employee attaches a receipt to a bill",
+          "kind": "HAPPY",
+          "loginLabels": [],
+          "openUrl": "https://app-staging.drifthr.com/reimbursements",
+          "steps": [
+            "In the Employee Portal open Reimbursements and add a bill to a claim.",
+            "Use the receipt file picker to attach an image or PDF.",
+            "Save the bill."
+          ],
+          "expected": "The receipt uploads with the bill and is stored against that line; HR sees the 📎 receipt on the claim line in the admin Expenses screen, so 'return for missing receipt' is resolvable.",
+          "sortOrder": 4
         }
       ]
     },
