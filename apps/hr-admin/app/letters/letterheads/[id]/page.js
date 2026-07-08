@@ -93,12 +93,20 @@ export default function LetterheadPickerPage() {
         h: d.start.h,
       });
     } else {
-      // resize from the bottom-right handle: grow w/h, floor to a small min.
+      // resize from the bottom-right handle: grow w/h, floor to a min. The writing
+      // area needs a floor big enough to hold real body text — a collapsed band
+      // (h≈0.01) pushes the whole letter off page 1 onto repeated letterhead pages
+      // ("letterhead shows but content missing"). The small field zones
+      // (date/refNo/authority/signature) keep a tiny floor. The renderer also
+      // guards this, but flooring here keeps the picker honest (WYSIWYG).
+      const isBody = d.zoneKey === 'writingArea';
+      const minW = isBody ? 0.2 : 0.02;
+      const minH = isBody ? 0.08 : 0.01;
       updateRect(d.zoneKey, {
         x: d.start.x,
         y: d.start.y,
-        w: Math.max(0.02, d.start.w + dxN),
-        h: Math.max(0.01, d.start.h + dyN),
+        w: Math.max(minW, d.start.w + dxN),
+        h: Math.max(minH, d.start.h + dyN),
       });
     }
   }, [updateRect]);

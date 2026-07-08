@@ -393,6 +393,34 @@ async function main() {
   );
   check('cropbox: body lands inside the VISIBLE (cropped) writing band', cInBand);
 
+  // 14) DEGENERATE WRITING AREA (the "letterhead shows but content missing" bug).
+  //     The position-picker floors the writing-area box at h≈0.01 / w≈0.02, and a
+  //     layout can otherwise arrive with a near-zero rect. A band too short to hold
+  //     even one line makes EVERY line paginate — the whole body spills onto
+  //     repeated letterhead pages and page 1 shows the stationery with NO text.
+  //     The engine must detect the degenerate box and fall back to the safe default
+  //     band so a short letter renders on a SINGLE page 1 with the body present.
+  const degShort = 'This certifies Asha Rao was employed with Acme Technologies.';
+  const degH = await renderLetter({
+    letterheadPdf: a4,
+    layout: { writingArea: { x: 0.1, y: 0.3, w: 0.8, h: 0.01, align: 'left', fontSize: 11, lineGap: 4 } },
+    bodyText: degShort, fields: { date: '09/07/2026', refNo: 'ACME/HR/2026/0011' },
+    fontBytes, fontBoldBytes,
+  });
+  check('degenerate h: renders to a valid %PDF', isPdf(degH));
+  check('degenerate h: short body stays on ONE page (not spilled off page 1)', (await pageCount(degH)) === 1);
+  check('degenerate h: page carries body text (not blank stationery)', extractTextPositions(degH).length > 0);
+
+  const degW = await renderLetter({
+    letterheadPdf: a4,
+    layout: { writingArea: { x: 0.1, y: 0.3, w: 0, h: 0.5, align: 'left', fontSize: 11, lineGap: 4 } },
+    bodyText: degShort, fields: { date: '09/07/2026', refNo: 'ACME/HR/2026/0012' },
+    fontBytes, fontBoldBytes,
+  });
+  check('degenerate w: renders to a valid %PDF', isPdf(degW));
+  check('degenerate w: not garble-wrapped one-glyph-per-line (few runs, one page)',
+    (await pageCount(degW)) === 1);
+
   // ── report ──────────────────────────────────────────────────────────────
   console.log('');
   console.log(`renderLetter test: ${passed} passed, ${failed} failed of ${passed + failed} assertions.`);

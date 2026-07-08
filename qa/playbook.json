@@ -776,6 +776,22 @@
           ],
           "expected": "You land on the Letters issuance screen pre-targeted to that request, where the letter is generated (fulfilment lives in Letters, not a phantom action on the Documents tab).",
           "sortOrder": 4
+        },
+        {
+          "key": "letter-body-renders-on-letterhead-with-tight-writing-area",
+          "title": "Letter body renders on the letterhead even with a small/repositioned writing area",
+          "kind": "EDGE",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/letters/letterheads",
+          "steps": [
+            "Log in as operator@demo.test.",
+            "Open Letters > Letterheads, open a letterhead's position picker, drag/resize the writing-area box (including small), then Save layout.",
+            "Go to Letters > Issue, pick a template that uses that letterhead and an employee, and review the live preview."
+          ],
+          "expected": "The merged body text always appears on page 1 over the letterhead — never pushed onto blank repeated pages. If the writing area was collapsed too small to hold a line, the renderer falls back to a safe body band so content is never missing.",
+          "sortOrder": 5
         }
       ]
     },

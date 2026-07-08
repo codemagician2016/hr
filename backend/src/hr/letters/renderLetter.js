@@ -236,11 +236,28 @@ async function renderLetter({
   const lineHeight = size + lineGap;
   const bodyAlign = writingArea.align || 'left';
 
-  // writing-area absolute box on page 1
+  // writing-area absolute box on page 1.
+  //
+  // Guard against a DEGENERATE saved writing area: the position-picker lets an
+  // operator shrink the box (resize floor h≈0.01 / w≈0.02), and a layout can also
+  // arrive with a near-zero rect. If the resolved band is too short to hold even a
+  // single wrapped line (h < one line-height) or too narrow to fit text, EVERY
+  // line trips pagination and the whole body spills onto repeated letterhead pages
+  // — leaving page 1 with the stationery but NO body (the reported "letterhead
+  // shows but the content doesn't" bug). Fall back to the safe default band so the
+  // body always lands on page 1. Continuation pages are all page-1-sized, so this
+  // decision (made against page 1) holds for the whole letter.
+  let effectiveWA = writingArea;
+  {
+    const probe = absRect(g0, writingArea);
+    if (!(probe.h >= lineHeight) || !(probe.w >= size * 4)) {
+      effectiveWA = { ...DEFAULT_WRITING_AREA, fontSize: size, lineGap, align: bodyAlign };
+    }
+  }
   let g = g0;
-  let area = absRect(g, writingArea);
+  let area = absRect(g, effectiveWA);
   let cursorY = area.yTop - size; // first baseline
-  const bottomLimit = area.yBottom; // stop when next line would cross this
+  let bottomLimit = area.yBottom; // stop when next line would cross this
 
   // Greedy word-wrap one logical paragraph at a time; \n forces a break, blank
   // lines become vertical space.
@@ -276,8 +293,9 @@ async function renderLetter({
       const added = await addContinuationPage();
       pages.push(added);
       g = geom(added);
-      area = absRect(g, writingArea);
+      area = absRect(g, effectiveWA);
       cursorY = area.yTop - size;
+      bottomLimit = area.yBottom;
     }
     if (line.text) {
       drawLine(g, line.text, area.x, cursorY, size, font, bodyAlign, area.w);
