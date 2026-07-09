@@ -13,12 +13,19 @@ like the same product, (c) gates it as a **sellable add-on**, and (d) adds a rea
 **candidate portal** (accounts + rich profile + smart re-apply).
 
 ## Architecture
-- **`apps/talent`** — a new monorepo vertical (shares `packages/*`, ships in the same
-  tarball). Holds BOTH audiences:
-  - **Admin ATS** at `app.drifthr.com/talent/*` (moved out of `apps/hr-admin/app/recruitment/*`).
-    Seamless via the shared `packages/ui` shell + shared operator session cookie; the
-    hr-admin "Talent Acquisition" nav item links to `/talent`.
-  - **Candidate careers** at `{tenant}.drifthr.com/careers/*`, per-tenant, passwordless.
+- **Sellable, entitlement-gated vertical.** The whole talent flow is gated by the
+  `talent_acquisition` add-on entitlement (see R1). The "vertical" is realized by the
+  gate + isolated candidate identity, not (yet) a separate deployable app.
+- **Admin ATS** stays in `apps/hr-admin/app/recruitment/*`, relabeled "Talent
+  Acquisition" and entitlement-gated. **Hosting decision:** a full `apps/talent`
+  app-split + prod-router path-routing on a shared box couldn't be runtime-verified
+  here, so it's a documented follow-on. The admin ATS is already a self-contained
+  section, so the split is mechanical.
+- **Candidate careers** live at `{tenant}.drifthr.com/careers/*` — that host is the
+  **ess** app's, so the careers portal ships **inside `apps/ess`** (`app/careers/*`)
+  reusing its per-tenant TenantProvider/theming, with a **separate candidate identity**
+  (passwordless magic-link) so it never mixes with employee sessions. Backend under
+  `backend/src/hr/talent/careers/`.
 - **Entitlement gate** — the whole vertical (nav + `/talent` + `/careers` +
   `/api/hr/recruitment` + `/api/public/careers`) is gated by the
   `talent_acquisition` boolean entitlement. Reuses `core/lib/entitlements.js`

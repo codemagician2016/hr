@@ -345,6 +345,10 @@ app.use('/api/public/pricing', publicPricingRoutes);
 // Feature 12 — UNAUTHENTICATED public careers board + apply (tenant resolved
 // from :businessSlug; hard-scoped; rate-limited; no score/knockout disclosure).
 app.use('/api/public/careers', require('./hr/talent/routes').publicCareers);
+// Feature 38 — candidate CAREERS PORTAL (entitlement-gated by talent_acquisition):
+// public board/apply + passwordless magic-link accounts + self-service profile.
+app.use('/api/careers', require('./hr/talent/careers/careersPortal.routes').publicRouter);
+app.use('/api/candidate', require('./hr/talent/careers/careersPortal.routes').candidateRouter);
 app.use('/api/subscription', subscriptionRoutes);
 app.use('/api/admin/pricing', pricingAdminRoutes);
 // Super-admin SaaS subscription promo codes (AdminCoupon). Controller +

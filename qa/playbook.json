@@ -1233,6 +1233,22 @@
           ],
           "expected": "With the add-on owned, the recruitment console works end to end. Without it, the console shows a friendly 'Talent Acquisition isn’t on your plan' upsell and every /api/hr/recruitment call returns 402/403 (server-enforced, not just hidden).",
           "sortOrder": 5
+        },
+        {
+          "key": "candidate-applies-via-careers-portal-guest-and-returning",
+          "title": "Candidate applies via the careers portal (guest + returning)",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "Employee (Priya)"
+          ],
+          "openUrl": "https://demo-staging.drifthr.com/careers",
+          "steps": [
+            "As HR, publish a job to the public careers page (Talent Acquisition add-on must be enabled).",
+            "Visit demo-staging.drifthr.com/careers, open a role, and apply as a NEW email (name + resume + consent).",
+            "Apply again to another role with the SAME email; open the emailed sign-in link and complete your profile (education/experience/skills)."
+          ],
+          "expected": "A new email applies as a guest and gets an account + magic link. Re-applying with the same email is recognized ('continue with your saved details' via link) instead of a blind duplicate. The signed-in candidate reuses their profile to apply in one click (optional resume swap) and tracks status under /careers/profile. A tenant WITHOUT the add-on has no /careers page (404).",
+          "sortOrder": 6
         }
       ]
     },

@@ -12062,13 +12062,72 @@ model Candidate {
   linkedinUrl      String?
   consentAt        DateTime? // candidate data-processing consent
   consentExpiresAt DateTime? // auto-purge after retention window
+  // Feature 38 — candidate PORTAL account (passwordless magic-link) + rich profile.
+  emailVerifiedAt  DateTime? // set when they first click a magic link
+  lastLoginAt      DateTime?
+  headline         String? // "Senior Backend Engineer"
+  location         String?
+  totalExperienceMonths Int? // self-reported summary
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
   deletedAt        DateTime?
   applications     Application[]
+  educations       CandidateEducation[]
+  experiences      CandidateExperience[]
+  skills           CandidateSkill[]
 
   @@unique([businessId, email])
   @@index([businessId, email])
+}
+
+// Candidate education (mirrors EmployeeEducation shape) — level/institution/field/
+// year/grade. `grade` holds a GPA / % / class, matching the "grade percentage" ask.
+model CandidateEducation {
+  id           String    @id @default(uuid())
+  candidateId  String
+  candidate    Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  level        String // "Bachelor's" / "Master's" / "Diploma" / "12th" …
+  institution  String
+  fieldOfStudy String?
+  startYear    Int?
+  endYear      Int?
+  grade        String? // GPA / % / class
+  isHighest    Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([candidateId])
+}
+
+// Candidate work experience — previous companies, title, from–to, current (net-new;
+// no employee precedent existed).
+model CandidateExperience {
+  id             String    @id @default(uuid())
+  candidateId    String
+  candidate      Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  company        String
+  title          String
+  employmentType String? // FULL_TIME / CONTRACT / INTERN …
+  location       String?
+  startDate      DateTime?
+  endDate        DateTime? // null when isCurrent
+  isCurrent      Boolean   @default(false)
+  description    String?   @db.Text
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([candidateId])
+}
+
+model CandidateSkill {
+  id          String    @id @default(uuid())
+  candidateId String
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  name        String
+  level       String? // Beginner / Intermediate / Advanced / Expert
+  createdAt   DateTime  @default(now())
+
+  @@index([candidateId])
 }
 
 model Application {
@@ -12091,7 +12150,8 @@ model Application {
   interviewScore      Decimal?          @db.Decimal(7, 2) // aggregated weighted interview total (0–100)
   meritScore          Decimal?          @db.Decimal(7, 2) // blended rank score (the merit-list sort key)
   scoreSnapshot       Json? // frozen breakdown for the "Why this rank?" panel
-  appliedSource       ApplicationSource @default(MANUAL) // PUBLIC | REFERRAL | AGENCY | MANUAL | IMPORT
+  appliedSource       ApplicationSource @default(MANUAL) // PUBLIC | REFERRAL | AGENCY | MANUAL | IMPORT | CAREER_PORTAL
+  resumeUrl           String?           @db.Text // per-application resume snapshot (Feature 38 — swap per job)
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
   version             Int               @default(0)
@@ -12110,6 +12170,7 @@ enum ApplicationSource {
   AGENCY
   MANUAL
   IMPORT
+  CAREER_PORTAL
 }
 
 enum ApplicationStatus {
