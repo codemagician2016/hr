@@ -10,6 +10,7 @@
 const express = require('express');
 const router = express.Router();
 const { protect, requirePermission } = require('../../../core/middleware/auth.middleware');
+const { requireEntitlement } = require('../../../core/middleware/requireEntitlement');
 const { effectivePermissions } = require('../../../core/lib/rbac');
 const { ROLES } = require('../../../core/lib/roles');
 const { attachSelfEmployee } = require('../../middleware/scope.middleware');
@@ -18,6 +19,11 @@ const c = require('../controllers/recruitment.controller');
 const s = require('../recruitment/recruitment.scoring.controller');
 
 router.use(protect);
+// Talent Acquisition is a paid ADD-ON — gate the WHOLE recruitment surface behind
+// the tenant's entitlement (402 if their plan needs renewal, 403 if the add-on
+// isn't owned). Sits ABOVE the per-route RBAC: entitlement = WHETHER the tenant's
+// plan includes the module; RBAC = WHO inside the tenant may use it.
+router.use(requireEntitlement('talent_acquisition', 'Talent Acquisition'));
 
 // Allow ANY of the listed permission keys (SUPER_ADMIN always passes). Lets the
 // new canManageHiring/canViewHiring keys coexist with the legacy canManage*

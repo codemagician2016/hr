@@ -80,7 +80,7 @@ export const NAV_ITEMS = [
   // Recruitment / ATS (Feature 12). Visible to anyone with the new canViewHiring
   // read key OR canManageHiring (recruiters/HR) OR the legacy canManageEmployees
   // super-set. The server is the real boundary; this just hides the nav link.
-  { key: 'recruitment', label: 'Recruitment', href: '/recruitment', feature: 'hr', anyPermission: ['canViewHiring', 'canManageHiring', 'canManageEmployees'], icon: 'people' },
+  { key: 'recruitment', label: 'Talent Acquisition', href: '/recruitment', feature: 'talent_acquisition', anyPermission: ['canViewHiring', 'canManageHiring', 'canManageEmployees'], icon: 'people' },
   { key: 'payroll', label: 'Payroll', href: '/payroll', feature: 'payroll', permission: 'canRunPayroll', icon: 'wallet' },
   // Feature 22 — Statutory Bonus (annual Payment of Bonus Act cycles) + the Feature 21
   // Labour Welfare Fund read panel (tab inside the page). Gated on canRunPayroll; the

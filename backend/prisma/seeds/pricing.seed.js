@@ -391,6 +391,7 @@ const FEATURE_MATRIX = [
   ['documents',            'BOOLEAN',   'Document management',                'false',     'true',      'true'],
   ['whiteLabelDomain',     'BOOLEAN',   'White-label custom domain',          'false',     'true',      'true'],
   ['recruiting',           'BOOLEAN',   'Recruiting (ATS)',                   'false',     'false',     'true'],
+  ['talent_acquisition',   'BOOLEAN',   'Talent Acquisition (add-on)',        'false',     'false',     'true'],
   ['performance',          'BOOLEAN',   'Performance management',             'false',     'false',     'true'],
   ['lms',                  'BOOLEAN',   'Learning management (LMS)',          'false',     'false',     'true'],
   ['apiAccess',            'BOOLEAN',   'API access',                         'false',     'false',     'true'],

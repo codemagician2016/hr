@@ -339,8 +339,44 @@ function fallbackBooleanForTier(tier, key) {
   return Boolean((FALLBACK_BOOLEANS[key] || {})[slug]);
 }
 
+// ── Sellable ADD-ONS (granted independently of the base tier) ─────────────────
+// Some boolean entitlements are purchasable add-ons that layer on top of ANY base
+// plan (e.g. Talent Acquisition). They are granted by EITHER an active per-product
+// add-on subscription (PaddleBillingSubscription with the mapped productKind) OR a
+// manual grant in Business.featureFlags.addOns.<key> (comp / trial / super-admin) —
+// so a tenant on the free base plan can still hold the add-on. Maps the entitlement
+// key → billing productKind.
+const ADDON_PRODUCT_KIND = Object.freeze({
+  talent_acquisition: 'TALENT',
+});
+const ADDON_ACTIVE_STATUSES = Object.freeze(['active', 'trialing', 'grace', 'past_due']);
+
+async function hasActiveAddOn(businessId, key) {
+  if (!businessId) return false;
+  // 1) manual grant / trial via featureFlags.addOns.<key>
+  try {
+    const biz = await prisma.business.findUnique({ where: { id: businessId }, select: { featureFlags: true } });
+    const flags = biz?.featureFlags;
+    if (flags && typeof flags === 'object' && flags.addOns && flags.addOns[key] === true) return true;
+  } catch (_e) { /* featureFlags is best-effort */ }
+  // 2) an active per-product add-on subscription
+  const productKind = ADDON_PRODUCT_KIND[key];
+  if (productKind && prisma.paddleBillingSubscription?.findFirst) {
+    try {
+      const sub = await prisma.paddleBillingSubscription.findFirst({
+        where: { businessId, productKind, status: { in: [...ADDON_ACTIVE_STATUSES] } },
+        select: { id: true },
+      });
+      if (sub) return true;
+    } catch (_e) { /* billing table optional */ }
+  }
+  return false;
+}
+
 // Resolve a BOOLEAN tier entitlement (e.g. api_access, white_label). Combines
 // the TierFeature row (if seeded) with a fallback map, gated by active access.
+// Purchasable ADD-ONS additionally OR-in an active add-on grant (see above), which
+// is self-standing — it does not require the BASE plan to be current.
 async function booleanEntitlement(businessId, key) {
   const normalizedKey = canonicalKey(key);
   const subscription = await getBusinessSubscriptionWithFeatures(businessId);
@@ -351,12 +387,15 @@ async function booleanEntitlement(businessId, key) {
   const fromRow = parseTierFeatureBoolean(row);
   const enabledByTier = fromRow == null ? fallbackBooleanForTier(tier, normalizedKey) : fromRow;
 
+  const addOnGranted = ADDON_PRODUCT_KIND[normalizedKey] ? await hasActiveAddOn(businessId, normalizedKey) : false;
+
   return {
     key: normalizedKey,
     tierSlug: tier?.slug || null,
-    enabled: Boolean(enabledByTier) && accessAllowed,
+    // add-on grant is self-standing; tier grant still requires base-plan access.
+    enabled: addOnGranted || (Boolean(enabledByTier) && accessAllowed),
     accessAllowed,
-    source: fromRow == null ? 'fallback' : 'tier_feature',
+    source: addOnGranted ? 'add_on' : (fromRow == null ? 'fallback' : 'tier_feature'),
   };
 }
 
@@ -403,6 +442,19 @@ async function assertMonthlyBookingLimit({ businessId, increment = 1, now = new 
   });
 }
 
+// The HR add-on entitlement map for the frontend (nav gating + BillingTab). Keyed
+// by entitlement key → { enabled, source }. Cheap: one query per add-on key.
+const HR_ADDON_KEYS = Object.freeze(['talent_acquisition']);
+async function hrEntitlements(businessId) {
+  const out = {};
+  for (const key of HR_ADDON_KEYS) {
+    // eslint-disable-next-line no-await-in-loop
+    const e = await booleanEntitlement(businessId, key);
+    out[key] = { enabled: e.enabled, source: e.source };
+  }
+  return out;
+}
+
 module.exports = {
   UNLIMITED,
   assertBooleanFeature,
@@ -412,6 +464,10 @@ module.exports = {
   booleanEntitlement,
   canonicalKey,
   currentUtcMonthRange,
+  hasActiveAddOn,
+  hrEntitlements,
+  HR_ADDON_KEYS,
+  ADDON_PRODUCT_KIND,
   limitLabel,
   numericEntitlement,
   subscriptionGrantsAccess,

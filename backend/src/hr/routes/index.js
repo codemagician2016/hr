@@ -108,6 +108,8 @@ router.use('/letters', require('../letters/routes/issuance.routes'));
 // Talent (recruitment/ATS + performance). RBAC: recruitment -> canManageEmployees;
 // performance -> canViewEmployees (read) / canManageEmployees (write). The offer
 // pre-flight reuses the payroll engine's India 50% wage check.
+// HR add-on entitlements (nav gating + super-admin grant/revoke of add-ons).
+router.use('/entitlements', require('./entitlements.routes'));
 const talent = require('../talent/routes');
 router.use('/recruitment', talent.recruitment);
 router.use('/performance', talent.performance);

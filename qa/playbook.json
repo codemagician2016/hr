@@ -1217,6 +1217,22 @@
           ],
           "expected": "A user with 'Manage hiring' sees 'New job' and creates the job. A view-only recruiter (no canManageHiring) does NOT see the button, and any blocked create shows a clear permission message (403) / duplicate-code (409) / add-on-required (402) instead of a silent failure.",
           "sortOrder": 4
+        },
+        {
+          "key": "talent-acquisition-is-an-entitlement-gated-add-on",
+          "title": "Talent Acquisition is a gated add-on (owned vs not-owned)",
+          "kind": "EDGE",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/recruitment",
+          "steps": [
+            "As a super-admin, grant the add-on (POST /api/hr/entitlements/talent_acquisition/grant) — or the Enterprise plan bundles it.",
+            "Log in as operator@demo.test and open Talent Acquisition — the console loads and jobs/pipeline work.",
+            "Revoke it (grant with {\"enabled\":false}) and reopen Talent Acquisition."
+          ],
+          "expected": "With the add-on owned, the recruitment console works end to end. Without it, the console shows a friendly 'Talent Acquisition isn’t on your plan' upsell and every /api/hr/recruitment call returns 402/403 (server-enforced, not just hidden).",
+          "sortOrder": 5
         }
       ]
     },

@@ -29,6 +29,32 @@ const TABS = [
 
 export default function RecruitmentPage() {
   const [tab, setTab] = useState('jobs');
+  // Talent Acquisition is a paid add-on — check the tenant's entitlement so we show
+  // a friendly upsell rather than raw 402s from every API. The server still enforces.
+  const [gated, setGated] = useState(null); // null=loading, false=owned, true=needs add-on
+  useEffect(() => {
+    get('/api/hr/entitlements')
+      .then((r) => setGated(!(r && r.entitlements && r.entitlements.talent_acquisition && r.entitlements.talent_acquisition.enabled)))
+      .catch(() => setGated(false)); // unknown → don't block (backend still gates)
+  }, []);
+
+  if (gated === true) {
+    return (
+      <div className="p-6 max-w-3xl mx-auto">
+        <PageHeader title="Talent Acquisition" subtitle="A DriftHR add-on." />
+        <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center">
+          <div className="text-3xl mb-2">🚀</div>
+          <h2 className="text-lg font-semibold text-gray-900">Talent Acquisition isn’t on your plan yet</h2>
+          <p className="text-sm text-gray-500 mt-2 max-w-md mx-auto">
+            Post jobs on your careers page, screen and score candidates objectively, run
+            interviews, and hire straight into onboarding — all in one place. Add it to your
+            plan from <b>Settings › Billing</b>, or ask your administrator to enable it.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <PageHeader
