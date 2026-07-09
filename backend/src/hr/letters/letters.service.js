@@ -303,8 +303,12 @@ async function fetchLetterheadBytes(fileUrl) {
 function buildRenderInputs({ template, ctx, overrides, refNo, locale, now }) {
   const o = overrides && typeof overrides === 'object' ? overrides : {};
   const authority = {
-    name: o.authorityName || (template.layoutAuthorityName) || (ctx.brand && ctx.brand.signatoryName) || '',
-    designation: o.authorityDesignation || (ctx.brand && ctx.brand.signatoryDesignation) || '',
+    // Phase 2 — the signatory block now has real backing columns on the template
+    // (authorityName/authorityDesignation), fixing the previously-blank authority
+    // line + {{authority.*}} / {{company.signatory*}} tokens. Per-issue overrides
+    // still win; the tenant brand is the last-resort fallback.
+    name: o.authorityName || template.authorityName || (ctx.brand && ctx.brand.signatoryName) || '',
+    designation: o.authorityDesignation || template.authorityDesignation || (ctx.brand && ctx.brand.signatoryDesignation) || '',
     subject: o.subject != null ? o.subject : (template.subject || ''),
     purpose: o.purpose || '',
     addressee: o.addressee || '',
@@ -397,23 +401,46 @@ function mergeEmployeeFrom(employee, employmentRecord, entity) {
 
 // Render a letter PDF from ctx + resolved inputs. letterhead ⇒ pdf-lib overlay;
 // none ⇒ pdfkit branded fallback. Returns a Buffer.
+// Default placement for a per-template signature when neither the template nor the
+// letterhead layout pins one (mirrors the picker's signature-zone default).
+const DEFAULT_SIG_BOX = { x: 0.1, y: 0.76, w: 0.25, h: 0.06 };
+
 async function renderPdf({ ctx, render, watermark }) {
   const { fontBytes, fontBoldBytes } = loadFonts();
+  const template = ctx.template || {};
+  // Phase 2 — the STATIC signature image is per-template; fetch its bytes once
+  // (data-URL or our-bucket URL, SSRF-guarded by the shared fetcher).
+  const signaturePng = template.signatureImageUrl
+    ? await fetchLetterheadBytes(template.signatureImageUrl)
+    : null;
+
   if (ctx.letterhead) {
     const lhBytes = await fetchLetterheadBytes(ctx.letterhead.fileUrl);
     if (lhBytes) {
-      const layout = ctx.letterhead.layoutJson && typeof ctx.letterhead.layoutJson === 'object'
+      const base = ctx.letterhead.layoutJson && typeof ctx.letterhead.layoutJson === 'object'
         ? ctx.letterhead.layoutJson : {};
+      // Resolve the signature box: the template's own placement wins; else the
+      // letterhead's picker zone; else a sensible default (so an uploaded signature
+      // always lands somewhere sane).
+      const layout = { ...base };
+      if (signaturePng) {
+        layout.fields = { ...(base.fields || {}) };
+        layout.fields.signature = template.signatureBoxJson || layout.fields.signature || DEFAULT_SIG_BOX;
+      }
       return renderLetter({
         letterheadPdf: lhBytes,
         layout,
         bodyText: render.bodyText,
         fields: render.fields,
+        signaturePng: signaturePng || undefined,
         fontBytes,
         fontBoldBytes,
         opts: {
           overflowPolicy: layout.overflowPolicy || 'repeat-letterhead',
-          signatureOnLastPage: !!layout.signatureOnLastPage,
+          // per-template flag wins; fall back to the letterhead layout's flag.
+          signatureOnLastPage: template.signatureImageUrl != null
+            ? template.signatureOnLastPage !== false
+            : !!layout.signatureOnLastPage,
           watermark: watermark || undefined,
         },
       });
@@ -426,6 +453,8 @@ async function renderPdf({ ctx, render, watermark }) {
     brand: ctx.brand,
     bodyText: render.bodyText,
     fields: render.fields,
+    signaturePng: signaturePng || undefined,
+    signatureBox: signaturePng ? (template.signatureBoxJson || DEFAULT_SIG_BOX) : undefined,
     fontBytes,
     fontBoldBytes,
     opts: { watermark: watermark || undefined },

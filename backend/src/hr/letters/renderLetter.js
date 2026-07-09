@@ -245,7 +245,7 @@ async function renderLetter({
   drawFieldAnchor(g0, fieldRects.date, f.date, font);
   drawFieldAnchor(g0, fieldRects.refNo, f.refNo, fontBold);
   drawFieldAnchor(g0, fieldRects.subject, f.subject, fontBold);
-  drawFieldAnchor(g0, fieldRects.authority, f.authority, font);
+  drawSignatoryBlock(g0, fieldRects.authority, f.authority, f.authorityDesignation);
 
   function drawFieldAnchor(g, rect, value, useFont) {
     if (!rect || value == null || value === '') return;
@@ -255,6 +255,19 @@ async function renderLetter({
     // Anchor text on the rect's first-line baseline (top of rect, minus ascent).
     const baseline = r.yTop - size;
     drawLine(g, value, r.x, baseline, size, useFont, align, r.w);
+  }
+
+  // The authority / signatory block: name + (optional) designation stacked under it,
+  // anchored at the authority rect. Fed by buildRenderInputs' fields.authority +
+  // fields.authorityDesignation (Phase 2 — real backing columns on the template).
+  function drawSignatoryBlock(g, rect, name, designation) {
+    if (!rect) return;
+    const r = absRect(g, rect);
+    const sz = num(rect.fontSize, DEFAULT_FIELD_SIZE);
+    const align = rect.align || 'left';
+    let baseline = r.yTop - sz;
+    if (name) { drawLine(g, name, r.x, baseline, sz, font, align, r.w); baseline -= (sz + 3); }
+    if (designation) drawLine(g, designation, r.x, baseline, Math.max(8, Math.round(sz * 0.9)), font, align, r.w);
   }
 
   // ── 2) WORD-WRAP + PAGINATE the body within the writing area ───────────────

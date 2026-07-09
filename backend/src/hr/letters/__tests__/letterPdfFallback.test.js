@@ -15,7 +15,27 @@
 
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 const { renderLetterFallback, _internals } = require('../letterPdfFallback');
+
+// Build a real, minimal opaque PNG (w×h, 8-bit RGB) that pdfkit's strict PNG parser
+// accepts — used to prove the fallback stamps a signature image.
+function makePng(w, h) {
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length, 0);
+    const body = Buffer.concat([Buffer.from(type, 'latin1'), data]);
+    const crc = Buffer.alloc(4); crc.writeUInt32BE(zlib.crc32(body) >>> 0, 0);
+    return Buffer.concat([len, body, crc]);
+  };
+  const sig = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8; ihdr[9] = 2; // 8-bit, colour type 2 (RGB)
+  const rowLen = w * 3;
+  const raw = Buffer.alloc(h * (rowLen + 1));
+  for (let y = 0; y < h; y += 1) { for (let x = 0; x < rowLen; x += 1) raw[y * (rowLen + 1) + 1 + x] = 90; }
+  return Buffer.concat([sig, chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
 
 const FONT_DIR = path.join(__dirname, '..', 'fonts');
 const fontBytes = fs.readFileSync(path.join(FONT_DIR, 'NotoSans-Regular.ttf'));
@@ -102,6 +122,20 @@ async function main() {
   check('empty: valid PDF', isPdf(empty));
   const noArg = await buf(undefined, 'no args');
   check('no-args: valid PDF', isPdf(noArg));
+
+  // 6b) Static signature image (Phase 2) draws in the no-letterhead fallback
+  //     without throwing → valid PDF larger than the same letter without one.
+  //     pdfkit's PNG parser is strict (rejects a 1×1 transparent stub), so we
+  //     synthesize a real 8×8 opaque PNG. A corrupt signature is separately proven
+  //     to be swallowed (never sinks the letter).
+  const goodPng = makePng(8, 8);
+  const noSig = await buf({ business: BIZ, brand: BRAND, bodyText: 'Body.', fields: FIELDS, fontBytes, fontBoldBytes }, 'no sig');
+  const withSig = await buf({ business: BIZ, brand: BRAND, bodyText: 'Body.', fields: FIELDS, signaturePng: goodPng, fontBytes, fontBoldBytes }, 'with sig');
+  check('signature: fallback with a signature is a valid PDF', isPdf(withSig));
+  check('signature: fallback embeds the image (output grows vs no-signature)',
+    !!(withSig && noSig && withSig.length > noSig.length));
+  const badSig = await buf({ business: BIZ, brand: BRAND, bodyText: 'Body.', fields: FIELDS, signaturePng: Buffer.from('not-a-png'), fontBytes, fontBoldBytes }, 'bad sig');
+  check('signature: a corrupt signature is swallowed (still a valid PDF)', isPdf(badSig));
 
   // 7) internals.
   check('businessName prefers legalName', _internals.businessName({ legalName: 'L', name: 'N' }) === 'L');

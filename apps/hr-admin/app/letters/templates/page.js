@@ -164,7 +164,15 @@ function TemplateEditor({ template, letterheads, letterheadsAvailable, onClose, 
     defaultLetterheadId: template?.defaultLetterheadId || '',
     requiresSignature: !!template?.requiresSignature,
     refNoPrefix: template?.refNoPrefix || '',
+    authorityName: template?.authorityName || '',
+    authorityDesignation: template?.authorityDesignation || '',
+    signatureOnLastPage: template?.signatureOnLastPage !== false,
   }));
+  // Static signature (Phase 2): the image is uploaded to a saved template via a
+  // dedicated endpoint; its placement box + on-last-page flag save with the form.
+  const [sigUrl, setSigUrl] = useState(template?.signatureImageUrl || '');
+  const [sigBox, setSigBox] = useState(template?.signatureBoxJson || null);
+  const [sigBusy, setSigBusy] = useState(false);
   const [palette, setPalette] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -203,6 +211,35 @@ function TemplateEditor({ template, letterheads, letterheadsAvailable, onClose, 
     wysiwygRef.current?.insertToken(token);
   }, []);
 
+  // Upload / remove the static signature image (PNG). Requires a saved template id.
+  const onSignatureFile = useCallback(async (file) => {
+    if (!file) return;
+    if (!template?.id) { setError('Save the template first, then add a signature.'); return; }
+    if (file.type !== 'image/png') { setError('The signature must be a PNG image.'); return; }
+    setSigBusy(true); setError('');
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result);
+        r.onerror = () => reject(new Error('Could not read the file'));
+        r.readAsDataURL(file);
+      });
+      const row = await post(`${TEMPLATES_BASE}/${template.id}/signature`, { fileBase64: dataUrl });
+      setSigUrl(row.signatureImageUrl || dataUrl);
+      setSigBox((prev) => prev || row.signatureBoxJson || { x: 0.1, y: 0.76, w: 0.25, h: 0.06 });
+    } catch (e) {
+      setError(e?.data?.message || e.message || 'Signature upload failed.');
+    } finally { setSigBusy(false); }
+  }, [template]);
+
+  const onRemoveSignature = useCallback(async () => {
+    if (!template?.id) { setSigUrl(''); return; }
+    setSigBusy(true); setError('');
+    try { await del(`${TEMPLATES_BASE}/${template.id}/signature`); setSigUrl(''); }
+    catch (e) { setError(e.message || 'Could not remove the signature.'); }
+    finally { setSigBusy(false); }
+  }, [template]);
+
   async function save({ publish } = {}) {
     setError('');
     if (!form.name.trim()) { setError('A template name is required.'); return; }
@@ -219,6 +256,10 @@ function TemplateEditor({ template, letterheads, letterheadsAvailable, onClose, 
         defaultLetterheadId: form.defaultLetterheadId || null,
         requiresSignature: form.requiresSignature,
         refNoPrefix: form.refNoPrefix || null,
+        authorityName: form.authorityName || null,
+        authorityDesignation: form.authorityDesignation || null,
+        signatureOnLastPage: form.signatureOnLastPage,
+        ...(sigBox ? { signatureBoxJson: sigBox } : {}),
       };
       if (isNew && form.code.trim()) payload.code = form.code.trim();
       let saved;
@@ -332,6 +373,9 @@ function TemplateEditor({ template, letterheads, letterheadsAvailable, onClose, 
                 value={form.bodyMarkdown}
                 onChange={(v) => set('bodyMarkdown', v)}
                 letterhead={selectedLetterhead}
+                signatureUrl={sigUrl}
+                signatureBox={sigBox}
+                onSignatureBoxChange={setSigBox}
               />
               <MergeFieldDrawer palette={palette} onInsert={insertToken} />
             </div>
@@ -362,6 +406,43 @@ function TemplateEditor({ template, letterheads, letterheadsAvailable, onClose, 
             <input type="checkbox" checked={form.requiresSignature} onChange={(e) => set('requiresSignature', e.target.checked)} />
             Route through e-sign before issue (recommended for contracts/appointments)
           </label>
+
+          {/* Signatory & static signature (Phase 2) */}
+          <div className="rounded-xl border border-gray-200 p-4 space-y-3">
+            <p className="text-sm font-semibold text-gray-800">Signatory &amp; signature<InfoTip text="The authorized signatory printed on every issued letter, plus a static signature image auto-stamped on the letterhead. The name fills {{authority.name}} / {{company.signatoryName}}." label="Signatory" /></p>
+            <div className="grid grid-cols-2 gap-3">
+              <TextInput label="Authority name" value={form.authorityName} onChange={(v) => set('authorityName', v)} hint="e.g. Priya Sharma" />
+              <TextInput label="Authority designation" value={form.authorityDesignation} onChange={(v) => set('authorityDesignation', v)} hint="e.g. Head of HR" />
+            </div>
+            <div className="flex items-start gap-6">
+              <div>
+                <p className="text-xs font-medium text-gray-600 mb-1">Signature image (PNG)</p>
+                {sigUrl ? (
+                  <div className="flex items-center gap-3">
+                    <img src={sigUrl} alt="Signature" className="h-12 border border-gray-200 rounded bg-white px-1" />
+                    <ActionButton tone="danger" onClick={onRemoveSignature} disabled={sigBusy}>Remove</ActionButton>
+                  </div>
+                ) : (
+                  <label className={`inline-flex items-center px-3 py-1.5 text-xs rounded-md border ${template?.id && !sigBusy ? 'border-gray-300 text-gray-700 hover:bg-gray-50 cursor-pointer' : 'border-gray-200 text-gray-400 cursor-not-allowed'}`}>
+                    {sigBusy ? 'Uploading…' : 'Upload PNG'}
+                    <input
+                      type="file"
+                      accept="image/png"
+                      className="hidden"
+                      disabled={!template?.id || sigBusy}
+                      onChange={(e) => { const fl = e.target.files && e.target.files[0]; e.target.value = ''; onSignatureFile(fl); }}
+                    />
+                  </label>
+                )}
+                {!template?.id && <p className="text-[11px] text-gray-400 mt-1">Save the template first to add a signature.</p>}
+                {sigUrl && selectedLetterhead && <p className="text-[11px] text-gray-400 mt-1">Drag it on the letterhead above to place it.</p>}
+              </div>
+              <label className="flex items-center gap-2 text-xs text-gray-600 mt-6">
+                <input type="checkbox" checked={form.signatureOnLastPage} onChange={(e) => set('signatureOnLastPage', e.target.checked)} />
+                Stamp on the last page (vs page 1)
+              </label>
+            </div>
+          </div>
         </div>
 
         <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between gap-2">

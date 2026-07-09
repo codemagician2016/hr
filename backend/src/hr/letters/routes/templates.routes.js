@@ -32,6 +32,9 @@ router.get('/:id', c.getTemplate);
 router.put('/:id', c.updateTemplate);
 router.post('/:id/publish', c.publishTemplate);
 router.post('/:id/archive', c.archiveTemplate);
+// Static signature image (auto-stamped on every issued letter for this template).
+router.post('/:id/signature', c.uploadSignature);
+router.delete('/:id/signature', c.deleteSignature);
 router.delete('/:id', c.deleteTemplate);
 
 module.exports = router;

@@ -810,6 +810,23 @@
           ],
           "expected": "The body is authored visually on the letterhead. Formatting (bold, headings, lists) and merge-field chips round-trip to the stored template and render on the issued PDF exactly as composed.",
           "sortOrder": 6
+        },
+        {
+          "key": "add-a-signature-and-signatory-then-issue",
+          "title": "Add a signatory + static signature to a template and issue",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/letters/templates",
+          "steps": [
+            "Log in as operator@demo.test and open Letters > Templates; open a saved template with a Default letterhead.",
+            "In 'Signatory & signature', set Authority name + designation, then Upload PNG for the signature image.",
+            "Drag the signature on the letterhead to place it; choose 'Stamp on the last page' if desired; Save & publish.",
+            "Go to Letters > Issue, pick this template + an employee, and open the preview/issued PDF."
+          ],
+          "expected": "The signatory name + designation render at the authority block and the uploaded signature image is auto-stamped at its placed position on every issued letter (no e-sign step needed).",
+          "sortOrder": 7
         }
       ]
     },

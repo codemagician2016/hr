@@ -11060,6 +11060,17 @@ model LetterTemplate {
   requiresSignature   Boolean            @default(false) // route minted letters through e-sign (CONTRACT)
   refNoPrefix         String? // override sequence prefix, e.g. "ACME/HR"
   locale              String? // BCP-47, e.g. "en-IN" / "en-NZ" (date/number format)
+  // Phase 2 — per-template STATIC signature image (uploaded once, auto-stamped on
+  // every issued letter) + the authority/signatory block text. Storage mirrors the
+  // letterhead convention: an S3 key/URL when configured, else an inline data-URL.
+  signatureImageUrl    String?           @db.Text // PNG: S3 URL or inline data-URL
+  signatureImageHash   String? // SHA-256 of the signature bytes
+  signatureMimeType    String? // image/png
+  signatureSizeBytes   Int?
+  signatureBoxJson     Json? // normalized {x,y,w,h} placement over the letterhead
+  signatureOnLastPage  Boolean           @default(true) // stamp on the last page vs page 1
+  authorityName        String? // signatory name (fills {{authority.name}}/{{company.signatoryName}})
+  authorityDesignation String? // signatory designation
   isSystem            Boolean            @default(false) // seeded IN/NZ template (non-deletable)
   isActive            Boolean            @default(true) // PUBLISHED. false = DRAFT/ARCHIVED
   createdAt           DateTime           @default(now())

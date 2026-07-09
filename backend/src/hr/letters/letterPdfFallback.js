@@ -54,7 +54,7 @@ function str(v) {
  * @param {Object} [args.opts]     { watermark }
  * @returns {Promise<Buffer>}
  */
-function renderLetterFallback({ business, brand, bodyText, fields, fontBytes, fontBoldBytes, opts } = {}) {
+function renderLetterFallback({ business, brand, bodyText, fields, signaturePng, fontBytes, fontBoldBytes, opts } = {}) {
   return new Promise((resolve, reject) => {
     try {
       const b = business || {};
@@ -154,18 +154,30 @@ function renderLetterFallback({ business, brand, bodyText, fields, fontBytes, fo
         });
       doc.moveDown(2);
 
-      // ── AUTHORITY / SIGNATURE BLOCK ────────────────────────────────────────
-      if (f.authority) {
-        ensureSpace(doc, 60);
+      // ── SIGNATURE IMAGE + AUTHORITY / SIGNATORY BLOCK ──────────────────────
+      // The static signature (Phase 2) prints above the signatory name. The
+      // letterhead path positions it absolutely from the layout; the flow-based
+      // fallback stamps it inline just above the name (a signature line).
+      if (signaturePng || f.authority) {
+        ensureSpace(doc, 96);
         doc.moveDown(2);
-        doc.font(boldFont).fontSize(10).fillColor(COLOR.text)
-          .text(str(f.authority), left, doc.y, { width: contentW * 0.6 });
-        if (f.authorityDesignation) {
-          doc.font(regFont).fontSize(9).fillColor(COLOR.muted)
-            .text(str(f.authorityDesignation), left, doc.y, { width: contentW * 0.6 });
+        if (signaturePng) {
+          try {
+            const sigW = Math.min(160, contentW * 0.35);
+            doc.image(asBuf(signaturePng), left, doc.y, { fit: [sigW, 54] });
+            doc.y += 58;
+          } catch (_e) { /* a bad/corrupt signature must never sink the letter */ }
         }
-        doc.font(regFont).fontSize(8).fillColor(COLOR.muted)
-          .text(`For ${businessName(b, br)}`, left, doc.y, { width: contentW * 0.6 });
+        if (f.authority) {
+          doc.font(boldFont).fontSize(10).fillColor(COLOR.text)
+            .text(str(f.authority), left, doc.y, { width: contentW * 0.6 });
+          if (f.authorityDesignation) {
+            doc.font(regFont).fontSize(9).fillColor(COLOR.muted)
+              .text(str(f.authorityDesignation), left, doc.y, { width: contentW * 0.6 });
+          }
+          doc.font(regFont).fontSize(8).fillColor(COLOR.muted)
+            .text(`For ${businessName(b, br)}`, left, doc.y, { width: contentW * 0.6 });
+        }
       }
 
       // ── WATERMARK (diagonal, every page) ───────────────────────────────────

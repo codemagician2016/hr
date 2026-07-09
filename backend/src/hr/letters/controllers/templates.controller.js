@@ -30,9 +30,25 @@
  * what we DO is validate that mergeFieldsJson keys are real catalog tokens.
  */
 
+const crypto = require('crypto');
 const prisma = require('../../../core/lib/prisma');
+const s3 = require('../../../core/lib/s3');
 const { writeAudit } = require('../../../core/lib/audit');
+const { validateDocDataUrl } = require('../../controllers/documents.controller');
 const { mergeFieldCatalog, CATALOG } = require('../mergeFields');
+
+const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
+const strOrNull = (s) => (typeof s === 'string' && s.trim() ? s.trim() : null);
+
+// Validate/sanitize a per-template signature placement box: normalized {x,y,w,h}
+// in [0,1]. Returns null to CLEAR, a clamped object to SET, or undefined when the
+// input is malformed (caller 422s).
+function sanitizeSigBox(v) {
+  if (v === null) return null;
+  if (typeof v !== 'object' || Array.isArray(v)) return undefined;
+  const n = (x, d) => { const f = Number(x); return Number.isFinite(f) ? Math.min(1, Math.max(0, f)) : d; };
+  return { x: n(v.x, 0.1), y: n(v.y, 0.76), w: n(v.w, 0.25), h: n(v.h, 0.06) };
+}
 
 // LetterCategory enum (mirror prisma/schema.prisma#LetterCategory — writing a
 // value outside this set 500s in Prisma; we 422 instead).
@@ -49,6 +65,11 @@ const TEMPLATE_PUBLIC = [
   'subject', 'bodyMarkdown', 'mergeFieldsJson', 'defaultLetterheadId',
   'requiresSignature', 'refNoPrefix', 'locale', 'isSystem', 'isActive',
   'version', 'createdAt', 'updatedAt',
+  // Phase 2 — signatory block + static signature placement/flags. The signature
+  // IMAGE (signatureImageUrl) is small (a PNG scan) and the editor needs it to
+  // preview/place, so it is included here rather than behind a separate fetch.
+  'signatureImageUrl', 'signatureBoxJson', 'signatureOnLastPage',
+  'authorityName', 'authorityDesignation',
 ];
 
 function publicTemplate(t) {
@@ -261,6 +282,12 @@ async function createTemplate(req, res) {
     code = `${slug}${countryCode ? `-${countryCode}` : ''}-${Date.now().toString(36).toUpperCase()}`;
   }
 
+  let sigBox;
+  if (b.signatureBoxJson !== undefined) {
+    sigBox = sanitizeSigBox(b.signatureBoxJson);
+    if (sigBox === undefined) return fail(res, 422, 'signatureBoxJson must be a normalized {x,y,w,h} object');
+  }
+
   // Operators cannot mint system templates (isSystem is seed-only).
   const data = {
     businessId,
@@ -277,6 +304,11 @@ async function createTemplate(req, res) {
     requiresSignature: b.requiresSignature === true || category === 'CONTRACT',
     refNoPrefix: typeof b.refNoPrefix === 'string' && b.refNoPrefix.trim() ? b.refNoPrefix.trim() : null,
     locale: typeof b.locale === 'string' && b.locale.trim() ? b.locale.trim() : null,
+    // Phase 2 — signatory block + static signature placement (image uploaded separately).
+    authorityName: strOrNull(b.authorityName),
+    authorityDesignation: strOrNull(b.authorityDesignation),
+    signatureBoxJson: sigBox,
+    signatureOnLastPage: b.signatureOnLastPage !== undefined ? !!b.signatureOnLastPage : undefined,
     isSystem: false,
     // New templates start as a DRAFT unless the caller explicitly publishes.
     isActive: b.isActive === true,
@@ -355,6 +387,15 @@ async function updateTemplate(req, res) {
   if (b.refNoPrefix !== undefined) data.refNoPrefix = typeof b.refNoPrefix === 'string' && b.refNoPrefix.trim() ? b.refNoPrefix.trim() : null;
   if (b.locale !== undefined) data.locale = typeof b.locale === 'string' && b.locale.trim() ? b.locale.trim() : null;
   if (b.entityId !== undefined) data.entityId = b.entityId || null;
+  // Phase 2 — signatory block + static signature placement/flags.
+  if (b.authorityName !== undefined) data.authorityName = strOrNull(b.authorityName);
+  if (b.authorityDesignation !== undefined) data.authorityDesignation = strOrNull(b.authorityDesignation);
+  if (b.signatureOnLastPage !== undefined) data.signatureOnLastPage = !!b.signatureOnLastPage;
+  if (b.signatureBoxJson !== undefined) {
+    const box = sanitizeSigBox(b.signatureBoxJson);
+    if (box === undefined) return fail(res, 422, 'signatureBoxJson must be a normalized {x,y,w,h} object');
+    data.signatureBoxJson = box;
+  }
   // `code` may be changed but stays tenant-unique; isSystem/isActive are not
   // editable here (publish/archive own isActive; isSystem is immutable seed flag).
   if (b.code !== undefined && typeof b.code === 'string' && b.code.trim()) data.code = b.code.trim();
@@ -442,6 +483,68 @@ async function deleteTemplate(req, res) {
   return res.json({ ok: true, id: existing.id });
 }
 
+// ── POST /:id/signature — upload the static signature PNG (auto-stamped) ───────
+async function uploadSignature(req, res) {
+  const businessId = req.user.businessId;
+  const existing = await prisma.letterTemplate.findFirst({
+    where: { id: req.params.id, businessId, deletedAt: null },
+  });
+  if (!existing) return fail(res, 404, 'Template not found');
+
+  const dataUrl = (req.body && (req.body.fileBase64 || req.body.dataUrl)) || '';
+  // Reuse the documents validator (≤10MB + MIME allow-list + server-side decode).
+  const check = validateDocDataUrl(dataUrl);
+  if (!check.ok) return res.status(check.status).json({ message: check.message });
+  // The renderer embeds the signature via pdf-lib embedPng, so require PNG.
+  if (check.mime !== 'image/png') return fail(res, 422, 'The signature must be a PNG image (image/png).');
+
+  let signatureImageUrl;
+  if (s3.isConfigured()) {
+    const up = await s3.uploadDataUrl({ dataUrl, businessId, scope: 'letter-signature' });
+    signatureImageUrl = up.url;
+  } else {
+    signatureImageUrl = dataUrl; // inline fallback (dev / no-bucket), mirrors letterheads
+  }
+
+  const row = await prisma.letterTemplate.update({
+    where: { id: existing.id },
+    data: {
+      signatureImageUrl,
+      signatureImageHash: sha256(check.buffer),
+      signatureMimeType: check.mime,
+      signatureSizeBytes: check.bytes,
+      version: { increment: 1 },
+    },
+  });
+  await writeAudit({
+    businessId, actorId: req.user.id, action: 'letter.template.signature.set',
+    entityType: 'LetterTemplate', entityId: row.id, meta: { sizeBytes: check.bytes },
+  });
+  return res.json(publicTemplate(row));
+}
+
+// ── DELETE /:id/signature — remove the static signature ───────────────────────
+async function deleteSignature(req, res) {
+  const businessId = req.user.businessId;
+  const existing = await prisma.letterTemplate.findFirst({
+    where: { id: req.params.id, businessId, deletedAt: null },
+  });
+  if (!existing) return fail(res, 404, 'Template not found');
+  const row = await prisma.letterTemplate.update({
+    where: { id: existing.id },
+    data: {
+      signatureImageUrl: null, signatureImageHash: null,
+      signatureMimeType: null, signatureSizeBytes: null,
+      version: { increment: 1 },
+    },
+  });
+  await writeAudit({
+    businessId, actorId: req.user.id, action: 'letter.template.signature.clear',
+    entityType: 'LetterTemplate', entityId: row.id, meta: {},
+  });
+  return res.json(publicTemplate(row));
+}
+
 module.exports = {
   listMergeFields,
   listTemplates,
@@ -451,9 +554,11 @@ module.exports = {
   publishTemplate,
   archiveTemplate,
   deleteTemplate,
+  uploadSignature,
+  deleteSignature,
   // exported for tests
   _internals: {
     unknownMergeFields, unknownBodyTokens, extractBodyTokens,
-    publicTemplate, LETTER_CATEGORIES, COUNTRY_CODES,
+    publicTemplate, LETTER_CATEGORIES, COUNTRY_CODES, sanitizeSigBox,
   },
 };

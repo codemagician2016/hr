@@ -421,6 +421,19 @@ async function main() {
   check('degenerate w: not garble-wrapped one-glyph-per-line (few runs, one page)',
     (await pageCount(degW)) === 1);
 
+  // 15) Authority / signatory block (Phase 2): name + designation stacked at the
+  //     authority anchor. Adding a designation must draw an extra line.
+  const authName = await renderLetter({
+    letterheadPdf: a4, layout: LAYOUT, bodyText: 'Body.',
+    fields: { authority: 'Priya Sharma' }, fontBytes, fontBoldBytes,
+  });
+  const authNameDesig = await renderLetter({
+    letterheadPdf: a4, layout: LAYOUT, bodyText: 'Body.',
+    fields: { authority: 'Priya Sharma', authorityDesignation: 'Head of HR' }, fontBytes, fontBoldBytes,
+  });
+  check('signatory: authorityDesignation draws an extra stacked line',
+    extractTextPositions(authNameDesig).length > extractTextPositions(authName).length);
+
   // ── report ──────────────────────────────────────────────────────────────
   console.log('');
   console.log(`renderLetter test: ${passed} passed, ${failed} failed of ${passed + failed} assertions.`);

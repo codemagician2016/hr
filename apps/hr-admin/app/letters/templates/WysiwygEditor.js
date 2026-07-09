@@ -26,6 +26,9 @@ import PdfCanvas from '../letterheads/PdfCanvas';
 // Must match backend renderLetter.js DEFAULT_WRITING_AREA so the on-screen band
 // lines up with the printed body when a letterhead has no saved layout yet.
 const DEFAULT_WA = { x: 0.1, y: 0.26, w: 0.8, h: 0.56, fontSize: 11 };
+// Must match backend letters.service.js DEFAULT_SIG_BOX.
+const DEFAULT_SIG_BOX = { x: 0.1, y: 0.76, w: 0.25, h: 0.06 };
+const clamp01 = (n) => Math.min(1, Math.max(0, n));
 
 // ── Markdown SUBSET ↔ HTML ────────────────────────────────────────────────────
 const TOKEN_RE = /\{\{\s*([a-zA-Z][\w]*\.[a-zA-Z][\w]*)\s*\}\}/g;
@@ -131,9 +134,13 @@ function ToolbarButton({ onClick, title, children, active }) {
   );
 }
 
-const WysiwygEditor = forwardRef(function WysiwygEditor({ value, onChange, letterhead }, ref) {
+const WysiwygEditor = forwardRef(function WysiwygEditor(
+  { value, onChange, letterhead, signatureUrl, signatureBox, onSignatureBoxChange }, ref,
+) {
   const editorRef = useRef(null);
+  const stageRef = useRef(null);           // the letterhead-canvas wrapper (for signature drag math)
   const lastEmitted = useRef(null);        // last Markdown WE produced (avoid caret resets)
+  const sigDragRef = useRef(null);
   const [mode, setMode] = useState('rich'); // 'rich' | 'source'
   const [canvas, setCanvas] = useState({ cssWidth: 0, cssHeight: 0, pageWidthPt: 595.28 });
 
@@ -198,6 +205,39 @@ const WysiwygEditor = forwardRef(function WysiwygEditor({ value, onChange, lette
 
   useImperativeHandle(ref, () => ({ insertToken }), [insertToken]);
 
+  // Signature drag/resize over the letterhead (normalized box). Live-updates the
+  // parent's signatureBox; window listeners attach only during a gesture.
+  const onSigMove = useCallback((e) => {
+    const d = sigDragRef.current;
+    if (!d || !onSignatureBoxChange) return;
+    const dxN = (e.clientX - d.startX) / d.w;
+    const dyN = (e.clientY - d.startY) / d.h;
+    const box = d.mode === 'move'
+      ? { ...d.start, x: clamp01(d.start.x + dxN), y: clamp01(d.start.y + dyN) }
+      : { ...d.start, w: clamp01(Math.max(0.06, d.start.w + dxN)), h: clamp01(Math.max(0.03, d.start.h + dyN)) };
+    onSignatureBoxChange(box);
+  }, [onSignatureBoxChange]);
+  const onSigUp = useCallback(() => {
+    sigDragRef.current = null;
+    window.removeEventListener('pointermove', onSigMove);
+    window.removeEventListener('pointerup', onSigUp);
+  }, [onSigMove]);
+  const onSigDown = useCallback((e, gestureMode) => {
+    if (!onSignatureBoxChange || !stageRef.current) return;
+    e.preventDefault(); e.stopPropagation();
+    const r = stageRef.current.getBoundingClientRect();
+    sigDragRef.current = {
+      mode: gestureMode, startX: e.clientX, startY: e.clientY,
+      w: r.width, h: r.height, start: { ...(signatureBox || DEFAULT_SIG_BOX) },
+    };
+    window.addEventListener('pointermove', onSigMove);
+    window.addEventListener('pointerup', onSigUp);
+  }, [onSignatureBoxChange, signatureBox, onSigMove, onSigUp]);
+  useEffect(() => () => {
+    window.removeEventListener('pointermove', onSigMove);
+    window.removeEventListener('pointerup', onSigUp);
+  }, [onSigMove, onSigUp]);
+
   // Paste as plain text (keep the doc to our controlled subset).
   const onPaste = useCallback((e) => {
     e.preventDefault();
@@ -252,7 +292,7 @@ const WysiwygEditor = forwardRef(function WysiwygEditor({ value, onChange, lette
       ) : src ? (
         // WYSIWYG on the letterhead: raster backdrop + editable overlay at the writing area.
         <div className="border border-gray-200 rounded-lg bg-gray-50 p-3 overflow-auto" style={{ maxHeight: '58vh' }}>
-          <div className="relative inline-block mx-auto">
+          <div ref={stageRef} className="relative inline-block mx-auto">
             <PdfCanvas src={src} scale={1} onSize={setCanvas} />
             {/* writing-area guide */}
             {canvas.cssWidth ? (
@@ -268,6 +308,25 @@ const WysiwygEditor = forwardRef(function WysiwygEditor({ value, onChange, lette
               className="mfeditor outline-none text-gray-900 leading-snug"
               style={editorStyle}
             />
+            {/* draggable static signature */}
+            {signatureUrl && canvas.cssWidth ? (() => {
+              const sBox = signatureBox || DEFAULT_SIG_BOX;
+              return (
+                <div
+                  className="absolute border border-dashed border-pink-400"
+                  style={{ left: sBox.x * canvas.cssWidth, top: sBox.y * canvas.cssHeight, width: sBox.w * canvas.cssWidth, height: sBox.h * canvas.cssHeight, cursor: 'move', touchAction: 'none' }}
+                  onPointerDown={(e) => onSigDown(e, 'move')}
+                  title="Drag to move · drag the corner to resize"
+                >
+                  <img src={signatureUrl} alt="Signature" className="w-full h-full object-contain pointer-events-none select-none" />
+                  <span
+                    onPointerDown={(e) => onSigDown(e, 'resize')}
+                    className="absolute bg-pink-500 rounded-sm"
+                    style={{ right: -5, bottom: -5, width: 10, height: 10, cursor: 'nwse-resize' }}
+                  />
+                </div>
+              );
+            })() : null}
           </div>
         </div>
       ) : (
