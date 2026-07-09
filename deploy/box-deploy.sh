@@ -67,8 +67,11 @@ if [ "${DRIFTHR_ENV:-staging}" = "prod" ]; then
   # risk of a port/domain drift on production. New code loads from the extracted
   # .next/backend on disk. (There is no prod ecosystem file; the fleet runs from
   # pm2's saved state.)
-  log "pm2 reload (prod, by name — preserves live env/ports)"
-  pm2 reload $APPS
+  # restart (not reload) BY NAME: fork-mode Next apps don't reliably pick up a new
+  # .next on `pm2 reload`, so restart to load the fresh build. Each app keeps its
+  # LIVE env/ports (43xx / PLATFORM_DOMAIN=drifthr.com) — no ecosystem config imposed.
+  log "pm2 restart (prod, by name — loads new build, preserves live env/ports)"
+  pm2 restart $APPS
 else
   # STAGING uses the checked-in config (starts any missing app; siblings untouched).
   log "pm2 startOrReload — ONLY drifthr-hms-* (staging config)"
