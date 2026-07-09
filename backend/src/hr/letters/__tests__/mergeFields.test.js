@@ -174,6 +174,34 @@ function main() {
   check('renderMerge() defensive on empty body', renderMerge('', {}).text === '');
   check('renderMerge() defensive on null body', renderMerge(null, {}).text === '');
 
+  // 10) Phase 3 — manual (at-issue) fields resolve as {{manual.<key>}} with per-type
+  //     formatting; declared tokens are known (not stripped); required-but-blank
+  //     manual fields are flagged missing.
+  const manualDefs = [
+    { key: 'bonusAmount', label: 'Bonus', type: 'currency', required: true },
+    { key: 'effectiveOn', label: 'Effective', type: 'date', required: false },
+    { key: 'reason', label: 'Reason', type: 'text', required: false },
+  ];
+  const manRes = resolveMergeData({
+    employee: EMP_IN, business: BIZ_IN, locale: 'en-IN', now: NOW, perms: {},
+    manual: { bonusAmount: 250000, effectiveOn: '2026-08-01', reason: 'Excellent performance' },
+    manualFields: manualDefs,
+  });
+  check('manual.currency formats as money', manRes.values['manual.bonusAmount'] === '₹2,50,000.00', manRes.values['manual.bonusAmount']);
+  check('manual.date formats dd/MM/yyyy', manRes.values['manual.effectiveOn'] === '01/08/2026', manRes.values['manual.effectiveOn']);
+  check('manual.text passes through', manRes.values['manual.reason'] === 'Excellent performance');
+  const manBody = renderMerge('Bonus {{manual.bonusAmount}} effective {{manual.effectiveOn}} — {{manual.reason}}.', manRes.values);
+  check('renderMerge substitutes manual tokens',
+    manBody.text.includes('₹2,50,000.00') && manBody.text.includes('01/08/2026') && manBody.text.includes('Excellent performance'), manBody.text);
+  check('renderMerge treats declared manual tokens as known (not unknown)', manBody.unknownTokens.length === 0, manBody.unknownTokens.join(','));
+
+  const manMissing = resolveMergeData({
+    employee: EMP_IN, business: BIZ_IN, locale: 'en-IN', now: NOW, perms: {},
+    manual: {}, manualFields: manualDefs,
+  });
+  check('required blank manual field flagged missing', manMissing.missingRequired.includes('manual.bonusAmount'), manMissing.missingRequired.join(','));
+  check('optional blank manual field NOT flagged', !manMissing.missingRequired.includes('manual.effectiveOn'));
+
   // ── report ──────────────────────────────────────────────────────────────
   console.log('');
   console.log(`mergeFields test: ${passed} passed, ${failed} failed of ${passed + failed} assertions.`);

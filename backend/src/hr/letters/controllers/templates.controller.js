@@ -50,6 +50,37 @@ function sanitizeSigBox(v) {
   return { x: n(v.x, 0.1), y: n(v.y, 0.76), w: n(v.w, 0.25), h: n(v.h, 0.06) };
 }
 
+// Phase 3 — manual (at-issue) fields. Sanitize the declared list: each entry
+// { key (alphanumeric, token-safe), label, type, required }. Returns null to
+// CLEAR, a normalized array to SET, or undefined when malformed (caller 422s).
+const MANUAL_FIELD_TYPES = new Set(['text', 'date', 'number', 'currency']);
+function sanitizeManualFields(v) {
+  if (v === null) return null;
+  if (!Array.isArray(v)) return undefined;
+  const out = [];
+  const seen = new Set();
+  for (const f of v) {
+    if (!f || typeof f !== 'object') return undefined;
+    const key = typeof f.key === 'string' ? f.key.trim() : '';
+    // must match the {{manual.<key>}} token grammar (letter then alphanumerics).
+    if (!/^[a-zA-Z][a-zA-Z0-9]*$/.test(key) || seen.has(key)) return undefined;
+    seen.add(key);
+    out.push({
+      key,
+      label: typeof f.label === 'string' && f.label.trim() ? f.label.trim() : key,
+      type: MANUAL_FIELD_TYPES.has(f.type) ? f.type : 'text',
+      required: !!f.required,
+    });
+  }
+  return out;
+}
+// The set of {{manual.<key>}} tokens a declared manual-fields list authorizes.
+function manualKeySet(manualFieldsJson) {
+  const set = new Set();
+  if (Array.isArray(manualFieldsJson)) for (const f of manualFieldsJson) if (f && f.key) set.add(`manual.${f.key}`);
+  return set;
+}
+
 // LetterCategory enum (mirror prisma/schema.prisma#LetterCategory — writing a
 // value outside this set 500s in Prisma; we 422 instead).
 const LETTER_CATEGORIES = new Set([
@@ -70,6 +101,8 @@ const TEMPLATE_PUBLIC = [
   // preview/place, so it is included here rather than behind a separate fetch.
   'signatureImageUrl', 'signatureBoxJson', 'signatureOnLastPage',
   'authorityName', 'authorityDesignation',
+  // Phase 3 — declared manual (at-issue) fields (the issue wizard renders inputs).
+  'manualFieldsJson',
 ];
 
 function publicTemplate(t) {
@@ -110,8 +143,9 @@ function extractBodyTokens(...texts) {
 // Tokens used in the body/subject that the catalog doesn't know. These would be
 // silently stripped at render time (renderMerge drops unknown tokens), so we
 // reject them at save time instead — the editor gets a precise list to fix.
-function unknownBodyTokens({ bodyMarkdown, subject }) {
-  return extractBodyTokens(bodyMarkdown, subject).filter((t) => !(t in CATALOG));
+function unknownBodyTokens({ bodyMarkdown, subject, manualKeys }) {
+  const allowManual = manualKeys instanceof Set ? manualKeys : new Set();
+  return extractBodyTokens(bodyMarkdown, subject).filter((t) => !(t in CATALOG) && !allowManual.has(t));
 }
 
 function fail(res, status, message, extra) {
@@ -270,7 +304,13 @@ async function createTemplate(req, res) {
   // would be stripped silently at render (renderMerge drops it), so reject it here
   // with the exact list — the editor highlights the typo before it ships a letter
   // with a hole where a field should be.
-  const unknownInBody = unknownBodyTokens({ bodyMarkdown, subject });
+  // Phase 3 — declared manual fields authorize {{manual.<key>}} tokens in the body.
+  let manualFields;
+  if (b.manualFieldsJson !== undefined) {
+    manualFields = sanitizeManualFields(b.manualFieldsJson);
+    if (manualFields === undefined) return fail(res, 422, 'manualFieldsJson must be an array of {key,label,type,required} with unique alphanumeric keys');
+  }
+  const unknownInBody = unknownBodyTokens({ bodyMarkdown, subject, manualKeys: manualKeySet(manualFields) });
   if (unknownInBody.length) {
     return fail(res, 422, 'The letter body references unknown merge fields', { unknownMergeFields: unknownInBody });
   }
@@ -309,6 +349,7 @@ async function createTemplate(req, res) {
     authorityDesignation: strOrNull(b.authorityDesignation),
     signatureBoxJson: sigBox,
     signatureOnLastPage: b.signatureOnLastPage !== undefined ? !!b.signatureOnLastPage : undefined,
+    manualFieldsJson: manualFields,
     isSystem: false,
     // New templates start as a DRAFT unless the caller explicitly publishes.
     isActive: b.isActive === true,
@@ -371,13 +412,24 @@ async function updateTemplate(req, res) {
     data.mergeFieldsJson = b.mergeFieldsJson;
   }
 
+  // Phase 3 — sanitize declared manual fields up-front so body-token validation
+  // (below) can authorize {{manual.<key>}} against the EFFECTIVE list.
+  let manualFields;
+  if (b.manualFieldsJson !== undefined) {
+    manualFields = sanitizeManualFields(b.manualFieldsJson);
+    if (manualFields === undefined) return fail(res, 422, 'manualFieldsJson must be an array of {key,label,type,required} with unique alphanumeric keys');
+    data.manualFieldsJson = manualFields;
+  }
+  const effManualKeys = manualKeySet(b.manualFieldsJson !== undefined ? manualFields : existing.manualFieldsJson);
+
   // Validate the EFFECTIVE body + subject (new value if supplied, else the stored
-  // one) against the catalog — an edit that introduces an unknown {{token}} is
-  // rejected with the exact list before it's saved + silently stripped at render.
-  if (b.bodyMarkdown !== undefined || b.subject !== undefined) {
+  // one) against the catalog + declared manual fields — an edit that introduces an
+  // unknown {{token}} (or removes a manual field a token relied on) is rejected
+  // with the exact list before it's saved + silently stripped at render.
+  if (b.bodyMarkdown !== undefined || b.subject !== undefined || b.manualFieldsJson !== undefined) {
     const effBody = b.bodyMarkdown !== undefined ? b.bodyMarkdown : existing.bodyMarkdown;
     const effSubject = b.subject !== undefined ? b.subject : existing.subject;
-    const unknownInBody = unknownBodyTokens({ bodyMarkdown: effBody, subject: effSubject });
+    const unknownInBody = unknownBodyTokens({ bodyMarkdown: effBody, subject: effSubject, manualKeys: effManualKeys });
     if (unknownInBody.length) {
       return fail(res, 422, 'The letter body references unknown merge fields', { unknownMergeFields: unknownInBody });
     }
@@ -560,5 +612,6 @@ module.exports = {
   _internals: {
     unknownMergeFields, unknownBodyTokens, extractBodyTokens,
     publicTemplate, LETTER_CATEGORIES, COUNTRY_CODES, sanitizeSigBox,
+    sanitizeManualFields, manualKeySet,
   },
 };

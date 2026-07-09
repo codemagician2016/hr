@@ -827,6 +827,23 @@
           ],
           "expected": "The signatory name + designation render at the authority block and the uploaded signature image is auto-stamped at its placed position on every issued letter (no e-sign step needed).",
           "sortOrder": 7
+        },
+        {
+          "key": "template-manual-fields-filled-at-issue",
+          "title": "Template manual fields are filled at issue and merged into the letter",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/letters/templates",
+          "steps": [
+            "Log in as operator@demo.test; open/edit a template and in 'Manual fields (filled at issue)' add a field (e.g. label 'Bonus amount', type Currency, Required).",
+            "Click Insert to drop {{manual.bonusAmount}} into the body; Save & publish.",
+            "Go to Letters > Issue, pick this template + an employee; the 'Fields to fill for this letter' section shows the manual field.",
+            "Type a value, Refresh preview, then Issue now."
+          ],
+          "expected": "The manual field appears in the issue form; a required field left blank blocks issue (missing-required). The typed value is type-formatted (currency/date/number) and merged into {{manual.<key>}} on the preview and issued PDF.",
+          "sortOrder": 8
         }
       ]
     },

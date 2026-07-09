@@ -11071,6 +11071,10 @@ model LetterTemplate {
   signatureOnLastPage  Boolean           @default(true) // stamp on the last page vs page 1
   authorityName        String? // signatory name (fills {{authority.name}}/{{company.signatoryName}})
   authorityDesignation String? // signatory designation
+  // Phase 3 — template-declared MANUAL (at-issue) fields the issuer fills in the
+  // wizard: [{ key, label, type: text|date|number|currency, required }]. Used in
+  // the body as {{manual.<key>}} (outside the fixed catalog).
+  manualFieldsJson     Json?
   isSystem            Boolean            @default(false) // seeded IN/NZ template (non-deletable)
   isActive            Boolean            @default(true) // PUBLISHED. false = DRAFT/ARCHIVED
   createdAt           DateTime           @default(now())

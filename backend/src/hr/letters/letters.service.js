@@ -333,6 +333,10 @@ function buildRenderInputs({ template, ctx, overrides, refNo, locale, now }) {
     // Feature 37 — LMS certificate facts (overrides.course), additive; only the
     // LMS_CERTIFICATE template's course.* tokens consume them, ignored elsewhere.
     course: o.course || null,
+    // Phase 3 — manual (at-issue) values the issuer filled + the template's
+    // declared field list (types drive formatting; required drives missingRequired).
+    manual: o.manual || null,
+    manualFields: template.manualFieldsJson || null,
   });
 
   // Body: an explicit override body wins (custom paragraph append handled by the

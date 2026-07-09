@@ -62,6 +62,8 @@ function IssueLetterPageInner() {
   const [issueDate, setIssueDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [subject, setSubject] = useState('');
   const [customParagraph, setCustomParagraph] = useState('');
+  // Phase 3 — template-declared manual (at-issue) fields the issuer fills.
+  const [manualValues, setManualValues] = useState({});
 
   const [previewUrl, setPreviewUrl] = useState('');
   const [previewing, setPreviewing] = useState(false);
@@ -87,6 +89,12 @@ function IssueLetterPageInner() {
     () => (templates || []).find((t) => t.id === templateId) || null,
     [templates, templateId]
   );
+  const manualFields = useMemo(
+    () => (Array.isArray(selectedTemplate?.manualFieldsJson) ? selectedTemplate.manualFieldsJson : []),
+    [selectedTemplate]
+  );
+  // reset the filled values whenever the template changes.
+  useEffect(() => { setManualValues({}); }, [templateId]);
 
   // ── load templates (server filters to the tenant's country — India-first) ──
   useEffect(() => {
@@ -118,6 +126,15 @@ function IssueLetterPageInner() {
     const o = { issueDate };
     if (subject.trim()) o.subject = subject.trim();
     if (customParagraph.trim()) o.customParagraph = customParagraph.trim();
+    // manual (at-issue) values the issuer filled — only send the non-empty ones.
+    if (manualFields.length) {
+      const filled = {};
+      for (const fld of manualFields) {
+        const v = manualValues[fld.key];
+        if (v != null && String(v).trim() !== '') filled[fld.key] = v;
+      }
+      if (Object.keys(filled).length) o.manual = filled;
+    }
     if (recipientMode === 'external') {
       // External recipient: surface the free letter.addressee + letter.purpose
       // merge fields. The addressee block is name + address (employee stays unset).
@@ -126,7 +143,7 @@ function IssueLetterPageInner() {
       if (extPurpose.trim()) o.purpose = extPurpose.trim();
     }
     return o;
-  }, [issueDate, subject, customParagraph, recipientMode, extName, extAddress, extPurpose]);
+  }, [issueDate, subject, customParagraph, recipientMode, extName, extAddress, extPurpose, manualFields, manualValues]);
 
   // The subject employee is only sent in employee mode.
   const effectiveEmployeeId = recipientMode === 'employee' ? (employeeId || null) : null;
@@ -421,6 +438,27 @@ function IssueLetterPageInner() {
               rows={4}
               hint="Appended to the letter body."
             />
+
+            {manualFields.length > 0 && (
+              <div className="rounded-xl border border-gray-200 p-3 space-y-2">
+                <p className="text-xs font-semibold text-gray-700">Fields to fill for this letter</p>
+                {manualFields.map((fld) => (
+                  <div key={fld.key}>
+                    <label className="block text-xs font-medium text-gray-600 mb-0.5">
+                      {fld.label || fld.key}{fld.required && <span className="text-red-500"> *</span>}
+                    </label>
+                    <input
+                      type={fld.type === 'date' ? 'date' : (fld.type === 'number' || fld.type === 'currency') ? 'number' : 'text'}
+                      value={manualValues[fld.key] ?? ''}
+                      onChange={(e) => setManualValues((m) => ({ ...m, [fld.key]: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                      placeholder={fld.type === 'currency' ? 'Amount' : ''}
+                    />
+                  </div>
+                ))}
+                <p className="text-[11px] text-gray-400">These fill the {'{{manual.<key>}}'} tokens. Click Refresh preview after editing.</p>
+              </div>
+            )}
 
             {masked.length > 0 && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">

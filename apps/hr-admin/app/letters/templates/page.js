@@ -150,6 +150,51 @@ function MergeFieldDrawer({ palette, onInsert }) {
   );
 }
 
+// Derive a token-safe camelCase key from a human label (letters/numbers only,
+// must start with a letter — matches the {{manual.<key>}} grammar).
+function slugKey(s) {
+  const words = String(s || '').replace(/[^a-zA-Z0-9]+/g, ' ').trim().split(' ').filter(Boolean);
+  const camel = words.map((w, i) => (i === 0 ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())).join('');
+  return camel.replace(/^[^a-zA-Z]+/, '');
+}
+
+// ─── Manual (at-issue) fields editor ─────────────────────────────────────────
+function ManualFieldsPanel({ fields, onChange, onInsert }) {
+  const rows = Array.isArray(fields) ? fields : [];
+  const update = (i, patch) => onChange(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  const add = () => onChange([...rows, { key: '', label: '', type: 'text', required: false }]);
+  const remove = (i) => onChange(rows.filter((_, idx) => idx !== i));
+  const setLabel = (i, label) => {
+    const r = rows[i];
+    update(i, { label, key: r._keyEdited ? r.key : slugKey(label) });
+  };
+  return (
+    <div className="rounded-xl border border-gray-200 p-4 space-y-2">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold text-gray-800">Manual fields (filled at issue)<InfoTip text="Values NOT in the employee record that the issuer types when generating a letter (e.g. bonus amount, effective date). Reference them in the body as {{manual.<key>}}." label="Manual fields" /></p>
+        <ActionButton onClick={add}>+ Add field</ActionButton>
+      </div>
+      {rows.length === 0 ? (
+        <p className="text-xs text-gray-400">None. Add one to collect a value from the issuer at generation time.</p>
+      ) : rows.map((r, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <input value={r.label || ''} onChange={(e) => setLabel(i, e.target.value)} placeholder="Label" className="flex-1 px-2 py-1 border border-gray-300 rounded text-xs" />
+          <input value={r.key || ''} onChange={(e) => update(i, { key: e.target.value.replace(/[^a-zA-Z0-9]/g, ''), _keyEdited: true })} placeholder="key" className="w-28 px-2 py-1 border border-gray-300 rounded text-xs font-mono" />
+          <select value={r.type || 'text'} onChange={(e) => update(i, { type: e.target.value })} className="px-2 py-1 border border-gray-300 rounded text-xs bg-white">
+            <option value="text">Text</option>
+            <option value="date">Date</option>
+            <option value="number">Number</option>
+            <option value="currency">Currency</option>
+          </select>
+          <label className="flex items-center gap-1 text-xs text-gray-600"><input type="checkbox" checked={!!r.required} onChange={(e) => update(i, { required: e.target.checked })} />Req</label>
+          <button type="button" onClick={() => r.key && onInsert(`{{manual.${r.key}}}`)} disabled={!r.key} className="text-xs text-violet-600 hover:underline disabled:text-gray-300" title="Insert {{manual.key}} into the body">Insert</button>
+          <button type="button" onClick={() => remove(i)} className="text-xs text-red-500 hover:underline">Remove</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── Editor (slide-over) ─────────────────────────────────────────────────────
 function TemplateEditor({ template, letterheads, letterheadsAvailable, onClose, onSaved }) {
   const isNew = !template;
@@ -167,6 +212,7 @@ function TemplateEditor({ template, letterheads, letterheadsAvailable, onClose, 
     authorityName: template?.authorityName || '',
     authorityDesignation: template?.authorityDesignation || '',
     signatureOnLastPage: template?.signatureOnLastPage !== false,
+    manualFields: Array.isArray(template?.manualFieldsJson) ? template.manualFieldsJson : [],
   }));
   // Static signature (Phase 2): the image is uploaded to a saved template via a
   // dedicated endpoint; its placement box + on-last-page flag save with the form.
@@ -260,6 +306,9 @@ function TemplateEditor({ template, letterheads, letterheadsAvailable, onClose, 
         authorityDesignation: form.authorityDesignation || null,
         signatureOnLastPage: form.signatureOnLastPage,
         ...(sigBox ? { signatureBoxJson: sigBox } : {}),
+        manualFieldsJson: (form.manualFields || [])
+          .filter((r) => r.key)
+          .map(({ key, label, type, required }) => ({ key, label: label || key, type: type || 'text', required: !!required })),
       };
       if (isNew && form.code.trim()) payload.code = form.code.trim();
       let saved;
@@ -443,6 +492,13 @@ function TemplateEditor({ template, letterheads, letterheadsAvailable, onClose, 
               </label>
             </div>
           </div>
+
+          {/* Manual (at-issue) fields (Phase 3) */}
+          <ManualFieldsPanel
+            fields={form.manualFields}
+            onChange={(v) => set('manualFields', v)}
+            onInsert={insertToken}
+          />
         </div>
 
         <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between gap-2">

@@ -317,6 +317,7 @@ function maskAccount(v) {
  */
 function resolveMergeData({
   employee, business, comp, entity, locale, now, refNo, authority, perms, required, course,
+  manual, manualFields,
 } = {}) {
   const loc = LOCALES[locale] ? locale : DEFAULT_LOCALE;
   const canViewComp = !!(perms && perms.canViewCompensation);
@@ -352,6 +353,25 @@ function resolveMergeData({
     values[key] = out;
   }
 
+  // Manual (at-issue) fields — template-declared, filled by the issuer in the
+  // wizard. Outside the fixed CATALOG; resolved from `manual` with per-field type
+  // formatting so {{manual.<key>}} substitutes like any other token.
+  const manualVals = manual && typeof manual === 'object' ? manual : {};
+  const manualDefs = Array.isArray(manualFields) ? manualFields : [];
+  for (const def of manualDefs) {
+    if (!def || !def.key) continue;
+    const rawVal = manualVals[def.key];
+    let out;
+    switch (def.type) {
+      case 'date': out = rawVal ? formatDate(rawVal, loc) : ''; break;
+      case 'currency':
+      case 'money': out = (rawVal == null || rawVal === '') ? '' : formatMoney(rawVal, loc); break;
+      case 'number': out = (rawVal == null || rawVal === '') ? '' : formatNumber(rawVal, loc); break;
+      default: out = str(rawVal);
+    }
+    values[`manual.${def.key}`] = out;
+  }
+
   // missingRequired: only the explicitly-required catalog keys whose resolved
   // value is empty (masked comp counts as PRESENT — the figure is hidden by
   // policy, not missing). Unknown required keys are reported as missing too.
@@ -361,6 +381,13 @@ function resolveMergeData({
     if (!(key in CATALOG)) { missingRequired.push(key); continue; }
     const v = values[key];
     if (v === undefined || v === null || v === '') missingRequired.push(key);
+  }
+  // required manual fields left blank are missing too.
+  for (const def of manualDefs) {
+    if (def && def.required) {
+      const v = values[`manual.${def.key}`];
+      if (v === undefined || v === null || v === '') missingRequired.push(`manual.${def.key}`);
+    }
   }
 
   return { values, missingRequired, masked };
