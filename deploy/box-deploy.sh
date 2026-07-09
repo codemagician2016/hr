@@ -23,9 +23,15 @@ log "backend npm ci"
 cd "$ROOT/backend"
 npm ci --no-audit --no-fund 2>&1 | tail -3 || npm install --no-audit --no-fund 2>&1 | tail -3
 
-log "prisma generate + migrate deploy (drifthr_hms)"
+log "prisma generate + db push (drifthr_hms)"
 npx prisma generate 2>&1 | tail -2
-npx prisma migrate deploy 2>&1 | tail -8
+# These DBs were provisioned via `prisma db push`, so the _prisma_migrations ledger
+# is intentionally stale and `migrate deploy` fails on drift (e.g. "type
+# RegularizationKind already exists"). Sync the schema ADDITIVELY with db push —
+# default (no --accept-data-loss) refuses any destructive change, so it is safe:
+# it only ever ADDs the new columns/tables. `set -e` aborts before the pm2 reload
+# if db push refuses, leaving the old code running (never a half-deploy).
+npx prisma db push --skip-generate 2>&1 | tail -14
 
 cd "$ROOT"
 log "pm2 startOrReload — ONLY drifthr-hms-* (siblings untouched)"
