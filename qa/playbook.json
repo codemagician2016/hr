@@ -792,6 +792,24 @@
           ],
           "expected": "The merged body text always appears on page 1 over the letterhead — never pushed onto blank repeated pages. If the writing area was collapsed too small to hold a line, the renderer falls back to a safe body band so content is never missing.",
           "sortOrder": 5
+        },
+        {
+          "key": "author-a-template-on-the-letterhead-wysiwyg",
+          "title": "Author a template on the letterhead (WYSIWYG rich formatting + merge fields)",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/letters/templates",
+          "steps": [
+            "Log in as operator@demo.test and open Letters > Templates.",
+            "Create or edit a template and pick a Default letterhead so the editor shows it as the backdrop.",
+            "Type the body directly on the letterhead; use the toolbar for bold, headings (H1/H2) and bullet/numbered lists.",
+            "Insert merge fields (e.g. employee.name, date.issueDate) from the palette — they appear as chips.",
+            "Save & publish, then issue the template to an employee and open the PDF."
+          ],
+          "expected": "The body is authored visually on the letterhead. Formatting (bold, headings, lists) and merge-field chips round-trip to the stored template and render on the issued PDF exactly as composed.",
+          "sortOrder": 6
         }
       ]
     },

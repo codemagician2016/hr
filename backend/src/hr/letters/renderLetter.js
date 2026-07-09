@@ -213,6 +213,33 @@ async function renderLetter({
     });
   }
 
+  // Draw a COMPOSED line = a left-to-right sequence of { text, font, size } segments
+  // in VISIBLE space, honouring the block alignment. Consecutive segments sharing a
+  // font+size are coalesced into one drawText (correct spacing, fewer ops). This is
+  // how the Markdown-subset body renders mixed regular/bold runs + heading sizes.
+  function drawSegments(g, segments, xStart, baselineY, align, maxW) {
+    const merged = [];
+    for (const seg of segments || []) {
+      if (!seg || !seg.text) continue;
+      const last = merged[merged.length - 1];
+      if (last && last.font === seg.font && last.size === seg.size) last.text += seg.text;
+      else merged.push({ text: seg.text, font: seg.font, size: seg.size });
+    }
+    if (!merged.length) return;
+    const total = merged.reduce((s, seg) => s + safeWidth(seg.font, seg.text, seg.size), 0);
+    let drawX = xStart;
+    if (align === 'right') drawX = xStart + Math.max(0, maxW - total);
+    else if (align === 'center') drawX = xStart + Math.max(0, (maxW - total) / 2);
+    for (const seg of merged) {
+      const p = place(g, drawX, baselineY);
+      g.page.drawText(seg.text, {
+        x: p.x, y: p.y, size: seg.size, font: seg.font,
+        color: rgb(0.1, 0.1, 0.1), rotate: degrees(p.angle),
+      });
+      drawX += safeWidth(seg.font, seg.text, seg.size);
+    }
+  }
+
   // ── 1) FIELD ANCHORS on page 1 (date / refNo / authority / subject) ────────
   const g0 = geom(page0);
   drawFieldAnchor(g0, fieldRects.date, f.date, font);
@@ -256,12 +283,16 @@ async function renderLetter({
   }
   let g = g0;
   let area = absRect(g, effectiveWA);
-  let cursorY = area.yTop - size; // first baseline
-  let bottomLimit = area.yBottom; // stop when next line would cross this
+  let bottomLimit = area.yBottom; // paginate when the next line would cross this
 
-  // Greedy word-wrap one logical paragraph at a time; \n forces a break, blank
-  // lines become vertical space.
-  const lines = wrapBody(bodyText, font, size, area.w);
+  // Parse the body Markdown SUBSET (bold, H1/H2/H3, bullet + numbered lists) into
+  // styled, wrapped lines. Each composed line carries its own segments (mixed
+  // regular/bold runs) + size, so headings render larger and bold runs use the bold
+  // TTF. A plain paragraph collapses to a single regular run, so an un-formatted
+  // body renders exactly as before (backward compatible).
+  const composed = composeLines(parseBlocks(bodyText), {
+    font, fontBold, baseSize: size, lineGap, maxWidth: area.w,
+  });
 
   const pages = [page0]; // track for signature-on-last-page
 
@@ -286,21 +317,24 @@ async function renderLetter({
     return added;
   }
 
-  for (const line of lines) {
-    // need room for this line's baseline; if it would dip below the area
-    // bottom, paginate.
-    if (cursorY < bottomLimit) {
+  // Descend a top cursor (y) by each composed line's OWN height, so headings
+  // (taller lines) and body pack correctly; paginate before a line that won't fit.
+  let y = area.yTop;
+  for (const cl of composed) {
+    const lineH = cl.size + lineGap;
+    if (y - lineH < bottomLimit) {
       const added = await addContinuationPage();
       pages.push(added);
       g = geom(added);
       area = absRect(g, effectiveWA);
-      cursorY = area.yTop - size;
       bottomLimit = area.yBottom;
+      y = area.yTop;
     }
-    if (line.text) {
-      drawLine(g, line.text, area.x, cursorY, size, font, bodyAlign, area.w);
+    if (cl.segments && cl.segments.length) {
+      // baseline ≈ top of the line minus the glyph ascent (~ the font size)
+      drawSegments(g, cl.segments, area.x, y - cl.size, bodyAlign, area.w);
     }
-    cursorY -= lineHeight;
+    y -= lineH;
   }
 
   // ── 3) WATERMARK (diagonal overlay across every page) ──────────────────────
@@ -366,7 +400,116 @@ async function renderLetter({
   return Buffer.from(out);
 }
 
-// ── body wrapping ─────────────────────────────────────────────────────────────
+// ── Markdown SUBSET → styled, wrapped lines ─────────────────────────────────────
+// The letter body is authored in a small Markdown subset (bold, H1/H2/H3, bullet +
+// numbered lists). We parse it into blocks, then into wrapped "composed lines" of
+// { text, font, size } segments the renderer draws. A plain paragraph collapses to
+// a single regular run, so an un-formatted body renders identically to before.
+
+const HEADING_SCALE = { h1: 1.6, h2: 1.35, h3: 1.15 };
+
+// Split the body into blocks: #/##/### headings, "- "/"* " bullets, "N. " numbers,
+// blank lines (vertical gap), else paragraph. Returns [{ type, text }].
+function parseBlocks(md) {
+  const src = String(md == null ? '' : md);
+  const out = [];
+  for (const raw of src.split(/\r?\n/)) {
+    const line = raw.replace(/\s+$/, '');
+    if (/^\s*$/.test(line)) { out.push({ type: 'blank', text: '' }); continue; }
+    let m;
+    if ((m = /^\s*(#{1,3})\s+(.*)$/.exec(line))) out.push({ type: `h${m[1].length}`, text: m[2] });
+    else if ((m = /^\s*[-*]\s+(.*)$/.exec(line))) out.push({ type: 'ul', text: m[1] });
+    else if ((m = /^\s*(\d+)\.\s+(.*)$/.exec(line))) out.push({ type: 'ol', text: m[2] });
+    else out.push({ type: 'p', text: line });
+  }
+  return out;
+}
+
+// Strip single * or _ emphasis markers around a run (italic is not slanted in v1 —
+// no italic TTF is bundled — but markers must never survive as literal asterisks).
+function stripEmphasis(t) {
+  return String(t).replace(/(\*|_)(\S(?:[^*_]*\S)?)\1/g, '$2');
+}
+
+// Parse an inline Markdown SUBSET into styled runs. **bold** → bold run; single
+// *emphasis* / _emphasis_ → markers stripped (plain); everything else literal.
+// Returns [{ text, bold }].
+function parseInline(text) {
+  const s = String(text == null ? '' : text);
+  const runs = [];
+  const push = (t, bold) => { const v = stripEmphasis(t); if (v) runs.push({ text: v, bold: !!bold }); };
+  const re = /\*\*([^*]+)\*\*/g;
+  let last = 0; let m;
+  while ((m = re.exec(s))) { push(s.slice(last, m.index), false); push(m[1], true); last = re.lastIndex; }
+  push(s.slice(last), false);
+  return runs.length ? runs : [{ text: '', bold: false }];
+}
+
+// Turn blocks into drawable lines: { segments:[{text,font,size}], size }. `size`
+// drives the line height + baseline. Blank blocks carry empty segments at base size.
+function composeLines(blocks, ctx) {
+  const { font, fontBold, baseSize, maxWidth } = ctx;
+  const out = [];
+  let olCount = 0;
+  for (const b of blocks || []) {
+    if (b.type === 'blank') { out.push({ segments: [], size: baseSize }); olCount = 0; continue; }
+    const isHeading = b.type === 'h1' || b.type === 'h2' || b.type === 'h3';
+    const size = isHeading ? Math.round(baseSize * HEADING_SCALE[b.type]) : baseSize;
+    let runs = parseInline(b.text);
+    if (b.type === 'ul') { runs = [{ text: '•  ', bold: false }, ...runs]; olCount = 0; }
+    else if (b.type === 'ol') { olCount += 1; runs = [{ text: `${olCount}.  `, bold: false }, ...runs]; }
+    else olCount = 0;
+    // a little air before a heading that follows real content
+    if (isHeading && out.length && out[out.length - 1].segments.length) {
+      out.push({ segments: [], size: Math.max(4, Math.round(baseSize * 0.4)) });
+    }
+    for (const segLine of wrapRuns(runs, { font, fontBold, forceBold: isHeading, size, maxWidth })) {
+      out.push({ segments: segLine, size });
+    }
+  }
+  return out;
+}
+
+// Greedy word-wrap styled runs into lines of { text, font, size } segments. Honours
+// per-run bold (or forceBold for headings). A single token wider than the box is
+// hard-split so it can never loop forever.
+function wrapRuns(runs, { font, fontBold, forceBold, size, maxWidth }) {
+  const words = [];
+  for (const r of runs) {
+    const f = (forceBold || r.bold) ? fontBold : font;
+    for (const part of String(r.text).split(/(\s+)/)) {
+      if (part === '') continue;
+      words.push({ text: part, font: f, size, isSpace: /^\s+$/.test(part) });
+    }
+  }
+  const lines = [];
+  let cur = []; let curW = 0;
+  const trimTrailing = () => {
+    while (cur.length && cur[cur.length - 1].isSpace) { curW -= safeWidth(cur[cur.length - 1].font, cur[cur.length - 1].text, size); cur.pop(); }
+  };
+  for (const w of words) {
+    const ww = safeWidth(w.font, w.text, w.size);
+    if (w.isSpace) { if (cur.length) { cur.push(w); curW += ww; } continue; }
+    if (curW + ww > maxWidth && cur.length) { trimTrailing(); lines.push(cur); cur = []; curW = 0; }
+    if (ww > maxWidth) {
+      let word = w.text;
+      while (safeWidth(w.font, word, size) > maxWidth && word.length > 1) {
+        let cut = word.length;
+        while (cut > 1 && safeWidth(w.font, word.slice(0, cut), size) > maxWidth) cut -= 1;
+        if (cur.length) { lines.push(cur); cur = []; curW = 0; }
+        lines.push([{ text: word.slice(0, cut), font: w.font, size }]);
+        word = word.slice(cut);
+      }
+      if (word) { cur.push({ text: word, font: w.font, size, isSpace: false }); curW += safeWidth(w.font, word, size); }
+      continue;
+    }
+    cur.push(w); curW += ww;
+  }
+  if (cur.length) { trimTrailing(); lines.push(cur); }
+  return lines.length ? lines : [[]];
+}
+
+// ── body wrapping (legacy plain-text path, retained for the wrapBody unit test) ──
 // Returns an array of { text } lines. Honours explicit \n (paragraph breaks) and
 // greedy-wraps each paragraph to maxWidth. A run of >maxWidth single token is
 // hard-split so it can never loop forever.
@@ -477,5 +620,5 @@ function fitInside(w, h, maxW, maxH) {
 
 module.exports = {
   renderLetter,
-  _internals: { wrapBody },
+  _internals: { wrapBody, parseBlocks, parseInline, composeLines, wrapRuns },
 };

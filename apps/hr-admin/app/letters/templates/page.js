@@ -7,9 +7,11 @@
  *  (a) Library grid — every LetterTemplate (system India + tenant custom) as a
  *      card with category · country · version · status (PUBLISHED/DRAFT). System
  *      rows are badged + non-deletable. Filter by category / country / status.
- *  (b) Editor — a slide-over panel with the body textarea + a MERGE-FIELD
- *      INSERTER DRAWER (typeahead palette from GET /api/hr/letters/templates/
- *      merge-fields, inserts {{employee.name}} at the caret), category +
+ *  (b) Editor — a slide-over panel with a WYSIWYG body editor that writes ON the
+ *      selected letterhead (rich subset: bold/headings/lists; Markdown storage) +
+ *      a MERGE-FIELD INSERTER DRAWER (typeahead palette from GET /api/hr/letters/
+ *      templates/merge-fields, inserts {{employee.name}} as a chip at the caret),
+ *      category +
  *      country/locale toggle (India wording variant), default-letterhead
  *      picker (GET /api/hr/letters/letterheads — degrades gracefully if 9C's
  *      route 404s), requiresSignature toggle, ref-prefix override, and
@@ -40,6 +42,7 @@ const put = (path, data) => request(path, { method: 'PUT', body: JSON.stringify(
 import { asList, PageHeader, StatusBadge, ActionButton } from '@/lib/ui';
 import { InfoTip } from '../lib';
 import ModuleGuide from '@/components/ModuleGuide';
+import WysiwygEditor from './WysiwygEditor';
 
 const CATEGORIES = [
   ['EXPERIENCE', 'Experience / Service'],
@@ -166,7 +169,8 @@ function TemplateEditor({ template, letterheads, letterheadsAvailable, onClose, 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [preview, setPreview] = useState({ open: false, kind: '', text: '', pdfUrl: '', loading: false, note: '' });
-  const bodyRef = useRef(null);
+  const [selectedLetterhead, setSelectedLetterhead] = useState(null);
+  const wysiwygRef = useRef(null);
   const readOnlyMeta = !isNew && template?.isSystem; // system rows: edit body but keep code/category stable
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -181,21 +185,22 @@ function TemplateEditor({ template, letterheads, letterheadsAvailable, onClose, 
     return () => { alive = false; };
   }, [form.countryCode]);
 
-  // Insert a token at the textarea caret (falls back to append).
+  // Fetch the FULL selected letterhead (fileUrl + layoutJson) so the WYSIWYG editor
+  // can raster it as the backdrop and pin the writing area. The list rows omit the
+  // heavy fileUrl, so we fetch the single row on demand.
+  useEffect(() => {
+    let alive = true;
+    const id = form.defaultLetterheadId;
+    if (!id) { setSelectedLetterhead(null); return undefined; }
+    get(`/api/hr/letters/letterheads/${id}`)
+      .then((row) => { if (alive) setSelectedLetterhead(row); })
+      .catch(() => { if (alive) setSelectedLetterhead(null); });
+    return () => { alive = false; };
+  }, [form.defaultLetterheadId]);
+
+  // Insert a merge-field token into the WYSIWYG editor at the caret (as a chip).
   const insertToken = useCallback((token) => {
-    const el = bodyRef.current;
-    setForm((f) => {
-      const body = f.bodyMarkdown || '';
-      if (!el || el.selectionStart == null) return { ...f, bodyMarkdown: body + token };
-      const start = el.selectionStart;
-      const end = el.selectionEnd;
-      const next = body.slice(0, start) + token + body.slice(end);
-      // restore caret after the inserted token on the next tick
-      requestAnimationFrame(() => {
-        try { el.focus(); el.selectionStart = el.selectionEnd = start + token.length; } catch { /* noop */ }
-      });
-      return { ...f, bodyMarkdown: next };
-    });
+    wysiwygRef.current?.insertToken(token);
   }, []);
 
   async function save({ publish } = {}) {
@@ -259,7 +264,7 @@ function TemplateEditor({ template, letterheads, letterheadsAvailable, onClose, 
   return (
     <div className="fixed inset-0 z-40 flex">
       <div className="flex-1 bg-black/30" onClick={onClose} aria-hidden="true" />
-      <div className="w-full max-w-3xl bg-white h-full shadow-xl flex flex-col overflow-hidden">
+      <div className="w-full max-w-5xl bg-white h-full shadow-xl flex flex-col overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">{isNew ? 'New template' : template.name}</h2>
@@ -315,21 +320,18 @@ function TemplateEditor({ template, letterheads, letterheadsAvailable, onClose, 
 
           <TextInput label={<>Subject (optional) <InfoTip text="The letter's subject line. May contain merge fields like {{letter.subject}}." label="Subject" /></>} value={form.subject} onChange={(v) => set('subject', v)} hint="Mergeable, e.g. {{letter.subject}}" />
 
-          {/* body + merge-field drawer side by side */}
+          {/* body: WYSIWYG on the letterhead + merge-field drawer */}
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label className="block text-sm font-medium text-gray-700">Body<InfoTip text="The letter text. Insert merge fields like {{employee.name}} from the palette — they're filled in automatically when you issue. No HTML." label="Body" /></label>
-              <span className="text-xs text-gray-400">Merge fields only — no HTML. Click a field to insert at the cursor.</span>
+              <label className="block text-sm font-medium text-gray-700">Body<InfoTip text="Write the letter on the letterhead. Format with the toolbar (bold, headings, lists) and insert merge fields like {{employee.name}} — they fill in automatically at issue. Pick a Default letterhead below to write directly on it." label="Body" /></label>
+              <span className="text-xs text-gray-400">Bold · headings · lists. Click a field to insert at the cursor.</span>
             </div>
-            <div className="flex gap-3">
-              <textarea
-                ref={bodyRef}
+            <div className="flex gap-3 items-start">
+              <WysiwygEditor
+                ref={wysiwygRef}
                 value={form.bodyMarkdown}
-                onChange={(e) => set('bodyMarkdown', e.target.value)}
-                rows={18}
-                spellCheck={false}
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono leading-relaxed focus:outline-none"
-                placeholder="To Whomsoever It May Concern…  Use {{employee.name}}, {{date.issueDate}}, {{company.legalName}}…"
+                onChange={(v) => set('bodyMarkdown', v)}
+                letterhead={selectedLetterhead}
               />
               <MergeFieldDrawer palette={palette} onInsert={insertToken} />
             </div>
