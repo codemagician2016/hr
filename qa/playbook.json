@@ -1249,6 +1249,22 @@
           ],
           "expected": "A new email applies as a guest and gets an account + magic link. Re-applying with the same email is recognized ('continue with your saved details' via link) instead of a blind duplicate. The signed-in candidate reuses their profile to apply in one click (optional resume swap) and tracks status under /careers/profile. A tenant WITHOUT the add-on has no /careers page (404).",
           "sortOrder": 6
+        },
+        {
+          "key": "hr-reviews-candidate-profile-and-invites-to-interview",
+          "title": "HR reviews a candidate's portal profile and invites to interview",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/recruitment",
+          "steps": [
+            "Open Recruitment > a job > an application from a portal candidate.",
+            "Review the Candidate profile panel (headline, experience, education, skills, resume/LinkedIn).",
+            "Move the candidate (shortlist), then schedule an interview and Send invitation."
+          ],
+          "expected": "The application detail shows the candidate's rich portal profile so HR can decide on the resume. Scheduling + 'Send invitation' actually emails the candidate and notifies panel interviewers — the interview_invitation / interview_panel_notice templates are now registered (no silent UNKNOWN_TEMPLATE).",
+          "sortOrder": 7
         }
       ]
     },

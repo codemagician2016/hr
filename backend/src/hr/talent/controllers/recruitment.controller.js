@@ -469,11 +469,18 @@ async function getCandidate(req, res, next) {
     const where = { id: req.params.id, businessId, deletedAt: null };
     // F1 scope — 404 a candidate with no application to an in-scope job.
     if (!reach.all) where.applications = { some: { jobId: { in: reach.ids } } };
+    // Feature 38 — include the candidate's rich portal profile so HR can decide on
+    // the resume (education / experience / skills), not just contact details.
+    const profileInclude = {
+      educations: { orderBy: { endYear: 'desc' } },
+      experiences: { orderBy: { startDate: 'desc' } },
+      skills: { orderBy: { name: 'asc' } },
+    };
     const item = await prisma.candidate.findFirst({
       where,
       include: reach.all
-        ? { applications: true }
-        : { applications: { where: { jobId: { in: reach.ids } } } },
+        ? { applications: true, ...profileInclude }
+        : { applications: { where: { jobId: { in: reach.ids } } }, ...profileInclude },
     });
     if (!item) return res.status(404).json({ message: 'Not found' });
     res.json(item);
@@ -729,7 +736,16 @@ async function getApplication(req, res, next) {
       include: {
         interviews: { include: { scorecards: { select: { id: true, status: true } } } },
         offers: true,
-        candidate: { select: { id: true, firstName: true, lastName: true, email: true, phone: true, resumeUrl: true, source: true, linkedinUrl: true } },
+        candidate: {
+          select: {
+            id: true, firstName: true, lastName: true, email: true, phone: true, resumeUrl: true, source: true, linkedinUrl: true,
+            // Feature 38 — the rich candidate profile so HR can decide on the resume.
+            headline: true, location: true, totalExperienceMonths: true,
+            educations: { orderBy: { endYear: 'desc' } },
+            experiences: { orderBy: { startDate: 'desc' } },
+            skills: { orderBy: { name: 'asc' } },
+          },
+        },
         job: { select: { hiringManagerId: true, title: true, countryCode: true } },
       },
     });

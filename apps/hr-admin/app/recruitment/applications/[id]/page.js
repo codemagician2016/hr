@@ -134,8 +134,35 @@ export default function ApplicationPage() {
           <section className="rounded-2xl border border-gray-200 bg-white p-4 text-xs text-gray-500 space-y-1">
             <div><b>Source:</b> {app.appliedSource || 'MANUAL'}</div>
             {cand.phone && <div><b>Phone:</b> {cand.phone}</div>}
+            {cand.linkedinUrl && <div><a href={cand.linkedinUrl} target="_blank" rel="noreferrer" className="hover:underline" style={{ color: 'var(--theme-primary)' }}>LinkedIn ↗</a></div>}
             {cand.resumeUrl && <div><a href={cand.resumeUrl} target="_blank" rel="noreferrer" className="hover:underline" style={{ color: 'var(--theme-primary)' }}>View resume ↗</a></div>}
           </section>
+
+          {/* Feature 38 — candidate portal profile (education / experience / skills). */}
+          {(cand.headline || (cand.educations || []).length || (cand.experiences || []).length || (cand.skills || []).length) ? (
+            <section className="rounded-2xl border border-gray-200 bg-white p-4 space-y-3">
+              <h3 className="text-sm font-semibold text-gray-900">Candidate profile</h3>
+              {cand.headline && <p className="text-sm text-gray-700">{cand.headline}{cand.location ? ` · ${cand.location}` : ''}</p>}
+              {(cand.experiences || []).length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Experience</p>
+                  <ul className="space-y-1">{cand.experiences.map((e) => <li key={e.id} className="text-sm text-gray-700">{e.title} @ {e.company}{e.isCurrent ? ' · current' : ''}{e.location ? ` · ${e.location}` : ''}</li>)}</ul>
+                </div>
+              )}
+              {(cand.educations || []).length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Education</p>
+                  <ul className="space-y-1">{cand.educations.map((e) => <li key={e.id} className="text-sm text-gray-700">{e.level} · {e.institution}{e.fieldOfStudy ? ` · ${e.fieldOfStudy}` : ''}{e.grade ? ` · ${e.grade}` : ''}</li>)}</ul>
+                </div>
+              )}
+              {(cand.skills || []).length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Skills</p>
+                  <div className="flex flex-wrap gap-1">{cand.skills.map((s) => <span key={s.id} className="text-xs rounded-full bg-gray-100 text-gray-700 px-2 py-0.5">{s.name}{s.level ? ` · ${s.level}` : ''}</span>)}</div>
+                </div>
+              )}
+            </section>
+          ) : null}
         </div>
       </div>
 

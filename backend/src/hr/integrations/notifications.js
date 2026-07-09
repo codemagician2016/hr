@@ -84,6 +84,28 @@ const HR_EVENT_TEMPLATES = Object.freeze({
 // HR template registry. vertical: 'HR' so listTemplates({vertical:'HR'}) scopes
 // them. All keep a sender tag so the recipient can identify the business.
 const HR_TEMPLATES = Object.freeze([
+  // Feature 12/36/38 — interview emails. These keys were referenced by
+  // inviteInterview() but never registered, so every invite silently failed
+  // UNKNOWN_TEMPLATE. Registered here (lowercase keys + the exact variables the
+  // caller passes) so candidate + panel invitations actually send.
+  {
+    key: 'interview_invitation',
+    displayName: 'Interview invitation (candidate)',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {candidateName}, you are invited to interview for {jobTitle} on {scheduledAt} ({mode}). {location} {videoUrl}',
+    variables: ['candidateName', 'jobTitle', 'scheduledAt', 'mode', 'location', 'videoUrl'],
+    channels: { sms: false, whatsapp: false, email: true },
+  },
+  {
+    key: 'interview_panel_notice',
+    displayName: 'Interview panel notice (interviewer)',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'You are on the interview panel for {jobTitle} on {scheduledAt}. Open your scorecard in the recruitment console.',
+    variables: ['jobTitle', 'scheduledAt'],
+    channels: { sms: false, whatsapp: false, email: true },
+  },
   {
     key: 'HR_PAYSLIP_PUBLISHED',
     displayName: 'Payslip published',
