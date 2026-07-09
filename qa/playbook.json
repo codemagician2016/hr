@@ -1201,6 +1201,22 @@
           ],
           "expected": "The interviewer sees only their own scorecard for interviews they are assigned to; they cannot see other panelists' cards or score an unassigned candidate. Submitting locks the card and contributes to the candidate's interview score.",
           "sortOrder": 3
+        },
+        {
+          "key": "post-a-new-job-permission-gated",
+          "title": "Post a new job (permission-gated)",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/recruitment",
+          "steps": [
+            "Log in as operator@demo.test (HR-Admin carries 'Manage hiring').",
+            "Open Recruitment > Jobs and click 'New job'.",
+            "Set a unique code, title, country, employment type, openings and the 40/60 merit blend; Create job."
+          ],
+          "expected": "A user with 'Manage hiring' sees 'New job' and creates the job. A view-only recruiter (no canManageHiring) does NOT see the button, and any blocked create shows a clear permission message (403) / duplicate-code (409) / add-on-required (402) instead of a silent failure.",
+          "sortOrder": 4
         }
       ]
     },

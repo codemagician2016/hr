@@ -16,6 +16,7 @@ import Link from 'next/link';
 import { ErrorBanner, PrimaryButton, TextInput, TextArea, Modal, ModalActions } from '@hr/ui';
 import { get, post, patch } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton } from '@/lib/ui';
+import { permissionsFromSession, hasPermission } from '@/lib/nav';
 import { Info, FieldLabel, Pager, NumberInput } from './_components';
 import ModuleGuide from '@/components/ModuleGuide';
 
@@ -101,7 +102,21 @@ function JobsTab() {
   const [error, setError] = useState('');
   const [showNew, setShowNew] = useState(false);
   const [page, setPage] = useState(1);
+  // Posting a job needs canManageHiring/canManageEmployees; the read side only
+  // needs canViewHiring — so a view-only recruiter would otherwise see a "New job"
+  // button that 403s ("New Job Post not working"). Gate the button on the same
+  // permission the server enforces. Unknown session → allow (server still gates).
+  const [canManage, setCanManage] = useState(true);
   const pageSize = 12;
+
+  useEffect(() => {
+    get('/api/auth/me')
+      .then((s) => {
+        const perms = permissionsFromSession(s);
+        setCanManage(hasPermission(perms, 'canManageHiring') || hasPermission(perms, 'canManageEmployees'));
+      })
+      .catch(() => setCanManage(true));
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
@@ -131,7 +146,9 @@ function JobsTab() {
     <div>
       {error && <ErrorBanner message={error} />}
       <div className="flex justify-end mb-3">
-        <PrimaryButton onClick={() => setShowNew(true)}>New job</PrimaryButton>
+        {canManage
+          ? <PrimaryButton onClick={() => setShowNew(true)}>New job</PrimaryButton>
+          : <span className="text-xs text-gray-400">You don’t have permission to post jobs (needs “Manage hiring”). Ask an admin to grant it.</span>}
       </div>
       <DataTable columns={columns} rows={pageRows} loading={loading} rowKey={(r) => r.id} emptyText="No jobs yet. Post your first role." />
       <Pager page={page} totalPages={totalPages} total={total} onPage={setPage} />
@@ -155,7 +172,13 @@ function NewJobModal({ onClose, onCreated }) {
     if (weightSum !== 100) { setError('Application % + Interview % must total 100.'); return; }
     setSaving(true); setError('');
     try { await post('/api/hr/recruitment/jobs', d); onCreated(); }
-    catch (err) { setError(err.message); }
+    catch (err) {
+      // Turn the raw status into an actionable message (was the "not working" case).
+      if (err.status === 403) setError('You don’t have permission to create jobs (needs “Manage hiring”). Ask an admin to grant it.');
+      else if (err.status === 409) setError(`A job with the code “${d.code}” already exists — choose a different code.`);
+      else if (err.status === 402) setError('Talent Acquisition isn’t on your plan yet — add it from Settings › Billing to post jobs.');
+      else setError(err.message || 'Could not create the job.');
+    }
     finally { setSaving(false); }
   }
 
