@@ -60,9 +60,21 @@ if [ ! -f "$SENTINEL" ]; then
 fi
 
 cd "$ROOT"
-log "pm2 startOrReload — ONLY drifthr-hms-* (siblings untouched)"
-pm2 startOrReload deploy/ecosystem.staging.config.js --update-env \
-  --only drifthr-hms-backend,drifthr-hms-router,drifthr-hms-platform,drifthr-hms-hr-admin,drifthr-hms-ess
+APPS="drifthr-hms-backend drifthr-hms-router drifthr-hms-platform drifthr-hms-hr-admin drifthr-hms-ess"
+if [ "${DRIFTHR_ENV:-staging}" = "prod" ]; then
+  # PROD reload BY NAME so each app keeps its LIVE env/ports exactly (43xx,
+  # PLATFORM_DOMAIN=drifthr.com) — no ecosystem config imposed, so there is zero
+  # risk of a port/domain drift on production. New code loads from the extracted
+  # .next/backend on disk. (There is no prod ecosystem file; the fleet runs from
+  # pm2's saved state.)
+  log "pm2 reload (prod, by name — preserves live env/ports)"
+  pm2 reload $APPS
+else
+  # STAGING uses the checked-in config (starts any missing app; siblings untouched).
+  log "pm2 startOrReload — ONLY drifthr-hms-* (staging config)"
+  pm2 startOrReload deploy/ecosystem.staging.config.js --update-env \
+    --only drifthr-hms-backend,drifthr-hms-router,drifthr-hms-platform,drifthr-hms-hr-admin,drifthr-hms-ess
+fi
 pm2 save
 log "done — drifthr-hms processes:"
 pm2 list | grep -E "drifthr-hms|name" || true
