@@ -27,11 +27,16 @@ cross-tenant logins resolve to the origin host's tenant.
 | Android keystore + passwords | `apps/mobile/android/upload-keystore.p12` + `/Users/kp/drifthr-employee-ANDROID-keystore.txt` |
 | Play service-account JSON (shared) | `/Users/kp/sitepresso-admin-PLAY-service-account.json` |
 
+> **STATUS 2026-07-20:** all records DONE (ASC app id `6792768991`; Play app created +
+> SA invited). First uploads shipped: Android **1.0.0 (vc 1784553697) live on Play
+> internal testing**; iOS shipped to TestFlight the same evening.
+
 ## One-time store records (HUMAN — Apple/Google 2FA login; API cannot do these)
 
-1. **Apple**: developer.apple.com → Identifiers → `+` App ID `com.drifthr.employee`; then
-   appstoreconnect.apple.com → My Apps → `+` New App (iOS, that bundle id, name
-   "DriftHR Employee", any SKU).
+1. **Apple**: ~~App ID registration~~ DONE 2026-07-20 via ASC API (bundleId record
+   `TTC5PH6HDG` — app creation is the one part the API can't do). Remaining:
+   appstoreconnect.apple.com → My Apps → `+` New App (iOS, bundle id
+   `com.drifthr.employee`, name "DriftHR Employee", any SKU).
 2. **Google**: play.google.com/console → Create app (name "DriftHR Employee", package
    `com.drifthr.employee`, Free) → Users and permissions → invite
    `sitepresso-admin-publisher@morningbag-278916.iam.gserviceaccount.com` as **Admin**.
