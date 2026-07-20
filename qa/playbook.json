@@ -844,6 +844,23 @@
           ],
           "expected": "The manual field appears in the issue form; a required field left blank blocks issue (missing-required). The typed value is type-formatted (currency/date/number) and merged into {{manual.<key>}} on the preview and issued PDF.",
           "sortOrder": 8
+        },
+        {
+          "key": "letter-categories-and-reusable-signature-stamp",
+          "title": "Custom letter categories + reusable signature/stamp library",
+          "kind": "HAPPY",
+          "loginLabels": [
+            "HR Admin (maker)"
+          ],
+          "openUrl": "https://app-staging.drifthr.com/letters/templates",
+          "steps": [
+            "Open Letters > Templates and create a template (e.g. a Bank Resolution letter) on a letterhead.",
+            "Give it a custom Category by typing a new name (e.g. 'Bank Resolution') — it is created and reusable.",
+            "Add a signature and a stamp: upload once; they are saved to the tenant library and can be picked on any future template.",
+            "Save & publish, issue the letter, then filter Templates/Register by that category."
+          ],
+          "expected": "Categories are tenant-defined (type-to-create, managed list) so letters can be grouped/filtered/searched by a name HR recognises; the issued letter snapshots its category so the register still filters after a rename. Signature and stamp are uploaded ONCE to the tenant library and reused across templates, each rendered at its own placement on the letterhead.",
+          "sortOrder": 9
         }
       ]
     },

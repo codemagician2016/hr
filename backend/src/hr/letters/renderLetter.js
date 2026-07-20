@@ -71,6 +71,7 @@ async function renderLetter({
   bodyText,
   fields,
   signaturePng,
+  stampPng,
   fontBytes,
   fontBoldBytes,
   opts,
@@ -382,8 +383,11 @@ async function renderLetter({
   }
 
   // ── 4) SIGNATURE PNG (in fields.signature box) ─────────────────────────────
-  if (signaturePng && fieldRects.signature) {
-    const sigBytes = toUint8(signaturePng);
+  // Feature 39 — the STAMP (company seal) draws exactly like the signature, in its
+  // own box, so a template can carry both.
+  for (const [imgBytes, rect] of [[signaturePng, fieldRects.signature], [stampPng, fieldRects.stamp]]) {
+    if (!imgBytes || !rect) continue;
+    const sigBytes = toUint8(imgBytes);
     let sigPage = page0;
     let gp = g0;
     if (signatureOnLastPage) {
@@ -392,7 +396,7 @@ async function renderLetter({
     }
     try {
       const png = await doc.embedPng(sigBytes);
-      const r = absRect(gp, fieldRects.signature);
+      const r = absRect(gp, rect);
       // fit the image inside the box preserving aspect ratio
       const dims = fitInside(png.width, png.height, r.w, r.h);
       // image bottom-left corner in VISIBLE space (centred inside the box), mapped

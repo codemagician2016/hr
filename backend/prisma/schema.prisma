@@ -603,6 +603,8 @@ model Business {
   // Letters & Communication (Feature 9)
   letterheads                  CompanyLetterhead[]
   letterTemplates              LetterTemplate[]
+  letterCategoryTags           LetterCategoryTag[]
+  letterAssets                 LetterAsset[]
   issuedLetters                IssuedLetter[]
   // Data Migration / Bulk Import (Feature 18)
   importJobs                   ImportJob[]
@@ -11075,6 +11077,17 @@ model LetterTemplate {
   // wizard: [{ key, label, type: text|date|number|currency, required }]. Used in
   // the body as {{manual.<key>}} (outside the fixed catalog).
   manualFieldsJson     Json?
+  // Feature 39 — tenant-defined CATEGORY (e.g. "Bank Resolution") for grouping /
+  // filtering, orthogonal to the fixed `category` enum which drives system behaviour
+  // (document folder, letterhead binding). Plus REUSABLE signature/stamp assets from
+  // the tenant library, each with its own placement box.
+  categoryId           String?
+  categoryTag          LetterCategoryTag? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  signatureAssetId     String?
+  signatureAsset       LetterAsset?       @relation("TemplateSignature", fields: [signatureAssetId], references: [id], onDelete: SetNull)
+  stampAssetId         String?
+  stampAsset           LetterAsset?       @relation("TemplateStamp", fields: [stampAssetId], references: [id], onDelete: SetNull)
+  stampBoxJson         Json? // normalized {x,y,w,h} placement for the stamp
   isSystem            Boolean            @default(false) // seeded IN/NZ template (non-deletable)
   isActive            Boolean            @default(true) // PUBLISHED. false = DRAFT/ARCHIVED
   createdAt           DateTime           @default(now())
@@ -11087,6 +11100,49 @@ model LetterTemplate {
   @@unique([businessId, code])
   @@index([businessId, category, isActive])
   @@index([businessId, countryCode, category])
+  @@index([businessId, categoryId])
+}
+
+// Feature 39 — tenant-defined letter CATEGORY ("Bank Resolution", "Visa Letter"…).
+// A managed list with type-to-create, so templates AND issued letters can be grouped,
+// filtered and searched by a name the tenant actually recognises. Distinct from the
+// fixed LetterCategory enum, which stays as the system Type.
+model LetterCategoryTag {
+  id            String           @id @default(uuid())
+  businessId    String
+  business      Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name          String
+  sortOrder     Int              @default(0)
+  isActive      Boolean          @default(true)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  templates     LetterTemplate[]
+  issuedLetters IssuedLetter[]
+
+  @@unique([businessId, name])
+  @@index([businessId, isActive])
+}
+
+// Feature 39 — REUSABLE signature / stamp images held once per tenant and referenced
+// by any number of templates, so HR uploads a signature or company seal ONCE and
+// picks it for every future template.
+model LetterAsset {
+  id                 String           @id @default(uuid())
+  businessId         String
+  business           Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  kind               String // SIGNATURE | STAMP
+  name               String
+  imageUrl           String           @db.Text // PNG: S3 URL or inline data-URL
+  imageHash          String?
+  mimeType           String?
+  sizeBytes          Int?
+  isActive           Boolean          @default(true)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  signatureTemplates LetterTemplate[] @relation("TemplateSignature")
+  stampTemplates     LetterTemplate[] @relation("TemplateStamp")
+
+  @@index([businessId, kind, isActive])
 }
 
 model IssuedLetter {
@@ -11096,6 +11152,10 @@ model IssuedLetter {
   entityId               String? // entity whose sequence/letterhead applied
   referenceNo            String // "ACME/HR/2026/0001" — unique per tenant
   category               LetterCategory
+  // Feature 39 — tenant category SNAPSHOT at issue, so the register still filters
+  // correctly even if the template's category is later renamed or reassigned.
+  categoryId             String?
+  categoryTag            LetterCategoryTag? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   // Subject employee — NULL for generic/company-wide letters
   employeeId             String?
   employee               Employee?          @relation(fields: [employeeId], references: [id], onDelete: SetNull)

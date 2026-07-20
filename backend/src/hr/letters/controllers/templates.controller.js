@@ -103,6 +103,8 @@ const TEMPLATE_PUBLIC = [
   'authorityName', 'authorityDesignation',
   // Phase 3 — declared manual (at-issue) fields (the issue wizard renders inputs).
   'manualFieldsJson',
+  // Feature 39 — tenant category + reusable signature/stamp assets + stamp placement.
+  'categoryId', 'signatureAssetId', 'stampAssetId', 'stampBoxJson',
 ];
 
 function publicTemplate(t) {
@@ -350,6 +352,10 @@ async function createTemplate(req, res) {
     signatureBoxJson: sigBox,
     signatureOnLastPage: b.signatureOnLastPage !== undefined ? !!b.signatureOnLastPage : undefined,
     manualFieldsJson: manualFields,
+    // Feature 39 — tenant category + reusable signature/stamp assets.
+    categoryId: b.categoryId || null,
+    signatureAssetId: b.signatureAssetId || null,
+    stampAssetId: b.stampAssetId || null,
     isSystem: false,
     // New templates start as a DRAFT unless the caller explicitly publishes.
     isActive: b.isActive === true,
@@ -447,6 +453,15 @@ async function updateTemplate(req, res) {
     const box = sanitizeSigBox(b.signatureBoxJson);
     if (box === undefined) return fail(res, 422, 'signatureBoxJson must be a normalized {x,y,w,h} object');
     data.signatureBoxJson = box;
+  }
+  // Feature 39 — tenant category + reusable signature/stamp assets + stamp placement.
+  if (b.categoryId !== undefined) data.categoryId = b.categoryId || null;
+  if (b.signatureAssetId !== undefined) data.signatureAssetId = b.signatureAssetId || null;
+  if (b.stampAssetId !== undefined) data.stampAssetId = b.stampAssetId || null;
+  if (b.stampBoxJson !== undefined) {
+    const box = sanitizeSigBox(b.stampBoxJson);
+    if (box === undefined) return fail(res, 422, 'stampBoxJson must be a normalized {x,y,w,h} object');
+    data.stampBoxJson = box;
   }
   // `code` may be changed but stays tenant-unique; isSystem/isActive are not
   // editable here (publish/archive own isActive; isSystem is immutable seed flag).

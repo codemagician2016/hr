@@ -110,6 +110,8 @@ router.use('/letters', require('../letters/routes/issuance.routes'));
 // pre-flight reuses the payroll engine's India 50% wage check.
 // HR add-on entitlements (nav gating + super-admin grant/revoke of add-ons).
 router.use('/entitlements', require('./entitlements.routes'));
+// Feature 39 — letter categories + reusable signature/stamp asset library.
+router.use('/letters/library', require('../letters/routes/letterLibrary.routes'));
 const talent = require('../talent/routes');
 router.use('/recruitment', talent.recruitment);
 router.use('/performance', talent.performance);

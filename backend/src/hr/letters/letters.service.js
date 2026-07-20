@@ -408,15 +408,28 @@ function mergeEmployeeFrom(employee, employmentRecord, entity) {
 // Default placement for a per-template signature when neither the template nor the
 // letterhead layout pins one (mirrors the picker's signature-zone default).
 const DEFAULT_SIG_BOX = { x: 0.1, y: 0.76, w: 0.25, h: 0.06 };
+// Feature 39 — default stamp placement (to the right of the signature).
+const DEFAULT_STAMP_BOX = { x: 0.42, y: 0.74, w: 0.18, h: 0.09 };
 
 async function renderPdf({ ctx, render, watermark }) {
   const { fontBytes, fontBoldBytes } = loadFonts();
   const template = ctx.template || {};
-  // Phase 2 — the STATIC signature image is per-template; fetch its bytes once
-  // (data-URL or our-bucket URL, SSRF-guarded by the shared fetcher).
-  const signaturePng = template.signatureImageUrl
-    ? await fetchLetterheadBytes(template.signatureImageUrl)
-    : null;
+  // Phase 2 + Feature 39 — the STATIC signature/stamp images. A reusable LIBRARY
+  // asset (uploaded once per tenant) wins; the legacy per-template signature image
+  // stays supported so existing templates keep working.
+  let sigUrl = template.signatureImageUrl || null;
+  let stampUrl = null;
+  if (template.signatureAssetId || template.stampAssetId) {
+    const ids = [template.signatureAssetId, template.stampAssetId].filter(Boolean);
+    try {
+      const assets = await prismaDefault.letterAsset.findMany({ where: { id: { in: ids } } });
+      const byId = Object.fromEntries(assets.map((a) => [a.id, a]));
+      if (template.signatureAssetId && byId[template.signatureAssetId]) sigUrl = byId[template.signatureAssetId].imageUrl;
+      if (template.stampAssetId && byId[template.stampAssetId]) stampUrl = byId[template.stampAssetId].imageUrl;
+    } catch (_e) { /* a missing asset must never block issuing a letter */ }
+  }
+  const signaturePng = sigUrl ? await fetchLetterheadBytes(sigUrl) : null;
+  const stampPng = stampUrl ? await fetchLetterheadBytes(stampUrl) : null;
 
   if (ctx.letterhead) {
     const lhBytes = await fetchLetterheadBytes(ctx.letterhead.fileUrl);
@@ -427,9 +440,10 @@ async function renderPdf({ ctx, render, watermark }) {
       // letterhead's picker zone; else a sensible default (so an uploaded signature
       // always lands somewhere sane).
       const layout = { ...base };
-      if (signaturePng) {
+      if (signaturePng || stampPng) {
         layout.fields = { ...(base.fields || {}) };
-        layout.fields.signature = template.signatureBoxJson || layout.fields.signature || DEFAULT_SIG_BOX;
+        if (signaturePng) layout.fields.signature = template.signatureBoxJson || layout.fields.signature || DEFAULT_SIG_BOX;
+        if (stampPng) layout.fields.stamp = template.stampBoxJson || layout.fields.stamp || DEFAULT_STAMP_BOX;
       }
       return renderLetter({
         letterheadPdf: lhBytes,
@@ -437,6 +451,7 @@ async function renderPdf({ ctx, render, watermark }) {
         bodyText: render.bodyText,
         fields: render.fields,
         signaturePng: signaturePng || undefined,
+        stampPng: stampPng || undefined,
         fontBytes,
         fontBoldBytes,
         opts: {
