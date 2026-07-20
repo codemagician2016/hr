@@ -746,7 +746,19 @@ const server = http.createServer(async (req, res) => {
     // from x-tenant-host / x-sitepresso-host. In production this was the
     // Cloudflare Worker's job; on EC2-behind-tunnel this router owns it, so set
     // the tenant host on EVERY proxied request, not just /api.
-    const tenantHost = req.headers.host || '';
+    //
+    // Feature 40 (multi-tenant employee app): an API client that cannot live on a
+    // per-tenant subdomain — the mobile app hits ONE fixed origin for every
+    // tenant — names its tenant explicitly via X-Tenant-Host (the backend's
+    // resolveBusinessId/resolveTenantBusinessId read that header FIRST). Honor an
+    // inbound value for /api/* ONLY: HTML paths stay Host-derived so the public
+    // microcache (keyed by Host) can never be poisoned cross-tenant, and the
+    // backend still enforces session↔tenant binding, so a forged header cannot
+    // reach another tenant's data — it only selects which tenant a LOGIN targets,
+    // exactly as choosing a subdomain does in a browser.
+    const inboundTenantHost = String(req.headers['x-tenant-host'] || '').trim();
+    const isApiPath = req.url === '/api' || String(req.url || '').startsWith('/api/');
+    const tenantHost = (isApiPath && inboundTenantHost) ? inboundTenantHost : (req.headers.host || '');
     req.headers['x-tenant-host'] = tenantHost;
     req.headers['x-sitepresso-host'] = tenantHost;
     proxy.web(req, res, { target });

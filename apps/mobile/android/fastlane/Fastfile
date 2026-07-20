@@ -1,0 +1,27 @@
+default_platform(:android)
+
+PACKAGE = "com.drifthr.employee"
+AAB = "../build/app/outputs/bundle/release/app-release.aab"
+
+platform :android do
+  desc "Validate the Play service-account key can reach the Play Store"
+  lane :validate do
+    validate_play_store_json_key
+  end
+
+  desc "Upload the built .aab to Play INTERNAL testing"
+  desc "Pre-req: flutter build appbundle --release --dart-define=API_URL=... --dart-define=PLATFORM_DOMAIN=... --build-number=$(date -u +%s)"
+  lane :play_internal do
+    upload_to_play_store(
+      package_name: PACKAGE,
+      track: "internal",
+      aab: AAB,
+      release_status: "completed",     # auto-roll-out to internal testers (set "draft" to stage)
+      skip_upload_apk: true,
+      skip_upload_metadata: true,
+      skip_upload_changelogs: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+    )
+  end
+end

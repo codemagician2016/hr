@@ -45,14 +45,22 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
     // Resolve the capture policy first so we know whether to prompt for a selfie.
     final policy = ref.read(capturePolicyProvider).asData?.value ?? const {};
     final requireFace = policy['requireFace'] == true;
+    // Feature 39 — faceEnrolled means an HR-APPROVED reference; faceStatus
+    // carries the lifecycle so a pending/rejected registration gets the right
+    // message instead of a generic "set up face" loop.
     final faceEnrolled = policy['faceEnrolled'] == true;
+    final faceStatus = (policy['faceStatus'] as String?) ?? (faceEnrolled ? 'ACTIVE' : 'NONE');
 
-    // FACE required but not enrolled → route the user to enrol before punching.
+    // FACE required but no approved reference → route/inform per lifecycle state.
     if (requireFace && !faceEnrolled) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Set up face recognition before punching.')),
-        );
+        final msg = switch (faceStatus) {
+          'PENDING' => 'Your face registration is awaiting HR approval — face check-in activates once approved.',
+          'REJECTED' => 'HR declined your face registration — retake your photo to punch with face.',
+          'REVOKED' => 'Your face registration was revoked — submit a new photo.',
+          _ => 'Set up face recognition before punching.',
+        };
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
         context.push('/face-enrollment');
       }
       return;
@@ -163,6 +171,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
                 requireIp: policy['requireIp'] == true,
                 requireFace: policy['requireFace'] == true,
                 faceEnrolled: policy['faceEnrolled'] == true,
+                faceStatus: (policy['faceStatus'] as String?) ?? 'NONE',
                 onSetupFace: () => context.push('/face-enrollment'),
               ),
               const SizedBox(height: 12),
@@ -244,6 +253,7 @@ class _ClockCard extends StatelessWidget {
     required this.requireIp,
     required this.requireFace,
     required this.faceEnrolled,
+    required this.faceStatus,
     required this.onSetupFace,
   });
 
@@ -256,6 +266,7 @@ class _ClockCard extends StatelessWidget {
   final bool requireIp;
   final bool requireFace;
   final bool faceEnrolled;
+  final String faceStatus; // Feature 39 lifecycle: NONE|PENDING|ACTIVE|REJECTED|REVOKED
   final VoidCallback onSetupFace;
 
   @override
@@ -298,12 +309,28 @@ class _ClockCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(BrandRadii.md),
                   border: Border.all(color: BrandColors.warning.withValues(alpha: 0.3)),
                 ),
-                child: const Row(
+                child: Row(
                   children: [
-                    Icon(Icons.face_retouching_natural, size: 18, color: BrandColors.warning),
-                    SizedBox(width: 8),
-                    Expanded(child: Text('Set up face recognition to punch', style: TextStyle(fontSize: 12, color: BrandColors.text))),
-                    Icon(Icons.chevron_right, size: 18, color: BrandColors.muted),
+                    Icon(
+                      faceStatus == 'PENDING'
+                          ? Icons.hourglass_top_outlined
+                          : Icons.face_retouching_natural,
+                      size: 18,
+                      color: BrandColors.warning,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        switch (faceStatus) {
+                          'PENDING' => 'Face registration awaiting HR approval',
+                          'REJECTED' => 'Face registration declined — retake your photo',
+                          'REVOKED' => 'Face registration revoked — submit a new photo',
+                          _ => 'Set up face recognition to punch',
+                        },
+                        style: const TextStyle(fontSize: 12, color: BrandColors.text),
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right, size: 18, color: BrandColors.muted),
                   ],
                 ),
               ),

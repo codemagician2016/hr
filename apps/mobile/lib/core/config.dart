@@ -1,17 +1,22 @@
-// App configuration. The backend origin is injected at build time via
-// --dart-define=API_URL=... so the same binary can target staging / prod /
-// a white-label tenant domain without a rebuild of the Dart source.
+// App configuration. ONE binary serves EVERY tenant (Feature 40 — the
+// multi-tenant employee app): the app talks to a single fixed backend origin
+// and names the signed-in tenant per-request via the `X-Tenant-Host` header
+// (see ApiClient). Which tenant that is comes from the Organization ID (the
+// Business.slug) the employee types at login, resolved through the public
+// GET /api/tenant/resolve?slug=… endpoint.
 //
-//   flutter run --dart-define=API_URL=https://demo-staging.drifthr.com
+//   flutter run \
+//     --dart-define=API_URL=https://demo-staging.drifthr.com \
+//     --dart-define=PLATFORM_DOMAIN=staging.drifthr.com
 //
-// Mirrors the React Native client's EXPO_PUBLIC_API_URL behaviour: a single
-// origin that every request is concatenated onto.
+// Prod builds:  API_URL=https://drifthr.com  PLATFORM_DOMAIN=drifthr.com
 
 class AppConfig {
   AppConfig._();
 
-  /// Backend origin. Defaults to the DriftHR staging box. A trailing slash is
-  /// trimmed so path concatenation (`$base$path`) is always predictable.
+  /// Fixed backend origin every request goes to (any host the DriftHR router
+  /// serves works — the tenant comes from the X-Tenant-Host header, not from
+  /// this origin). A trailing slash is trimmed so `$base$path` is predictable.
   static String get apiBaseUrl {
     const raw = String.fromEnvironment(
       'API_URL',
@@ -19,6 +24,22 @@ class AppConfig {
     );
     return raw.replaceFirst(RegExp(r'/+$'), '');
   }
+
+  /// The platform domain tenant subdomains hang off. `X-Tenant-Host` is built
+  /// as `<slug>.<platformDomain>` — a LOGICAL tenant name the backend parses
+  /// (resolveBusinessId / resolveTenantBusinessId); it never needs to resolve
+  /// in DNS.
+  static String get platformDomain {
+    const raw = String.fromEnvironment(
+      'PLATFORM_DOMAIN',
+      defaultValue: 'staging.drifthr.com',
+    );
+    return raw.toLowerCase().replaceFirst(RegExp(r'^\.+'), '');
+  }
+
+  /// The X-Tenant-Host value for an organization ID (Business.slug).
+  static String tenantHostForSlug(String slug) =>
+      '${slug.toLowerCase().trim()}.$platformDomain';
 
   static const String appName = 'DriftHR';
   static const String tagline = 'Effortless HR & payroll.';

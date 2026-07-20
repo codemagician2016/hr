@@ -41,8 +41,10 @@ class Geo {
         return const GeoResult(error: 'Location permission denied — punch recorded without location.');
       }
 
+      // geolocator 12.x API — `locationSettings` arrived in a later major.
+      // ignore: deprecated_member_use
       final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium),
+        desiredAccuracy: LocationAccuracy.medium,
       );
       return GeoResult(position: pos);
     } catch (_) {

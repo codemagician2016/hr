@@ -1,0 +1,58 @@
+default_platform(:ios)
+
+APP_IDENTIFIER = "com.drifthr.employee"
+PROFILE_NAME = "match AppStore #{APP_IDENTIFIER}"
+
+def asc_api_key
+  app_store_connect_api_key(
+    key_id: ENV.fetch("ASC_KEY_ID"),
+    issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+    # ASC_KEY_CONTENT must be the base64 of the downloaded AuthKey_XXXX.p8 file.
+    key_content: ENV.fetch("ASC_KEY_CONTENT"),
+    is_key_content_base64: true,
+    in_house: false,
+  )
+end
+
+platform :ios do
+  before_all do
+    setup_ci if ENV["CI"]
+  end
+
+  desc "ONE-TIME: create + store the distribution certificate and profile in the match repo"
+  lane :bootstrap_signing do
+    match(type: "appstore", readonly: false, api_key: asc_api_key)
+  end
+
+  desc "Build a signed release and upload to TestFlight"
+  lane :beta do
+    api_key = asc_api_key
+
+    # Fetch the cert + profile created once via bootstrap_signing.
+    match(type: "appstore", readonly: true, api_key: api_key)
+
+    # Flutter ships Automatic signing; force the match profile.
+    update_code_signing_settings(
+      use_automatic_signing: false,
+      path: "Runner.xcodeproj",
+      team_id: ENV.fetch("DEVELOPER_TEAM_ID"),
+      bundle_identifier: APP_IDENTIFIER,
+      code_sign_identity: "Apple Distribution",
+      profile_name: PROFILE_NAME,
+    )
+
+    build_app(
+      workspace: "Runner.xcworkspace",
+      scheme: "Runner",
+      export_method: "app-store",
+      export_options: {
+        provisioningProfiles: { APP_IDENTIFIER => PROFILE_NAME },
+      },
+    )
+
+    upload_to_testflight(
+      api_key: api_key,
+      skip_waiting_for_build_processing: true,
+    )
+  end
+end

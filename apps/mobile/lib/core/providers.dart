@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'api_client.dart';
+import 'config.dart';
 import 'file_download.dart';
 import 'session.dart';
 
@@ -92,7 +93,27 @@ class AuthController extends StateNotifier<AuthState> {
     }
   }
 
-  Future<void> signIn(String email, String password) async {
+  /// Feature 40 — multi-tenant sign-in: Organization ID (Business.slug) +
+  /// email + password. The org resolves FIRST via the public tenant endpoint
+  /// (clear "unknown org" error, and the org brand name for the UI); then the
+  /// org is persisted so the login request itself carries X-Tenant-Host.
+  Future<void> signIn(String orgId, String email, String password) async {
+    final slug = orgId.toLowerCase().trim();
+    if (slug.isEmpty || !RegExp(r'^[a-z0-9-]+$').hasMatch(slug)) {
+      throw ApiException(
+        'Organization ID can only contain letters, numbers and dashes.',
+        status: 400,
+      );
+    }
+    final tenant = await _api.resolveTenant(slug);
+    final business = tenant['business'];
+    final orgName = business is Map<String, dynamic> ? business['name'] as String? : null;
+    await _session.saveOrg(
+      slug: slug,
+      tenantHost: AppConfig.tenantHostForSlug(slug),
+      name: orgName,
+    );
+
     final customer = await _api.login(email, password);
     // Prefer the rich profile; if it 401s/errors, keep the bare customer.
     try {

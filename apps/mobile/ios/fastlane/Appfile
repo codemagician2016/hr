@@ -1,0 +1,7 @@
+app_identifier("com.drifthr.employee")
+
+# Apple Developer (portal) Team ID — set as the DEVELOPER_TEAM_ID env var.
+team_id(ENV["DEVELOPER_TEAM_ID"]) if ENV["DEVELOPER_TEAM_ID"]
+
+# Only needed if the account belongs to multiple App Store Connect teams.
+itc_team_id(ENV["ITC_TEAM_ID"]) if ENV["ITC_TEAM_ID"]

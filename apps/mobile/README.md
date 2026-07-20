@@ -23,24 +23,25 @@ cd apps/mobile
 # 1. Resolve dependencies (writes pubspec.lock)
 flutter pub get
 
-# 2. Generate the native platform folders (android/ ios/ …) — they are
-#    intentionally git-ignored; the SDK scaffolds them on the build machine.
-flutter create .
+# 2. android/ and ios/ are COMMITTED (bundle id com.drifthr.employee, store
+#    permissions, release signing, fastlane) — no `flutter create .` needed.
 
-# 3. Run against a backend. API_URL is injected at build time.
-flutter run --dart-define=API_URL=https://demo-staging.drifthr.com
+# 3. Run against a backend. The app is MULTI-TENANT (Feature 40): employees sign
+#    in with Organization ID + email + password; the org travels as the
+#    X-Tenant-Host header on every request. Two defines pick the environment:
+flutter run \
+  --dart-define=API_URL=https://demo-staging.drifthr.com \
+  --dart-define=PLATFORM_DOMAIN=staging.drifthr.com
 ```
 
-`API_URL` defaults to `https://demo-staging.drifthr.com` if omitted. Point it at
-any DriftHR tenant origin (staging / prod / a white-label custom domain).
+`API_URL` is the FIXED backend origin (any host the DriftHR router serves);
+`PLATFORM_DOMAIN` is what tenant hosts hang off (`<orgId>.<PLATFORM_DOMAIN>` —
+a logical name the backend parses, never a DNS lookup). Defaults target staging.
+Prod: `API_URL=https://drifthr.com PLATFORM_DOMAIN=drifthr.com`.
 
 ### Release builds
 
-```bash
-flutter build apk     --dart-define=API_URL=https://app.yourtenant.com   # Android
-flutter build appbundle --dart-define=API_URL=https://app.yourtenant.com # Play Store
-flutter build ipa     --dart-define=API_URL=https://app.yourtenant.com   # iOS
-```
+See `store/RELEASE.md` (concrete runbook: signing, fastlane lanes, store records).
 
 ---
 

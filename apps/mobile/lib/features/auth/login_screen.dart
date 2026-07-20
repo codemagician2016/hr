@@ -21,6 +21,7 @@ class LoginScreen extends ConsumerStatefulWidget {
 
 class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _orgId = TextEditingController();
   final _email = TextEditingController();
   final _password = TextEditingController();
   bool _submitting = false;
@@ -28,7 +29,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   String? _error;
 
   @override
+  void initState() {
+    super.initState();
+    // Feature 40 — pre-fill the last-used organization (employees sign into
+    // the same company every day; typing the org ID once is enough).
+    final remembered = ref.read(sessionProvider).orgSlug;
+    if (remembered != null && remembered.isNotEmpty) _orgId.text = remembered;
+  }
+
+  @override
   void dispose() {
+    _orgId.dispose();
     _email.dispose();
     _password.dispose();
     super.dispose();
@@ -43,6 +54,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     });
     try {
       await ref.read(authControllerProvider.notifier).signIn(
+            _orgId.text,
             _email.text.trim(),
             _password.text,
           );
@@ -50,7 +62,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     } on ApiException catch (e) {
       setState(() => _error = e.message);
     } catch (_) {
-      setState(() => _error = 'Login failed. Check your email and password.');
+      setState(() => _error = 'Login failed. Check your details and try again.');
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -100,6 +112,25 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             ErrorBanner(message: _error!),
                             const SizedBox(height: 14),
                           ],
+                          TextFormField(
+                            controller: _orgId,
+                            keyboardType: TextInputType.text,
+                            autocorrect: false,
+                            textInputAction: TextInputAction.next,
+                            decoration: const InputDecoration(
+                              labelText: 'Organization ID',
+                              helperText: "Your company's DriftHR ID — ask HR if unsure",
+                            ),
+                            validator: (v) {
+                              final s = (v ?? '').trim().toLowerCase();
+                              if (s.isEmpty) return 'Enter your organization ID';
+                              if (!RegExp(r'^[a-z0-9-]+$').hasMatch(s)) {
+                                return 'Letters, numbers and dashes only';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 14),
                           TextFormField(
                             controller: _email,
                             keyboardType: TextInputType.emailAddress,

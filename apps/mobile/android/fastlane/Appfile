@@ -1,0 +1,5 @@
+package_name("com.drifthr.employee")
+
+# Play service-account key (shared across all PaperByte apps). Kept OUTSIDE the
+# repo (chmod 600); override with PLAY_JSON_KEY.
+json_key_file(ENV["PLAY_JSON_KEY"] || File.expand_path("~/sitepresso-admin-PLAY-service-account.json"))

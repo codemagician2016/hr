@@ -14,11 +14,11 @@ pubspec.lock
 *.iml
 *.log
 
-# Generated native folders (run `flutter create .` to (re)generate them)
-# Kept ignored because this repo ships only the Dart/lib source — the SDK
-# scaffolds android/ ios/ etc. on the build machine.
-/android/
-/ios/
+# android/ and ios/ are COMMITTED (since Feature 40): they carry hand-tuned,
+# unregenerable config — bundle id com.drifthr.employee, store permissions,
+# release-signing wiring, fastlane lanes. Secrets stay out via android/.gitignore
+# (key.properties, *.p12) and the platform .gitignores. Desktop/web targets are
+# not shipped and stay ignored.
 /linux/
 /macos/
 /windows/

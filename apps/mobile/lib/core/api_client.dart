@@ -60,6 +60,14 @@ class ApiClient {
           if (token != null && token.isNotEmpty) {
             options.headers['Authorization'] = 'Bearer $token';
           }
+          // Feature 40 — name the tenant on EVERY request. The backend resolves
+          // the login tenant from this header AND enforces that the session's
+          // businessId matches it on every /api/hr/me/* call (the cross-tenant
+          // 403 guard), so it must be present consistently, not just at login.
+          final tenantHost = session.tenantHost;
+          if (tenantHost != null && tenantHost.isNotEmpty) {
+            options.headers['X-Tenant-Host'] = tenantHost;
+          }
           handler.next(options);
         },
       ),
@@ -149,8 +157,32 @@ class ApiClient {
 
   // ── auth ────────────────────────────────────────────────────────────────────
 
+  /// GET /api/tenant/resolve?slug=… — the PUBLIC organization lookup (Feature
+  /// 40). Returns the tenant envelope `{ business:{id,name,slug}, brand, … }`
+  /// or throws ApiException (404 → unknown org ID). No session required.
+  Future<Map<String, dynamic>> resolveTenant(String slug) async {
+    final res = await _dio.get<dynamic>(
+      '/api/tenant/resolve',
+      queryParameters: {'slug': slug},
+    );
+    final status = res.statusCode ?? 0;
+    final Map<String, dynamic> body =
+        res.data is Map<String, dynamic> ? res.data as Map<String, dynamic> : {};
+    if (status < 200 || status >= 300) {
+      throw ApiException(
+        (body['message'] as String?) ??
+            "We couldn't find that organization ID. Check it with your HR team.",
+        status: status,
+        body: body,
+      );
+    }
+    return body;
+  }
+
   /// POST /api/customer/login. Captures the session cookie (and/or a Bearer
   /// token from the body), persists it, and returns the `customer` object.
+  /// The tenant is carried by the X-Tenant-Host header the interceptor adds
+  /// (session.saveOrg must have run first).
   Future<Map<String, dynamic>> login(String email, String password) async {
     final res = await _dio.post<dynamic>(
       '/api/customer/login',

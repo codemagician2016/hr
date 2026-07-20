@@ -18,14 +18,26 @@ class Session {
 
   static const _cookieKey = 'drifthr.session.cookie';
   static const _tokenKey = 'drifthr.session.token';
+  // Feature 40 — the signed-in organization (tenant). orgSlug is what the
+  // employee typed; tenantHost is the `<slug>.<platformDomain>` value replayed
+  // as X-Tenant-Host on EVERY request (login + session guard both key off it).
+  static const _orgSlugKey = 'drifthr.org.slug';
+  static const _tenantHostKey = 'drifthr.org.tenantHost';
+  static const _orgNameKey = 'drifthr.org.name';
 
   final FlutterSecureStorage _storage;
 
   String? _cookie;
   String? _token;
+  String? _orgSlug;
+  String? _tenantHost;
+  String? _orgName;
 
   String? get cookie => _cookie;
   String? get token => _token;
+  String? get orgSlug => _orgSlug;
+  String? get tenantHost => _tenantHost;
+  String? get orgName => _orgName;
 
   bool get hasSession => (_cookie?.isNotEmpty ?? false) || (_token?.isNotEmpty ?? false);
 
@@ -34,9 +46,15 @@ class Session {
     try {
       _cookie = await _storage.read(key: _cookieKey);
       _token = await _storage.read(key: _tokenKey);
+      _orgSlug = await _storage.read(key: _orgSlugKey);
+      _tenantHost = await _storage.read(key: _tenantHostKey);
+      _orgName = await _storage.read(key: _orgNameKey);
     } catch (_) {
       _cookie = null;
       _token = null;
+      _orgSlug = null;
+      _tenantHost = null;
+      _orgName = null;
     }
   }
 
@@ -51,6 +69,25 @@ class Session {
     }
   }
 
+  /// Persist the resolved organization. Called BEFORE login so the login
+  /// request itself already carries the right X-Tenant-Host.
+  Future<void> saveOrg({required String slug, required String tenantHost, String? name}) async {
+    _orgSlug = slug;
+    _tenantHost = tenantHost;
+    _orgName = name;
+    try {
+      await _storage.write(key: _orgSlugKey, value: slug);
+      await _storage.write(key: _tenantHostKey, value: tenantHost);
+      if (name != null && name.isNotEmpty) {
+        await _storage.write(key: _orgNameKey, value: name);
+      }
+    } catch (_) {
+      // In-memory values are what the interceptor reads; storage is best-effort.
+    }
+  }
+
+  /// Clears the AUTH session only. The organization is deliberately kept so the
+  /// next login pre-fills the org ID (an employee signs into the same company).
   Future<void> clear() async {
     _cookie = null;
     _token = null;
@@ -60,6 +97,19 @@ class Session {
     } catch (_) {
       // Best-effort: the in-memory clear above is what matters.
     }
+  }
+
+  /// Full reset including the remembered organization ("switch company").
+  Future<void> clearAll() async {
+    await clear();
+    _orgSlug = null;
+    _tenantHost = null;
+    _orgName = null;
+    try {
+      await _storage.delete(key: _orgSlugKey);
+      await _storage.delete(key: _tenantHostKey);
+      await _storage.delete(key: _orgNameKey);
+    } catch (_) {}
   }
 
   /// Reduce a possibly multi-cookie `Set-Cookie` header (dio returns each cookie
