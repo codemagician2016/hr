@@ -808,7 +808,7 @@
             "Insert merge fields (e.g. employee.name, date.issueDate) from the palette — they appear as chips.",
             "Save & publish, then issue the template to an employee and open the PDF."
           ],
-          "expected": "The body is authored visually on the letterhead. Formatting (bold, headings, lists) and merge-field chips round-trip to the stored template and render on the issued PDF exactly as composed.",
+          "expected": "The body is authored visually on the letterhead. Formatting (bold, headings, lists) and merge-field chips round-trip to the stored template and render on the issued PDF exactly as composed. The issued PDF opens correctly in ANY viewer (Acrobat / Preview / Chrome) with all characters visible — fonts are fully embedded, not subsetted.",
           "sortOrder": 6
         },
         {

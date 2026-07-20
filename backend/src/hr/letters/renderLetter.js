@@ -96,9 +96,14 @@ async function renderLetter({
   const lhBytes = toUint8(letterheadPdf);
   const doc = await PDFDocument.load(lhBytes);
   doc.registerFontkit(fontkit);
-  const font = await doc.embedFont(toUint8(fontBytes), { subset: true });
+  // Embed the FULL font, NOT a subset. Subsetted CID/Type0 fonts are the classic
+  // cause of "text is in the PDF but renders as missing/scattered glyphs": many
+  // viewers/rasterizers mishandle a subset's glyph table, so the text layer extracts
+  // perfectly while the page renders blank. A legal document must render everywhere,
+  // so we trade ~0.5-1 MB per letter for guaranteed fidelity.
+  const font = await doc.embedFont(toUint8(fontBytes), { subset: false });
   const fontBold = fontBoldBytes
-    ? await doc.embedFont(toUint8(fontBoldBytes), { subset: true })
+    ? await doc.embedFont(toUint8(fontBoldBytes), { subset: false })
     : font;
 
   // Page 0 is the letterhead underlay we draw the body onto. For
