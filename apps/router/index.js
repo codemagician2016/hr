@@ -557,12 +557,25 @@ async function resolveRoute(host, url, referer) {
   // deleted, suspended) we don't want a long-lived stale value routing traffic
   // to a dead tenant. The backend lookup is a single indexed query, so 1× per
   // minute per slug is cheap.
-  let tenantExists = await redis.get(`ess-route:${subdomain}`).catch(() => null);
-  if (tenantExists !== '1') {
-    tenantExists = (await lookupTenantExistsFromBackend(subdomain)) ? '1' : null;
-    if (tenantExists === '1') {
-      redis.set(`ess-route:${subdomain}`, '1', 'EX', 60).catch(() => {});
+  //
+  // Feature 41 — mobile-web hosts: `m-<slug>` is the tenant's mobile alias
+  // (m-acme.drifthr.com / m-demo-staging.drifthr.com). Exact slug first —
+  // a tenant could legitimately OWN a slug starting with "m-" — then the
+  // stripped base as fallback. The backend resolves the tenant identically
+  // (core/lib/mobileHost.js), so the alias serves the same ESS app.
+  const slugCandidates = subdomain.startsWith('m-') && subdomain.length > 2
+    ? [subdomain, subdomain.slice(2)]
+    : [subdomain];
+  let tenantExists = null;
+  for (const s of slugCandidates) {
+    tenantExists = await redis.get(`ess-route:${s}`).catch(() => null);
+    if (tenantExists !== '1') {
+      tenantExists = (await lookupTenantExistsFromBackend(s)) ? '1' : null;
+      if (tenantExists === '1') {
+        redis.set(`ess-route:${s}`, '1', 'EX', 60).catch(() => {});
+      }
     }
+    if (tenantExists === '1') break;
   }
 
   if (tenantExists !== '1') {

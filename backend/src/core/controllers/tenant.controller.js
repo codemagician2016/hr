@@ -3,6 +3,7 @@ const { ROLES } = require('../lib/roles');
 const { resolveVertical } = require('../lib/vertical');
 const { healThemeCopy } = require('../lib/themeCopyHeal');
 const { routableCustomDomainWhere } = require('../lib/customDomainRouting');
+const { hostCandidates } = require('../lib/mobileHost');
 const {
   FEATURE_CATALOG,
   FEATURE_KEYS_FOR_STOREFRONT,
@@ -165,59 +166,50 @@ async function resolve(req, res) {
   const platformSuffix = `.${PLATFORM_DOMAIN}`;
   const hyphenSuffix = `-${PLATFORM_DOMAIN}`;
 
-  if (slug) {
-    if (!/^[a-z0-9-]+$/.test(slug) || RESERVED_SUBDOMAINS.has(slug)) {
-      return res.status(404).json({ message: 'Not a tenant' });
-    }
-    business = await prisma.business.findUnique({
-      where: { slug },
-      include: {
-        subscription: { include: { tier: { select: { name: true, slug: true } } } },
-        content: true,
-        seoSettings: true,
-        // White-label: the tenant-wide brand (entityId NULL) drives logo/colour/
-        // name on the portal + login. Pull the active tenant-wide rows; we pick
-        // the default below.
-        tenantBrands: { where: { entityId: null, isActive: true, deletedAt: null } },
-      },
-    });
-  } else if (host === PLATFORM_DOMAIN) {
-    return res.status(404).json({ message: 'Platform domain is not a tenant' });
-  } else if (host.endsWith(hyphenSuffix) || host.endsWith(platformSuffix)) {
-    // Subdomain tenant — dotted (acme.drifthr.com) or hyphenated staging
-    // (acme-staging.drifthr.com). Strip whichever suffix matched (hyphen first).
-    const matched = host.endsWith(hyphenSuffix) ? hyphenSuffix : platformSuffix;
-    const sub = host.slice(0, -matched.length);
-    if (!sub || sub.includes('.') || RESERVED_SUBDOMAINS.has(sub)) {
-      return res.status(404).json({ message: 'Not a tenant' });
-    }
+  const TENANT_INCLUDE = {
+    subscription: { include: { tier: { select: { name: true, slug: true } } } },
+    content: true,
+    seoSettings: true,
+    // White-label: the tenant-wide brand (entityId NULL) drives logo/colour/
+    // name on the portal + login. Pull the active tenant-wide rows; we pick
+    // the default below.
+    tenantBrands: { where: { entityId: null, isActive: true, deletedAt: null } },
+  };
 
-    business = await prisma.business.findUnique({
-      where: { slug: sub },
-      include: {
-        subscription: { include: { tier: { select: { name: true, slug: true } } } },
-        content: true,
-        seoSettings: true,
-        tenantBrands: { where: { entityId: null, isActive: true, deletedAt: null } },
-      },
-    });
-  } else {
+  // One host → business lookup (null = no match; the caller decides on 404).
+  const lookupByHost = async (h) => {
+    if (!h || h === PLATFORM_DOMAIN) return null;
+    if (h.endsWith(hyphenSuffix) || h.endsWith(platformSuffix)) {
+      // Subdomain tenant — dotted (acme.drifthr.com) or hyphenated staging
+      // (acme-staging.drifthr.com). Strip whichever suffix matched (hyphen first).
+      const matched = h.endsWith(hyphenSuffix) ? hyphenSuffix : platformSuffix;
+      const sub = h.slice(0, -matched.length);
+      if (!sub || sub.includes('.') || RESERVED_SUBDOMAINS.has(sub)) return null;
+      return prisma.business.findUnique({ where: { slug: sub }, include: TENANT_INCLUDE });
+    }
     // Verified custom-domain tenant, e.g. "shop.example.com".
     // The public router checks this to pick the correct vertical when the
     // custom host goes through the Worker. Direct Vercel custom domains can
     // reach this app while verification is still pending/failed, so resolve
     // any connected custom domain here and let SEO stay paused until ACTIVE.
-    business = await prisma.business.findFirst({
-      where: {
-        subscription: { is: routableCustomDomainWhere(host) },
-      },
-      include: {
-        subscription: { include: { tier: { select: { name: true, slug: true } } } },
-        content: true,
-        seoSettings: true,
-        tenantBrands: { where: { entityId: null, isActive: true, deletedAt: null } },
-      },
+    return prisma.business.findFirst({
+      where: { subscription: { is: routableCustomDomainWhere(h) } },
+      include: TENANT_INCLUDE,
     });
+  };
+
+  if (slug) {
+    if (!/^[a-z0-9-]+$/.test(slug) || RESERVED_SUBDOMAINS.has(slug)) {
+      return res.status(404).json({ message: 'Not a tenant' });
+    }
+    business = await prisma.business.findUnique({ where: { slug }, include: TENANT_INCLUDE });
+  } else {
+    // Feature 41 — mobile-web hosts: try the EXACT host first, then (only when
+    // nothing matched) its m-alias base (m-acme.… → acme.…, m.acme.com → acme.com).
+    for (const candidate of hostCandidates(host)) {
+      business = await lookupByHost(candidate);
+      if (business) break;
+    }
   }
 
   if (!business) {

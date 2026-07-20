@@ -14,6 +14,7 @@ const { effectivePermissions, SYSTEM_ROLES, SYSTEM_ROLE_SCOPES, SYSTEM_ROLE_COMP
 const { ROLES } = require('../lib/roles');
 const { resolveVertical } = require('../lib/vertical');
 const { routableCustomDomainWhere } = require('../lib/customDomainRouting');
+const { hostCandidates } = require('../lib/mobileHost');
 
 const USER_SELECT = {
   id: true,
@@ -100,36 +101,46 @@ async function resolveTenantBusinessId(req) {
   const platformSuffix = `.${platformDomain}`;
   const aapkaSuffix = '.aapkatech.com';
 
-  if (host.endsWith(platformSuffix)) {
-    const sub = host.slice(0, -platformSuffix.length);
-    if (sub && !sub.includes('.')) {
-      const biz = await prisma.business.findUnique({ where: { slug: sub }, select: { id: true } });
-      return biz?.id || null;
+  const lookupByHost = async (h) => {
+    if (h.endsWith(platformSuffix)) {
+      const sub = h.slice(0, -platformSuffix.length);
+      if (sub && !sub.includes('.')) {
+        const biz = await prisma.business.findUnique({ where: { slug: sub }, select: { id: true } });
+        return biz?.id || null;
+      }
     }
-  }
 
-  if (host.endsWith(aapkaSuffix)) {
-    const sub = host.slice(0, -aapkaSuffix.length);
-    if (sub && !sub.includes('.')) {
-      const biz = await prisma.business.findUnique({ where: { slug: sub }, select: { id: true } });
-      return biz?.id || null;
+    if (h.endsWith(aapkaSuffix)) {
+      const sub = h.slice(0, -aapkaSuffix.length);
+      if (sub && !sub.includes('.')) {
+        const biz = await prisma.business.findUnique({ where: { slug: sub }, select: { id: true } });
+        return biz?.id || null;
+      }
     }
-  }
 
-  // BYO custom-domain lookup, re-enabled for the white-label ESS: a tenant's
-  // own domain (e.g. careers.acme.com) must resolve to its businessId so the
-  // cross-tenant session guard below can reject a customer session that belongs
-  // to a different business. Uses the same routable-host filter as the public
-  // tenant resolver (core/lib/customDomainRouting + internal.routes /tenant-route).
-  // Returns null when the host is not a connected custom domain, so platform
-  // subdomains and unknown hosts behave exactly as before.
-  const customDomainWhere = routableCustomDomainWhere(host);
-  if (!customDomainWhere) return null;
-  const biz = await prisma.business.findFirst({
-    where: { subscription: { is: customDomainWhere } },
-    select: { id: true },
-  });
-  return biz?.id || null;
+    // BYO custom-domain lookup, re-enabled for the white-label ESS: a tenant's
+    // own domain (e.g. careers.acme.com) must resolve to its businessId so the
+    // cross-tenant session guard below can reject a customer session that belongs
+    // to a different business. Uses the same routable-host filter as the public
+    // tenant resolver (core/lib/customDomainRouting + internal.routes /tenant-route).
+    // Returns null when the host is not a connected custom domain, so platform
+    // subdomains and unknown hosts behave exactly as before.
+    const customDomainWhere = routableCustomDomainWhere(h);
+    if (!customDomainWhere) return null;
+    const biz = await prisma.business.findFirst({
+      where: { subscription: { is: customDomainWhere } },
+      select: { id: true },
+    });
+    return biz?.id || null;
+  };
+
+  // Feature 41 — mobile-web hosts: exact host first, then its m-alias base
+  // (m-acme.drifthr.com → acme.drifthr.com, m.acme.com → acme.com).
+  for (const candidate of hostCandidates(host)) {
+    const id = await lookupByHost(candidate);
+    if (id) return id;
+  }
+  return null;
 }
 
 // Seed the HR system roles (Owner / HR-Admin / Finance / Manager) for a

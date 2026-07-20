@@ -44,26 +44,39 @@ async function resolveBusinessId(req) {
   const platformDomain = (process.env.PLATFORM_DOMAIN || 'sitepresso.com').toLowerCase();
   const suffix = `.${platformDomain}`;
 
-  if (host.endsWith(suffix)) {
-    const sub = host.slice(0, -suffix.length);
-    if (!sub || sub.includes('.')) return null;
-    const biz = await prisma.business.findUnique({ where: { slug: sub }, select: { id: true } });
-    if (directId && biz?.id && directId !== biz.id) return null;
-    return biz?.id || directId;
-  }
-
-  // White-label custom-domain (the tenant's branded ESS host, e.g. demo.drifthr.com):
-  // resolve the tenant by its bound custom domain — the same routable check the
-  // edge router uses for /domain-route. DriftHR's ESS is custom-domain-first, so
-  // this lookup is required (it was retired in the Sitepresso storefront flow).
+  // One host → { id } | 'MISMATCH' | null. 'MISMATCH' = the host resolved a tenant
+  // that CONTRADICTS a supplied X-Business-Id (tamper guard → hard null).
   const { routableCustomDomainWhere } = require('../lib/customDomainRouting');
-  const where = routableCustomDomainWhere(host);
-  if (where) {
-    const biz = await prisma.business.findFirst({
-      where: { subscription: { is: where } },
-      select: { id: true },
-    });
-    if (biz?.id) return (directId && directId !== biz.id) ? null : biz.id;
+  const lookupByHost = async (h) => {
+    if (h.endsWith(suffix)) {
+      const sub = h.slice(0, -suffix.length);
+      if (!sub || sub.includes('.')) return null;
+      const biz = await prisma.business.findUnique({ where: { slug: sub }, select: { id: true } });
+      if (directId && biz?.id && directId !== biz.id) return 'MISMATCH';
+      return biz?.id || null;
+    }
+    // White-label custom-domain (the tenant's branded ESS host, e.g. demo.drifthr.com):
+    // resolve the tenant by its bound custom domain — the same routable check the
+    // edge router uses for /domain-route. DriftHR's ESS is custom-domain-first, so
+    // this lookup is required (it was retired in the Sitepresso storefront flow).
+    const where = routableCustomDomainWhere(h);
+    if (where) {
+      const biz = await prisma.business.findFirst({
+        where: { subscription: { is: where } },
+        select: { id: true },
+      });
+      if (biz?.id) return (directId && directId !== biz.id) ? 'MISMATCH' : biz.id;
+    }
+    return null;
+  };
+
+  // Feature 41 — mobile-web hosts: exact host first, then its m-alias base
+  // (m-acme.drifthr.com → acme.drifthr.com, m.acme.com → acme.com).
+  const { hostCandidates } = require('../lib/mobileHost');
+  for (const candidate of hostCandidates(host)) {
+    const r = await lookupByHost(candidate);
+    if (r === 'MISMATCH') return null;
+    if (r) return r;
   }
   return directId;
 }

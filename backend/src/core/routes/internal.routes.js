@@ -198,12 +198,18 @@ router.get('/domain-route', async (req, res) => {
   const host = String(req.query.host || '').toLowerCase().trim();
   if (!host) return res.status(400).json({ error: 'host required' });
   try {
-    const biz = await prisma.business.findFirst({
-      where: { subscription: { is: routableCustomDomainWhere(host) } },
-      select: { id: true, slug: true },
-    });
-    if (!biz) return res.status(404).json({ error: 'not found' });
-    return res.json({ action: 'serve', slug: biz.slug || null, businessId: biz.id });
+    // Feature 41 — mobile-web hosts: exact host first, then its m-alias base
+    // (m.acme.com → acme.com) so the tenant's mobile URL serves without a
+    // second custom-domain binding.
+    const { hostCandidates } = require('../lib/mobileHost');
+    for (const candidate of hostCandidates(host)) {
+      const biz = await prisma.business.findFirst({
+        where: { subscription: { is: routableCustomDomainWhere(candidate) } },
+        select: { id: true, slug: true },
+      });
+      if (biz) return res.json({ action: 'serve', slug: biz.slug || null, businessId: biz.id });
+    }
+    return res.status(404).json({ error: 'not found' });
   } catch (err) {
     return res.status(500).json({ error: 'db error' });
   }
