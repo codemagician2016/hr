@@ -232,6 +232,8 @@ async function register(req, res, next) {
     const q = req.query || {};
     const where = { businessId };
     if (q.category) where.category = String(q.category);
+    // Feature 39 — filter the register by the tenant category SNAPSHOT.
+    if (q.categoryId) where.categoryId = String(q.categoryId);
     if (q.status) where.status = String(q.status);
     if (q.entityId) where.entityId = String(q.entityId);
     if (q.issuedBy) where.issuedBy = String(q.issuedBy);

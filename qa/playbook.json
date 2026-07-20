@@ -857,9 +857,10 @@
             "Open Letters > Templates and create a template (e.g. a Bank Resolution letter) on a letterhead.",
             "Give it a custom Category by typing a new name (e.g. 'Bank Resolution') — it is created and reusable.",
             "Add a signature and a stamp: upload once; they are saved to the tenant library and can be picked on any future template.",
-            "Save & publish, issue the letter, then filter Templates/Register by that category."
+            "Save & publish, issue the letter, then filter Templates/Register by that category.",
+            "Drag the signature AND the stamp on the letterhead to place each one, then filter the Templates list by the category."
           ],
-          "expected": "Categories are tenant-defined (type-to-create, managed list) so letters can be grouped/filtered/searched by a name HR recognises; the issued letter snapshots its category so the register still filters after a rename. Signature and stamp are uploaded ONCE to the tenant library and reused across templates, each rendered at its own placement on the letterhead.",
+          "expected": "Categories are tenant-defined (type-to-create, managed list) so letters can be grouped/filtered/searched by a name HR recognises; the issued letter snapshots its category so the register still filters after a rename. Signature and stamp are uploaded ONCE to the tenant library and reused across templates, each rendered at its own placement on the letterhead. Signature and stamp are each independently draggable/resizable on the letterhead, and the Templates list + Register can be filtered by category.",
           "sortOrder": 9
         }
       ]

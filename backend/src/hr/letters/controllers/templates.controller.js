@@ -214,6 +214,8 @@ async function listMergeFields(req, res) {
 async function listTemplates(req, res) {
   const businessId = req.user.businessId;
   const where = { businessId, deletedAt: null };
+  // Feature 39 — filter by the TENANT category tag (e.g. "Bank Resolution").
+  if (req.query.categoryId) where.categoryId = String(req.query.categoryId);
 
   if (req.query.category) {
     const cat = String(req.query.category).toUpperCase();

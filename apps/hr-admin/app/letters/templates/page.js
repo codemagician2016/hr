@@ -158,6 +158,80 @@ function slugKey(s) {
   return camel.replace(/^[^a-zA-Z]+/, '');
 }
 
+// ─── Feature 39: category combobox (type-to-create) ──────────────────────────
+function CategoryPicker({ value, categories, onChange, onCreated }) {
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  async function create(e) {
+    e.preventDefault();
+    const n = name.trim();
+    if (!n) return;
+    setBusy(true);
+    try {
+      const row = await post('/api/hr/letters/library/categories', { name: n });
+      onCreated();
+      onChange(row.id);
+      setName(''); setAdding(false);
+    } finally { setBusy(false); }
+  }
+  if (adding) {
+    return (
+      <div className="flex gap-1">
+        <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Bank Resolution"
+          onKeyDown={(e) => { if (e.key === 'Enter') create(e); }}
+          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+        <button type="button" onClick={create} disabled={busy} className="px-2 text-xs text-white rounded-lg" style={{ background: 'var(--theme-primary)' }}>{busy ? '…' : 'Add'}</button>
+        <button type="button" onClick={() => setAdding(false)} className="px-2 text-xs text-gray-500">Cancel</button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex gap-1">
+      <select value={value} onChange={(e) => onChange(e.target.value)} className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
+        <option value="">— none —</option>
+        {(categories || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+      </select>
+      <button type="button" onClick={() => setAdding(true)} className="px-2 text-xs underline" style={{ color: 'var(--theme-primary)' }}>+ New</button>
+    </div>
+  );
+}
+
+// ─── Feature 39: reusable SIGNATURE / STAMP picker (tenant library) ──────────
+function AssetPicker({ kind, label, assets, value, onChange, onUploaded, onError }) {
+  const [busy, setBusy] = useState(false);
+  const mine = (assets || []).filter((a) => a.kind === kind);
+  const selected = mine.find((a) => a.id === value);
+  async function upload(file) {
+    if (!file) return;
+    if (file.type !== 'image/png') { onError(`The ${label.toLowerCase()} must be a PNG image.`); return; }
+    setBusy(true);
+    try {
+      const dataUrl = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
+      const row = await post('/api/hr/letters/library/assets', { kind, name: file.name.replace(/\.png$/i, ''), fileBase64: dataUrl });
+      onUploaded();
+      onChange(row.id);
+    } catch (e) { onError(e?.data?.message || e.message || 'Upload failed.'); }
+    finally { setBusy(false); }
+  }
+  return (
+    <div>
+      <p className="text-xs font-medium text-gray-600 mb-1">{label}</p>
+      <div className="flex gap-1 items-center">
+        <select value={value} onChange={(e) => onChange(e.target.value)} className="flex-1 px-2 py-1.5 border border-gray-300 rounded-md text-xs bg-white">
+          <option value="">— none —</option>
+          {mine.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+        <label className="px-2 py-1.5 text-xs border border-gray-300 rounded-md cursor-pointer hover:bg-gray-50 whitespace-nowrap">
+          {busy ? '…' : 'Upload'}
+          <input type="file" accept="image/png" className="hidden" onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; upload(f); }} />
+        </label>
+      </div>
+      {selected && <img src={selected.imageUrl} alt={label} className="h-10 mt-1 border border-gray-200 rounded bg-white px-1" />}
+    </div>
+  );
+}
+
 // ─── Manual (at-issue) fields editor ─────────────────────────────────────────
 function ManualFieldsPanel({ fields, onChange, onInsert }) {
   const rows = Array.isArray(fields) ? fields : [];
@@ -213,7 +287,21 @@ function TemplateEditor({ template, letterheads, letterheadsAvailable, onClose, 
     authorityDesignation: template?.authorityDesignation || '',
     signatureOnLastPage: template?.signatureOnLastPage !== false,
     manualFields: Array.isArray(template?.manualFieldsJson) ? template.manualFieldsJson : [],
+    // Feature 39 — tenant category + reusable signature/stamp assets.
+    categoryId: template?.categoryId || '',
+    signatureAssetId: template?.signatureAssetId || '',
+    stampAssetId: template?.stampAssetId || '',
   }));
+  // Feature 39 library: tenant categories + reusable SIGNATURE/STAMP assets.
+  const [categories, setCategories] = useState([]);
+  const [assets, setAssets] = useState([]);
+  const [stampBox, setStampBox] = useState(template?.stampBoxJson || null);
+  const [libBusy, setLibBusy] = useState(false);
+  const reloadLibrary = useCallback(() => {
+    get('/api/hr/letters/library/categories').then((r) => setCategories(asList(r))).catch(() => setCategories([]));
+    get('/api/hr/letters/library/assets').then((r) => setAssets(asList(r))).catch(() => setAssets([]));
+  }, []);
+  useEffect(() => { reloadLibrary(); }, [reloadLibrary]);
   // Static signature (Phase 2): the image is uploaded to a saved template via a
   // dedicated endpoint; its placement box + on-last-page flag save with the form.
   const [sigUrl, setSigUrl] = useState(template?.signatureImageUrl || '');
@@ -309,6 +397,11 @@ function TemplateEditor({ template, letterheads, letterheadsAvailable, onClose, 
         manualFieldsJson: (form.manualFields || [])
           .filter((r) => r.key)
           .map(({ key, label, type, required }) => ({ key, label: label || key, type: type || 'text', required: !!required })),
+        // Feature 39 — tenant category + reusable signature/stamp assets.
+        categoryId: form.categoryId || null,
+        signatureAssetId: form.signatureAssetId || null,
+        stampAssetId: form.stampAssetId || null,
+        ...(stampBox ? { stampBoxJson: stampBox } : {}),
       };
       if (isNew && form.code.trim()) payload.code = form.code.trim();
       let saved;
@@ -436,9 +529,12 @@ function TemplateEditor({ template, letterheads, letterheadsAvailable, onClose, 
                 value={form.bodyMarkdown}
                 onChange={(v) => set('bodyMarkdown', v)}
                 letterhead={selectedLetterhead}
-                signatureUrl={sigUrl}
+                signatureUrl={(assets.find((a) => a.id === form.signatureAssetId) || {}).imageUrl || sigUrl}
                 signatureBox={sigBox}
                 onSignatureBoxChange={setSigBox}
+                stampUrl={(assets.find((a) => a.id === form.stampAssetId) || {}).imageUrl || ''}
+                stampBox={stampBox}
+                onStampBoxChange={setStampBox}
               />
               <MergeFieldDrawer palette={palette} onInsert={insertToken} />
             </div>
@@ -477,34 +573,20 @@ function TemplateEditor({ template, letterheads, letterheadsAvailable, onClose, 
               <TextInput label="Authority name" value={form.authorityName} onChange={(v) => set('authorityName', v)} hint="e.g. Priya Sharma" />
               <TextInput label="Authority designation" value={form.authorityDesignation} onChange={(v) => set('authorityDesignation', v)} hint="e.g. Head of HR" />
             </div>
-            <div className="flex items-start gap-6">
-              <div>
-                <p className="text-xs font-medium text-gray-600 mb-1">Signature image (PNG)</p>
-                {sigUrl ? (
-                  <div className="flex items-center gap-3">
-                    <img src={sigUrl} alt="Signature" className="h-12 border border-gray-200 rounded bg-white px-1" />
-                    <ActionButton tone="danger" onClick={onRemoveSignature} disabled={sigBusy}>Remove</ActionButton>
-                  </div>
-                ) : (
-                  <label className={`inline-flex items-center px-3 py-1.5 text-xs rounded-md border ${template?.id && !sigBusy ? 'border-gray-300 text-gray-700 hover:bg-gray-50 cursor-pointer' : 'border-gray-200 text-gray-400 cursor-not-allowed'}`}>
-                    {sigBusy ? 'Uploading…' : 'Upload PNG'}
-                    <input
-                      type="file"
-                      accept="image/png"
-                      className="hidden"
-                      disabled={!template?.id || sigBusy}
-                      onChange={(e) => { const fl = e.target.files && e.target.files[0]; e.target.value = ''; onSignatureFile(fl); }}
-                    />
-                  </label>
-                )}
-                {!template?.id && <p className="text-[11px] text-gray-400 mt-1">Save the template first to add a signature.</p>}
-                {sigUrl && selectedLetterhead && <p className="text-[11px] text-gray-400 mt-1">Drag it on the letterhead above to place it.</p>}
-              </div>
-              <label className="flex items-center gap-2 text-xs text-gray-600 mt-6">
-                <input type="checkbox" checked={form.signatureOnLastPage} onChange={(e) => set('signatureOnLastPage', e.target.checked)} />
-                Stamp on the last page (vs page 1)
-              </label>
+            {/* Feature 39 — tenant category + REUSABLE signature/stamp from the library */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Category<InfoTip text="Your own grouping name (e.g. 'Bank Resolution') so letters are easy to recognise, filter and search later. Type a new name to create it — it's then reusable on any template." label="Category" /></label>
+              <CategoryPicker value={form.categoryId} categories={categories} onChange={(v) => set('categoryId', v)} onCreated={reloadLibrary} />
             </div>
+            <div className="grid grid-cols-2 gap-4">
+              <AssetPicker kind="SIGNATURE" label="Signature" assets={assets} value={form.signatureAssetId} onChange={(v) => set('signatureAssetId', v)} onUploaded={reloadLibrary} onError={setError} />
+              <AssetPicker kind="STAMP" label="Stamp / seal" assets={assets} value={form.stampAssetId} onChange={(v) => set('stampAssetId', v)} onUploaded={reloadLibrary} onError={setError} />
+            </div>
+            <label className="flex items-center gap-2 text-xs text-gray-600">
+              <input type="checkbox" checked={form.signatureOnLastPage} onChange={(e) => set('signatureOnLastPage', e.target.checked)} />
+              Place signature/seal on the last page (vs page 1)
+            </label>
+            <p className="text-[11px] text-gray-400">Signatures and stamps are saved to your library — upload once, then reuse them on every future template.</p>
           </div>
 
           {/* Manual (at-issue) fields (Phase 3) */}
@@ -592,7 +674,10 @@ export default function TemplatesPage() {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({ category: '', country: '', status: '' });
+  const [filters, setFilters] = useState({ category: '', country: '', status: '', categoryId: '' });
+  // Feature 39 — tenant categories drive the list filter ("show me all Bank Resolutions").
+  const [pageCategories, setPageCategories] = useState([]);
+  useEffect(() => { get('/api/hr/letters/library/categories').then((r) => setPageCategories(asList(r))).catch(() => setPageCategories([])); }, []);
   const [editing, setEditing] = useState(undefined); // undefined=closed, null=new, obj=edit
   const [letterheads, setLetterheads] = useState([]);
   const [letterheadsAvailable, setLetterheadsAvailable] = useState(false);
@@ -602,6 +687,7 @@ export default function TemplatesPage() {
     setError('');
     const params = {};
     if (filters.category) params.category = filters.category;
+    if (filters.categoryId) params.categoryId = filters.categoryId;
     if (filters.country) params.country = filters.country;
     if (filters.status) params.status = filters.status;
     get(TEMPLATES_BASE, params)
@@ -664,6 +750,10 @@ export default function TemplatesPage() {
       <div className="flex flex-wrap items-end gap-3 mb-5">
         <div>
           <label className="block text-xs text-gray-500 mb-1">Category</label>
+          <select value={filters.categoryId} onChange={(e) => setFilters((f) => ({ ...f, categoryId: e.target.value }))} className="px-3 py-1.5 border border-gray-300 rounded-md text-sm">
+            <option value="">All categories</option>
+            {pageCategories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
           <select value={filters.category} onChange={(e) => setFilters((f) => ({ ...f, category: e.target.value }))} className="px-3 py-1.5 border border-gray-300 rounded-md text-sm">
             <option value="">All</option>
             {CATEGORIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
