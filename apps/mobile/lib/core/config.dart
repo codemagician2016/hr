@@ -17,11 +17,18 @@ class AppConfig {
   /// Fixed backend origin every request goes to (any host the DriftHR router
   /// serves works — the tenant comes from the X-Tenant-Host header, not from
   /// this origin). A trailing slash is trimmed so `$base$path` is predictable.
+  ///
+  /// WEB builds (Feature 41 — the m-<tenant> mobile-web hosts serve this same
+  /// app compiled with `flutter build web`): pass `--dart-define=API_URL=`
+  /// (EMPTY) → requests go SAME-ORIGIN (relative paths), so the app works on
+  /// every m-host with no CORS and the X-Tenant-Host header still names the
+  /// signed-in org.
   static String get apiBaseUrl {
     const raw = String.fromEnvironment(
       'API_URL',
       defaultValue: 'https://demo-staging.drifthr.com',
     );
+    if (raw.isEmpty) return ''; // same-origin (web build)
     return raw.replaceFirst(RegExp(r'/+$'), '');
   }
 

@@ -22,7 +22,7 @@ pubspec.lock
 /linux/
 /macos/
 /windows/
-/web/
+
 
 # Local env / secrets
 *.env

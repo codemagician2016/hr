@@ -24,6 +24,25 @@ for app in platform hr-admin ess; do
   echo "[ship]   ✓ apps/$app"
 done
 
+# 1b) Feature 41 — the employee app compiled to WEB (served on the m-<tenant>
+#     mobile-web hosts by drifthr-hms-mobile-web). Same-origin API (API_URL
+#     empty). Best-effort: no Flutter on this machine → ship without it (the
+#     static server just 404s until a build ships).
+FLUTTER="${FLUTTER_BIN:-/Users/kp/flutter/bin/flutter}"
+if command -v "$FLUTTER" >/dev/null 2>&1; then
+  echo "[ship] building apps/mobile (flutter web)…"
+  ( cd apps/mobile && "$FLUTTER" build web --release \
+      --dart-define=API_URL= \
+      --dart-define=PLATFORM_DOMAIN=staging.drifthr.com \
+      >/tmp/drifthr-build-mobile-web.log 2>&1 ) \
+    && echo "[ship]   ✓ apps/mobile (web)" \
+    || { echo "[ship]   ⚠ flutter web build failed (shipping without it):"; tail -10 /tmp/drifthr-build-mobile-web.log; }
+else
+  echo "[ship]   ⚠ flutter not found — shipping without the mobile web app"
+fi
+MOBILE_WEB_DIR=""
+[ -d apps/mobile/build/web ] && MOBILE_WEB_DIR="apps/mobile/build/web"
+
 # 2) Tarball: source + prebuilt .next; never node_modules/.git/.next-cache/secrets.
 echo "[ship] tarball…"
 tar --no-mac-metadata --no-xattrs \
@@ -32,7 +51,7 @@ tar --no-mac-metadata --no-xattrs \
   --exclude='.deploy' --exclude='*/.env' --exclude='*/.env.*' \
   -czf "$TAR" \
   backend apps/platform apps/hr-admin apps/ess apps/router packages scripts deploy \
-  package.json package-lock.json turbo.json .nvmrc
+  package.json package-lock.json turbo.json .nvmrc $MOBILE_WEB_DIR
 echo "[ship]   $(du -h "$TAR" | cut -f1)  $TAR"
 
 # 3) Upload to S3.

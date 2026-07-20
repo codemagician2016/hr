@@ -84,6 +84,9 @@ function externalHost(host) {
 }
 
 const QA_PORTAL_PORT = parseInt(process.env.QA_PORTAL_PORT || '3801', 10);
+// Feature 41 — when set, m-<tenant> hosts serve the employee app compiled to
+// web (flutter build web via scripts/static-serve.js) instead of the ESS.
+const MOBILE_WEB_PORT = parseInt(process.env.MOBILE_WEB_PORT || '0', 10) || null;
 const PUBLIC_MICROCACHE_TTL_SECONDS = parseInt(process.env.PUBLIC_MICROCACHE_TTL_SECONDS || '300', 10);
 const PUBLIC_MICROCACHE_MAX_BYTES = parseInt(process.env.PUBLIC_MICROCACHE_MAX_BYTES || String(2 * 1024 * 1024), 10);
 const TENANT_ADMIN_PATH_RE = /^\/admin(?:\/|$)/;
@@ -548,6 +551,15 @@ async function resolveRoute(host, url, referer) {
       }
     }
     if (serve === 'serve') {
+      // Feature 41 — `m.<custom-domain>` serves the employee app compiled to
+      // web when deployed (the backend's /domain-route already resolves the
+      // m-stripped base, so `serve` is true for the m-host of a bound domain).
+      // A custom domain that is ITSELF bound as m.<domain> still reaches ESS
+      // only if the mobile web app is not deployed — acceptable: the explicit
+      // binding owner controls their own hostnames.
+      if (MOBILE_WEB_PORT && cleanHost.startsWith('m.')) {
+        return { target: `http://localhost:${MOBILE_WEB_PORT}` };
+      }
       return { target: `http://localhost:${resolveEssPort(pathname)}`, vertical: 'ess' };
     }
     return tenantNotFoundRoute(cleanHost, platformDomain);
@@ -574,12 +586,15 @@ async function resolveRoute(host, url, referer) {
   // Feature 41 — mobile-web hosts: `m-<slug>` is the tenant's mobile alias
   // (m-acme.drifthr.com / m-demo-staging.drifthr.com). Exact slug first —
   // a tenant could legitimately OWN a slug starting with "m-" — then the
-  // stripped base as fallback. The backend resolves the tenant identically
-  // (core/lib/mobileHost.js), so the alias serves the same ESS app.
+  // stripped base as fallback. When MOBILE_WEB_PORT is configured, an m-alias
+  // host serves the EMPLOYEE APP compiled to web (flutter build web — the
+  // browser-testable mobile app); otherwise it falls back to the responsive
+  // ESS. /api/* was already routed to the backend above either way.
   const slugCandidates = subdomain.startsWith('m-') && subdomain.length > 2
     ? [subdomain, subdomain.slice(2)]
     : [subdomain];
   let tenantExists = null;
+  let matchedSlug = null;
   for (const s of slugCandidates) {
     tenantExists = await redis.get(`ess-route:${s}`).catch(() => null);
     if (tenantExists !== '1') {
@@ -588,11 +603,17 @@ async function resolveRoute(host, url, referer) {
         redis.set(`ess-route:${s}`, '1', 'EX', 60).catch(() => {});
       }
     }
-    if (tenantExists === '1') break;
+    if (tenantExists === '1') { matchedSlug = s; break; }
   }
 
   if (tenantExists !== '1') {
     return tenantNotFoundRoute(cleanHost, platformDomain);
+  }
+
+  // m-alias host (matched via the stripped base, not a real m-* slug) → the
+  // mobile web app when deployed.
+  if (MOBILE_WEB_PORT && matchedSlug !== subdomain && subdomain.startsWith('m-')) {
+    return { target: `http://localhost:${MOBILE_WEB_PORT}` };
   }
 
   return { target: `http://localhost:${resolveEssPort(pathname)}`, vertical: 'ess' };

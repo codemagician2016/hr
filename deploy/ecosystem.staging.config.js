@@ -65,6 +65,7 @@ module.exports = {
         PLATFORM_PORT: '4212',
         HR_ADMIN_PORT: '4213',
         ESS_PORT: '4214',
+        MOBILE_WEB_PORT: '4215', // Feature 41 — m-<tenant> hosts serve the Flutter-web employee app
         PLATFORM_DOMAIN: 'staging.drifthr.com',
         REDIS_URL: 'redis://localhost:6379/5', // DB 5 — isolated from sibling routers
         // Hyphenated 1-level staging hosts → canonical dotted form (Universal-SSL safe).
@@ -79,5 +80,22 @@ module.exports = {
     nextApp('drifthr-hms-platform', 'apps/platform', 4212),
     nextApp('drifthr-hms-hr-admin', 'apps/hr-admin', 4213),
     nextApp('drifthr-hms-ess', 'apps/ess', 4214),
+    {
+      // Feature 41 — the employee app compiled to web (flutter build web),
+      // served on the m-<tenant> mobile-web hosts. Static files only; the app
+      // talks to /api same-origin (dart-define API_URL empty at build).
+      name: 'drifthr-hms-mobile-web',
+      cwd: ROOT,
+      script: path.join(ROOT, 'scripts/static-serve.js'),
+      exec_mode: 'fork',
+      instances: 1,
+      autorestart: true,
+      max_memory_restart: '120M',
+      env: {
+        NODE_ENV: 'production',
+        PORT: '4215',
+        STATIC_DIR: path.join(ROOT, 'apps/mobile/build/web'),
+      },
+    },
   ],
 };

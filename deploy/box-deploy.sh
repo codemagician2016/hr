@@ -60,7 +60,7 @@ if [ ! -f "$SENTINEL" ]; then
 fi
 
 cd "$ROOT"
-APPS="drifthr-hms-backend drifthr-hms-router drifthr-hms-platform drifthr-hms-hr-admin drifthr-hms-ess"
+APPS="drifthr-hms-backend drifthr-hms-router drifthr-hms-platform drifthr-hms-hr-admin drifthr-hms-ess drifthr-hms-mobile-web"
 if [ "${DRIFTHR_ENV:-staging}" = "prod" ]; then
   # PROD reload BY NAME so each app keeps its LIVE env/ports exactly (43xx,
   # PLATFORM_DOMAIN=drifthr.com) — no ecosystem config imposed, so there is zero
@@ -76,7 +76,7 @@ else
   # STAGING uses the checked-in config (starts any missing app; siblings untouched).
   log "pm2 startOrReload — ONLY drifthr-hms-* (staging config)"
   pm2 startOrReload deploy/ecosystem.staging.config.js --update-env \
-    --only drifthr-hms-backend,drifthr-hms-router,drifthr-hms-platform,drifthr-hms-hr-admin,drifthr-hms-ess
+    --only drifthr-hms-backend,drifthr-hms-router,drifthr-hms-platform,drifthr-hms-hr-admin,drifthr-hms-ess,drifthr-hms-mobile-web
 fi
 pm2 save
 log "done — drifthr-hms processes:"
