@@ -519,6 +519,13 @@ IN weekly-hours/OT thresholds (48 h/week; OT ≥ **2× normal wage**) and NZ hou
 
 ## 8. Attendance & Time capture
 
+> **Implementation status:** multi-mode capture (geo/IP/face policies, WARN/ENFORCE,
+> review queue) shipped as Feature 2; device ingestion as Feature 28; **real face
+> recognition (server-side ArcFace/ONNX), HR-approved face enrolment, polygon
+> geofences (office or per-employee) and per-employee policy scope shipped as
+> Feature 39 — see `docs/features/39-face-geo-attendance-controls.md`** (the
+> as-built spec supersedes the sketches below where they differ).
+
 ### 8.1 Clock-in channels
 | Channel | Proof captured | Typical use |
 |---|---|---|

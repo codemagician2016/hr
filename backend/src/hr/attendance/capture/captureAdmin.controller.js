@@ -18,7 +18,7 @@
 const prisma = require('../../../core/lib/prisma');
 const { writeAudit } = require('../../../core/lib/audit');
 
-const SCOPES = ['TENANT', 'ENTITY', 'LOCATION', 'EMPLOYEE_GROUP'];
+const SCOPES = ['TENANT', 'ENTITY', 'LOCATION', 'EMPLOYEE_GROUP', 'EMPLOYEE'];
 
 function asBool(v, dflt = false) {
   if (v === true || v === false) return v;
@@ -68,6 +68,11 @@ async function upsertPolicy(req, res, next) {
     if (scope === 'EMPLOYEE_GROUP' && scopeId) {
       const dep = await prisma.department.findFirst({ where: { id: scopeId, businessId }, select: { id: true } });
       if (!dep) return res.status(404).json({ message: 'department (employee group) not found in this tenant' });
+    }
+    if (scope === 'EMPLOYEE' && scopeId) {
+      // Feature 39 — per-person policy override (highest precedence in the resolver).
+      const emp = await prisma.employee.findFirst({ where: { id: scopeId, businessId, deletedAt: null }, select: { id: true } });
+      if (!emp) return res.status(404).json({ message: 'employee not found in this tenant' });
     }
 
     const data = {

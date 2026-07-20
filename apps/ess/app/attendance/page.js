@@ -6,7 +6,13 @@
 // surface, which resolves the employee SERVER-SIDE from the session — the page
 // NEVER sends an employeeId (audit #53/#55).
 //
-//   Punch        : POST /api/hr/me/attendance/punch        { type }
+//   Punch        : POST /api/hr/me/attendance/punch        { type, geoLat?, geoLng?, selfieDataUrl? }
+//                  (F39 — coords + live selfie are gathered client-side per the
+//                   capture policy; 201 may carry captureFlagged/-Reasons, a 403
+//                   reason:'CAPTURE_POLICY' means the punch was NOT recorded)
+//   Policy       : GET  /api/hr/me/attendance/policy        (F39 — what MY punch must capture)
+//   Face         : GET  /api/hr/me/attendance/face          (F39 — my face registration state)
+//                  POST /api/hr/me/attendance/face/enroll   { selfieDataUrl } → PENDING (HR approves)
 //   Punches      : GET  /api/hr/me/attendance/punches?from=&to=
 //   Day rollup   : GET  /api/hr/me/attendance/days?from=&to=   (one row per civil day)
 //   Timesheets   : GET  /api/hr/me/attendance/timesheets
@@ -25,7 +31,7 @@
 // with no rollup row we derive WEEKOFF (shift weekly-off) / HOLIDAY (calendar) /
 // ABSENT (past working day) so the month reads as a complete calendar.
 
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import AppShell from '@/components/AppShell';
 import { ErrorBanner, Empty, Spinner, Centered } from '@hr/ui';
@@ -34,6 +40,7 @@ import { apiPost } from '@/lib/api';
 import { useProfile } from '@/lib/useProfile';
 import { formatTime, formatDate } from '@/lib/format';
 import InfoTip from '@/components/InfoTip';
+import CameraCaptureModal from '@/components/CameraCaptureModal';
 
 // ── time helpers ─────────────────────────────────────────────────────────────
 
@@ -84,6 +91,69 @@ const PUNCH_LABELS = {
   BREAK_START: 'Break started',
   BREAK_END: 'Break ended',
 };
+
+// ── Feature 39 — face & geo capture at punch ─────────────────────────────────
+
+// Friendly labels for the server's captureFlagReasons codes. A FLAGGED punch IS
+// recorded — these just explain the "pending HR review" notice in plain words.
+const FLAG_LABELS = {
+  OUT_OF_GEOFENCE: 'outside your work zone',
+  OFF_NETWORK: 'not on an office network',
+  FACE_LOW_SCORE: "face didn't match confidently",
+  FACE_NEEDS_REVIEW: 'face pending manual review',
+  MISSING_GEO: 'location unavailable',
+  FACE_NO_REFERENCE: 'no approved face on file',
+  FACE_MISSING_SELFIE: 'no selfie captured',
+};
+function flagReasonLabel(code) {
+  return FLAG_LABELS[code] || String(code || '').toLowerCase().replace(/_/g, ' ');
+}
+
+// Face registration lifecycle chip (FaceEnrollmentStatus) — semantic hues like
+// StatusPill; the HR gate means only ACTIVE actually enables face check-in.
+const FACE_STATUS_META = {
+  NONE: { label: 'Not registered', cls: 'bg-gray-100 text-gray-600' },
+  PENDING: { label: 'Pending HR approval', cls: 'bg-amber-100 text-amber-700' },
+  ACTIVE: { label: 'Approved ✓', cls: 'bg-emerald-100 text-emerald-700' },
+  REJECTED: { label: 'Rejected', cls: 'bg-red-100 text-red-700' },
+  REVOKED: { label: 'Revoked', cls: 'bg-red-100 text-red-700' },
+};
+function FaceStatusChip({ status }) {
+  const m = FACE_STATUS_META[String(status || 'NONE').toUpperCase()] || FACE_STATUS_META.NONE;
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${m.cls}`}>
+      {m.label}
+    </span>
+  );
+}
+
+// One chip on the capture strip ("what today's punch needs").
+function CaptureChip({ icon, label, title }) {
+  return (
+    <span
+      title={title}
+      className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium"
+      style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-text)', background: 'var(--theme-primary-soft, #f8fafc)' }}
+    >
+      <span aria-hidden="true">{icon}</span>
+      {label}
+    </span>
+  );
+}
+
+// Browser geolocation as a promise. Resolves null on deny/timeout/unavailable —
+// the CALLER decides whether that blocks (geoEnforce) or proceeds (server flags
+// MISSING_GEO). High accuracy, 10s cap, accepts a fix up to 30s old.
+function getBrowserPosition() {
+  return new Promise((resolve) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+    );
+  });
+}
 
 // Regularization reason types — these mirror the backend REGULARIZATION_KINDS
 // (meAttendance.controller.js) one-for-one. A "regularization" (the India-standard
@@ -851,6 +921,20 @@ function ClockSection({ canAct }) {
     { select: (b) => (Array.isArray(b) ? b : b?.items || b?.punches || []) }
   );
 
+  // F39 — the capture policy that applies to ME (drives the capture strip + the
+  // punch orchestration below) and my face registration state (the face card).
+  // The face detail is only fetched when it can matter: face is required, or a
+  // registration already exists (any status).
+  const policyApi = useApi('/api/hr/me/attendance/policy', { select: (b) => b || null });
+  const policy = policyApi.data || null;
+  const faceRelevant = !!policy && (!!policy.requireFace || (policy.faceStatus && policy.faceStatus !== 'NONE'));
+  const faceApi = useApi('/api/hr/me/attendance/face', {
+    select: (b) => b || null,
+    enabled: faceRelevant,
+  });
+  const face = faceApi.data;
+  const faceStatus = String(face?.status || policy?.faceStatus || 'NONE').toUpperCase();
+
   const all = punches || [];
   const today = useMemo(() => {
     const t0 = startOfToday().getTime();
@@ -868,18 +952,120 @@ function ClockSection({ canAct }) {
 
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState(null);
+  // F39 punch-orchestration state.
+  const [punchNotice, setPunchNotice] = useState(null);   // 201-but-flagged gentle notice
+  const [geoState, setGeoState] = useState(null);         // null|'fetching'|'captured'|'skipped'
+  const [cameraPunch, setCameraPunch] = useState(null);   // { type, coords } → face check-in modal open
+  const [noFaceConfirm, setNoFaceConfirm] = useState(null); // { type, coords, status } → warn-mode inline confirm
+  const [enrollOpen, setEnrollOpen] = useState(false);    // face registration modal
+  const [enrollNotice, setEnrollNotice] = useState(null); // "sent to HR" success message
+  const [faceHighlight, setFaceHighlight] = useState(false);
+  const faceCardRef = useRef(null);
 
-  async function punch(type) {
+  // Draw the eye to the Face check-in card (used when a punch needs a face the
+  // employee hasn't registered / had approved yet).
+  function pointToFaceCard(scroll = true) {
+    setFaceHighlight(true);
+    if (scroll && faceCardRef.current) {
+      faceCardRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    setTimeout(() => setFaceHighlight(false), 2500);
+  }
+
+  // Bare punch POST — THROWS on failure so each entry point surfaces the error in
+  // the right place (page banner vs inside the camera modal, where it enables an
+  // immediate retake). A 201 with captureFlagged means the punch WAS recorded but
+  // goes to HR's review queue — a gentle notice, not an error. A 403 with
+  // reason:'CAPTURE_POLICY' means it was NOT recorded; the server's message says
+  // exactly which control blocked it and is shown verbatim.
+  async function doPunch(type, coords, selfieDataUrl) {
+    const body = { type };
+    if (coords) { body.geoLat = coords.lat; body.geoLng = coords.lng; }
+    if (selfieDataUrl) body.selfieDataUrl = selfieDataUrl;
+    const resp = await apiPost('/api/hr/me/attendance/punch', body);
+    if (resp && resp.captureFlagged) {
+      const reasons = (resp.captureFlagReasons || []).map(flagReasonLabel).filter(Boolean);
+      setPunchNotice(`Punch recorded — pending HR review${reasons.length ? ` (${reasons.join(', ')})` : ''}.`);
+    }
+    reload();
+  }
+
+  // Banner-error variant for the non-modal paths.
+  async function submitPunch(type, coords, selfieDataUrl) {
     setBusy(true);
     setActionError(null);
     try {
-      await apiPost('/api/hr/me/attendance/punch', { type });
-      reload();
+      await doPunch(type, coords, selfieDataUrl);
     } catch (e) {
       setActionError(e.message || 'Could not record your punch.');
     } finally {
       setBusy(false);
+      setGeoState(null);
     }
+  }
+
+  // F39 orchestration: gather what the resolved capture policy asks for BEFORE
+  // posting — (1) browser geolocation when requireGeo, (2) a live camera selfie
+  // when requireFace + the registration is ACTIVE. Everything is best-effort on
+  // WARN mode (server records + flags) and blocking on ENFORCE mode. IP needs no
+  // client step — the server observes the request IP itself.
+  async function punch(type) {
+    if (busy) return;
+    setActionError(null);
+    setPunchNotice(null);
+    setNoFaceConfirm(null);
+
+    // 1) Location.
+    let coords = null;
+    if (policy?.requireGeo) {
+      setBusy(true);
+      setGeoState('fetching');
+      coords = await getBrowserPosition();
+      setBusy(false);
+      if (!coords) {
+        if (policy.geoEnforce) {
+          setGeoState(null);
+          setActionError('Location is required to punch — enable location access for this site and retry.');
+          return;
+        }
+        setGeoState('skipped'); // server records the punch and flags MISSING_GEO
+      } else {
+        setGeoState('captured');
+      }
+    }
+
+    // 2) Face.
+    if (policy?.requireFace) {
+      if (faceStatus === 'ACTIVE') {
+        setCameraPunch({ type, coords }); // camera modal takes over; submit happens on capture
+        return;
+      }
+      // No usable (HR-approved) face yet: PENDING / NONE / REJECTED / REVOKED.
+      if (policy.faceEnforce) {
+        setGeoState(null);
+        if (faceStatus === 'PENDING') {
+          setActionError('Your face registration is awaiting HR approval — you can punch once it is approved.');
+        } else {
+          setActionError('Face check-in is required — register your face first (see the Face check-in card below).');
+          pointToFaceCard();
+        }
+        return;
+      }
+      // WARN mode → offer to punch without face (server flags it) via an inline confirm.
+      setNoFaceConfirm({ type, coords, status: faceStatus });
+      if (faceStatus !== 'PENDING') pointToFaceCard(false);
+      return;
+    }
+
+    await submitPunch(type, coords, null);
+  }
+
+  // Inline warn-mode confirm ("punch without face?") — proceed.
+  async function punchWithoutFace() {
+    const ctx = noFaceConfirm;
+    if (!ctx) return;
+    setNoFaceConfirm(null);
+    await submitPunch(ctx.type, ctx.coords, null);
   }
 
   if (loading) return <Centered><Spinner /></Centered>;
@@ -898,7 +1084,76 @@ function ClockSection({ canAct }) {
           <p className="text-xs" style={{ color: 'var(--theme-muted)' }}>worked today</p>
         </div>
 
-        {actionError && <ErrorBanner message={actionError} />}
+        {/* F39 capture strip — what today's punch must carry (only the required ones). */}
+        {policy && (policy.requireGeo || policy.requireIp || policy.requireFace) && (
+          <div className="mb-4 space-y-1 text-center">
+            <div className="flex flex-wrap items-center justify-center gap-1.5">
+              <span className="text-[11px]" style={{ color: 'var(--theme-muted)' }}>Punch checks:</span>
+              {policy.requireGeo && (
+                <CaptureChip
+                  icon="📍"
+                  label="Location"
+                  title={policy.zoneNames?.length ? `Your work zones: ${policy.zoneNames.join(', ')}` : undefined}
+                />
+              )}
+              {policy.requireIp && <CaptureChip icon="🌐" label="Office network" />}
+              {policy.requireFace && <CaptureChip icon="🙂" label="Face" />}
+            </div>
+            {policy.requireGeo && policy.zoneNames?.length > 0 && (
+              <p className="text-[11px]" style={{ color: 'var(--theme-muted)' }}>
+                Zones: {policy.zoneNames.join(' · ')}
+              </p>
+            )}
+          </div>
+        )}
+
+        {actionError && <div className="mb-3"><ErrorBanner message={actionError} /></div>}
+        {punchNotice && (
+          <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">{punchNotice}</p>
+        )}
+        {geoState && (
+          <p className="mb-3 text-center text-[11px]" style={{ color: 'var(--theme-muted)' }}>
+            {geoState === 'fetching' && '📍 Getting your location…'}
+            {geoState === 'captured' && '📍 Location captured ✓'}
+            {geoState === 'skipped' && '📍 Location unavailable — punching without it (HR may review).'}
+          </p>
+        )}
+
+        {/* F39 warn-mode inline confirm: face applies but there's no approved face
+            yet — the punch still goes through, flagged for HR review. */}
+        {noFaceConfirm && (
+          <div className="mb-3 rounded-lg border px-3 py-2.5 text-xs" style={{ borderColor: 'var(--theme-border)' }}>
+            <p style={{ color: 'var(--theme-text)' }}>
+              {noFaceConfirm.status === 'PENDING'
+                ? 'Your face registration is awaiting HR approval.'
+                : noFaceConfirm.status === 'REJECTED'
+                  ? 'Your face registration was rejected — retake it from the Face check-in card below.'
+                  : noFaceConfirm.status === 'REVOKED'
+                    ? 'Your face registration was revoked — register again from the Face check-in card below.'
+                    : "You haven't registered your face yet — see the Face check-in card below."}
+              {' '}You can still punch without face check-in; the punch will be flagged for HR review.
+            </p>
+            <div className="mt-2 flex gap-2">
+              <button
+                type="button"
+                onClick={punchWithoutFace}
+                disabled={busy}
+                className="rounded-lg px-3 py-1.5 font-semibold transition disabled:opacity-50"
+                style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}
+              >
+                Punch without face
+              </button>
+              <button
+                type="button"
+                onClick={() => { setNoFaceConfirm(null); setGeoState(null); }}
+                className="rounded-lg border px-3 py-1.5 font-medium"
+                style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-muted)' }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <button
@@ -937,6 +1192,107 @@ function ClockSection({ canAct }) {
           </button>
         </div>
       </section>
+
+      {/* F39 — Face check-in (registration) card. Shown only when the policy asks
+          for face OR a registration already exists in any state. Registration is
+          HR-gated: submit → PENDING → HR approves → ACTIVE (only then does the
+          punch flow open the face camera). */}
+      {policy && (policy.requireFace || faceStatus !== 'NONE') && (
+        <section
+          ref={faceCardRef}
+          className="rounded-2xl border bg-white p-5 shadow-sm transition-shadow"
+          style={{
+            borderColor: 'var(--theme-border)',
+            boxShadow: faceHighlight ? '0 0 0 3px var(--theme-primary)' : undefined,
+          }}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="flex flex-wrap items-center gap-2 text-sm font-semibold" style={{ color: 'var(--theme-text)' }}>
+                Face check-in
+                <FaceStatusChip status={faceStatus} />
+              </h2>
+              {faceApi.loading ? (
+                <div className="mt-2"><Spinner small /></div>
+              ) : (
+                <>
+                  <p className="mt-1 text-xs" style={{ color: 'var(--theme-muted)' }}>
+                    {faceStatus === 'ACTIVE' && 'Approved — your face is checked at every punch.'}
+                    {faceStatus === 'PENDING' && 'Sent to HR for approval — face check-in activates once approved.'}
+                    {faceStatus === 'REJECTED' && 'HR rejected this photo. Retake it to try again.'}
+                    {faceStatus === 'REVOKED' && 'HR revoked your face registration. Register again to re-enable face check-in.'}
+                    {faceStatus === 'NONE' && 'Register your face to enable face check-in. HR reviews and approves it before it activates.'}
+                  </p>
+                  {(faceStatus === 'REJECTED' || faceStatus === 'REVOKED') && face?.decisionNote && (
+                    <p className="mt-1 text-xs text-red-600">HR&apos;s note: {face.decisionNote}</p>
+                  )}
+                </>
+              )}
+            </div>
+            {face?.imageUrl && (
+              <img
+                src={face.imageUrl}
+                alt="Your registered face"
+                className="h-14 w-14 flex-shrink-0 rounded-xl border object-cover"
+                style={{ borderColor: 'var(--theme-border)' }}
+              />
+            )}
+          </div>
+
+          {enrollNotice && (
+            <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{enrollNotice}</p>
+          )}
+
+          <button
+            type="button"
+            onClick={() => { setEnrollNotice(null); setEnrollOpen(true); }}
+            disabled={!canAct}
+            className="mt-3 rounded-lg px-4 py-2 text-xs font-semibold transition disabled:opacity-50"
+            style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}
+          >
+            {faceStatus === 'NONE' ? 'Register face' : 'Retake'}
+          </button>
+          {faceStatus === 'ACTIVE' && (
+            <p className="mt-1.5 text-[11px]" style={{ color: 'var(--theme-muted)' }}>
+              Retaking sends the new photo to HR — face check-in pauses until it&apos;s re-approved.
+            </p>
+          )}
+        </section>
+      )}
+
+      {/* F39 — face check-in camera at punch time (registration is ACTIVE). The
+          submit runs INSIDE the modal so a policy rejection (e.g. face didn't
+          match, enforce mode) shows there with an immediate Retake. */}
+      {cameraPunch && (
+        <CameraCaptureModal
+          title="Face check-in"
+          hint="Look straight at the camera so we can match your registered face."
+          onCapture={async (dataUrl) => {
+            await doPunch(cameraPunch.type, cameraPunch.coords, dataUrl); // throws → shown in-modal
+            setCameraPunch(null);
+            setGeoState(null);
+          }}
+          onClose={() => { setCameraPunch(null); setGeoState(null); }}
+        />
+      )}
+
+      {/* F39 — face registration camera. A 422 (no face / too small / multiple
+          faces) throws out of onCapture → the modal shows the message and stays
+          open for a retake. */}
+      {enrollOpen && (
+        <CameraCaptureModal
+          title="Register your face"
+          hint="Look straight at the camera, alone, in good light."
+          onCapture={async (dataUrl) => {
+            const resp = await apiPost('/api/hr/me/attendance/face/enroll', { selfieDataUrl: dataUrl });
+            setEnrollOpen(false);
+            setEnrollNotice(resp?.message || 'Face submitted — HR will review and approve it.');
+            faceApi.reload();
+            policyApi.reload();
+          }}
+          onClose={() => setEnrollOpen(false)}
+        />
+      )}
 
       <section className="grid grid-cols-2 gap-3">
         <div className="rounded-2xl border bg-white p-3 shadow-sm" style={{ borderColor: 'var(--theme-border)' }}>

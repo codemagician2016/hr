@@ -16,6 +16,11 @@ async function jsonOrThrow(res) {
     const err = new Error(body.message || `${res.status} ${res.statusText}`);
     err.status = res.status;
     err.errors = body.errors || body.issues || [];
+    // Machine-readable error discriminator when the backend sends one (e.g. the
+    // attendance punch 403 reason:'CAPTURE_POLICY', face-enroll 422 reason:'NO_FACE')
+    // plus the full body for callers that need more than the message.
+    err.reason = body.reason || null;
+    err.body = body;
     throw err;
   }
   return body;

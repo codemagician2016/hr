@@ -35,6 +35,11 @@ const { registerShiftSwapConsumer } = require('./consumers.shiftSwap');
 // snapshot the taxable amount). Self-registers on load like the others; wired here
 // too so the explicit boot path stays the single source of truth.
 const { registerEncashmentConsumer } = require('./consumers.encashment');
+// FLAG (Feature 39 — shared edit): the FACE_ENROLLMENT consumer (HR approves a face
+// reference → PENDING→ACTIVE flip so face punching goes live). Self-registers on
+// load like the others; wired here too so the explicit boot path stays the single
+// source of truth.
+const { registerFaceEnrollmentConsumer } = require('./consumers.faceEnrollment');
 
 let done = false;
 
@@ -47,6 +52,7 @@ function registerConsumers() {
   registerCompOffConsumer();
   registerShiftSwapConsumer();
   registerEncashmentConsumer();
+  registerFaceEnrollmentConsumer();
   done = true;
 }
 

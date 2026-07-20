@@ -30,7 +30,7 @@ const {
 } = require('./derive');
 const { resolveTimezone, civilDateInTz, zonedWallTimeToUtc } = require('./tz');
 const { tenantCountry } = require('../tenant/countryContext');
-const { evaluatePunchGeofence } = require('./geo');
+const { evaluatePunchGeofence, evaluatePunchZones } = require('./geo');
 
 // Resolve the tenant-wide geofence-enforce default from Business.featureFlags
 // (attendance.geofenceEnforce). Falls back to false (WARN ONLY). A per-location
@@ -227,12 +227,20 @@ function resolveOtRule(employee, rules) {
  * GRACEFUL: no location geofence, or no punch coords → every punch evaluates to
  * evaluated:false → outOfGeofence:false, no marker updates, nothing thrown.
  */
-function evaluateDayGeofence(punches, location, tenantEnforce) {
+function evaluateDayGeofence(punches, location, tenantEnforce, polygonZones) {
   const out = { outOfGeofence: false, maxDistanceM: null, enforce: false, markerUpdates: [] };
+  // Feature 39 — when polygon zones govern this employee (personal/office fence
+  // links), the day verdict must agree with the AT-PUNCH zone verdict, or capture
+  // would accept a punch the rollup then flags. Legacy radius-only tenants keep the
+  // EXACT pre-39 path (byte-identical verdicts — no marker churn on re-run).
+  const useZones = Array.isArray(polygonZones) && polygonZones.length > 0;
+  const zoneEnforce = location && location.geofenceEnforce != null ? !!location.geofenceEnforce : !!tenantEnforce;
   for (const p of punches || []) {
     // Only IN/OUT gate presence; BREAK punches are ignored for the geofence verdict.
     if (p.punchType !== 'IN' && p.punchType !== 'OUT') continue;
-    const v = evaluatePunchGeofence(p, location, { tenantEnforce });
+    const v = useZones
+      ? { ...evaluatePunchZones(p, polygonZones), enforce: zoneEnforce }
+      : evaluatePunchGeofence(p, location, { tenantEnforce });
     if (!v.evaluated) continue;
     out.enforce = v.enforce;
     if (v.outOfGeofence) {
@@ -302,6 +310,19 @@ async function recompute(businessId, employeeId, fromDate, toDate, tx) {
   // this resolves to a no-op (evaluatePunchGeofence returns evaluated:false).
   const geofenceLocation = employment ? employment.location : null;
   const tenantEnforce = tenantGeofenceEnforce(business);
+  // Feature 39 — polygon zones (personal/office fence links) governing this
+  // employee, loaded ONCE for the whole range. Empty for radius-only tenants →
+  // evaluateDayGeofence keeps the exact legacy path. Lazy-required to keep the
+  // module graph acyclic (capture/policy.js never requires service.js).
+  let polygonZones = [];
+  try {
+    const zones = await require('./capture/policy').loadZones(businessId, {
+      employeeId,
+      locationId: employment ? employment.locationId : null,
+      location: geofenceLocation,
+    }, db);
+    polygonZones = zones.filter((z) => z.kind === 'POLYGON');
+  } catch (_e) { polygonZones = []; /* zone lookup must never break recompute */ }
   const employee = {
     id: employeeId,
     entityId: employment ? employment.entityId : null,
@@ -453,7 +474,7 @@ async function recompute(businessId, employeeId, fromDate, toDate, tx) {
     // radius, set ctx.flags.outOfGeofence so derive.js surfaces the OUT_OF_GEOFENCE
     // exception. Persist the per-punch marker (idempotent — only when it changed).
     // Graceful: no location geofence or no punch coords → evaluated:false → no flag.
-    const geo = evaluateDayGeofence(punches, geofenceLocation, tenantEnforce);
+    const geo = evaluateDayGeofence(punches, geofenceLocation, tenantEnforce, polygonZones);
     if (geo.markerUpdates.length) {
       for (const u of geo.markerUpdates) {
         await db.attendancePunch.update({

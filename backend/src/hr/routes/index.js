@@ -12,6 +12,11 @@ const router = express.Router();
 // this aggregator is loaded exactly once from backend/src/index.js at app start.
 require('../approvals/registerConsumers');
 
+// Feature 39 — register the real (ONNX ArcFace) face matcher at boot when the
+// native deps + model files are available; otherwise the stub stays (face punches
+// flow to the HR review queue). Never throws — capture must not block app boot.
+require('../attendance/capture/face/register').registerFaceMatcher();
+
 // FLAG (Feature 14 — shared edit): tenant single-country mode. The operator
 // surface — POST /setup/country (set the HR country ONCE, the only writer) +
 // GET /country-context (capability matrix the hr-admin app gates every

@@ -23,6 +23,8 @@
  */
 
 const prisma = require('../../core/lib/prisma');
+const { Prisma } = require('@prisma/client');
+const { DbNull } = Prisma;
 const s3 = require('../../core/lib/s3');
 const payrollService = require('../payroll/service');
 const { recompute } = require('../attendance/service');
@@ -153,6 +155,7 @@ async function resolveCaptureContext(businessId, employeeId) {
     },
   });
   return {
+    employeeId, // Feature 39 — EMPLOYEE-scope policy precedence + personal fence links
     entityId: employment ? employment.entityId : null,
     locationId: employment ? employment.locationId : null,
     departmentId: employment ? employment.departmentId : null,
@@ -257,11 +260,14 @@ async function createPunch(req, res, next) {
 async function getCapturePolicy(req, res, next) {
   try {
     const emp = await resolveActiveSelf(req);
-    if (!emp) return res.json({ requireGeo: false, requireIp: false, requireFace: false, faceEnrolled: false });
+    if (!emp) return res.json({ requireGeo: false, requireIp: false, requireFace: false, faceEnrolled: false, faceStatus: 'NONE' });
     const { businessId } = req.customer;
     const ctx = await resolveCaptureContext(businessId, emp.id);
     const policy = await capture.resolvePolicy(businessId, ctx);
     const ref = await capture.loadFaceReference(businessId, emp.id);
+    // Feature 39 — the zones this employee resolves to (personal polygons > office
+    // polygons > legacy radius), so the client knows whether geo can be evaluated.
+    const zones = await capture.loadZones(businessId, ctx);
     res.json({
       scope: policy.scope,
       requireGeo: !!policy.requireGeo,
@@ -270,17 +276,26 @@ async function getCapturePolicy(req, res, next) {
       geoEnforce: !!policy.geoEnforce,
       ipEnforce: !!policy.ipEnforce,
       faceEnforce: !!policy.faceEnforce,
-      // Does the assigned location actually have a geofence? (so the client knows geo
-      // can be evaluated). Coords come from the location row in ctx.
-      hasGeofence: !!(ctx.location && ctx.location.geoLat != null && ctx.location.geoLng != null && ctx.location.geofenceM),
+      // Back-compat: hasGeofence now means "any zone is evaluable" (polygon or radius).
+      hasGeofence: zones.length > 0,
+      hasZones: zones.length > 0,
+      zoneNames: zones.map((z) => z.name).filter(Boolean),
+      // faceEnrolled = an HR-APPROVED (ACTIVE) reference exists — the only state that
+      // lets a face punch actually match. faceStatus carries the full lifecycle for
+      // the enrolment card (NONE/PENDING/ACTIVE/REJECTED/REVOKED).
       faceEnrolled: !!ref.hasReference,
+      faceStatus: ref.status || 'NONE',
     });
   } catch (e) { next(e); }
 }
 
-// ── POST /me/attendance/face/enroll { selfieDataUrl } — enroll MY reference face ─
-// SELF_ONLY. Stores the reference selfie (audit) + computes an embedding via the
-// pluggable matcher (null for the stub). Upserts the single active enrollment.
+// ── POST /me/attendance/face/enroll { selfieDataUrl } — register MY face ────────
+// SELF_ONLY. Feature 39: a self-enrolment NO LONGER activates instantly — the row
+// lands PENDING and rides the F10 approval engine (module FACE_ENROLLMENT, built-in
+// default = a single HR step). Only after HR approves does it become the matching
+// reference. The embedding is computed NOW (bad captures are rejected 422 up-front
+// with a retake message, so junk never reaches HR); any previously-open request is
+// superseded (cancelled) — the newest capture is always the one under review.
 async function enrollFace(req, res, next) {
   try {
     const emp = await resolveActiveSelf(req);
@@ -290,42 +305,120 @@ async function enrollFace(req, res, next) {
     if (!check.ok) return res.status(check.status).json({ message: check.message });
     if (!check.dataUrl) return res.status(400).json({ message: 'selfieDataUrl is required to enroll a face' });
 
+    // Compute the reference embedding up-front (quality gate). The real matcher
+    // throws FaceError (422) on no-face / too-small / multiple-faces so the employee
+    // retakes immediately; the stub returns { embedding:null } and HR eyeballs the
+    // photo instead.
+    let embedded;
+    try {
+      embedded = await faceMatcher.getMatcher().embed(check.dataUrl, { purpose: 'enroll' });
+    } catch (fe) {
+      if (fe && fe.statusCode === 422 && fe.code) {
+        return res.status(422).json({ message: fe.message, reason: fe.code });
+      }
+      throw fe;
+    }
     const imageUrl = await storeSelfie(businessId, check.dataUrl);
-    const embedded = await faceMatcher.getMatcher().embed(check.dataUrl, {});
 
-    const row = await prisma.faceEnrollment.upsert({
-      where: { businessId_employeeId: { businessId, employeeId: emp.id } },
-      create: {
-        businessId, employeeId: emp.id, imageUrl,
-        embedding: embedded.embedding || undefined,
-        matcher: embedded.matcher || null,
-        enrolledBy: emp.id,
-      },
-      update: {
-        imageUrl,
-        embedding: embedded.embedding || undefined,
-        matcher: embedded.matcher || null,
-        isActive: true,
-        enrolledAt: new Date(),
-        enrolledBy: emp.id,
-        version: { increment: 1 },
-      },
+    // Supersede any open approval on the previous capture BEFORE overwriting the row
+    // (the consumer's approvalRequestId guard makes a late fire on the old request a
+    // no-op either way; cancelling keeps the HR inbox clean).
+    const prev = await prisma.faceEnrollment.findFirst({
+      where: { businessId, employeeId: emp.id },
+      select: { approvalRequestId: true, status: true },
     });
-    res.status(201).json({ enrolled: true, matcher: row.matcher, enrolledAt: row.enrolledAt });
+    if (prev && prev.approvalRequestId && prev.status === 'PENDING') {
+      try {
+        await engine.cancel({ approvalRequestId: prev.approvalRequestId, actorUserId: 'SYSTEM', comment: 'Superseded by a new face enrolment' });
+      } catch (_e) { /* already decided/closed — fine */ }
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const row = await tx.faceEnrollment.upsert({
+        where: { businessId_employeeId: { businessId, employeeId: emp.id } },
+        create: {
+          businessId, employeeId: emp.id, imageUrl,
+          embedding: embedded.embedding || undefined,
+          matcher: embedded.matcher || null,
+          enrolledBy: emp.id,
+          status: 'PENDING',
+          detScore: embedded.detScore != null ? embedded.detScore : null,
+        },
+        update: {
+          imageUrl,
+          // Explicitly CLEAR a stale embedding when this capture produced none (stub
+          // matcher) — the old vector must never be matched against the new photo.
+          embedding: embedded.embedding == null ? DbNull : embedded.embedding,
+          matcher: embedded.matcher || null,
+          isActive: true,
+          enrolledAt: new Date(),
+          enrolledBy: emp.id,
+          status: 'PENDING',
+          approvalRequestId: null,
+          decidedBy: null,
+          decidedAt: null,
+          decisionNote: null,
+          detScore: embedded.detScore != null ? embedded.detScore : null,
+          version: { increment: 1 },
+        },
+      });
+      const opened = await engine.openRequest({
+        businessId,
+        module: 'FACE_ENROLLMENT',
+        entityType: 'FaceEnrollment',
+        entityId: row.id,
+        requesterEmployeeId: emp.id,
+        payload: { imageUrl, matcher: row.matcher },
+        ctx: {},
+      }, tx);
+      const reqId = opened.approvalRequest ? opened.approvalRequest.id : null;
+      if (reqId) {
+        await tx.faceEnrollment.update({ where: { id: row.id }, data: { approvalRequestId: reqId } });
+      }
+      // If the chain auto-completed (no resolvable HR — engine's audited escalate
+      // path), the consumer needs the approvalRequestId set BEFORE onApprove fires;
+      // it fired inside openRequest already, so handle the terminal case explicitly.
+      if (opened.terminal === 'APPROVED') {
+        await tx.faceEnrollment.update({
+          where: { id: row.id },
+          data: { status: 'ACTIVE', decidedAt: new Date(), version: { increment: 1 } },
+        });
+        return { status: 'ACTIVE' };
+      }
+      return { status: 'PENDING' };
+    });
+
+    res.status(201).json({
+      enrolled: result.status === 'ACTIVE',
+      status: result.status,
+      matcher: embedded.matcher || null,
+      message: result.status === 'PENDING'
+        ? 'Face submitted — HR will review and approve it before face check-in activates.'
+        : 'Face registered and active.',
+    });
   } catch (e) { next(e); }
 }
 
-// ── GET /me/attendance/face — is MY face enrolled? (for the enrollment screen) ──
+// ── GET /me/attendance/face — MY face registration state (enrolment card) ───────
 async function getFaceEnrollment(req, res, next) {
   try {
     const emp = await resolveActiveSelf(req);
-    if (!emp) return res.json({ enrolled: false });
+    if (!emp) return res.json({ enrolled: false, status: 'NONE' });
     const { businessId } = req.customer;
     const row = await prisma.faceEnrollment.findFirst({
-      where: { businessId, employeeId: emp.id, isActive: true },
-      select: { enrolledAt: true, matcher: true },
+      where: { businessId, employeeId: emp.id },
+      select: { enrolledAt: true, matcher: true, status: true, decisionNote: true, imageUrl: true, decidedAt: true },
     });
-    res.json({ enrolled: !!row, enrolledAt: row ? row.enrolledAt : null, matcher: row ? row.matcher : null });
+    if (!row) return res.json({ enrolled: false, status: 'NONE' });
+    res.json({
+      enrolled: row.status === 'ACTIVE',
+      status: row.status,
+      enrolledAt: row.enrolledAt,
+      decidedAt: row.decidedAt,
+      decisionNote: row.decisionNote || null,
+      matcher: row.matcher,
+      imageUrl: row.imageUrl || null, // the employee's OWN reference selfie
+    });
   } catch (e) { next(e); }
 }
 

@@ -9747,6 +9747,7 @@ enum CapturePolicyScope {
   ENTITY
   LOCATION
   EMPLOYEE_GROUP // scopeId holds the department id (the natural employee grouping)
+  EMPLOYEE // Feature 39 — scopeId holds ONE employee id (highest precedence: a per-person override)
 }
 
 /// An allowed office IP range for IP_RESTRICTED capture. CIDR (v4 or v6) scoped to a
@@ -9765,25 +9766,103 @@ model LocationOfficeIp {
   @@index([businessId, locationId, isActive])
 }
 
-/// The employee's enrolled reference face. ONE active row per (tenant, employee).
-/// imageUrl = object-storage key of the reference selfie (audit). embedding = the
-/// matcher's reference vector (JSON array) when a real embedding matcher produced one
-/// at enrol time; null for the stub matcher (which compares NOTHING and defers to HR).
-/// DPDP/PII note: the selfie is @pii:sensitive; liveness is OUT OF SCOPE v1.
+/// The employee's enrolled reference face. ONE row per (tenant, employee) — a
+/// re-enrolment OVERWRITES the row back to PENDING, so face punching is deliberately
+/// unavailable until HR re-approves the new reference (secure default; blocks the
+/// "swap the reference on a stolen session" attack). imageUrl = object-storage key of
+/// the reference selfie (audit). embedding = the matcher's reference vector (JSON
+/// array) when a real embedding matcher produced one at enrol time; null for the stub.
+/// Feature 39: `status` gates matching — ONLY an ACTIVE row is a valid reference; the
+/// PENDING→ACTIVE flip rides the F10 approval engine (module FACE_ENROLLMENT, built-in
+/// default chain = a single HR step). DPDP/PII note: the selfie is @pii:sensitive and
+/// the embedding is derived biometric data — both tenant-scoped, deleted with the
+/// employee; matching runs ONLY on our servers (no third-party biometric processor).
+/// Liveness is OUT OF SCOPE v1 (roadmap).
 model FaceEnrollment {
   id         String   @id @default(uuid())
   businessId String
   employeeId String
   imageUrl   String   @db.Text // @pii:sensitive — object-storage key of the reference selfie
   embedding  Json? // reference embedding vector (real matcher) or null (stub)
-  matcher    String? // which matcher impl produced the embedding ("stub" | "face-api" | …)
+  matcher    String? // which matcher impl produced the embedding ("stub" | "arcface-onnx" | …)
   isActive   Boolean  @default(true)
   enrolledAt DateTime @default(now())
   enrolledBy String? // self (the employee's userId) or an HR operator
-  version    Int      @default(0)
+
+  // Feature 39 — HR approval gate. Legacy rows default ACTIVE (they were live before
+  // the gate existed); every NEW self-enrolment is written PENDING explicitly.
+  status            FaceEnrollmentStatus @default(ACTIVE)
+  approvalRequestId String? // the open/decided F10 ApprovalRequest gating this reference
+  decidedBy         String? // operator userId who approved/rejected/revoked
+  decidedAt         DateTime?
+  decisionNote      String?  @db.Text // HR's reject/revoke reason (shown to the employee)
+  detScore          Float? // detector confidence at enrol (quality audit)
+
+  version Int @default(0)
 
   @@unique([businessId, employeeId])
   @@index([businessId, employeeId, isActive])
+  @@index([businessId, status])
+}
+
+enum FaceEnrollmentStatus {
+  PENDING // submitted, awaiting HR approval — NOT a valid matching reference yet
+  ACTIVE // HR-approved — the live matching reference
+  REJECTED // HR declined (decisionNote carries the reason); employee may retake
+  REVOKED // HR pulled an ACTIVE reference (compromise/exit); face punch disabled
+}
+
+// ===========================================================================
+// Feature 39 — Face & Geo Attendance Controls: polygon geofences. A named,
+// map-drawn polygon attachable to a LOCATION (office zone) or to ONE EMPLOYEE
+// (individual restriction — beats office zones when present). Zone resolution
+// at punch: employee links > location links > legacy Location radius circle.
+// Relation-less (plain ids + @@index), same posture as every F2 capture model.
+// ===========================================================================
+
+/// A named polygon geofence. polygonJson = the closed outer ring as [[lng,lat], ...]
+/// (GeoJSON vertex order; first==last optional — the evaluator closes it). Validated
+/// at save: ≥3 distinct vertices, coords in range, non-degenerate area. Centroid is
+/// stamped at save for map centering + nearest-zone distance hints.
+model AttendanceGeoFence {
+  id          String  @id @default(uuid())
+  businessId  String
+  name        String
+  description String?
+  polygonJson Json
+  centroidLat Decimal? @db.Decimal(9, 6)
+  centroidLng Decimal? @db.Decimal(9, 6)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdBy   String?
+  version     Int      @default(0)
+
+  @@index([businessId, isActive])
+}
+
+/// Attach a fence to an office (scopeKind=LOCATION, scopeId=locationId) or to an
+/// individual (scopeKind=EMPLOYEE, scopeId=employeeId). An employee with ANY active
+/// EMPLOYEE link punches only inside THOSE zones (personal override); otherwise the
+/// zones of their current location apply; otherwise the legacy radius circle.
+model AttendanceFenceLink {
+  id         String         @id @default(uuid())
+  businessId String
+  fenceId    String
+  scopeKind  FenceScopeKind
+  scopeId    String // locationId | employeeId (tenant-validated at the API)
+  isActive   Boolean        @default(true)
+  createdAt  DateTime       @default(now())
+  createdBy  String?
+
+  @@unique([businessId, fenceId, scopeKind, scopeId])
+  @@index([businessId, scopeKind, scopeId, isActive])
+  @@index([businessId, fenceId, isActive])
+}
+
+enum FenceScopeKind {
+  LOCATION
+  EMPLOYEE
 }
 
 // ===========================================================================
@@ -12608,6 +12687,7 @@ enum WorkflowModule {
   COMP_OFF // Feature 30 — comp-off EARN approval (manager green-lights a credit)
   SHIFT_SWAP // Feature 29 — shift-swap approval (manager green-lights a roster-cell trade)
   LEAVE_ENCASHMENT // Feature 31 — in-service leave encashment request approval
+  FACE_ENROLLMENT // Feature 39 — HR approves an employee's face reference before face punching
 }
 
 model WorkflowStep {

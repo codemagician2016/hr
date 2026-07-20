@@ -77,6 +77,13 @@ const BUILT_IN_DEFAULT = Object.freeze({
   LEAVE_ENCASHMENT: [
     step(1, 'REPORTING_MANAGER', { name: 'Manager', approverRefId: '1', slaHours: 48, onTimeoutAction: 'ESCALATE' }),
   ],
+  // Feature 39 — face-reference enrolment. HR — not the reporting manager — owns the
+  // biometric identity gate (mirrors PROFILE_CHANGE: identity changes are an HR
+  // accountability, and the approver eyeballs the submitted selfie). A tenant can
+  // override by publishing a real FACE_ENROLLMENT WorkflowDefinition.
+  FACE_ENROLLMENT: [
+    step(1, 'HR', { name: 'HR', slaHours: 72, onTimeoutAction: 'ESCALATE' }),
+  ],
 });
 
 // Generic fallback for any module without a bespoke built-in: manager approves,

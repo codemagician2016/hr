@@ -7,7 +7,10 @@
  *   A  Policy resolution precedence: EMPLOYEE_GROUP > LOCATION > ENTITY > TENANT.
  *   B  FACE required: a punch with NO selfie is REJECTED under enforce + FLAGGED
  *      under warn; a punch WITH a selfie (stub matcher → NEEDS_REVIEW) is ACCEPTED
- *      but flagged for review; an enrolled reference is honoured.
+ *      but flagged for review; an enrolled reference is honoured. Feature 39: a
+ *      self-enrolment lands PENDING (HR approval gate) and is NOT matchable until
+ *      approved — the test simulates the HR approval with a direct status flip
+ *      (the F10 engine round-trip is covered by consumer guards + staging QA).
  *   C  IP_RESTRICTED: an off-CIDR punch is REJECTED under enforce + FLAGGED under
  *      warn (trusted req.ip, not raw XFF); an in-CIDR punch is ACCEPTED clean.
  *   D  GEO_FENCE still enforces (reuses geo.js) — out-of-radius rejected under
@@ -73,6 +76,17 @@ async function cleanup(businessId) {
     await prisma.attendance.deleteMany({ where: { businessId, employeeId: { in: ids } } });
     await prisma.attendancePunch.deleteMany({ where: { businessId, employeeId: { in: ids } } });
     await prisma.faceEnrollment.deleteMany({ where: { businessId, employeeId: { in: ids } } });
+    // Feature 39 — enrolments open FACE_ENROLLMENT approval requests; sweep them
+    // (actions first — FK) so re-runs don't pile PENDING rows into the inbox.
+    const reqs = await prisma.approvalRequest.findMany({
+      where: { businessId, module: 'FACE_ENROLLMENT', requesterEmployeeId: { in: ids } },
+      select: { id: true },
+    });
+    const reqIds = reqs.map((r) => r.id);
+    if (reqIds.length) {
+      await prisma.approvalAction.deleteMany({ where: { businessId, approvalRequestId: { in: reqIds } } });
+      await prisma.approvalRequest.deleteMany({ where: { id: { in: reqIds } } });
+    }
     await prisma.employmentRecord.deleteMany({ where: { businessId, employeeId: { in: ids } } });
   }
   await prisma.attendanceCapturePolicy.deleteMany({ where: { businessId, OR: [{ name: { startsWith: PREFIX } }, { createdBy: `${PREFIX}-op` }] } });
@@ -161,10 +175,21 @@ async function main() {
       const noPunch = await prisma.attendancePunch.count({ where: { businessId, employeeId: fe.id } });
       check('B2 rejected punch was NOT created', noPunch === 0);
 
-      // First enrol FACEENF's reference (so the stub matcher compares against a
-      // reference and returns NEEDS_REVIEW rather than NO_REFERENCE → reject).
+      // First enrol FACEENF's reference. Feature 39: it rides the approval gate —
+      // normally PENDING; ACTIVE only when the engine auto-approved (no resolvable
+      // HR in the seed → audited escalate path).
       const enrollEnf = await callController(meAttendance.enrollFace, essReq(businessId, feEmail, { body: { selfieDataUrl: SELFIE } }));
-      check('B3a enrol reference for FACEENF', enrollEnf.statusCode === 201 && enrollEnf.body.enrolled === true);
+      check('B3a enrol rides the approval gate (PENDING, or auto-ACTIVE without HR)', enrollEnf.statusCode === 201 && ['PENDING', 'ACTIVE'].includes(enrollEnf.body.status));
+
+      if (enrollEnf.body.status === 'PENDING') {
+        // While PENDING the reference is NOT matchable → enforce + selfie → 403.
+        const pendRej = await callController(meAttendance.createPunch, essReq(businessId, feEmail, { body: { type: 'IN', selfieDataUrl: SELFIE } }));
+        check('B3b PENDING reference not matchable → 403 under enforce', pendRej.statusCode === 403 && pendRej.body.reason === 'CAPTURE_POLICY');
+      } else {
+        check('B3b PENDING probe (skipped — engine auto-approved)', true);
+      }
+      // Simulate the HR approval: PENDING → ACTIVE (engine round-trip covered elsewhere).
+      await prisma.faceEnrollment.updateMany({ where: { businessId, employeeId: fe.id }, data: { status: 'ACTIVE' } });
 
       // WITH selfie (stub → NEEDS_REVIEW) + a reference on file → 201 accepted but
       // flagged for review (the default stub NEVER hard-rejects; a human verifies).
@@ -186,13 +211,22 @@ async function main() {
       const warn = await callController(meAttendance.createPunch, essReq(businessId, fwEmail, { body: { type: 'IN' } }));
       check('B6 FACE warn + no selfie → 201 created, flagged FACE_MISSING_SELFIE', warn.statusCode === 201 && warn.body.captureFlagged === true && warn.body.captureFlagReasons.includes('FACE_MISSING_SELFIE'));
 
-      // /me/attendance/policy preview reflects requireFace + faceEnrolled false→true.
+      // /me/attendance/policy preview reflects requireFace + the F39 lifecycle:
+      // NONE → (enrol) PENDING, faceEnrolled STILL false → (HR approve) ACTIVE, true.
       const polRes = await callController(meAttendance.getCapturePolicy, essReq(businessId, fwEmail, {}));
-      check('B7 /policy preview shows requireFace true, faceEnrolled false', polRes.body.requireFace === true && polRes.body.faceEnrolled === false);
+      check('B7 /policy preview shows requireFace true, faceEnrolled false, status NONE', polRes.body.requireFace === true && polRes.body.faceEnrolled === false && polRes.body.faceStatus === 'NONE');
       const enr = await callController(meAttendance.enrollFace, essReq(businessId, fwEmail, { body: { selfieDataUrl: SELFIE } }));
-      check('B8 enrollFace → 201 enrolled', enr.statusCode === 201 && enr.body.enrolled === true);
+      check('B8 enrollFace → 201, gated (PENDING or auto-ACTIVE without HR)', enr.statusCode === 201 && ['PENDING', 'ACTIVE'].includes(enr.body.status));
+      if (enr.body.status === 'PENDING') {
+        const polPend = await callController(meAttendance.getCapturePolicy, essReq(businessId, fwEmail, {}));
+        check('B8b /policy shows faceStatus PENDING, faceEnrolled STILL false', polPend.body.faceStatus === 'PENDING' && polPend.body.faceEnrolled === false);
+      } else {
+        check('B8b PENDING preview (skipped — engine auto-approved)', true);
+      }
+      const fwEmp = await prisma.employee.findFirst({ where: { businessId, workEmail: fwEmail }, select: { id: true } });
+      await prisma.faceEnrollment.updateMany({ where: { businessId, employeeId: fwEmp.id }, data: { status: 'ACTIVE' } });
       const polRes2 = await callController(meAttendance.getCapturePolicy, essReq(businessId, fwEmail, {}));
-      check('B9 /policy preview now shows faceEnrolled true', polRes2.body.faceEnrolled === true);
+      check('B9 /policy preview shows faceEnrolled true after approval', polRes2.body.faceEnrolled === true && polRes2.body.faceStatus === 'ACTIVE');
 
       await prisma.attendanceCapturePolicy.deleteMany({ where: { businessId, createdBy: `${PREFIX}-op` } });
     }

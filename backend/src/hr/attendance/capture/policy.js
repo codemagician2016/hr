@@ -27,7 +27,7 @@
  */
 
 const prisma = require('../../../core/lib/prisma');
-const { evaluatePunchGeofence } = require('../geo');
+const { evaluatePunchZones } = require('../geo');
 const { evaluatePunchIp } = require('./ip');
 const faceMatcher = require('./faceMatcher');
 
@@ -63,6 +63,7 @@ async function resolvePolicy(businessId, ctx, db = prisma) {
   const pick = (scope, id) => rows.find((r) => r.scope === scope && (id == null ? r.scopeId == null : r.scopeId === id));
 
   const resolved =
+    (c.employeeId && pick('EMPLOYEE', c.employeeId)) || // Feature 39 — per-person override wins
     (c.departmentId && pick('EMPLOYEE_GROUP', c.departmentId)) ||
     (c.locationId && pick('LOCATION', c.locationId)) ||
     (c.entityId && pick('ENTITY', c.entityId)) ||
@@ -70,6 +71,44 @@ async function resolvePolicy(businessId, ctx, db = prisma) {
     null;
 
   return resolved || { ...NULL_POLICY };
+}
+
+/**
+ * loadZones — Feature 39. The geofence zones THIS employee may punch inside.
+ * Resolution (docs/features/39 §5a): active EMPLOYEE fence links (personal override)
+ * → else active LOCATION fence links for the current work site → else the legacy
+ * Location radius circle → else []. Each zone is shaped for geo.evaluatePunchZones.
+ */
+async function loadZones(businessId, ctx, db = prisma) {
+  const c = ctx || {};
+  if (!businessId) return [];
+  const or = [];
+  if (c.employeeId) or.push({ scopeKind: 'EMPLOYEE', scopeId: c.employeeId });
+  if (c.locationId) or.push({ scopeKind: 'LOCATION', scopeId: c.locationId });
+  let links = [];
+  if (or.length) {
+    links = await db.attendanceFenceLink.findMany({
+      where: { businessId, isActive: true, OR: or },
+      select: { fenceId: true, scopeKind: true },
+    });
+  }
+  const wanted = links.some((l) => l.scopeKind === 'EMPLOYEE')
+    ? links.filter((l) => l.scopeKind === 'EMPLOYEE') // personal links OVERRIDE office zones
+    : links;
+  if (wanted.length) {
+    const fences = await db.attendanceGeoFence.findMany({
+      where: { businessId, isActive: true, id: { in: [...new Set(wanted.map((l) => l.fenceId))] } },
+      select: { id: true, name: true, polygonJson: true },
+    });
+    const zones = fences.map((f) => ({ kind: 'POLYGON', id: f.id, name: f.name, ring: f.polygonJson }));
+    if (zones.length) return zones;
+  }
+  // Legacy fallback: the assigned Location's radius circle (unchanged behaviour).
+  const loc = c.location;
+  if (loc && loc.geoLat != null && loc.geoLng != null && loc.geofenceM) {
+    return [{ kind: 'RADIUS', id: loc.id || c.locationId || null, name: 'Office radius', lat: loc.geoLat, lng: loc.geoLng, radiusM: loc.geofenceM }];
+  }
+  return [];
 }
 
 /**
@@ -86,16 +125,21 @@ async function loadLocationCidrs(businessId, locationId, db = prisma) {
 }
 
 /**
- * loadFaceReference — the employee's active enrolled reference (FACE mode).
- * Returns { hasReference, embedding } — embedding is null for the stub matcher.
+ * loadFaceReference — the employee's enrolled reference (FACE mode). Feature 39:
+ * ONLY an ACTIVE (HR-approved) enrolment is a valid matching reference; a PENDING/
+ * REJECTED/REVOKED row reports hasReference:false (punch → NO_REFERENCE) while still
+ * surfacing its status for the /policy preview + friendlier client messaging.
+ * Returns { hasReference, embedding, status } — status 'NONE' when never enrolled.
  */
 async function loadFaceReference(businessId, employeeId, db = prisma) {
-  if (!businessId || !employeeId) return { hasReference: false, embedding: null };
+  if (!businessId || !employeeId) return { hasReference: false, embedding: null, status: 'NONE' };
   const row = await db.faceEnrollment.findFirst({
-    where: { businessId, employeeId, isActive: true },
-    select: { embedding: true },
+    where: { businessId, employeeId },
+    select: { embedding: true, status: true, isActive: true },
   });
-  return { hasReference: !!row, embedding: row ? row.embedding : null };
+  if (!row) return { hasReference: false, embedding: null, status: 'NONE' };
+  const usable = row.status === 'ACTIVE' && row.isActive !== false;
+  return { hasReference: usable, embedding: usable ? row.embedding : null, status: row.status };
 }
 
 /**
@@ -281,14 +325,13 @@ async function evaluatePunchCapture(businessId, ctx, punch, opts = {}, db = pris
     return { ok: true, reject: false, reason: null, flags: [], methods: [], policy, marks: { captureMethods: [], captureFlagged: false, captureFlagReasons: [] } };
   }
 
-  // GEO — reuse the EXISTING pure geofence math against the assigned location.
+  // GEO — Feature 39: evaluate against the employee's resolved ZONES (personal
+  // polygons > office polygons > legacy Location radius). Same graceful-degradation
+  // + verdict shape as the old single-circle path (enforceCapture is unchanged).
   let geoVerdict = null;
   if (policy.requireGeo) {
-    geoVerdict = evaluatePunchGeofence(
-      { geoLat: pn.geoLat, geoLng: pn.geoLng },
-      c.location || null,
-      {},
-    );
+    const zones = await loadZones(businessId, { ...c, employeeId: c.employeeId || opts.employeeId }, db);
+    geoVerdict = evaluatePunchZones({ geoLat: pn.geoLat, geoLng: pn.geoLng }, zones);
   }
 
   // IP — trusted req.ip vs the location's CIDR allow-list.
@@ -325,6 +368,7 @@ module.exports = {
   resolvePolicy,
   loadLocationCidrs,
   loadFaceReference,
+  loadZones,
   runFaceMatch,
   enforceCapture,
   evaluatePunchCapture,
