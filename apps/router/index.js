@@ -62,10 +62,23 @@ const HOST_ALIAS_REVERSE = (() => {
 
 // Map a (possibly canonical/dotted) host back to the external host the browser
 // can resolve. Preserves any :port suffix. No-op when no reverse alias exists.
+// Feature 41: mirrors the generic hyphen-form canonicalization — on alias-using
+// deployments (staging), a canonical `<label>.<PLATFORM_DOMAIN>` host with no
+// explicit reverse entry maps back to the browser-resolvable 1-level form
+// `<label>-<PLATFORM_DOMAIN>` (Universal-SSL safe). Never active on prod
+// (empty alias map), where dotted tenant hosts are the real external hosts.
 function externalHost(host) {
   if (!host) return host;
   const [bare, port] = String(host).toLowerCase().split(':');
-  const ext = HOST_ALIAS_REVERSE[bare];
+  let ext = HOST_ALIAS_REVERSE[bare];
+  if (!ext && Object.keys(HOST_ALIAS).length) {
+    const pd = (process.env.PLATFORM_DOMAIN || 'hr.com').toLowerCase();
+    const dot = `.${pd}`;
+    if (bare.endsWith(dot)) {
+      const label = bare.slice(0, -dot.length);
+      if (label && !label.includes('.')) ext = `${label}-${pd}`;
+    }
+  }
   if (!ext) return host;
   return port ? `${ext}:${port}` : ext;
 }
@@ -693,8 +706,25 @@ const server = http.createServer(async (req, res) => {
   try {
     // Rewrite hyphenated staging hosts to their canonical dotted form BEFORE any
     // routing/guard logic (so app-staging.drifthr.com is treated as app.staging.…).
+    // Feature 41: beyond the explicit env map, apply the GENERIC rule the map
+    // encodes — `<label>-<PLATFORM_DOMAIN>` (the 1-level Universal-SSL staging
+    // form) canonicalizes to `<label>.<PLATFORM_DOMAIN>` — so every tenant host
+    // (acme-staging.…) and every mobile alias (m-demo-staging.…) canonicalizes
+    // without a per-host env entry. Explicit map entries still win (they can
+    // point anywhere, e.g. app-staging → app.staging).
     const aliasFrom = (req.headers.host || '').toLowerCase().split(':')[0];
-    if (HOST_ALIAS[aliasFrom]) req.headers.host = HOST_ALIAS[aliasFrom];
+    if (HOST_ALIAS[aliasFrom]) {
+      req.headers.host = HOST_ALIAS[aliasFrom];
+    } else if (Object.keys(HOST_ALIAS).length) {
+      // Generic rule only where the alias mechanism is in use (staging): on prod
+      // there is no env map and dotted tenant hosts are REAL hosts — never touch.
+      const pd = (process.env.PLATFORM_DOMAIN || 'hr.com').toLowerCase();
+      const hyphen = `-${pd}`;
+      if (aliasFrom.endsWith(hyphen)) {
+        const label = aliasFrom.slice(0, -hyphen.length);
+        if (label && !label.includes('.')) req.headers.host = `${label}.${pd}`;
+      }
+    }
     const cleanHost = (req.headers.host || '').toLowerCase().split(':')[0];
     const platformDomain = (process.env.PLATFORM_DOMAIN || 'hr.com').toLowerCase();
     const isPlatformHost = cleanHost === platformDomain || cleanHost.endsWith(`.${platformDomain}`);
