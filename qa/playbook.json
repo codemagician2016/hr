@@ -803,7 +803,7 @@
           "openUrl": "https://app-staging.drifthr.com/letters/templates",
           "steps": [
             "Log in as operator@demo.test and open Letters > Templates.",
-            "Create or edit a template and pick a Default letterhead so the editor shows it as the backdrop.",
+            "Create or edit a template and use the 'Print on:' selector directly above the body to choose a letterhead (or Blank) — the editor re-renders that stationery live behind your text.",
             "Type the body directly on the letterhead; use the toolbar for bold, headings (H1/H2) and bullet/numbered lists.",
             "Insert merge fields (e.g. employee.name, date.issueDate) from the palette — they appear as chips.",
             "Save & publish, then issue the template to an employee and open the PDF."

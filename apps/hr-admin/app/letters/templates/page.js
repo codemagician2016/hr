@@ -412,10 +412,24 @@ function TemplateEditor({ template, letterheads, letterheadsAvailable, onClose, 
 
           {/* body: WYSIWYG on the letterhead + merge-field drawer */}
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-sm font-medium text-gray-700">Body<InfoTip text="Write the letter on the letterhead. Format with the toolbar (bold, headings, lists) and insert merge fields like {{employee.name}} — they fill in automatically at issue. Pick a Default letterhead below to write directly on it." label="Body" /></label>
-              <span className="text-xs text-gray-400">Bold · headings · lists. Click a field to insert at the cursor.</span>
+            <div className="flex items-center justify-between mb-2 gap-3 flex-wrap">
+              <label className="block text-sm font-medium text-gray-700">Body<InfoTip text="Write the letter directly on the stationery you picked. Format with the toolbar (bold, headings, lists) and insert merge fields like {{employee.name}} — they fill in automatically at issue." label="Body" /></label>
+              {/* Print on — pick the stationery here so the editor shows the real
+                  look & feel while you write (switches the backdrop live). */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-gray-600">Print on:</span>
+                <select
+                  value={form.defaultLetterheadId}
+                  onChange={(e) => set('defaultLetterheadId', e.target.value)}
+                  className="px-2 py-1.5 border border-gray-300 rounded-md text-xs bg-white"
+                >
+                  <option value="">Blank / auto-resolve at issue</option>
+                  {asList(letterheads).map((lh) => <option key={lh.id} value={lh.id}>{lh.name || lh.code}</option>)}
+                </select>
+                <InfoTip text="Choose the letterhead you're writing on — the editor renders it live behind your text, so what you type is exactly where it prints. Leave it on 'Blank' to write without a letterhead (one is then auto-resolved by category at issue, or a branded page is generated if none exists)." label="Print on" />
+              </div>
             </div>
+            <p className="text-xs text-gray-400 mb-1">Bold · headings · lists. Click a merge field to insert it at the cursor.</p>
             <div className="flex gap-3 items-start">
               <WysiwygEditor
                 ref={wysiwygRef}
