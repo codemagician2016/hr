@@ -190,22 +190,57 @@ async function assign(req, res, next) {
       return res.status(409).json({ message: 'Asset is already assigned; return it before reassigning' });
     }
 
-    const data = {
-      businessId,
-      assetId,
-      employeeId,
-      assignedAt: req.body.assignedAt ? new Date(req.body.assignedAt) : new Date(),
-      conditionOut: req.body.conditionOut !== undefined ? req.body.conditionOut : undefined,
-      notes: req.body.notes !== undefined ? req.body.notes : undefined,
-      status: 'ASSIGNED',
-    };
-    for (const k of Object.keys(data)) if (data[k] === undefined) delete data[k];
-
-    const [assignment] = await prisma.$transaction([
-      prisma.assetAssignment.create({ data, include: ASSIGNMENT_INCLUDE }),
-      prisma.asset.update({ where: { id: assetId }, data: { status: 'ASSIGNED' } }),
-    ]);
-    res.status(201).json(assignment);
+    // Program Phase 2 — the hand-over rides the approval engine. The ASSET
+    // consumer CREATES the assignment on approval; the built-in AUTO_APPROVE
+    // default terminalizes inside this same tx (identical to the old direct
+    // create), while a tenant-authored chain leaves it pending (202).
+    const engine = require('../approvals/engine');
+    require('../approvals/consumers.asset');
+    const result = await prisma.$transaction(async (tx) => {
+      const rec = await tx.employmentRecord.findFirst({
+        where: { businessId, employeeId, isCurrent: true },
+        orderBy: { effectiveFrom: 'desc' },
+        select: { departmentId: true, gradeId: true, locationId: true },
+      });
+      const opened = await engine.openRequest({
+        businessId,
+        module: 'ASSET',
+        entityType: 'Asset',
+        entityId: assetId,
+        requesterEmployeeId: employeeId,
+        payload: {
+          assignment: {
+            assetId,
+            employeeId,
+            assignedAt: req.body.assignedAt || null,
+            conditionOut: req.body.conditionOut !== undefined ? req.body.conditionOut : null,
+            notes: req.body.notes !== undefined ? req.body.notes : null,
+          },
+          assetName: asset.name || asset.assetTag || null,
+        },
+        ctx: {
+          entityId: assetId,
+          departmentId: rec ? rec.departmentId : null,
+          employeeLevel: rec ? rec.gradeId : null,
+          locationId: rec ? rec.locationId : null,
+        },
+      }, tx);
+      if (opened.terminal && opened.approvalRequest.status === 'APPROVED') {
+        const assignment = await tx.assetAssignment.findFirst({
+          where: { assetId, businessId, returnedAt: null },
+          include: ASSIGNMENT_INCLUDE,
+          orderBy: { assignedAt: 'desc' },
+        });
+        return { assignment };
+      }
+      return { pending: opened.approvalRequest };
+    });
+    if (result.assignment) return res.status(201).json(result.assignment);
+    return res.status(202).json({
+      pendingApproval: true,
+      approvalRequestId: result.pending.id,
+      message: 'Assignment awaits approval per your ASSET workflow.',
+    });
   } catch (e) {
     if (e.code === 'P2002') return res.status(409).json({ message: 'Asset is already assigned' });
     next(e);

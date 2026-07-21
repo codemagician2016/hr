@@ -40,6 +40,17 @@ const { registerEncashmentConsumer } = require('./consumers.encashment');
 // load like the others; wired here too so the explicit boot path stays the single
 // source of truth.
 const { registerFaceEnrollmentConsumer } = require('./consumers.faceEnrollment');
+// Program Phase 2 — the previously-direct modules ride the engine: LOAN (EMI
+// schedule on approve), TIMESHEET (stamp flips), ATTENDANCE_REGULARIZATION
+// (punch materialize + recompute), COMPENSATION (PROPOSED→EFFECTIVE
+// supersession), ASSET (assignment created on approve; AUTO default),
+// DOCUMENT_SIGN (envelope dispatch gate; AUTO default).
+const { registerLoanConsumer } = require('./consumers.loan');
+const { registerTimesheetConsumer } = require('./consumers.timesheet');
+const { registerRegularizationConsumer } = require('./consumers.regularization');
+const { registerCompensationConsumer } = require('./consumers.compensation');
+const { registerAssetConsumer } = require('./consumers.asset');
+const { registerDocumentSignConsumer } = require('./consumers.documentSign');
 
 let done = false;
 
@@ -53,6 +64,12 @@ function registerConsumers() {
   registerShiftSwapConsumer();
   registerEncashmentConsumer();
   registerFaceEnrollmentConsumer();
+  registerLoanConsumer();
+  registerTimesheetConsumer();
+  registerRegularizationConsumer();
+  registerCompensationConsumer();
+  registerAssetConsumer();
+  registerDocumentSignConsumer();
   done = true;
 }
 

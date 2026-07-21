@@ -16,11 +16,14 @@
 //   • "Only if" → conditionJson (conditions.js grammar).
 //   • "Time limit" → slaHours + onTimeoutAction.
 //
-// We edit ONE definition per module — the module default (no scope/entity). If
-// none exists we create it on first save. Scope-specific defs are an advanced
-// path the spec defers; this keeps the SME flow to "one chain per process".
+// Program Phase 2: the canvas edits ONE SPECIFIC definition (passed in as
+// `def`) — a module can now have several: the company-wide default (no
+// scope/entity) plus scoped chains (departments / grades / locations). The
+// surrounding page owns the definition list, scope editing and publish/delete
+// actions; here we only assemble and publish that one definition's steps. If
+// no def is passed (legacy path) we create the module default on first save.
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Spinner, ErrorBanner, PrimaryButton } from '@hr/ui';
 import { get, post, patch, request } from '@/lib/api';
 import {
@@ -516,12 +519,10 @@ function PreviewPanel({ module, rows, defId, userNames }) {
 }
 
 // ─── the builder ─────────────────────────────────────────────────────────────
-export default function ChainBuilder({ module, defs, onClose, onChanged }) {
-  // Pick the module-default def (no scope/entity) to edit, else the first, else none.
-  const initialDef = useMemo(
-    () => defs.find((d) => !d.entityId && !d.scopeJson) || defs[0] || null,
-    [defs],
-  );
+// `def` = the SPECIFIC definition to edit (the page picks it from the module's
+// list — default or scoped). `scopeLabel` = its human scope summary ("Whole
+// company" / "Dept: Engineering · Location: Pune") for the header.
+export default function ChainBuilder({ module, def: initialDef = null, scopeLabel = '', onClose, onChanged }) {
   const [def, setDef] = useState(initialDef);
   const [rows, setRows] = useState(() => rowsFromSteps(initialDef?.steps || []));
   const [chose, setChose] = useState(!!initialDef && (initialDef.steps?.length || 0) > 0);
@@ -579,7 +580,8 @@ export default function ChainBuilder({ module, defs, onClose, onChanged }) {
     setRows((rs) => rs.map((r) => (r.uid === uid ? { ...r, steps: [...r.steps, step('HR')] } : r)));
   }
 
-  // Ensure a module-default definition exists; return its id.
+  // Legacy fallback only — the page normally hands us an existing definition.
+  // If none was passed, create the module default (company-wide) on first save.
   async function ensureDef() {
     if (def) return def;
     const created = await post('/api/hr/approvals/workflows', {
@@ -623,7 +625,7 @@ export default function ChainBuilder({ module, defs, onClose, onChanged }) {
       const saved = await saveDraft();
       if (!saved) { setPublishing(false); return; }
       await post(`/api/hr/approvals/workflows/${saved.id}/publish`, {});
-      setNotice('Published — this chain is now live for new requests.');
+      setNotice('Published — new requests matching this chain’s scope now route through it.');
       onChanged?.();
     } catch (err) {
       setError(err.data?.message || err.message || 'Failed to publish.');
@@ -638,12 +640,18 @@ export default function ChainBuilder({ module, defs, onClose, onChanged }) {
     <div>
       <div className="mb-5 flex items-start justify-between gap-4">
         <div>
-          <button type="button" onClick={onClose} className="mb-2 text-sm text-gray-500 hover:text-gray-700">← All processes</button>
+          <button type="button" onClick={onClose} className="mb-2 text-sm text-gray-500 hover:text-gray-700">← All {moduleLabel(module)} chains</button>
           <h1 className="flex items-center text-2xl font-semibold text-gray-900">
-            {moduleLabel(module)} approval chain
+            {def?.name || `${moduleLabel(module)} approval chain`}
             <InfoTip text="Stack the steps an employee’s request must pass, top to bottom. Drop two approvers into one step to make them happen at the same time. Save a draft any time; publish when you’re ready." />
           </h1>
-          <p className="mt-0.5 text-sm text-gray-500">{oneLiner}</p>
+          <p className="mt-0.5 text-sm text-gray-500">
+            <span className="font-medium text-gray-600">{moduleLabel(module)}</span>
+            <span className="mx-1.5 text-gray-300">·</span>
+            {scopeLabel || (def && !def.scopeJson ? 'Whole company' : '')}
+            {(scopeLabel || (def && !def.scopeJson)) && <span className="mx-1.5 text-gray-300">·</span>}
+            {oneLiner}
+          </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {def?.isPublished ? (

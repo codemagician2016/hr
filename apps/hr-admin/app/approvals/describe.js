@@ -73,5 +73,27 @@ export function describeChain(steps) {
   return segs.join(' → ');
 }
 
+// Summarise a definition's scopeJson as a short human line. The resolver grammar
+// (workflowResolver.js): { departmentIds:[], employeeLevels:[], locationIds:[] } —
+// arrays of ids; every present array must include the requester's value. Note
+// employeeLevels holds GRADE ids (platform convention — surfaced as "Grade").
+// `lookups` = { departments:[{id,name}], grades:[...], locations:[...] } so we
+// can print names, not ids. No scope (or all-empty arrays) = "Whole company".
+export function describeScope(scopeJson, lookups = {}) {
+  if (!scopeJson || typeof scopeJson !== 'object') return 'Whole company';
+  const nameOf = (list, id) => (list || []).find((x) => x.id === id)?.name || 'unknown';
+  const parts = [];
+  if (Array.isArray(scopeJson.departmentIds) && scopeJson.departmentIds.length > 0) {
+    parts.push(`Dept: ${scopeJson.departmentIds.map((id) => nameOf(lookups.departments, id)).join(', ')}`);
+  }
+  if (Array.isArray(scopeJson.employeeLevels) && scopeJson.employeeLevels.length > 0) {
+    parts.push(`Grade: ${scopeJson.employeeLevels.map((id) => nameOf(lookups.grades, id)).join(', ')}`);
+  }
+  if (Array.isArray(scopeJson.locationIds) && scopeJson.locationIds.length > 0) {
+    parts.push(`Location: ${scopeJson.locationIds.map((id) => nameOf(lookups.locations, id)).join(', ')}`);
+  }
+  return parts.length > 0 ? parts.join(' · ') : 'Whole company';
+}
+
 export const WHO_SHORT = SHORT;
 export { WHO_OPTIONS };

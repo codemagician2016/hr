@@ -84,6 +84,36 @@ const BUILT_IN_DEFAULT = Object.freeze({
   FACE_ENROLLMENT: [
     step(1, 'HR', { name: 'HR', slaHours: 72, onTimeoutAction: 'ESCALATE' }),
   ],
+  // ── Program Phase 2 — engine onboarding for the previously-direct modules. ──
+  // Every default below mirrors the module's PRE-ENGINE behaviour so wiring the
+  // engine changes nothing until a tenant publishes their own chain.
+  // LOAN: approval was a canManageCompensation act — an HR/comp accountability,
+  // not the reporting manager's.
+  LOAN: [
+    step(1, 'HR', { name: 'HR / Compensation', slaHours: 72, onTimeoutAction: 'ESCALATE' }),
+  ],
+  // COMPENSATION: the maker-checker (canApproveCompensation) is an HR gate.
+  COMPENSATION: [
+    step(1, 'HR', { name: 'HR (comp approver)', slaHours: 72, onTimeoutAction: 'ESCALATE' }),
+  ],
+  // TIMESHEET / ATTENDANCE_REGULARIZATION: manager-owned today (resolveApprover
+  // routed regularizations to the reporting manager; timesheets are a manager
+  // sign-off). Matches GENERIC_DEFAULT but pinned explicitly.
+  TIMESHEET: [
+    step(1, 'REPORTING_MANAGER', { name: 'Manager', approverRefId: '1', slaHours: 48, onTimeoutAction: 'ESCALATE' }),
+  ],
+  ATTENDANCE_REGULARIZATION: [
+    step(1, 'REPORTING_MANAGER', { name: 'Manager', approverRefId: '1', slaHours: 48, onTimeoutAction: 'ESCALATE' }),
+  ],
+  // ASSET / DOCUMENT_SIGN: NO approval existed (assign/dispatch were direct HR
+  // acts). AUTO_APPROVE keeps them instant until a tenant authors a real chain
+  // (e.g. IT sign-off before a laptop hand-over).
+  ASSET: [
+    step(1, 'AUTO_APPROVE', { name: 'Auto (no approval configured)' }),
+  ],
+  DOCUMENT_SIGN: [
+    step(1, 'AUTO_APPROVE', { name: 'Auto (no approval configured)' }),
+  ],
 });
 
 // Generic fallback for any module without a bespoke built-in: manager approves,

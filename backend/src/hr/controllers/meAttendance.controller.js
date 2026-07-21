@@ -561,9 +561,35 @@ async function submitTimesheet(req, res, next) {
     if (ts.status !== 'DRAFT' && ts.status !== 'REJECTED') {
       return res.status(409).json({ message: `Cannot submit a timesheet in status ${ts.status}` });
     }
-    const updated = await prisma.timesheet.update({
-      where: { id: ts.id },
-      data: { status: 'SUBMITTED', submittedAt: new Date(), version: { increment: 1 } },
+    // Program Phase 2 — open the TIMESHEET approval in the same tx (default
+    // chain: reporting manager; a tenant chain may auto-approve).
+    const engine = require('../approvals/engine');
+    require('../approvals/consumers.timesheet');
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.timesheet.update({
+        where: { id: ts.id },
+        data: { status: 'SUBMITTED', submittedAt: new Date(), version: { increment: 1 } },
+      });
+      const rec = await tx.employmentRecord.findFirst({
+        where: { businessId, employeeId: emp.id, isCurrent: true },
+        orderBy: { effectiveFrom: 'desc' },
+        select: { departmentId: true, gradeId: true, locationId: true },
+      });
+      await engine.openRequest({
+        businessId,
+        module: 'TIMESHEET',
+        entityType: 'Timesheet',
+        entityId: ts.id,
+        requesterEmployeeId: emp.id,
+        payload: { periodStart: ts.periodStart, periodEnd: ts.periodEnd, totalHours: ts.totalHours != null ? String(ts.totalHours) : null },
+        ctx: {
+          entityId: ts.id,
+          departmentId: rec ? rec.departmentId : null,
+          employeeLevel: rec ? rec.gradeId : null,
+          locationId: rec ? rec.locationId : null,
+        },
+      }, tx);
+      return tx.timesheet.findUnique({ where: { id: ts.id } });
     });
     res.json(updated);
   } catch (e) { next(e); }
@@ -609,19 +635,45 @@ async function createRegularization(req, res, next) {
     const fullEmp = await prisma.employee.findFirst({ where: { id: emp.id, businessId, deletedAt: null } });
     const approver = await resolveApprover(fullEmp);
 
-    const reqRow = await prisma.attendanceRegularizationRequest.create({
-      data: {
+    const engine = require('../approvals/engine');
+    require('../approvals/consumers.regularization');
+    const reqRow = await prisma.$transaction(async (tx) => {
+      const row = await tx.attendanceRegularizationRequest.create({
+        data: {
+          businessId,
+          employeeId: emp.id,
+          date: d,
+          kind,
+          requestedInAt: requestedInAt ? new Date(requestedInAt) : null,
+          requestedOutAt: requestedOutAt ? new Date(requestedOutAt) : null,
+          reason,
+          status: 'PENDING',
+        },
+      });
+      const rec = await tx.employmentRecord.findFirst({
+        where: { businessId, employeeId: emp.id, isCurrent: true },
+        orderBy: { effectiveFrom: 'desc' },
+        select: { departmentId: true, gradeId: true, locationId: true },
+      });
+      const opened = await engine.openRequest({
         businessId,
-        employeeId: emp.id,
-        date: d,
-        kind,
-        requestedInAt: requestedInAt ? new Date(requestedInAt) : null,
-        requestedOutAt: requestedOutAt ? new Date(requestedOutAt) : null,
-        reason,
-        status: 'PENDING',
-        approvalRequestId: approver && approver.employeeId ? approver.employeeId
-          : (approver && approver.userId ? approver.userId : null),
-      },
+        module: 'ATTENDANCE_REGULARIZATION',
+        entityType: 'AttendanceRegularizationRequest',
+        entityId: row.id,
+        requesterEmployeeId: emp.id,
+        payload: { kind, date: d.toISOString().slice(0, 10), reason },
+        ctx: {
+          entityId: row.id,
+          departmentId: rec ? rec.departmentId : null,
+          employeeLevel: rec ? rec.gradeId : null,
+          locationId: rec ? rec.locationId : null,
+        },
+      }, tx);
+      await tx.attendanceRegularizationRequest.update({
+        where: { id: row.id },
+        data: { approvalRequestId: opened.approvalRequest.id },
+      });
+      return tx.attendanceRegularizationRequest.findUnique({ where: { id: row.id } });
     });
     res.status(201).json(reqRow);
   } catch (e) { next(e); }

@@ -121,6 +121,64 @@ async function createEnvelope(req, res, next) {
       if (!tpl) return res.status(404).json({ message: 'Document template not found' });
     }
 
+    // Program Phase 2 — dispatch rides the approval engine. AUTO_APPROVE
+    // built-in default → the DOCUMENT_SIGN consumer creates the envelope inside
+    // this same tx (identical behaviour + tokens in this response); a
+    // tenant-authored chain → 202-pending and the consumer emails signer links
+    // on approval.
+    const engine = require('../../approvals/engine');
+    require('../../approvals/consumers.documentSign');
+    const envelopeArgs = {
+      subject,
+      employeeDocumentId: body.employeeDocumentId || null,
+      documentTemplateId: body.documentTemplateId || null,
+      signers,
+      sequential: !!body.sequential,
+      expiresAt: body.expiresAt || null,
+    };
+    // Pre-resolve: a chain that is pure AUTO_APPROVE (the built-in default)
+    // means NO human gate — keep the historical direct path so the invite
+    // tokens ride this response byte-identically. Only a tenant-authored chain
+    // with a real approver opens an ApprovalRequest (202 + links emailed by the
+    // consumer on approval).
+    const { resolveDefinition } = require('../../approvals/workflowResolver');
+    const resolved = await resolveDefinition(businessId, 'DOCUMENT_SIGN', { entityId: body.employeeDocumentId || null });
+    const needsApproval = (resolved.steps || []).some((st) => st.approverType !== 'AUTO_APPROVE');
+    if (needsApproval) {
+      const gate = await prisma.$transaction(async (tx) => engine.openRequest({
+        businessId,
+        module: 'DOCUMENT_SIGN',
+        entityType: 'SignatureEnvelope',
+        entityId: body.employeeDocumentId || body.documentTemplateId || 'template-only',
+        requesterEmployeeId: req.user.employeeId || null,
+        payload: { envelope: envelopeArgs, subject },
+        ctx: { entityId: body.employeeDocumentId || null },
+      }, tx));
+      if (!(gate.terminal && gate.approvalRequest.status === 'APPROVED')) {
+        return res.status(202).json({
+          pendingApproval: true,
+          approvalRequestId: gate.approvalRequest.id,
+          message: 'Envelope dispatch awaits approval per your DOCUMENT_SIGN workflow.',
+        });
+      }
+      // Edge: conditional steps all skipped → terminal APPROVED in-tx and the
+      // consumer already created + emailed. Return without raw tokens.
+      const fresh = await prisma.approvalRequest.findUnique({ where: { id: gate.approvalRequest.id } });
+      if (fresh && fresh.payloadJson && fresh.payloadJson._envelopeId) {
+        const env = await prisma.signatureEnvelope.findFirst({
+          where: { id: fresh.payloadJson._envelopeId, businessId },
+          include: { signers: true },
+        });
+        return res.status(201).json({
+          envelope: publicEnvelope(env),
+          signers: (env.signers || []).map((sg) => ({
+            id: sg.id, signerOrder: sg.signerOrder, role: sg.role, name: sg.name, email: sg.email,
+            status: sg.status, token: null,
+          })),
+          signerLinksEmailed: true,
+        });
+      }
+    }
     const provider = esign.getProvider('BUILTIN');
     const out = await provider.createEnvelope({
       businessId,

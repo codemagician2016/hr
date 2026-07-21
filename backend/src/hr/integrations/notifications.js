@@ -57,6 +57,8 @@ const HR_EVENT_TEMPLATES = Object.freeze({
   'probation.confirmed': 'HR_PROBATION_CONFIRMED', // → employee on (auto-)confirmation
   // Program P1.7 — document expiry sweep (passport/visa/licence + company docs).
   'document.expiring':   'HR_DOCUMENT_EXPIRING_SOON', // → employee + HR at T-30/7/1/0
+  // Program Phase 2 — approval-gated e-sign dispatch: signer invite links.
+  'esign.invite':        'HR_ESIGN_INVITE', // → each signer when an approved envelope dispatches
   // Feature 4 — Employee portal invitation (welcome + set-password link).
   'portal.invite':   'HR_PORTAL_INVITE',    // → new hire to claim their ESS login
   // Feature 20 — Investment-proof workflow fan-out (window lifecycle + verdicts + reminders).
@@ -305,6 +307,16 @@ const HR_TEMPLATES = Object.freeze([
     body: 'Congratulations {employeeName}! Your probation has been successfully completed and your employment is confirmed effective {effectiveDate}.',
     variables: ['employeeName', 'effectiveDate'],
     channels: { sms: false, whatsapp: true, email: true },
+  },
+  // ─── Program Phase 2 — e-sign signer invite (approval-gated dispatch) ───
+  {
+    key: 'HR_ESIGN_INVITE',
+    displayName: 'E-sign invitation (signer)',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {signerName}, you have a document to sign: "{subject}". Sign here: {link}',
+    variables: ['signerName', 'subject', 'link'],
+    channels: { sms: false, whatsapp: false, email: true },
   },
   // ─── Program P1.7 — document expiry sweep ───
   {

@@ -616,10 +616,47 @@ const revisions = {
             }
           }
         }
-        return tx.compensationRevision.create({
+        const row = await tx.compensationRevision.create({
           data,
           include: { lines: { orderBy: { sortOrder: 'asc' }, include: { component: true } } },
         });
+        // Program Phase 2 — a PROPOSED revision opens a COMPENSATION approval in
+        // the SAME tx (default chain: HR). The consumer carries the
+        // PROPOSED→EFFECTIVE supersession; the legacy approve route drives the
+        // engine for rows that have this request.
+        if (status === 'PROPOSED') {
+          const engine = require('../approvals/engine');
+          require('../approvals/consumers.compensation');
+          const rec = await tx.employmentRecord.findFirst({
+            where: { businessId, employeeId, isCurrent: true },
+            orderBy: { effectiveFrom: 'desc' },
+            select: { departmentId: true, gradeId: true, locationId: true },
+          });
+          const opened = await engine.openRequest({
+            businessId,
+            module: 'COMPENSATION',
+            entityType: 'CompensationRevision',
+            entityId: row.id,
+            requesterEmployeeId: employeeId,
+            payload: {
+              revisionReason: revisionReason || null,
+              effectiveFrom,
+              amount: req.body.ctcAnnual != null ? Number(req.body.ctcAnnual) : null,
+            },
+            ctx: {
+              entityId: row.id,
+              amount: req.body.ctcAnnual != null ? Number(req.body.ctcAnnual) : null,
+              departmentId: rec ? rec.departmentId : null,
+              employeeLevel: rec ? rec.gradeId : null,
+              locationId: rec ? rec.locationId : null,
+            },
+          }, tx);
+          await tx.compensationRevision.update({
+            where: { id: row.id },
+            data: { approvalRequestId: opened.approvalRequest.id },
+          });
+        }
+        return row;
       });
 
       // Sensitive action — audit the compensation change (best-effort).
@@ -687,6 +724,45 @@ const revisions = {
           error: 'SOD_SELF_APPROVAL',
           message: 'The approver must be different from the proposer (separation of duties).',
         });
+      }
+      // Program Phase 2 — an open engine request owns the decision (consumer
+      // performs the identical supersession). SoD above already enforced.
+      {
+        const engine = require('../approvals/engine');
+        require('../approvals/consumers.compensation');
+        const open = await prisma.approvalRequest.findFirst({
+          where: { businessId, module: 'COMPENSATION', entityId: rev.id, status: { in: ['PENDING', 'ESCALATED'] } },
+          orderBy: { createdAt: 'desc' },
+        });
+        if (open) {
+          await engine.recordDecision({
+            approvalRequestId: open.id,
+            actorUserId: req.user.id || 'SYSTEM',
+            decision: 'APPROVED',
+            systemActor: true,
+          });
+          const committedViaEngine = await prisma.compensationRevision.findFirst({
+            where: { id: rev.id, businessId },
+            include: { lines: { orderBy: { sortOrder: 'asc' }, include: { component: true } } },
+          });
+          await writeAudit({
+            businessId, actorId: req.user.id, action: 'compensation.change',
+            entityType: 'CompensationRevision', entityId: rev.id,
+            meta: { employeeId: rev.employeeId, transition: 'PROPOSED→EFFECTIVE', approvedBy: req.user.id, proposedBy: rev.proposedById, via: 'engine' },
+          });
+          const gradeE = await resolveEmployeeGrade(businessId, committedViaEngine.employeeId);
+          const priorRevE = await prisma.compensationRevision.findFirst({
+            where: { businessId, employeeId: committedViaEngine.employeeId, status: 'EFFECTIVE', id: { not: committedViaEngine.id }, effectiveFrom: { lt: committedViaEngine.effectiveFrom } },
+            orderBy: { effectiveFrom: 'desc' },
+            select: { ctcAnnual: true },
+          });
+          const priorCtcE = priorRevE ? toNum(priorRevE.ctcAnnual) : null;
+          return res.json(maskCompensation(
+            revisionPayload(committedViaEngine, committedViaEngine.employeeId, priorCtcE),
+            { ...req.user, employeeId: req.user.employeeId },
+            { grade: gradeE, target: { employeeId: committedViaEngine.employeeId } },
+          ));
+        }
       }
       const effFrom = new Date(rev.effectiveFrom);
       const committed = await prisma.$transaction(async (tx) => {

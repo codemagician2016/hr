@@ -6,6 +6,51 @@
 // (15,2) — amounts are passed through as numbers/strings, never parseInt'd; only
 // internal schedule arithmetic uses a fixed-scale helper to avoid float drift.
 const prisma = require('../../core/lib/prisma');
+// Program Phase 2 — LOAN rides the approval engine: submit opens an
+// ApprovalRequest (BUILT_IN_DEFAULT: one HR step) and the legacy direct
+// approve/reject/cancel routes drive engine.recordDecision/cancel (systemActor —
+// their canManageCompensation gate stays the authz), with the domain flip in
+// approvals/consumers.loan.js. Direct decisions on rows with NO open request
+// (pre-engine legacy, or approving a DRAFT without submit) keep the old path.
+const engine = require('../approvals/engine');
+require('../approvals/consumers.loan');
+
+async function openLoanApproval(tx, loan) {
+  // Scope ctx from the current employment record (dept/grade drive scoped defs).
+  const rec = await tx.employmentRecord.findFirst({
+    where: { businessId: loan.businessId, employeeId: loan.employeeId, isCurrent: true },
+    orderBy: { effectiveFrom: 'desc' },
+    select: { departmentId: true, gradeId: true, locationId: true },
+  });
+  return engine.openRequest({
+    businessId: loan.businessId,
+    module: 'LOAN',
+    entityType: 'Loan',
+    entityId: loan.id,
+    requesterEmployeeId: loan.employeeId,
+    payload: {
+      number: loan.loanNumber || null,
+      loanType: loan.loanType,
+      principal: String(loan.principal),
+      tenureMonths: loan.tenureMonths,
+      amount: Number(loan.principal),
+    },
+    ctx: {
+      entityId: loan.id,
+      amount: Number(loan.principal),
+      departmentId: rec ? rec.departmentId : null,
+      employeeLevel: rec ? rec.gradeId : null,
+      locationId: rec ? rec.locationId : null,
+    },
+  }, tx);
+}
+
+async function findOpenLoanRequest(businessId, loanId, tx = prisma) {
+  return tx.approvalRequest.findFirst({
+    where: { businessId, module: 'LOAN', entityId: loanId, status: { in: ['PENDING', 'ESCALATED'] } },
+    orderBy: { createdAt: 'desc' },
+  });
+}
 
 const LIST_SELECT = {
   id: true, loanNumber: true, employeeId: true, schemeId: true, loanType: true,
@@ -276,9 +321,15 @@ async function submit(req, res, next) {
     if (existing.status !== 'DRAFT') {
       return res.status(409).json({ message: `Only a DRAFT loan can be submitted (currently ${existing.status})` });
     }
-    const loan = await prisma.loan.update({
-      where: { id: req.params.id },
-      data: { status: 'PENDING', submittedAt: new Date() },
+    const loan = await prisma.$transaction(async (tx) => {
+      const updated = await tx.loan.update({
+        where: { id: req.params.id },
+        data: { status: 'PENDING', submittedAt: new Date() },
+      });
+      // Open the approval request in the SAME tx. If the tenant's chain
+      // auto-approves, the consumer flips the loan APPROVED before commit.
+      await openLoanApproval(tx, updated);
+      return tx.loan.findUnique({ where: { id: updated.id } });
     });
     res.json(loan);
   } catch (e) { next(e); }
@@ -293,6 +344,20 @@ async function approve(req, res, next) {
     if (!existing) return res.status(404).json({ message: 'Loan not found' });
     if (!['DRAFT', 'PENDING'].includes(existing.status)) {
       return res.status(409).json({ message: `Cannot approve a loan in ${existing.status} state` });
+    }
+
+    // Engine path: an open request means THIS decision routes through the engine
+    // (consumer builds the schedule + flips). systemActor — this route's
+    // permission gate stays the authz; the inbox path enforces membership.
+    const open = await findOpenLoanRequest(businessId, existing.id);
+    if (open) {
+      await engine.recordDecision({
+        approvalRequestId: open.id,
+        actorUserId: req.user.id || req.user.userId || 'SYSTEM',
+        decision: 'APPROVED',
+        systemActor: true,
+      });
+      return res.json(await prisma.loan.findUnique({ where: { id: existing.id } }));
     }
 
     const { rows, totalPayableC } = buildSchedule(existing);
@@ -329,6 +394,17 @@ async function reject(req, res, next) {
     if (!existing) return res.status(404).json({ message: 'Loan not found' });
     if (!['DRAFT', 'PENDING'].includes(existing.status)) {
       return res.status(409).json({ message: `Cannot reject a loan in ${existing.status} state` });
+    }
+    const open = await findOpenLoanRequest(businessId, existing.id);
+    if (open) {
+      await engine.recordDecision({
+        approvalRequestId: open.id,
+        actorUserId: req.user.id || req.user.userId || 'SYSTEM',
+        decision: 'REJECTED',
+        comment: req.body.reason || null,
+        systemActor: true,
+      });
+      return res.json(await prisma.loan.findUnique({ where: { id: existing.id } }));
     }
     const loan = await prisma.loan.update({
       where: { id: req.params.id },
@@ -387,6 +463,17 @@ async function cancel(req, res, next) {
     if (!['DRAFT', 'PENDING', 'APPROVED'].includes(existing.status)) {
       return res.status(409).json({ message: `Cannot cancel a loan in ${existing.status} state` });
     }
+    // Close any open approval request alongside (fires the consumer onCancel,
+    // which performs the same installment-drop + CANCELLED flip).
+    const open = await findOpenLoanRequest(businessId, existing.id);
+    if (open) {
+      await engine.cancel({
+        approvalRequestId: open.id,
+        actorUserId: req.user.id || req.user.userId || 'SYSTEM',
+        comment: req.body && req.body.reason ? req.body.reason : null,
+      });
+      return res.json(await prisma.loan.findUnique({ where: { id: existing.id } }));
+    }
     const loan = await prisma.$transaction(async (tx) => {
       await tx.loanInstallment.deleteMany({ where: { businessId, loanId: existing.id } });
       return tx.loan.update({ where: { id: existing.id }, data: { status: 'CANCELLED' } });
@@ -412,4 +499,6 @@ async function remove(req, res, next) {
 module.exports = {
   list, listByEmployee, get, listInstallments,
   create, update, submit, approve, reject, disburse, close, cancel, remove,
+  // Phase 2 — schedule math shared with approvals/consumers.loan.js.
+  _buildSchedule: buildSchedule, _fromCents: fromCents,
 };

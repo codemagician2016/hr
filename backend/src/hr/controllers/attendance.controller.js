@@ -943,11 +943,61 @@ async function transitionTimesheet(req, res, next, target) {
       return res.status(409).json({ message: `Cannot move timesheet from ${ts.status} to ${target}` });
     }
 
+    // Program Phase 2 — TIMESHEET rides the approval engine. SUBMIT opens an
+    // ApprovalRequest (default: reporting manager); APPROVE/REJECT on a sheet
+    // with an open request drive engine.recordDecision (systemActor — this
+    // route's permission gate stays the authz) and the consumer performs the
+    // stamp. Sheets with no open request (pre-engine) keep the direct path.
+    const engine = require('../approvals/engine');
+    require('../approvals/consumers.timesheet');
+    if (target === 'APPROVED' || target === 'REJECTED') {
+      const open = await prisma.approvalRequest.findFirst({
+        where: { businessId, module: 'TIMESHEET', entityId: ts.id, status: { in: ['PENDING', 'ESCALATED'] } },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (open) {
+        await engine.recordDecision({
+          approvalRequestId: open.id,
+          actorUserId: req.user.id || 'SYSTEM',
+          decision: target,
+          systemActor: true,
+        });
+        return res.json(await prisma.timesheet.findUnique({ where: { id: ts.id } }));
+      }
+    }
+
     const data = { status: target };
     if (target === 'SUBMITTED') data.submittedAt = new Date();
     if (target === 'APPROVED' || target === 'REJECTED') {
       data.decidedAt = new Date();
       data.decidedBy = req.user.id || null;
+    }
+
+    if (target === 'SUBMITTED') {
+      const updated = await prisma.$transaction(async (tx) => {
+        const row = await tx.timesheet.update({ where: { id: ts.id }, data });
+        const rec = await tx.employmentRecord.findFirst({
+          where: { businessId, employeeId: ts.employeeId, isCurrent: true },
+          orderBy: { effectiveFrom: 'desc' },
+          select: { departmentId: true, gradeId: true, locationId: true },
+        });
+        await engine.openRequest({
+          businessId,
+          module: 'TIMESHEET',
+          entityType: 'Timesheet',
+          entityId: ts.id,
+          requesterEmployeeId: ts.employeeId,
+          payload: { periodStart: ts.periodStart, periodEnd: ts.periodEnd, totalHours: ts.totalHours != null ? String(ts.totalHours) : null },
+          ctx: {
+            entityId: ts.id,
+            departmentId: rec ? rec.departmentId : null,
+            employeeLevel: rec ? rec.gradeId : null,
+            locationId: rec ? rec.locationId : null,
+          },
+        }, tx);
+        return tx.timesheet.findUnique({ where: { id: ts.id } });
+      });
+      return res.json(updated);
     }
 
     const updated = await prisma.timesheet.update({ where: { id: ts.id }, data });
@@ -1040,18 +1090,48 @@ async function createRegularization(req, res, next) {
     // hint on approvalRequestId; the actual decide path re-checks scope.
     const approver = await resolveApprover(emp);
 
-    const reqRow = await prisma.attendanceRegularizationRequest.create({
-      data: {
+    // Program Phase 2 — the row + its engine ApprovalRequest commit together;
+    // approvalRequestId now stores the REAL request id (it previously held a
+    // routing HINT — the resolved approver's id).
+    const engine = require('../approvals/engine');
+    require('../approvals/consumers.regularization');
+    const reqRow = await prisma.$transaction(async (tx) => {
+      const row = await tx.attendanceRegularizationRequest.create({
+        data: {
+          businessId,
+          employeeId,
+          date: d,
+          kind,
+          requestedInAt: requestedInAt ? new Date(requestedInAt) : null,
+          requestedOutAt: requestedOutAt ? new Date(requestedOutAt) : null,
+          reason,
+          status: 'PENDING',
+        },
+      });
+      const rec = await tx.employmentRecord.findFirst({
+        where: { businessId, employeeId, isCurrent: true },
+        orderBy: { effectiveFrom: 'desc' },
+        select: { departmentId: true, gradeId: true, locationId: true },
+      });
+      const opened = await engine.openRequest({
         businessId,
-        employeeId,
-        date: d,
-        kind,
-        requestedInAt: requestedInAt ? new Date(requestedInAt) : null,
-        requestedOutAt: requestedOutAt ? new Date(requestedOutAt) : null,
-        reason,
-        status: 'PENDING',
-        approvalRequestId: approver && approver.employeeId ? approver.employeeId : (approver && approver.userId ? approver.userId : null),
-      },
+        module: 'ATTENDANCE_REGULARIZATION',
+        entityType: 'AttendanceRegularizationRequest',
+        entityId: row.id,
+        requesterEmployeeId: employeeId,
+        payload: { kind, date: d.toISOString().slice(0, 10), reason },
+        ctx: {
+          entityId: row.id,
+          departmentId: rec ? rec.departmentId : null,
+          employeeLevel: rec ? rec.gradeId : null,
+          locationId: rec ? rec.locationId : null,
+        },
+      }, tx);
+      await tx.attendanceRegularizationRequest.update({
+        where: { id: row.id },
+        data: { approvalRequestId: opened.approvalRequest.id },
+      });
+      return tx.attendanceRegularizationRequest.findUnique({ where: { id: row.id } });
     });
     res.status(201).json({ ...reqRow, routing: approver });
   } catch (e) { next(e); }
@@ -1138,6 +1218,33 @@ async function decideRegularization(req, res, next, decision) {
     }
     if (reqRow.status !== 'PENDING') {
       return res.status(409).json({ message: `Request is already ${reqRow.status}` });
+    }
+
+    // Program Phase 2 — an open engine request owns the decision (consumer does
+    // the punch-materialize + recompute). systemActor: this route's permission
+    // gate is the authz; inbox decisions enforce membership.
+    {
+      const engine = require('../approvals/engine');
+      require('../approvals/consumers.regularization');
+      const open = await prisma.approvalRequest.findFirst({
+        where: { businessId, module: 'ATTENDANCE_REGULARIZATION', entityId: reqRow.id, status: { in: ['PENDING', 'ESCALATED'] } },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (open) {
+        await engine.recordDecision({
+          approvalRequestId: open.id,
+          actorUserId: req.user.id || 'SYSTEM',
+          decision,
+          systemActor: true,
+        });
+        const fresh = await prisma.attendanceRegularizationRequest.findUnique({ where: { id: reqRow.id } });
+        await writeAudit({
+          businessId, actorId: req.user.id, action: `attendance.regularization.${decision === 'APPROVED' ? 'approve' : 'reject'}`,
+          entityType: 'AttendanceRegularizationRequest', entityId: reqRow.id,
+          meta: { employeeId: reqRow.employeeId, kind: reqRow.kind },
+        });
+        return res.json(fresh);
+      }
     }
 
     if (decision === 'REJECTED') {
