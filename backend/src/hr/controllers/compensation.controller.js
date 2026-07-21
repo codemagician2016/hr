@@ -128,8 +128,76 @@ const COMPONENT_FIELDS = [
   'isWageForPF', 'isWageForESI', 'isWageForPT', 'isWageForGratuity',
   'isTaxable', 'taxSection', 'isKiwiSaverable', 'isPayeable',
   'isRecurring', 'prorationMethod', 'glCode', 'sortOrder', 'isActive',
+  // Program P1.3 — the full authoring surface: per-component clamps, the
+  // min-wage Basic floor flag, and custom SLAB bands.
+  'floorValue', 'capValue', 'minWageFloorApplies', 'slabsJson',
 ];
 const pickComponent = picker(COMPONENT_FIELDS);
+
+/**
+ * P1.3 — validate the RESULTING component state (create: the payload; update:
+ * existing merged with the patch). Returns an error message or null.
+ * derivationPass is NEVER client-supplied — computeDerivationPass below stamps
+ * it from calcMethod + base scope so deriveBreakup's topo order stays correct.
+ */
+function validateComponentState(state) {
+  const method = state.calcMethod;
+  const scope = state.calcBaseScope || 'SINGLE';
+  const num = (v) => (v == null || v === '' ? null : toNum(v));
+
+  if (method === 'FLAT' && num(state.calcValue) == null) {
+    return 'A FLAT component needs calcValue (the amount).';
+  }
+  if (method === 'PERCENT_OF') {
+    const pct = num(state.calcValue);
+    if (pct == null || pct < 0 || pct > 1000) return 'A PERCENT_OF component needs calcValue between 0 and 1000 (the percentage).';
+    if ((scope === 'SINGLE' || scope === 'MULTIPLE') && !state.calcBaseCode) {
+      return 'A PERCENT_OF component with a component base needs calcBaseCode (e.g. BASIC), or set calcBaseScope to GROSS/CTC.';
+    }
+  }
+  if (method === 'SLAB') {
+    const bands = state.slabsJson;
+    if (!Array.isArray(bands) || bands.length === 0) return 'A SLAB component needs slabsJson: at least one band.';
+    if (bands.length > 20) return 'A SLAB component allows at most 20 bands.';
+    let prevUpTo = 0;
+    for (let i = 0; i < bands.length; i += 1) {
+      const b = bands[i];
+      if (!b || typeof b !== 'object') return `Slab band ${i + 1} must be an object.`;
+      if (b.valueType !== 'FLAT' && b.valueType !== 'PERCENT') return `Slab band ${i + 1}: valueType must be FLAT or PERCENT.`;
+      const val = num(b.value);
+      if (val == null || val < 0) return `Slab band ${i + 1}: value must be a non-negative number.`;
+      if (b.valueType === 'PERCENT' && val > 100) return `Slab band ${i + 1}: a PERCENT band cannot exceed 100.`;
+      if (b.upTo == null) {
+        if (i !== bands.length - 1) return `Slab band ${i + 1}: only the LAST band may be open-ended (upTo empty).`;
+      } else {
+        const upTo = num(b.upTo);
+        if (upTo == null || upTo <= prevUpTo) return `Slab band ${i + 1}: upTo must be a number greater than the previous band's.`;
+        prevUpTo = upTo;
+      }
+    }
+    if ((scope === 'SINGLE' || scope === 'MULTIPLE') && !state.calcBaseCode) {
+      return 'A SLAB component banded by another component needs calcBaseCode, or set calcBaseScope to GROSS/CTC.';
+    }
+  }
+  const floor = num(state.floorValue);
+  const cap = num(state.capValue);
+  if (floor != null && floor < 0) return 'floorValue cannot be negative.';
+  if (cap != null && cap < 0) return 'capValue cannot be negative.';
+  if (floor != null && cap != null && floor > cap) return 'floorValue cannot exceed capValue.';
+  return null;
+}
+
+// Mirror deriveBreakup's topo order (0 flat/literal, 1 percent-of-named,
+// 2 percent-of-GROSS/CTC, 3 balancing). Stored so structure authoring can
+// order/reject at save time; deriveBreakup still re-infers for SLAB/BALANCING.
+function computeDerivationPass(state) {
+  const scope = state.calcBaseScope || 'SINGLE';
+  if (state.calcMethod === 'BALANCING') return 3;
+  if (state.calcMethod === 'PERCENT_OF' || state.calcMethod === 'SLAB') {
+    return scope === 'GROSS' || scope === 'CTC' ? 2 : 1;
+  }
+  return 0;
+}
 
 const components = {
   list: async (req, res, next) => {
@@ -173,6 +241,9 @@ const components = {
         return res.status(400).json({ message: 'code, name, kind, category and calcMethod are required' });
       }
       const data = { ...pickComponent(req.body), businessId };
+      const invalid = validateComponentState(data);
+      if (invalid) return res.status(400).json({ message: invalid });
+      data.derivationPass = computeDerivationPass(data);
       const item = await prisma.salaryComponent.create({ data });
       res.status(201).json(item);
     } catch (e) { if (e.code === 'P2002') return dup(res); next(e); }
@@ -182,7 +253,12 @@ const components = {
       const { businessId } = req.user;
       const existing = await prisma.salaryComponent.findFirst({ where: { id: req.params.id, businessId, deletedAt: null } });
       if (!existing) return res.status(404).json({ message: 'Pay component not found' });
-      const item = await prisma.salaryComponent.update({ where: { id: req.params.id }, data: pickComponent(req.body) });
+      const data = pickComponent(req.body);
+      // Validate the RESULTING state (existing + patch), not the bare patch.
+      const invalid = validateComponentState({ ...existing, ...data });
+      if (invalid) return res.status(400).json({ message: invalid });
+      data.derivationPass = computeDerivationPass({ ...existing, ...data });
+      const item = await prisma.salaryComponent.update({ where: { id: req.params.id }, data });
       res.json(item);
     } catch (e) { if (e.code === 'P2002') return dup(res); next(e); }
   },

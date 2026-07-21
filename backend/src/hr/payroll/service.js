@@ -166,10 +166,19 @@ function isoDate(value) {
  */
 function mapComponentLine(line, order, targetGrossMinor = null, entityProrationBasis = null) {
   const comp = line.component || {};
-  const calcMethod = line.calcMethod || comp.calcMethod;
-  // Statutory + slab components are computed by the compliance module, not the
-  // engine. Drop them so they don't double-count.
-  if (calcMethod === 'STATUTORY' || calcMethod === 'SLAB') return null;
+  let calcMethod = line.calcMethod || comp.calcMethod;
+  // Statutory components are computed by the compliance module, not the engine.
+  // Drop them so they don't double-count.
+  if (calcMethod === 'STATUTORY') return null;
+  // P1.3 — custom SLAB components resolve at derivation time (deriveBreakup
+  // materializes the band amount onto the line). A materialized slab line flows
+  // through as a FIXED amount (proration/wage flags apply normally); one with
+  // no materialized amount has nothing to pay and is dropped — NOT silently
+  // treated as statutory.
+  if (calcMethod === 'SLAB') {
+    if (line.amountMonthly == null) return null;
+    calcMethod = 'FLAT';
+  }
 
   const engineCalc = CALC_MAP[calcMethod];
   if (!engineCalc) return null;

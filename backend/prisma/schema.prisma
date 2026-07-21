@@ -7165,6 +7165,12 @@ model SalaryComponent {
   floorValue          Decimal?            @db.Decimal(15, 2) // per-component clamp → engine floorMinor
   capValue            Decimal?            @db.Decimal(15, 2) // per-component clamp → engine capMinor
   minWageFloorApplies Boolean             @default(false) // counts toward the min-wage Basic floor
+  // Program P1.3 — custom SLAB components: ordered bracket-lookup bands over the
+  // calcBase (GROSS | CTC | a named component). The WHOLE base falls in exactly
+  // one band (PT-style, NOT progressive). [{upTo: number|null, value, valueType:
+  // 'FLAT'|'PERCENT'}]; only the last band may be open-ended (upTo null).
+  // Evaluated at derivation time (deriveBreakup) → materialized amounts.
+  slabsJson           Json?
   createdAt           DateTime            @default(now())
   updatedAt           DateTime            @updatedAt
   deletedAt           DateTime?

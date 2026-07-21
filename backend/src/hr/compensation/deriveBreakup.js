@@ -65,6 +65,15 @@ function passFor(line) {
   // stored derivationPass is 0/1/2 ran in the wrong pass and the residual never
   // filled — the balancing component resolved to 0. The per-line rule wins.
   if (method === CALC.BALANCING) return 3;
+  // SLAB resolves with PERCENT_OF's base semantics: a GROSS/CTC base is a known
+  // constant (pass 2); a named-component base needs that component first (pass
+  // 1). Like BALANCING this per-METHOD rule wins over a stored derivationPass —
+  // slab components carry the DB default (0) which would mis-run them as FLAT.
+  if (method === CALC.SLAB) {
+    const base = comp.calcBaseScope;
+    if (base === 'SINGLE' || base === 'MULTIPLE') return 1;
+    return 2; // GROSS / CTC (the default slab base)
+  }
   if (Number.isInteger(comp.derivationPass)) return comp.derivationPass;
   if (method === CALC.PERCENT_OF) {
     const base = comp.calcBaseScope;
@@ -97,6 +106,37 @@ function clampLine(amountMinor, comp) {
   const capMinor = comp.capValue != null ? toMinorSafe(comp.capValue) : null;
   if (floorMinor == null && capMinor == null) return amountMinor;
   return money.clampMinor(amountMinor, { floorMinor, capMinor });
+}
+
+/**
+ * evaluateSlab — Program P1.3 custom SLAB components. Bracket LOOKUP (the whole
+ * base lands in exactly one band, PT-style — NOT progressive/marginal): bands
+ * ordered by upTo ascending, open band (upTo null) last; the first band whose
+ * upTo covers the base wins. FLAT band → its value; PERCENT band → % of base.
+ * No matching band (all bounded, base above the top) → 0. PURE.
+ */
+function evaluateSlab(slabsJson, baseMinor) {
+  if (!Array.isArray(slabsJson) || slabsJson.length === 0) return 0;
+  const bands = slabsJson
+    .map((b) => ({
+      upToMinor: b && b.upTo != null ? toMinorSafe(b.upTo) : null,
+      value: b ? b.value : null,
+      valueType: b && b.valueType === 'PERCENT' ? 'PERCENT' : 'FLAT',
+    }))
+    .sort((a, b) => {
+      if (a.upToMinor == null) return 1;
+      if (b.upToMinor == null) return -1;
+      return a.upToMinor - b.upToMinor;
+    });
+  for (const band of bands) {
+    if (band.upToMinor == null || baseMinor <= band.upToMinor) {
+      if (band.valueType === 'PERCENT') {
+        return money.percentOf(baseMinor, toPercent(band.value), RoundingMode.HALF_UP);
+      }
+      return toMinorSafe(band.value);
+    }
+  }
+  return 0;
 }
 
 /**
@@ -300,11 +340,31 @@ function deriveBreakup({ target = {}, basis, lines, ctx = {} }) {
   // declared flat amounts — the engine/compliance module owns statutory ones at
   // runtime; here we only echo what the structure declares.
   const resolved = earnResult.resolved.slice();
+  // P1.3 — a non-earning SLAB line (e.g. a canteen deduction banded by gross)
+  // evaluates against the RESOLVED earnings: GROSS (default) | CTC | a named
+  // resolved earning. Everything else passes through as declared flat amounts.
+  const resolvedByCode = new Map(earnResult.resolved.map((r) => [r.code, r.amountMonthlyMinor]));
+  const grossForSlabs = money.sumMinor(earnResult.resolved.map((r) => r.amountMonthlyMinor));
+  const ctcMonthlyForSlabs = basis === 'CTC'
+    ? money.roundRational(target.ctcAnnualMinor, 12, RoundingMode.HALF_UP)
+    : grossForSlabs;
   for (const o of ordered) {
     const comp = o.line.component || {};
     const category = comp.category || 'EARNING';
     if (category === 'EARNING') continue;
-    const amt = clampLine(toMinorSafe(o.line.amountMonthly != null ? o.line.amountMonthly : o.line.calcValue), comp);
+    const method = o.line.calcMethod || comp.calcMethod || CALC.FLAT;
+    let raw;
+    if (method === CALC.SLAB) {
+      let baseMinor;
+      if (comp.calcBaseScope === 'CTC') baseMinor = ctcMonthlyForSlabs;
+      else if ((comp.calcBaseScope === 'SINGLE' || comp.calcBaseScope === 'MULTIPLE') && comp.calcBaseCode) {
+        baseMinor = resolvedByCode.has(comp.calcBaseCode) ? resolvedByCode.get(comp.calcBaseCode) : grossForSlabs;
+      } else baseMinor = grossForSlabs;
+      raw = evaluateSlab(comp.slabsJson, baseMinor);
+    } else {
+      raw = toMinorSafe(o.line.amountMonthly != null ? o.line.amountMonthly : o.line.calcValue);
+    }
+    const amt = clampLine(raw, comp);
     resolved.push({
       code: comp.code,
       componentId: comp.id || o.line.componentId || null,
@@ -408,8 +468,11 @@ function resolveEarnings(earningDefs, targetGrossMinor, ctcAnnualMinor) {
   for (const o of earningDefs) {
     if (o.pass !== 2) continue;
     const comp = o.line.component || {};
+    const method = o.line.calcMethod || comp.calcMethod || CALC.FLAT;
     const baseMinor = comp.calcBaseScope === 'CTC' ? ctcMonthlyMinor : targetGrossMinor;
-    const amt = money.percentOf(baseMinor, toPercent(o.line.calcValue), RoundingMode.HALF_UP);
+    const amt = method === CALC.SLAB
+      ? evaluateSlab(comp.slabsJson, baseMinor)
+      : money.percentOf(baseMinor, toPercent(o.line.calcValue), RoundingMode.HALF_UP);
     push(o, amt, baseMinor, false);
   }
   // Pass 1 — PERCENT_OF a named (literal/component) base — may reference a
@@ -417,13 +480,16 @@ function resolveEarnings(earningDefs, targetGrossMinor, ctcAnnualMinor) {
   for (const o of earningDefs) {
     if (o.pass !== 1) continue;
     const comp = o.line.component || {};
+    const method = o.line.calcMethod || comp.calcMethod || CALC.FLAT;
     const baseKey = comp.calcBaseCode;
     let baseMinor;
     if (!baseKey || baseKey === 'GROSS') baseMinor = targetGrossMinor;
     else if (baseKey === 'CTC') baseMinor = ctcMonthlyMinor;
     else if (byCode.has(baseKey)) baseMinor = byCode.get(baseKey);
     else throw new DeriveError('UNKNOWN_BASE', `${comp.code} references unknown base "${baseKey}"`);
-    const amt = money.percentOf(baseMinor, toPercent(o.line.calcValue), RoundingMode.HALF_UP);
+    const amt = method === CALC.SLAB
+      ? evaluateSlab(comp.slabsJson, baseMinor)
+      : money.percentOf(baseMinor, toPercent(o.line.calcValue), RoundingMode.HALF_UP);
     push(o, amt, baseMinor, false);
   }
 
@@ -565,5 +631,5 @@ module.exports = {
   employerCostFixedPoint,
   DeriveError,
   // exported for tests
-  _internal: { resolveEarnings, passFor, computeWagesVerdict, toMinorSafe },
+  _internal: { resolveEarnings, passFor, computeWagesVerdict, toMinorSafe, evaluateSlab },
 };
