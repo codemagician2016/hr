@@ -529,7 +529,211 @@ const rules = {
           },
         ],
       },
+
+      // ---------------------------------------------------------------------
+      //  Feature 43 — remaining PT jurisdictions (multi-state completeness).
+      //  Slabs verified 2026-07-20 against taxguru.in state-wise table
+      //  (2024-25, unchanged FY2025-26) cross-checked with greythr.com/wiki
+      //  levy list. Annual-income-slab states (CG, MN, ML) are encoded as
+      //  monthly bands = floor(annual/12), with a February true-up
+      //  (febAmountRupees) wherever annual/12 is uneven — same device MH/KA
+      //  use for the ₹2,500 top band. J&K: PT act never operationalised — in
+      //  NO_PT_STATES (monitored), not taxed.
+      // ---------------------------------------------------------------------
+
+      // Chhattisgarh (CG) — slab on ANNUAL income; every band divides by 12
+      // exactly. <=40k Nil; 40-50k ₹360/yr; 50-60k ₹720; 60-80k ₹1,080;
+      // 80k-1L ₹1,200; 1-1.5L ₹1,440; 1.5-2L ₹1,800; 2-2.5L ₹2,160;
+      // 2.5-3L ₹2,280; >3L ₹2,400.
+      CG: {
+        frequency: 'MONTHLY',
+        annualCapRupees: 2500,
+        versions: [
+          {
+            effectiveFrom: '2011-04-01',
+            any: [
+              { upToRupees: 3333, amountRupees: 0 },
+              { upToRupees: 4166, amountRupees: 30 },
+              { upToRupees: 5000, amountRupees: 60 },
+              { upToRupees: 6666, amountRupees: 90 },
+              { upToRupees: 8333, amountRupees: 100 },
+              { upToRupees: 12500, amountRupees: 120 },
+              { upToRupees: 16666, amountRupees: 150 },
+              { upToRupees: 20833, amountRupees: 180 },
+              { upToRupees: 25000, amountRupees: 190 },
+              { upToRupees: null, amountRupees: 200, febAmountRupees: 200 },
+            ],
+          },
+        ],
+      },
+
+      // Punjab (PB) — Punjab State Development Tax Act 2018: FLAT ₹200/month
+      // for salary earners with taxable income (> ₹2.5L/yr basic-exemption
+      // proxy → ₹20,833/mo). Annual ₹2,400 < cap; no Feb top-up.
+      PB: {
+        frequency: 'MONTHLY',
+        annualCapRupees: 2500,
+        versions: [
+          {
+            effectiveFrom: '2018-04-19',
+            any: [
+              { upToRupees: 20833, amountRupees: 0 },
+              { upToRupees: null, amountRupees: 200, febAmountRupees: 200 },
+            ],
+          },
+        ],
+      },
+
+      // Sikkim (SK) — monthly slabs. <=20k Nil; 20-30k ₹125; 30-40k ₹150;
+      // >40k ₹200 (annual ₹2,400 < cap).
+      SK: {
+        frequency: 'MONTHLY',
+        annualCapRupees: 2500,
+        versions: [
+          {
+            effectiveFrom: '2006-04-01',
+            any: [
+              { upToRupees: 20000, amountRupees: 0 },
+              { upToRupees: 30000, amountRupees: 125 },
+              { upToRupees: 40000, amountRupees: 150 },
+              { upToRupees: null, amountRupees: 200, febAmountRupees: 200 },
+            ],
+          },
+        ],
+      },
+
+      // Tripura (TR) — monthly slabs (revised 25-Jul-2018). <=7,500 Nil;
+      // 7,501-15,000 ₹150; >15,000 ₹208 (annual ₹2,496 < cap).
+      TR: {
+        frequency: 'MONTHLY',
+        annualCapRupees: 2500,
+        versions: [
+          {
+            effectiveFrom: '2018-07-25',
+            any: [
+              { upToRupees: 7500, amountRupees: 0 },
+              { upToRupees: 15000, amountRupees: 150 },
+              { upToRupees: null, amountRupees: 208, febAmountRupees: 208 },
+            ],
+          },
+        ],
+      },
+
+      // Mizoram (MZ) — monthly slabs. <=5,000 Nil; 5-8k ₹75; 8-10k ₹120;
+      // 10-12k ₹150; 12-15k ₹180; >15k ₹208 (annual ₹2,496).
+      MZ: {
+        frequency: 'MONTHLY',
+        annualCapRupees: 2500,
+        versions: [
+          {
+            effectiveFrom: '2000-01-01',
+            any: [
+              { upToRupees: 5000, amountRupees: 0 },
+              { upToRupees: 8000, amountRupees: 75 },
+              { upToRupees: 10000, amountRupees: 120 },
+              { upToRupees: 12000, amountRupees: 150 },
+              { upToRupees: 15000, amountRupees: 180 },
+              { upToRupees: null, amountRupees: 208, febAmountRupees: 208 },
+            ],
+          },
+        ],
+      },
+
+      // Nagaland (NL) — monthly slabs. <=4,000 Nil; 4-5k ₹35; 5-7k ₹75;
+      // 7-9k ₹110; 9-12k ₹180; >12k ₹208 (annual ₹2,496).
+      NL: {
+        frequency: 'MONTHLY',
+        annualCapRupees: 2500,
+        versions: [
+          {
+            effectiveFrom: '2000-01-01',
+            any: [
+              { upToRupees: 4000, amountRupees: 0 },
+              { upToRupees: 5000, amountRupees: 35 },
+              { upToRupees: 7000, amountRupees: 75 },
+              { upToRupees: 9000, amountRupees: 110 },
+              { upToRupees: 12000, amountRupees: 180 },
+              { upToRupees: null, amountRupees: 208, febAmountRupees: 208 },
+            ],
+          },
+        ],
+      },
+
+      // Manipur (MN) — slab on ANNUAL income; uneven bands true-up in Feb.
+      // <=50k Nil; 50-75k ₹1,200/yr (₹100/mo); 75k-1L ₹2,000/yr (166×11+174);
+      // 1-1.25L ₹2,400/yr (₹200/mo); >1.25L ₹2,500/yr (208×11+212).
+      MN: {
+        frequency: 'MONTHLY',
+        annualCapRupees: 2500,
+        versions: [
+          {
+            effectiveFrom: '2000-01-01',
+            any: [
+              { upToRupees: 4166, amountRupees: 0 },
+              { upToRupees: 6250, amountRupees: 100 },
+              { upToRupees: 8333, amountRupees: 166, febAmountRupees: 174 },
+              { upToRupees: 10416, amountRupees: 200 },
+              { upToRupees: null, amountRupees: 208, febAmountRupees: 212 },
+            ],
+          },
+        ],
+      },
+
+      // Meghalaya (ML) — slab on ANNUAL income; uneven bands true-up in Feb.
+      // <=50k Nil; then ₹200/300/500/750/1,000/1,250/1,500/1,800/2,100/2,400
+      // per year by band; >5L ₹2,500/yr.
+      ML: {
+        frequency: 'MONTHLY',
+        annualCapRupees: 2500,
+        versions: [
+          {
+            effectiveFrom: '2000-01-01',
+            any: [
+              { upToRupees: 4166, amountRupees: 0 },
+              { upToRupees: 6250, amountRupees: 16, febAmountRupees: 24 }, // ₹200/yr
+              { upToRupees: 8333, amountRupees: 25 }, // ₹300/yr
+              { upToRupees: 12500, amountRupees: 41, febAmountRupees: 49 }, // ₹500/yr
+              { upToRupees: 16666, amountRupees: 62, febAmountRupees: 68 }, // ₹750/yr
+              { upToRupees: 20833, amountRupees: 83, febAmountRupees: 87 }, // ₹1,000/yr
+              { upToRupees: 25000, amountRupees: 104, febAmountRupees: 106 }, // ₹1,250/yr
+              { upToRupees: 29166, amountRupees: 125 }, // ₹1,500/yr
+              { upToRupees: 33333, amountRupees: 150 }, // ₹1,800/yr
+              { upToRupees: 37500, amountRupees: 175 }, // ₹2,100/yr
+              { upToRupees: 41666, amountRupees: 200 }, // ₹2,400/yr
+              { upToRupees: null, amountRupees: 208, febAmountRupees: 212 }, // ₹2,500/yr
+            ],
+          },
+        ],
+      },
+
+      // Puducherry (PY) — HALF-YEARLY slabs (TN-style municipal PT).
+      // <=99,999 Nil; 1-2L ₹250; 2-3L ₹500; 3-4L ₹750; 4-5L ₹1,000;
+      // >5L ₹1,250 per half-year (max ₹2,500/yr = cap).
+      PY: {
+        frequency: 'HALF_YEARLY',
+        annualCapRupees: 2500,
+        versions: [
+          {
+            effectiveFrom: '2000-01-01',
+            halfYear: [
+              { upToRupees: 99999, amountRupees: 0 },
+              { upToRupees: 200000, amountRupees: 250 },
+              { upToRupees: 300000, amountRupees: 500 },
+              { upToRupees: 400000, amountRupees: 750 },
+              { upToRupees: 500000, amountRupees: 1000 },
+              { upToRupees: null, amountRupees: 1250 },
+            ],
+          },
+        ],
+      },
     },
+
+    // Feature 43 — jurisdictions that levy NO professional tax (or whose act is
+    // not operationalised: J&K). A work-state in THIS set is legitimately nil;
+    // a state in NEITHER set raises the PT_STATE_UNMAPPED pay-run warning so a
+    // coverage gap can never silently under-deduct. Source: greythr.com/wiki
+    // levy list, verified 2026-07-20.
+    noPtStates: ['AN', 'AR', 'CH', 'DN', 'DD', 'DL', 'GA', 'HR', 'HP', 'JK', 'LA', 'LD', 'RJ', 'UK', 'UP'],
   },
 
   // ===========================================================================
@@ -594,6 +798,11 @@ const rules = {
         versions: [{ effectiveFrom: '2000-01-01', eeRupees: 0.75, erRupees: 2.25, mgrExclusionRupees: 2500 }] },
       OR: { frequency: 'HALF_YEARLY', deductionMonths: [6, 12],
         versions: [{ effectiveFrom: '2000-01-01', eeRupees: 10, erRupees: 20, mgrExclusionRupees: 1600 }] },
+      // Feature 43 — Chandigarh (UT) follows the Punjab LWF rules: EE ₹5/mo,
+      // ER ₹20/mo, monthly. Verified 2026-07-20 (simpliance.in/labour-welfare-
+      // fund-detail/chandigarh; greythr wiki CH LWF page).
+      CH: { frequency: 'MONTHLY', deductionMonths: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        versions: [{ effectiveFrom: '2000-01-01', eeRupees: 5, erRupees: 20, mgrExclusionRupees: null }] },
     },
   },
 
@@ -1940,6 +2149,17 @@ function compute(ctx = {}) {
           pt.frequency === 'HALF_YEARLY'
             ? `${stateCode} half-yearly slab on ₹${(ptGrossMinor / PAISE).toFixed(2)}`
             : `${stateCode} monthly slab${month === 2 ? ' (Feb top-up)' : ''}`,
+      });
+    }
+    // Feature 43 — NEVER fail silent-to-nil on a coverage gap: a state that is
+    // neither in the slab tables NOR in the explicit no-PT list surfaces a
+    // WARN anomaly on the pay-run (rides the existing anomaly pipeline into
+    // errorJson + the payroll console) instead of quietly skipping PT.
+    if (!pt.configured && !rules.professionalTax.noPtStates.includes(stateCode)) {
+      anomalies.push({
+        code: 'PT_STATE_UNMAPPED',
+        severity: 'WARN',
+        message: `Professional Tax rules for state "${stateCode}" are not configured — NO PT was deducted. Verify whether ${stateCode} levies PT and report the gap.`,
       });
     }
   }
