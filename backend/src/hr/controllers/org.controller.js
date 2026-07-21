@@ -238,8 +238,10 @@ module.exports = {
     // Feature 42 — prorationBasis: the tenant-facing salary-day basis
     // (CALENDAR_DAYS | WORKING_DAYS | THIRTY_DAY_STANDARD | TWENTYSIX_DAY_STANDARD),
     // configured from Settings → Payroll; consumed at attendance freeze + engine.
+    // Feature 45 — reimbursementDefaultChannel: the tenant default for new
+    // claims (PAY_SEPARATELY | PAY_VIA_PAYROLL), settable from Settings → Payroll.
     fields: ['code', 'legalName', 'tradeName', 'countryCode', 'payCurrency', 'timezone', 'taxYearStartMonth',
-      'addressLine1', 'addressLine2', 'city', 'stateCode', 'postalCode', 'prorationBasis',
+      'addressLine1', 'addressLine2', 'city', 'stateCode', 'postalCode', 'prorationBasis', 'reimbursementDefaultChannel',
       'pan', 'tan', 'gstin', 'cin', 'nzbn', 'irdEntityNumber', 'status', 'activeFrom', 'activeTo'],
     required: ['code', 'legalName', 'countryCode', 'payCurrency', 'timezone'],
     dates: ['activeFrom', 'activeTo'],

@@ -27,7 +27,9 @@ async function listCategories(req, res, next) {
     const { businessId } = req.user;
     const items = await prisma.expenseCategory.findMany({
       where: { businessId, deletedAt: null },
-      include: { policies: { where: { deletedAt: null }, orderBy: { createdAt: 'desc' } } },
+      // Feature 45 — gradeRules ride along so the admin grade-grid seeds from a
+      // fresh load (the PUT is replace-all; a blank-seeded re-save would wipe rules).
+      include: { policies: { where: { deletedAt: null }, orderBy: { createdAt: 'desc' }, include: { gradeRules: { orderBy: { gradeRank: 'asc' } } } } },
       orderBy: { createdAt: 'desc' },
     });
     res.json({ items });
@@ -89,4 +91,55 @@ async function upsertCategoryPolicy(req, res, next) {
   } catch (e) { next(e); }
 }
 
-module.exports = { listCategories, createCategory, updateCategory, removeCategory, upsertCategoryPolicy };
+// ── PUT /categories/:id/policy/grade-rules — Feature 45 per-JOB-LEVEL caps ────
+// REPLACE-ALL semantics (mirrors the travel per-diem/hotel/transport PUTs):
+// body { rules: [{ gradeRank|null, maxPerClaim?, maxPerMonth?, dailyCap? }] }.
+// gradeRank null = all levels; at most one null-rank row; ranks unique.
+async function replaceGradeRules(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const category = await prisma.expenseCategory.findFirst({ where: { id: req.params.id, businessId, deletedAt: null } });
+    if (!category) return res.status(404).json({ message: 'Category not found' });
+    const policy = await prisma.expensePolicy.findFirst({ where: { businessId, categoryId: category.id, deletedAt: null } });
+    if (!policy) return res.status(409).json({ message: 'Set the category policy (limits) before adding grade rules' });
+
+    const rules = Array.isArray(req.body && req.body.rules) ? req.body.rules : [];
+    const seen = new Set();
+    const cleaned = [];
+    for (const r of rules) {
+      const rank = r.gradeRank == null || r.gradeRank === '' ? null : Number(r.gradeRank);
+      if (rank != null && (!Number.isInteger(rank) || rank < 0)) {
+        return res.status(400).json({ message: 'gradeRank must be a non-negative integer or null (all levels)' });
+      }
+      const key = rank == null ? '*' : String(rank);
+      if (seen.has(key)) return res.status(400).json({ message: `Duplicate rule for grade rank ${key}` });
+      seen.add(key);
+      const numOrNull = (v) => {
+        if (v == null || v === '') return null;
+        const n = Number(v);
+        return Number.isFinite(n) && n >= 0 ? n : NaN;
+      };
+      const row = { gradeRank: rank, maxPerClaim: numOrNull(r.maxPerClaim), maxPerMonth: numOrNull(r.maxPerMonth), dailyCap: numOrNull(r.dailyCap) };
+      if ([row.maxPerClaim, row.maxPerMonth, row.dailyCap].some((v) => Number.isNaN(v))) {
+        return res.status(400).json({ message: 'Caps must be non-negative numbers' });
+      }
+      if (row.maxPerClaim == null && row.maxPerMonth == null && row.dailyCap == null) {
+        return res.status(400).json({ message: 'A grade rule must set at least one cap' });
+      }
+      cleaned.push(row);
+    }
+
+    const out = await prisma.$transaction(async (tx) => {
+      await tx.expenseGradeRule.deleteMany({ where: { businessId, policyId: policy.id } });
+      if (cleaned.length) {
+        await tx.expenseGradeRule.createMany({
+          data: cleaned.map((r) => ({ businessId, policyId: policy.id, ...r })),
+        });
+      }
+      return tx.expenseGradeRule.findMany({ where: { businessId, policyId: policy.id }, orderBy: { gradeRank: 'asc' } });
+    });
+    res.status(201).json({ items: out });
+  } catch (e) { next(e); }
+}
+
+module.exports = { listCategories, createCategory, updateCategory, removeCategory, upsertCategoryPolicy, replaceGradeRules };

@@ -160,6 +160,28 @@ async function resolveDefinition(businessId, module, ctx = {}, opts = {}) {
     //     so an over-narrow scope never deadlocks a request.
   }
 
+  // Feature 45 — the built-in EXPENSE "HR above threshold" amount is tenant-
+  // configurable (Business.featureFlags.expense.hrThresholdRupees; default the
+  // historical ₹50,000 constant). Steps are CLONED — the frozen built-ins are
+  // never mutated. Read failure → constant (never blocks a request).
+  if (module === 'EXPENSE') {
+    try {
+      const biz = await db.business.findUnique({ where: { id: businessId }, select: { featureFlags: true } });
+      const exp = biz && biz.featureFlags && typeof biz.featureFlags === 'object' ? biz.featureFlags.expense : null;
+      const threshold = exp && Number.isFinite(Number(exp.hrThresholdRupees)) && Number(exp.hrThresholdRupees) > 0
+        ? Number(exp.hrThresholdRupees)
+        : null;
+      if (threshold != null && threshold !== EXPENSE_HR_THRESHOLD) {
+        const steps = builtInSteps('EXPENSE').map((s) => (
+          s.conditionJson && s.conditionJson.amount
+            ? { ...s, conditionJson: { amount: { '>': threshold } }, name: 'HR (over threshold)' }
+            : s
+        ));
+        return { definition: null, steps, source: 'BUILT_IN_DEFAULT' };
+      }
+    } catch (_e) { /* fall through to the constant */ }
+  }
+
   return { definition: null, steps: builtInSteps(module), source: 'BUILT_IN_DEFAULT' };
 }
 

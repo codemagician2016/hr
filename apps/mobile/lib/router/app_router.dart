@@ -18,6 +18,7 @@ import '../features/attendance/attendance_screen.dart';
 import '../features/attendance/face_enrollment_screen.dart';
 import '../features/auth/login_screen.dart';
 import '../features/auth/splash_screen.dart';
+import '../features/expenses/expenses_screen.dart';
 import '../features/home/home_screen.dart';
 import '../features/leave/leave_screen.dart';
 import '../features/letters/letters_screen.dart';
@@ -111,6 +112,18 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/letters',
         parentNavigatorKey: _rootKey,
         builder: (_, __) => const LettersScreen(),
+      ),
+      // Feature 45 — reimbursement claims (list + claim detail).
+      GoRoute(
+        path: '/expenses',
+        parentNavigatorKey: _rootKey,
+        builder: (_, __) => const ExpensesScreen(),
+      ),
+      GoRoute(
+        path: '/expenses/:id',
+        parentNavigatorKey: _rootKey,
+        builder: (_, state) =>
+            ExpenseClaimDetailScreen(claimId: state.pathParameters['id']!),
       ),
       GoRoute(
         path: '/tax',

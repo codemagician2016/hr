@@ -50,6 +50,42 @@ router.post('/categories', requirePermission('canManageExpensePolicy'), categori
 router.patch('/categories/:id', requirePermission('canManageExpensePolicy'), categories.updateCategory);
 router.delete('/categories/:id', requirePermission('canManageExpensePolicy'), categories.removeCategory);
 router.put('/categories/:id/policy', requirePermission('canManageExpensePolicy'), categories.upsertCategoryPolicy);
+// Feature 45 — per-JOB-LEVEL cap overrides (replace-all, mirrors travel rule PUTs).
+router.put('/categories/:id/policy/grade-rules', requirePermission('canManageExpensePolicy'), categories.replaceGradeRules);
+
+// Feature 45 — tenant expense settings: the built-in "HR above threshold"
+// escalation amount (was the hard-coded ₹50,000).
+router.get('/settings', requirePermission('canManageExpensePolicy'), async (req, res, next) => {
+  try {
+    const prisma = require('../../core/lib/prisma');
+    const { EXPENSE_HR_THRESHOLD } = require('../approvals/workflowResolver');
+    const biz = await prisma.business.findUnique({ where: { id: req.user.businessId }, select: { featureFlags: true } });
+    const exp = biz && biz.featureFlags && typeof biz.featureFlags === 'object' ? biz.featureFlags.expense : null;
+    res.json({
+      hrThresholdRupees: exp && Number.isFinite(Number(exp.hrThresholdRupees)) ? Number(exp.hrThresholdRupees) : EXPENSE_HR_THRESHOLD,
+      defaultHrThresholdRupees: EXPENSE_HR_THRESHOLD,
+    });
+  } catch (e) { next(e); }
+});
+router.patch('/settings', requirePermission('canManageExpensePolicy'), async (req, res, next) => {
+  try {
+    const prisma = require('../../core/lib/prisma');
+    const { writeAudit } = require('../../core/lib/audit');
+    const businessId = req.user.businessId;
+    const raw = req.body && req.body.hrThresholdRupees;
+    const threshold = raw == null || raw === '' ? null : Number(raw);
+    if (threshold != null && (!Number.isFinite(threshold) || threshold <= 0)) {
+      return res.status(400).json({ message: 'hrThresholdRupees must be a positive number (or null to reset to default)' });
+    }
+    const biz = await prisma.business.findUnique({ where: { id: businessId }, select: { featureFlags: true } });
+    const flags = biz && biz.featureFlags && typeof biz.featureFlags === 'object' ? biz.featureFlags : {};
+    const exp = flags.expense && typeof flags.expense === 'object' ? flags.expense : {};
+    if (threshold == null) delete exp.hrThresholdRupees; else exp.hrThresholdRupees = threshold;
+    await prisma.business.update({ where: { id: businessId }, data: { featureFlags: { ...flags, expense: exp } } });
+    await writeAudit({ businessId, actorId: req.user.id, action: 'expense.settings.hrThreshold', entityType: 'Business', entityId: businessId, meta: { hrThresholdRupees: threshold } }).catch(() => {});
+    res.json({ hrThresholdRupees: threshold });
+  } catch (e) { next(e); }
+});
 
 // ── Approver inbox (canApproveExpense — scoped) ──────────────────────────────────
 router.get('/inbox', requirePermission('canApproveExpense'), claims.inbox);

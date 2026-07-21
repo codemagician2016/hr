@@ -59,4 +59,14 @@ class Api {
   static const letterRequests = '/api/hr/me/letters/requests'; // GET + POST
   static const letterRequestable = '/api/hr/me/letters/requestable'; // { items, allowCustom } (Feature 42)
   static String letterDownload(String id) => '/api/hr/me/letters/$id/download';
+
+  // Expenses / reimbursements (Feature 45) — mirrors apps/ess/app/reimbursements
+  static const expenseReference = '/api/hr/me/expenses/reference'; // { categories, policy }
+  static const expensePolicyPreview = '/api/hr/me/expenses/policy/preview'; // POST → { verdict, … }
+  static const expenseClaims = '/api/hr/me/expenses/claims'; // GET { items } + POST create draft
+  static String expenseClaim(String id) => '/api/hr/me/expenses/claims/$id';
+  static String expenseClaimLines(String id) => '/api/hr/me/expenses/claims/$id/lines'; // POST → { line, verdict }
+  static String expenseClaimLine(String id, String lineId) => '/api/hr/me/expenses/claims/$id/lines/$lineId'; // DELETE
+  static String expenseClaimSubmit(String id) => '/api/hr/me/expenses/claims/$id/submit';
+  static String expenseClaimCancel(String id) => '/api/hr/me/expenses/claims/$id/cancel';
 }

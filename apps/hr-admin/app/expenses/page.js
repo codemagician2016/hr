@@ -6,10 +6,14 @@
 // (canApproveExpense, engine-driven + SoD) and /reimburse (Finance settle). Each claim
 // carries a POLICY VERDICT banner (green Within / amber Flagged / red Hard-cap) + the
 // travel ID when it is booked against a trip.
+//
+// Feature 45/26 — APPROVED claims additionally show the payout channel as a chip plus a
+// small flip control (PAY_SEPARATELY ↔ PAY_VIA_PAYROLL) → PATCH /claims/:id/payout-channel
+// (frozen with a 409 once a pay run has stamped the claim).
 
 import { useCallback, useEffect, useState } from 'react';
 import { ErrorBanner, formatAdminDate } from '@hr/ui';
-import { get, post } from '@/lib/api';
+import { get, post, patch } from '@/lib/api';
 import { DataTable, PageHeader, StatusBadge, ActionButton, employeeLabel, moneyish, ServerPagination } from '@/lib/ui';
 import { InfoTip } from '@/lib/widgets';
 import ModuleGuide from '@/components/ModuleGuide';
@@ -27,6 +31,36 @@ function VerdictBadge({ v }) {
   };
   const [cls, label] = map[v] || ['bg-gray-100 text-gray-600', v];
   return <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}>{label}</span>;
+}
+
+// Feature 45/26 — the claim's payout channel as a small chip.
+function ChannelChip({ channel }) {
+  const via = channel === 'PAY_VIA_PAYROLL';
+  return (
+    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${via ? 'bg-indigo-100 text-indigo-800' : 'bg-gray-100 text-gray-600'}`}>
+      {via ? 'Via payroll' : 'Paid separately'}
+    </span>
+  );
+}
+
+// Chip + flip control for an APPROVED claim's payout channel.
+function ChannelControl({ claim, busy, onFlip }) {
+  const value = claim.payoutChannel === 'PAY_VIA_PAYROLL' ? 'PAY_VIA_PAYROLL' : 'PAY_SEPARATELY';
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className="text-xs text-gray-500">Payout</span>
+      <InfoTip text="Pay separately settles the claim outside payroll (Reimburse below). Pay via payroll adds it to the next pay run's net as a tax-exempt reimbursement line. Frozen once a run picks the claim up." />
+      <select
+        value={value}
+        disabled={busy}
+        onChange={(e) => onFlip(claim.id, e.target.value)}
+        className="rounded-md border border-gray-300 px-1.5 py-0.5 text-xs disabled:opacity-50"
+      >
+        <option value="PAY_SEPARATELY">Pay separately</option>
+        <option value="PAY_VIA_PAYROLL">Pay via payroll</option>
+      </select>
+    </span>
+  );
 }
 
 export default function ExpensesPage() {
@@ -70,6 +104,21 @@ export default function ExpensesPage() {
     catch (e) { setError(e.message); }
   }
 
+  // Flip an APPROVED claim's payout channel (409 once a pay run has stamped it).
+  async function flipChannel(id, payoutChannel) {
+    setBusyId(id);
+    setError('');
+    try {
+      await patch(`/api/hr/expenses/claims/${id}/payout-channel`, { payoutChannel });
+      load();
+      if (detail && detail.id === id) openDetail(id);
+    } catch (e) {
+      setError(e.data?.message || e.message || 'Failed to change the payout channel.');
+    } finally {
+      setBusyId('');
+    }
+  }
+
   const items = data?.items || [];
   const total = data?.total ?? items.length;
 
@@ -80,7 +129,15 @@ export default function ExpensesPage() {
     { key: 'amount', header: 'Amount', render: (r) => moneyish(r.amount, r.currencyCode) },
     { key: 'policy', header: 'Policy', render: (r) => <VerdictBadge v={r.policyVerdict} /> },
     { key: 'submitted', header: 'Submitted', render: (r) => formatAdminDate(r.submittedAt || r.createdAt) },
-    { key: 'status', header: 'Status', render: (r) => <StatusBadge status={r.status} /> },
+    {
+      key: 'status', header: 'Status',
+      render: (r) => (
+        <div className="flex flex-col items-start gap-1">
+          <StatusBadge status={r.status} />
+          {String(r.status || '').toUpperCase() === 'APPROVED' && <ChannelChip channel={r.payoutChannel} />}
+        </div>
+      ),
+    },
     {
       key: 'actions', header: '',
       render: (r) => {
@@ -91,7 +148,12 @@ export default function ExpensesPage() {
             <ActionButton tone="danger" disabled={busyId === r.id} onClick={() => act(r.id, 'reject', { reason: prompt('Reason for rejection?') || '' })}>Reject</ActionButton>
           </div>
         );
-        if (s === 'APPROVED') return <ActionButton tone="positive" disabled={busyId === r.id} onClick={() => act(r.id, 'reimburse', { paymentRef: prompt('Payment reference (optional)') || undefined })}>Reimburse</ActionButton>;
+        if (s === 'APPROVED') return (
+          <div className="flex flex-wrap items-center gap-2">
+            <ChannelControl claim={r} busy={busyId === r.id} onFlip={flipChannel} />
+            <ActionButton tone="positive" disabled={busyId === r.id} onClick={() => act(r.id, 'reimburse', { paymentRef: prompt('Payment reference (optional)') || undefined })}>Reimburse</ActionButton>
+          </div>
+        );
         return null;
       },
     },
@@ -142,12 +204,12 @@ export default function ExpensesPage() {
         onPageSizeChange={(ps) => { setPage(1); setPageSize(ps); }}
       />
 
-      {detail && <ClaimDetailModal claim={detail} onClose={() => setDetail(null)} onAct={act} busyId={busyId} />}
+      {detail && <ClaimDetailModal claim={detail} onClose={() => setDetail(null)} onAct={act} onFlipChannel={flipChannel} busyId={busyId} />}
     </div>
   );
 }
 
-function ClaimDetailModal({ claim, onClose, onAct, busyId }) {
+function ClaimDetailModal({ claim, onClose, onAct, onFlipChannel, busyId }) {
   const s = String(claim.status || '').toUpperCase();
   return (
     <div className="fixed inset-0 z-40 flex items-start justify-center bg-black/30 p-4" onClick={onClose}>
@@ -186,7 +248,10 @@ function ClaimDetailModal({ claim, onClose, onAct, busyId }) {
           </div>
         )}
         {s === 'APPROVED' && (
-          <div className="mt-4"><ActionButton tone="positive" disabled={busyId === claim.id} onClick={() => onAct(claim.id, 'reimburse', { paymentRef: prompt('Payment reference (optional)') || undefined })}>Mark reimbursed</ActionButton></div>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <ChannelControl claim={claim} busy={busyId === claim.id} onFlip={onFlipChannel} />
+            <ActionButton tone="positive" disabled={busyId === claim.id} onClick={() => onAct(claim.id, 'reimburse', { paymentRef: prompt('Payment reference (optional)') || undefined })}>Mark reimbursed</ActionButton>
+          </div>
         )}
       </div>
     </div>

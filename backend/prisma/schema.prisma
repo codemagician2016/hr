@@ -10170,6 +10170,28 @@ model ExpensePolicy {
   version        Int               @default(0)
 
   @@index([businessId, categoryId])
+
+  gradeRules ExpenseGradeRule[] // Feature 45 — per-JOB-LEVEL cap overrides
+}
+
+/// Feature 45 — per-grade cap override for a category's reimbursement policy
+/// (the owner's "reimbursement per job level"). gradeRank NULL = all levels
+/// (the base row); an exact gradeRank match overrides. A null override field
+/// falls back to the policy's flat cap. Mirrors the TravelHotelRule grade
+/// pattern; rows are REPLACE-ALL via PUT (like travel per-diem/hotel rules).
+model ExpenseGradeRule {
+  id          String        @id @default(uuid())
+  businessId  String
+  policyId    String
+  policy      ExpensePolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  gradeRank   Int? // matches Grade.rank; NULL = applies to all levels
+  maxPerClaim Decimal?      @db.Decimal(15, 2)
+  maxPerMonth Decimal?      @db.Decimal(15, 2)
+  dailyCap    Decimal?      @db.Decimal(15, 2)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([businessId, policyId])
 }
 
 model ExpenseClaim {

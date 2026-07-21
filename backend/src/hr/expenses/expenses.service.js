@@ -122,6 +122,9 @@ async function loadCategoryPolicy(businessId, categoryId) {
   return prisma.expensePolicy.findFirst({
     where: { businessId, categoryId, isActive: true, deletedAt: null },
     orderBy: { createdAt: 'desc' },
+    // Feature 45 — per-grade cap overrides ride along; policyEngine.evalCategory
+    // picks exact-gradeRank > all-levels > flat policy caps.
+    include: { gradeRules: true },
   });
 }
 
@@ -248,7 +251,13 @@ function sanitizeTripDimensions(raw, trip) {
 async function evaluateOneLine(businessId, employeeId, line, opts) {
   const { policy, gradeRank, cityTier, currencyCode, journeyHours } = opts;
   const categoryPolicy = await loadCategoryPolicy(businessId, line.categoryId);
-  const monthToDate = categoryPolicy && categoryPolicy.maxPerMonth != null
+  // Feature 45 — a monthly cap can now also come from a per-grade override row,
+  // so month-to-date must load whenever ANY monthly cap could apply.
+  const anyMonthlyCap = categoryPolicy && (
+    categoryPolicy.maxPerMonth != null
+    || (categoryPolicy.gradeRules || []).some((r) => r.maxPerMonth != null)
+  );
+  const monthToDate = anyMonthlyCap
     ? await monthToDateForCategory(businessId, employeeId, line.categoryId, line.expenseDate ? new Date(line.expenseDate) : new Date())
     : 0;
   const ctx = { policy, categoryPolicy, gradeRank, cityTier, currencyCode, journeyHours, monthToDate };
@@ -284,6 +293,18 @@ async function openClaimApproval(tx, { businessId, claim }) {
     where: { businessId, module: 'EXPENSE', entityType: 'ExpenseClaim', entityId: claim.id, status: { in: ['PENDING', 'ESCALATED'] } },
     data: { status: 'WITHDRAWN', completedAt: new Date(), slaDueAt: null },
   });
+  // Feature 45 — routing dimensions were hard-coded null, so level/department-
+  // scoped EXPENSE WorkflowDefinitions could NEVER match (scopeMatches saw
+  // undefined). Resolve them from the current employment record + category so
+  // "different approval chain for senior grades / this department" actually routes.
+  const er = await tx.employmentRecord.findFirst({
+    where: { businessId, employeeId: claim.employeeId, isCurrent: true },
+    select: { departmentId: true, gradeId: true, locationId: true },
+  });
+  const category = claim.categoryId
+    ? await tx.expenseCategory.findFirst({ where: { id: claim.categoryId, businessId }, select: { code: true } })
+    : null;
+
   const result = await engine.openRequest({
     businessId,
     module: 'EXPENSE',
@@ -299,8 +320,10 @@ async function openClaimApproval(tx, { businessId, claim }) {
     ctx: {
       entityId: claim.id,
       amount: Number(claim.amount),
-      categoryCode: null,
-      departmentId: null,
+      categoryCode: category ? category.code : null,
+      departmentId: er ? er.departmentId : null,
+      employeeLevel: er ? er.gradeId : null, // matches scopeJson.employeeLevels (gradeId, same convention as LEAVE)
+      locationId: er ? er.locationId : null,
     },
   }, tx);
   return result;

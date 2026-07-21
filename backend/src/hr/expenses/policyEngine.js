@@ -170,10 +170,21 @@ function evalCategory(line, ctx) {
   if (cp.requireReceipt && !line.receiptUrl) {
     return { verdict: VERDICT.FLAGGED, appliedCap: null, reason: 'Receipt required for this category' };
   }
+  // Feature 45 — per-JOB-LEVEL override: an exact gradeRank rule beats the
+  // all-levels (null-rank) rule beats the policy's flat caps. A null field on
+  // the winning rule falls back to the flat cap (partial overrides compose).
+  const gradeRules = ctx.gradeRules || cp.gradeRules || [];
+  let gr = null;
+  if (gradeRules.length) {
+    const exact = ctx.gradeRank != null ? gradeRules.find((r) => r.gradeRank === ctx.gradeRank) : null;
+    gr = exact || gradeRules.find((r) => r.gradeRank == null) || null;
+  }
+  const capOf = (field) => (gr && gr[field] != null ? num(gr[field]) : num(cp[field]));
+  const levelTag = gr && gr.gradeRank != null ? ` (level ${gr.gradeRank})` : '';
   const checks = [
-    { cap: num(cp.maxPerClaim), label: 'per-claim cap', running: amount },
-    { cap: num(cp.dailyCap), label: 'daily cap', running: amount },
-    { cap: num(cp.maxPerMonth), label: 'monthly cap', running: (num(ctx.monthToDate) || 0) + (amount || 0) },
+    { cap: capOf('maxPerClaim'), label: `per-claim cap${levelTag}`, running: amount },
+    { cap: capOf('dailyCap'), label: `daily cap${levelTag}`, running: amount },
+    { cap: capOf('maxPerMonth'), label: `monthly cap${levelTag}`, running: (num(ctx.monthToDate) || 0) + (amount || 0) },
   ];
   for (const c of checks) {
     if (c.cap !== null && c.running !== null && c.running > c.cap) {
