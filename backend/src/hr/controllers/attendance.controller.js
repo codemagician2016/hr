@@ -545,13 +545,87 @@ async function removeShift(req, res, next) {
   } catch (e) { next(e); }
 }
 
-// POST /shifts/:id/assign  — assign this shift pattern to an employee, effective-dated.
+// POST /shifts/:id/assign  — assign this shift pattern, effective-dated, to:
+//   { employeeId }                        one employee (original contract), or
+//   { employeeIds: [...] }                an explicit list, or
+//   { departmentId }                      every active employee of a department, or
+//   { entityId }                          every active employee of an entity.
+// Feature 42 — working days are decided by the assigned shift's weeklyOffDays, so
+// bulk assignment IS how a company sets working days department-/company-wide
+// while individual assignment overrides employee-wise. Bulk is best-effort per
+// employee: overlapping windows are SKIPPED (reported), never a batch abort.
 // ShiftAssignment has no deletedAt column → unassign is a hard delete.
 async function assignShift(req, res, next) {
   try {
     const { businessId } = req.user;
     const shiftPatternId = req.params.id;
-    const { employeeId, effectiveFrom, effectiveTo } = req.body;
+    const { employeeId, employeeIds, departmentId, entityId, effectiveFrom, effectiveTo } = req.body;
+
+    // ── Feature 42: bulk targets (department / entity / explicit list) ────────
+    if (!employeeId && (departmentId || entityId || Array.isArray(employeeIds))) {
+      if (!effectiveFrom) return res.status(400).json({ message: 'effectiveFrom is required' });
+      const shift = await prisma.shiftPattern.findFirst({ where: { id: shiftPatternId, businessId, deletedAt: null } });
+      if (!shift) return res.status(404).json({ message: 'Shift not found' });
+
+      let targetIds = [];
+      if (Array.isArray(employeeIds)) {
+        targetIds = employeeIds.map(String);
+      } else {
+        const er = await prisma.employmentRecord.findMany({
+          where: {
+            businessId, isCurrent: true,
+            ...(departmentId ? { departmentId: String(departmentId) } : {}),
+            ...(entityId ? { entityId: String(entityId) } : {}),
+          },
+          select: { employeeId: true },
+        });
+        targetIds = [...new Set(er.map((r) => r.employeeId))];
+      }
+      // Tenant + active + manager-scope filter (a manager bulk-assigns only their sub-tree).
+      const emps = await prisma.employee.findMany({
+        where: { businessId, id: { in: targetIds }, isActive: true, deletedAt: null },
+        select: { id: true },
+      });
+      const inScope = emps.map((e) => e.id).filter((id) => scopeAllows(req.scope, id));
+      if (!inScope.length) return res.status(404).json({ message: 'No assignable employees in the selected target' });
+
+      const from = utcDay(effectiveFrom);
+      const to = effectiveTo ? utcDay(effectiveTo) : null;
+      if (to && to.getTime() < from.getTime()) {
+        return res.status(400).json({ message: 'effectiveTo must be on or after effectiveFrom' });
+      }
+      const existingAll = await prisma.shiftAssignment.findMany({
+        where: { businessId, employeeId: { in: inScope } },
+        select: { employeeId: true, effectiveFrom: true, effectiveTo: true },
+      });
+      const byEmp = new Map();
+      for (const a of existingAll) {
+        if (!byEmp.has(a.employeeId)) byEmp.set(a.employeeId, []);
+        byEmp.get(a.employeeId).push(a);
+      }
+      const nFrom = from.getTime();
+      const nTo = to ? to.getTime() : Infinity;
+      const assignable = [];
+      const skipped = [];
+      for (const id of inScope) {
+        const clash = (byEmp.get(id) || []).some((a) => {
+          const aFrom = utcDay(a.effectiveFrom).getTime();
+          const aTo = a.effectiveTo ? utcDay(a.effectiveTo).getTime() : Infinity;
+          return aFrom <= nTo && nFrom <= aTo;
+        });
+        if (clash) skipped.push(id); else assignable.push(id);
+      }
+      if (assignable.length) {
+        await prisma.shiftAssignment.createMany({
+          data: assignable.map((id) => ({ businessId, employeeId: id, shiftPatternId, effectiveFrom: from, effectiveTo: to })),
+        });
+      }
+      return res.status(201).json({
+        assigned: assignable.length,
+        skippedOverlapping: skipped.length,
+        skippedEmployeeIds: skipped,
+      });
+    }
 
     if (!employeeId || !effectiveFrom) {
       return res.status(400).json({ message: 'employeeId and effectiveFrom are required' });

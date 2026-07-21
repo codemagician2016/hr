@@ -7206,6 +7206,12 @@ model CtcPolicy {
   esiApplicable  Boolean         @default(false) // include employer ESI in the CTC fixed point
   capPfAtCeiling Boolean         @default(true) // cap PF at the ₹15,000 wage ceiling in the quote
   isActive       Boolean         @default(true)
+  // Feature 42 — CTC LOCK: a locked policy refuses edits/deletes until an Owner
+  // (canApproveCompensation holder) unlocks it — protects an agreed structure
+  // from silent drift (policy writes have no maker-checker by design).
+  isLocked       Boolean         @default(false)
+  lockedById     String?
+  lockedAt       DateTime?
   lines          CtcPolicyLine[]
   createdById    String?
   createdAt      DateTime        @default(now())
@@ -7306,6 +7312,7 @@ enum ProrationMethod {
   CALENDAR_DAYS
   WORKING_DAYS
   THIRTY_DAY_STANDARD
+  TWENTYSIX_DAY_STANDARD // Feature 42 — the factory "26-day basis" (engine FIXED_26, now reachable)
   NONE
 }
 
@@ -11169,6 +11176,10 @@ model LetterTemplate {
   stampBoxJson         Json? // normalized {x,y,w,h} placement for the stamp
   isSystem            Boolean            @default(false) // seeded IN/NZ template (non-deletable)
   isActive            Boolean            @default(true) // PUBLISHED. false = DRAFT/ARCHIVED
+  // Feature 42 — employee self-service: HR decides PER TEMPLATE whether employees
+  // can request this letter from ESS/mobile. The ESS request list is driven by
+  // the tenant's published+selfServe templates — nothing hard-coded.
+  selfServe           Boolean            @default(false)
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
   deletedAt           DateTime?
@@ -11315,6 +11326,10 @@ model DocumentRequest {
   employeeId          String
   employee            Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   templateKind        TemplateKind // what they want (SALARY_CERTIFICATE, etc.)
+  // Feature 42 — when the employee picked a REAL template from the tenant's
+  // selfServe library (vs the legacy kind enum / OTHER free-form), bind it so
+  // HR fulfils from the exact template the employee asked for.
+  letterTemplateId    String?
   purpose             String?
   status              RequestStatus @default(PENDING)
   generatedDocumentId String? // resulting EmployeeDocument

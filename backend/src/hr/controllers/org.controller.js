@@ -235,8 +235,11 @@ module.exports = {
   treeAncestors,
   treeSearch,
   entities: crud('entity', {
+    // Feature 42 — prorationBasis: the tenant-facing salary-day basis
+    // (CALENDAR_DAYS | WORKING_DAYS | THIRTY_DAY_STANDARD | TWENTYSIX_DAY_STANDARD),
+    // configured from Settings → Payroll; consumed at attendance freeze + engine.
     fields: ['code', 'legalName', 'tradeName', 'countryCode', 'payCurrency', 'timezone', 'taxYearStartMonth',
-      'addressLine1', 'addressLine2', 'city', 'stateCode', 'postalCode',
+      'addressLine1', 'addressLine2', 'city', 'stateCode', 'postalCode', 'prorationBasis',
       'pan', 'tan', 'gstin', 'cin', 'nzbn', 'irdEntityNumber', 'status', 'activeFrom', 'activeTo'],
     required: ['code', 'legalName', 'countryCode', 'payCurrency', 'timezone'],
     dates: ['activeFrom', 'activeTo'],

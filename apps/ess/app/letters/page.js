@@ -24,14 +24,17 @@ import { ServerPagination } from '@/lib/pagination';
 const LETTERS_PATH = '/api/hr/me/letters';
 const PAGE_SIZES = [10, 25, 50];
 
-// The letter types an employee can request (maps to DocumentRequest.templateKind).
-const REQUEST_TYPES = [
+// Feature 42 — the request dropdown is DYNAMIC: GET /requestable returns the
+// tenant's published selfServe templates (+ whether free-form "Other" requests
+// are allowed). The legacy hard-coded kinds below survive ONLY as a fallback
+// for older environments where the /requestable route isn't deployed yet.
+const LEGACY_REQUEST_TYPES = [
   { value: 'SALARY_CERTIFICATE', label: 'Salary Certificate' },
   { value: 'EXPERIENCE_LETTER', label: 'Experience Certificate' },
   { value: 'RELIEVING_LETTER', label: 'Relieving Letter' },
   { value: 'APPOINTMENT_LETTER', label: 'Appointment Letter' },
   { value: 'CONFIRMATION_LETTER', label: 'Confirmation Letter' },
-  { value: 'OTHER', label: 'Other' },
+  { value: 'OTHER', label: 'Other (describe below)' },
 ];
 
 const CATEGORY_LABELS = {
@@ -60,12 +63,36 @@ function MyLettersInner() {
   const letters = useMemo(() => data?.items || [], [data]);
   const lettersTotal = data?.total ?? letters.length;
 
+  // Feature 42 — what the employee may request: the tenant's published selfServe
+  // templates + the free-form "Other" switch. Errors (route not deployed) fall
+  // back to the legacy hard-coded kinds so the form keeps working.
+  const {
+    data: requestable, loading: requestableLoading, error: requestableError,
+  } = useApi(`${LETTERS_PATH}/requestable`, {
+    select: (b) => ({ items: b?.items || [], allowCustom: !!b?.allowCustom }),
+  });
+  const legacyMode = !!requestableError;
+  const reqItems = requestable?.items || [];
+  const allowCustom = legacyMode ? true : !!requestable?.allowCustom;
+  const reqOptions = useMemo(() => (legacyMode
+    ? LEGACY_REQUEST_TYPES
+    : [
+      ...reqItems.map((t) => ({ value: t.id, label: t.name })),
+      ...(allowCustom ? [{ value: 'OTHER', label: 'Other (describe below)' }] : []),
+    ]), [legacyMode, reqItems, allowCustom]);
+  const requestsEnabled = legacyMode || reqOptions.length > 0;
+
   // Request-a-letter form state
-  const [reqType, setReqType] = useState('SALARY_CERTIFICATE');
+  const [reqType, setReqType] = useState('');
   const [purpose, setPurpose] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [reqError, setReqError] = useState(null);
   const [reqSuccess, setReqSuccess] = useState(false);
+  // The selected option (falls back to the first once the list arrives).
+  const effectiveType = reqType && reqOptions.some((o) => o.value === reqType)
+    ? reqType
+    : (reqOptions[0]?.value || '');
+  const isOther = effectiveType === 'OTHER';
 
   // My letter requests (pending / in-progress / fulfilled). `reqTick` re-fetches
   // after a new request is submitted so the new PENDING row shows immediately.
@@ -78,14 +105,21 @@ function MyLettersInner() {
 
   async function submitRequest(e) {
     e.preventDefault();
-    setSubmitting(true);
     setReqError(null);
     setReqSuccess(false);
+    if (!effectiveType) return;
+    if (isOther && !purpose.trim()) {
+      setReqError('Please describe the letter you need in the Purpose field.');
+      return;
+    }
+    setSubmitting(true);
     try {
-      await apiPost(`${LETTERS_PATH}/requests`, {
-        templateKind: reqType,
-        purpose: purpose.trim() || undefined,
-      });
+      // Template-bound request ({ letterTemplateId }) for a picked template;
+      // legacy { templateKind } for the free-form "Other" / fallback kinds.
+      const body = isOther || legacyMode
+        ? { templateKind: effectiveType, purpose: purpose.trim() || undefined }
+        : { letterTemplateId: effectiveType, purpose: purpose.trim() || undefined };
+      await apiPost(`${LETTERS_PATH}/requests`, body);
       setReqSuccess(true);
       setPurpose('');
       setReqTick((t) => t + 1); // refresh my-requests list
@@ -244,68 +278,83 @@ function MyLettersInner() {
         </div>
       )}
 
-      {/* Request a letter */}
+      {/* Request a letter — dynamic (Feature 42): the tenant's requestable
+          templates + optional free-form "Other". Hidden with a note when HR has
+          enabled neither. */}
       <div className="rounded-xl border bg-white p-4 shadow-sm" style={{ borderColor: 'var(--theme-border)' }}>
         <h2 className="flex items-center text-base font-semibold" style={{ color: 'var(--theme-text)' }}>
           Request a Letter
           <EssInfoTip text="Pick the letter you need and (optionally) why. HR is notified and will issue it; you'll be able to download it here." label="Request a Letter" />
         </h2>
-        <p className="mt-1 text-xs" style={{ color: 'var(--theme-muted)' }}>
-          Ask HR to issue a letter. Your request lands in the HR queue and appears above once issued.
-        </p>
-        <form onSubmit={submitRequest} className="mt-3 space-y-3">
-          <div>
-            <label htmlFor="reqType" className="flex items-center text-xs font-medium" style={{ color: 'var(--theme-text)' }}>
-              Letter type
-              <EssInfoTip text="The kind of letter you need, e.g. a salary certificate or experience certificate." label="Letter type" />
-            </label>
-            <select
-              id="reqType"
-              value={reqType}
-              onChange={(e) => setReqType(e.target.value)}
-              className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-              style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-text)' }}
-            >
-              {REQUEST_TYPES.map((t) => (
-                <option key={t.value} value={t.value}>{t.label}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label htmlFor="purpose" className="flex items-center text-xs font-medium" style={{ color: 'var(--theme-text)' }}>
-              Purpose <span className="ml-1" style={{ color: 'var(--theme-muted)' }}>(optional)</span>
-              <EssInfoTip text="Why you need the letter, e.g. 'for a visa application' or 'bank loan'. Helps HR issue the right wording." label="Purpose" />
-            </label>
-            <textarea
-              id="purpose"
-              value={purpose}
-              onChange={(e) => setPurpose(e.target.value)}
-              rows={2}
-              maxLength={2000}
-              placeholder="e.g. for a visa application / bank loan"
-              className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-              style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-text)' }}
-            />
-          </div>
-          {reqError && <ErrorBanner message={reqError} />}
-          {reqSuccess && (
-            <div
-              className="rounded-lg px-3 py-2 text-sm font-medium"
-              style={{ background: 'var(--theme-primary-soft)', color: 'var(--theme-primary)' }}
-              role="status"
-            >
-              Request submitted. HR will action it shortly.
-            </div>
-          )}
-          <button
-            type="submit"
-            disabled={submitting}
-            className="rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-60 active:scale-[0.99]"
-            style={{ background: 'var(--theme-primary)' }}
-          >
-            {submitting ? 'Submitting…' : 'Submit request'}
-          </button>
-        </form>
+        {requestableLoading && !requestable ? (
+          <div className="mt-3 flex justify-center py-4"><Spinner /></div>
+        ) : !requestsEnabled ? (
+          <p className="mt-2 text-sm" style={{ color: 'var(--theme-muted)' }}>
+            Your HR team hasn&apos;t enabled letter requests yet.
+          </p>
+        ) : (
+          <>
+            <p className="mt-1 text-xs" style={{ color: 'var(--theme-muted)' }}>
+              Ask HR to issue a letter. Your request lands in the HR queue and appears above once issued.
+            </p>
+            <form onSubmit={submitRequest} className="mt-3 space-y-3">
+              <div>
+                <label htmlFor="reqType" className="flex items-center text-xs font-medium" style={{ color: 'var(--theme-text)' }}>
+                  Letter type
+                  <EssInfoTip text="The letters your HR team has made requestable. Pick 'Other' to describe something not listed." label="Letter type" />
+                </label>
+                <select
+                  id="reqType"
+                  value={effectiveType}
+                  onChange={(e) => setReqType(e.target.value)}
+                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                  style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-text)' }}
+                >
+                  {reqOptions.map((t) => (
+                    <option key={t.value} value={t.value}>{t.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="purpose" className="flex items-center text-xs font-medium" style={{ color: 'var(--theme-text)' }}>
+                  Purpose{' '}
+                  <span className="ml-1" style={{ color: 'var(--theme-muted)' }}>
+                    {isOther ? '(required)' : '(optional)'}
+                  </span>
+                  <EssInfoTip text="Why you need the letter, e.g. 'for a visa application' or 'bank loan'. For 'Other', describe the letter you need." label="Purpose" />
+                </label>
+                <textarea
+                  id="purpose"
+                  value={purpose}
+                  onChange={(e) => setPurpose(e.target.value)}
+                  rows={2}
+                  maxLength={2000}
+                  placeholder={isOther ? 'Describe the letter you need' : 'e.g. for a visa application / bank loan'}
+                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                  style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-text)' }}
+                />
+              </div>
+              {reqError && <ErrorBanner message={reqError} />}
+              {reqSuccess && (
+                <div
+                  className="rounded-lg px-3 py-2 text-sm font-medium"
+                  style={{ background: 'var(--theme-primary-soft)', color: 'var(--theme-primary)' }}
+                  role="status"
+                >
+                  Request submitted. HR will action it shortly.
+                </div>
+              )}
+              <button
+                type="submit"
+                disabled={submitting || !effectiveType}
+                className="rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-60 active:scale-[0.99]"
+                style={{ background: 'var(--theme-primary)' }}
+              >
+                {submitting ? 'Submitting…' : 'Submit request'}
+              </button>
+            </form>
+          </>
+        )}
       </div>
     </div>
   );

@@ -109,6 +109,9 @@ function rollupEmployee(rows, periodStart, periodEnd, opts = {}) {
   const basis = opts.prorationBasis || null;
   if (basis === 'THIRTY_DAY_STANDARD' || basis === 'FIXED_30') {
     standardDays = 30;
+  } else if (basis === 'TWENTYSIX_DAY_STANDARD' || basis === 'FIXED_26') {
+    // Feature 42 — the factory 26-day basis (Gratuity/Factories tradition).
+    standardDays = 26;
   } else if (basis === 'WORKING_DAYS') {
     standardDays = round4(calendarDays - weeklyOffDays - holidayDays);
   }

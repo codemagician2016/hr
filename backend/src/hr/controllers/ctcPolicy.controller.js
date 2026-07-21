@@ -274,6 +274,12 @@ async function update(req, res, next) {
     const { businessId } = req.user;
     const existing = await prisma.ctcPolicy.findFirst({ where: { id: req.params.id, businessId, deletedAt: null } });
     if (!existing) return res.status(404).json({ message: 'CTC policy not found' });
+    // Feature 42 — CTC LOCK: a locked policy refuses edits until unlocked by a
+    // canApproveCompensation holder (policy writes have no maker-checker; the
+    // lock is the freeze that protects an agreed structure from silent drift).
+    if (existing.isLocked) {
+      return res.status(423).json({ error: 'CTC_POLICY_LOCKED', message: 'This CTC policy is locked. Unlock it (approver-only) before editing.' });
+    }
 
     if (req.body.countryCode && String(req.body.countryCode).toUpperCase() !== existing.countryCode) {
       return res.status(409).json({ error: 'COUNTRY_MISMATCH', message: 'A CTC policy country cannot be changed.' });
@@ -329,9 +335,47 @@ async function remove(req, res, next) {
     const { businessId } = req.user;
     const existing = await prisma.ctcPolicy.findFirst({ where: { id: req.params.id, businessId, deletedAt: null } });
     if (!existing) return res.status(404).json({ message: 'CTC policy not found' });
+    // Feature 42 — a locked policy cannot be deleted either.
+    if (existing.isLocked) {
+      return res.status(423).json({ error: 'CTC_POLICY_LOCKED', message: 'This CTC policy is locked. Unlock it (approver-only) before deleting.' });
+    }
     await prisma.ctcPolicy.update({ where: { id: existing.id }, data: { deletedAt: new Date(), isActive: false } });
     audit('compensation.change', { businessId, actorId: req.user.id, entityId: existing.id, meta: { op: 'ctc-policy.delete', code: existing.code } });
     res.status(204).end();
+  } catch (e) { next(e); }
+}
+
+// ── Feature 42 — CTC LOCK / UNLOCK ────────────────────────────────────────────
+// Lock: any canManageCompensation holder may lock (freeze an agreed structure).
+// Unlock: gated at the ROUTE on canApproveCompensation (the comp CHECKER role) —
+// the maker who locked it cannot silently unfreeze without the approver.
+async function lock(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const existing = await prisma.ctcPolicy.findFirst({ where: { id: req.params.id, businessId, deletedAt: null } });
+    if (!existing) return res.status(404).json({ message: 'CTC policy not found' });
+    if (existing.isLocked) return res.json(shapePolicy(existing));
+    const row = await prisma.ctcPolicy.update({
+      where: { id: existing.id },
+      data: { isLocked: true, lockedById: req.user.id || null, lockedAt: new Date() },
+    });
+    audit('compensation.change', { businessId, actorId: req.user.id, entityId: row.id, meta: { op: 'ctc-policy.lock', code: row.code } });
+    res.json(shapePolicy(row));
+  } catch (e) { next(e); }
+}
+
+async function unlock(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const existing = await prisma.ctcPolicy.findFirst({ where: { id: req.params.id, businessId, deletedAt: null } });
+    if (!existing) return res.status(404).json({ message: 'CTC policy not found' });
+    if (!existing.isLocked) return res.json(shapePolicy(existing));
+    const row = await prisma.ctcPolicy.update({
+      where: { id: existing.id },
+      data: { isLocked: false, lockedById: null, lockedAt: null },
+    });
+    audit('compensation.change', { businessId, actorId: req.user.id, entityId: row.id, meta: { op: 'ctc-policy.unlock', code: row.code } });
+    res.json(shapePolicy(row));
   } catch (e) { next(e); }
 }
 
@@ -504,7 +548,7 @@ async function statementPdf(req, res, next) {
 }
 
 module.exports = {
-  list, get, create, update, remove, defaults, preview, statementPdf,
+  list, get, create, update, remove, lock, unlock, defaults, preview, statementPdf,
   // exported for tests / the onboard controller's reuse
   _internal: { computePreview, validateLines, loadPolicyForCompile, lineCreates, shapePolicy },
 };

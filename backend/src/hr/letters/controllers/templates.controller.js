@@ -105,6 +105,8 @@ const TEMPLATE_PUBLIC = [
   'manualFieldsJson',
   // Feature 39 — tenant category + reusable signature/stamp assets + stamp placement.
   'categoryId', 'signatureAssetId', 'stampAssetId', 'stampBoxJson',
+  // Feature 42 — employee self-service visibility (ESS request list is driven by this).
+  'selfServe',
 ];
 
 function publicTemplate(t) {
@@ -361,6 +363,8 @@ async function createTemplate(req, res) {
     isSystem: false,
     // New templates start as a DRAFT unless the caller explicitly publishes.
     isActive: b.isActive === true,
+    // Feature 42 — HR decides per template whether employees can self-request it.
+    selfServe: b.selfServe === true,
     version: 0,
   };
 
@@ -390,6 +394,9 @@ async function updateTemplate(req, res) {
 
   const b = req.body || {};
   const data = {};
+
+  // Feature 42 — employee self-service visibility toggle.
+  if (b.selfServe !== undefined) data.selfServe = b.selfServe === true;
 
   if (b.name !== undefined) {
     const name = typeof b.name === 'string' ? b.name.trim() : '';

@@ -151,7 +151,7 @@ export const NAV_ITEMS = [
   // Settings groups Branding, Roles, Domain and Billing. Show it to anyone who
   // can manage ANY of those — a Finance role (canEditBilling, no canEditBranding)
   // must still reach the Billing tab. Per-tab/per-action gating happens inside.
-  { key: 'settings', label: 'Settings', href: '/settings', anyPermission: ['canEditBranding', 'canEditBilling', 'canEditDomain', 'canManageCompanyProfile', 'canManageExpensePolicy', 'canManageImports', 'canManageAttendance'], group: true, icon: 'settings' },
+  { key: 'settings', label: 'Settings', href: '/settings', anyPermission: ['canEditBranding', 'canEditBilling', 'canEditDomain', 'canManageCompanyProfile', 'canManageExpensePolicy', 'canManageImports', 'canManageAttendance', 'canManageOrg'], group: true, icon: 'settings' },
   // White-label Branding (self-service) — logo/favicon/colours/display-name so a
   // tenant's OWN brand shows on the console, the ESS portal, and both login pages
   // (never the DriftHR vendor mark). Mirrors the backend OR-gate: visible to
@@ -162,6 +162,10 @@ export const NAV_ITEMS = [
   // at /settings/domain but was never wired into the nav. Gated on canEditDomain
   // (Owner/Finance-scoped). The page itself shows a read-only banner for others.
   { key: 'settings-domain', label: 'Domain', href: '/settings/domain', permission: 'canEditDomain', parent: 'settings', icon: 'globe' },
+  // Feature 42 — Settings → Payroll: the per-entity SALARY-DAY BASIS console
+  // (Entity.prorationBasis: calendar / working-days / fixed-30 / fixed-26).
+  // Gated on canManageOrg (entity writes); the page shows read-only for others.
+  { key: 'settings-payroll', label: 'Payroll', href: '/settings/payroll', permission: 'canManageOrg', parent: 'settings', icon: 'coin' },
   // FLAG FOR MERGE: two NEW Settings sub-pages, gated on the new
   // canManageCompanyProfile rbac key (seeded true for Owner + HR-Admin). The
   // server is the real boundary; this just hides the links from operators who

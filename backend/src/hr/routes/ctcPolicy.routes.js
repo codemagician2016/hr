@@ -30,5 +30,9 @@ router.post('/:id/statement.pdf', requirePermission('canViewCompensation'), c.st
 router.post('/', requirePermission('canManageCompensation'), c.create);
 router.patch('/:id', requirePermission('canManageCompensation'), c.update);
 router.delete('/:id', requirePermission('canManageCompensation'), c.remove);
+// Feature 42 — CTC lock: maker may freeze; only the comp APPROVER may unfreeze
+// (SoD: the maker who locked an agreed structure can't silently unlock it).
+router.post('/:id/lock', requirePermission('canManageCompensation'), c.lock);
+router.post('/:id/unlock', requirePermission('canApproveCompensation'), c.unlock);
 
 module.exports = router;

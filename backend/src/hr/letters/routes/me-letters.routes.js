@@ -24,6 +24,9 @@ router.get('/', c.listMyLetters);
 // letterId when fulfilled). Placed before /:id so "requests" is never swallowed as
 // an :id download segment.
 router.get('/requests', c.listMyLetterRequests);
+// Feature 42 — the DYNAMIC list of letters this tenant lets employees request
+// (published + selfServe templates, + whether free-form "Other" is allowed).
+router.get('/requestable', c.listRequestableTemplates);
 // request a letter into the HR queue (reuses DocumentRequest) — placed before /:id
 // so "requests" can never be swallowed as an :id download segment.
 router.post('/requests', c.createLetterRequest);

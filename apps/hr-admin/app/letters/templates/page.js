@@ -34,7 +34,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Spinner, ErrorBanner, Empty, PrimaryButton, TextInput,
 } from '@hr/ui';
-import { get, post, del, request } from '@/lib/api';
+import { get, post, patch, del, request } from '@/lib/api';
 
 // PUT helper (lib/api exposes get/post/patch/del + request; PUT is the update verb
 // per the backend, so we issue it through the generic request wrapper).
@@ -85,6 +85,23 @@ const TOKEN_RE = /\{\{\s*([a-zA-Z][a-zA-Z0-9]*\.[a-zA-Z][a-zA-Z0-9]*)\s*\}\}/g;
 function clientMerge(body, values) {
   return String(body || '').replace(TOKEN_RE, (_m, key) =>
     Object.prototype.hasOwnProperty.call(values, key) ? String(values[key] ?? '') : '');
+}
+
+// Small pill toggle (mirrors the compliance page's Toggle styling).
+function Toggle({ on, onClick, disabled, label }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={!!on}
+      aria-label={label}
+      onClick={onClick}
+      disabled={disabled}
+      className={`inline-flex h-5 w-9 items-center rounded-full transition disabled:opacity-50 ${on ? 'bg-emerald-500' : 'bg-gray-300'}`}
+    >
+      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${on ? 'translate-x-4' : 'translate-x-1'}`} />
+    </button>
+  );
 }
 
 function CountryBadge({ code }) {
@@ -642,7 +659,7 @@ function PreviewModal({ preview, onClose }) {
 }
 
 // ─── Library card ────────────────────────────────────────────────────────────
-function TemplateCard({ t, onEdit, onPublish, onArchive, onDelete }) {
+function TemplateCard({ t, onEdit, onPublish, onArchive, onDelete, onToggleSelfServe }) {
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-4 flex flex-col gap-2 hover:shadow-sm transition-shadow">
       <div className="flex items-start justify-between gap-2">
@@ -657,6 +674,15 @@ function TemplateCard({ t, onEdit, onPublish, onArchive, onDelete }) {
         <span className="text-gray-400">v{t.version}</span>
         {t.isSystem && <span className="text-violet-600 font-medium">system</span>}
         {t.requiresSignature && <span className="text-blue-600">e-sign</span>}
+      </div>
+      {/* Feature 42 — employee self-service visibility: ON ⇒ this template shows
+          in the ESS "Request a letter" dropdown (once PUBLISHED). */}
+      <div className="flex items-center justify-between gap-2 pt-2 border-t border-gray-100">
+        <span className="text-xs text-gray-600 inline-flex items-center">
+          Employee can request
+          <InfoTip text="When ON (and the template is published), employees see this letter in their Letters screen and can request it themselves." label="Employee can request" />
+        </span>
+        <Toggle on={!!t.selfServe} onClick={() => onToggleSelfServe(t, !t.selfServe)} label={`Employee can request ${t.name}`} />
       </div>
       <div className="flex flex-wrap items-center gap-1.5 mt-1">
         <ActionButton onClick={() => onEdit(t)}>Edit</ActionButton>
@@ -705,11 +731,34 @@ export default function TemplatesPage() {
       .catch(() => { setLetterheadsAvailable(false); });
   }, []);
 
+  // Feature 42 — page-level "Allow custom letter requests" switch (tenant flag:
+  // whether ESS may submit a free-form "Other" request alongside the selfServe
+  // template list). null while loading / when the settings route is unavailable.
+  const [reqSettings, setReqSettings] = useState(null);
+  const [reqSettingsBusy, setReqSettingsBusy] = useState(false);
+  useEffect(() => {
+    get(`${TEMPLATES_BASE}/settings`).then(setReqSettings).catch(() => setReqSettings(null));
+  }, []);
+  const toggleAllowCustom = async () => {
+    if (!reqSettings || reqSettingsBusy) return;
+    setReqSettingsBusy(true);
+    try {
+      const next = await patch(`${TEMPLATES_BASE}/settings`, { allowCustomRequests: !reqSettings.allowCustomRequests });
+      setReqSettings(next);
+    } catch (e) {
+      setError(e.message || 'Failed to update the custom-request setting.');
+    } finally {
+      setReqSettingsBusy(false);
+    }
+  };
+
   const act = async (fn, t, verb) => {
     try { await fn(); load(); } catch (e) { setError(e.message || `Failed to ${verb}.`); }
   };
   const onPublish = (t) => act(() => post(`${TEMPLATES_BASE}/${t.id}/publish`), t, 'publish');
   const onArchive = (t) => act(() => post(`${TEMPLATES_BASE}/${t.id}/archive`), t, 'archive');
+  // Feature 42 — per-template ESS visibility toggle (PUT accepts a partial body).
+  const onToggleSelfServe = (t, next) => act(() => put(`${TEMPLATES_BASE}/${t.id}`, { selfServe: next }), t, 'update');
   const onDelete = (t) => {
     if (!window.confirm(`Delete template "${t.name}"? This cannot be undone.`)) return;
     act(() => del(`${TEMPLATES_BASE}/${t.id}`), t, 'delete');
@@ -745,6 +794,29 @@ export default function TemplatesPage() {
           "🔒 merge fields (salary/CTC) only resolve for admins who can view compensation; for everyone else they render blank.",
         ]}
       />
+
+      {/* Feature 42 — employee self-service controls (top toolbar) */}
+      <div className="rounded-2xl border border-gray-200 bg-white px-4 py-3 mb-5 flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-gray-800 inline-flex items-center">
+            Allow custom letter requests
+            <InfoTip text="When ON, employees may also submit a free-form 'Other' request (describing what they need) besides the templates you mark requestable. Turn OFF to restrict requests to the marked templates only." label="Allow custom letter requests" />
+          </p>
+          <p className="text-xs text-gray-500">
+            Employees see published templates with &lsquo;Employee can request&rsquo; ON in their Letters screen.
+          </p>
+        </div>
+        {reqSettings ? (
+          <Toggle
+            on={!!reqSettings.allowCustomRequests}
+            onClick={toggleAllowCustom}
+            disabled={reqSettingsBusy}
+            label="Allow custom letter requests"
+          />
+        ) : (
+          <span className="text-xs text-gray-400">Unavailable</span>
+        )}
+      </div>
 
       {/* filters */}
       <div className="flex flex-wrap items-end gap-3 mb-5">
@@ -788,7 +860,7 @@ export default function TemplatesPage() {
               <h2 className="text-sm font-semibold text-gray-900 mb-3">System templates</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {grouped.system.map((t) => (
-                  <TemplateCard key={t.id} t={t} onEdit={setEditing} onPublish={onPublish} onArchive={onArchive} onDelete={onDelete} />
+                  <TemplateCard key={t.id} t={t} onEdit={setEditing} onPublish={onPublish} onArchive={onArchive} onDelete={onDelete} onToggleSelfServe={onToggleSelfServe} />
                 ))}
               </div>
             </section>
@@ -800,7 +872,7 @@ export default function TemplatesPage() {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {grouped.custom.map((t) => (
-                  <TemplateCard key={t.id} t={t} onEdit={setEditing} onPublish={onPublish} onArchive={onArchive} onDelete={onDelete} />
+                  <TemplateCard key={t.id} t={t} onEdit={setEditing} onPublish={onPublish} onArchive={onArchive} onDelete={onDelete} onToggleSelfServe={onToggleSelfServe} />
                 ))}
               </div>
             )}

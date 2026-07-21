@@ -157,6 +157,38 @@ const TEMPLATE_KINDS = new Set([
   'PAYSLIP', 'FORM16', 'FNF_STATEMENT', 'POLICY_ACK', 'OTHER',
 ]);
 
+// Feature 42 — the tenant's "allow free-form/custom letter requests" switch.
+// Stored on Business.featureFlags.letters.allowCustomRequests; DEFAULT TRUE
+// (back-compat: free-form has always been available via OTHER + purpose).
+async function allowsCustomRequests(businessId) {
+  const biz = await prisma.business.findUnique({ where: { id: businessId }, select: { featureFlags: true } });
+  const letters = biz && biz.featureFlags && typeof biz.featureFlags === 'object' ? biz.featureFlags.letters : null;
+  return !(letters && letters.allowCustomRequests === false);
+}
+
+// ── GET /requestable — the letters an employee may ask for (Feature 42) ───────
+// DYNAMIC: the tenant's PUBLISHED templates that HR marked selfServe — nothing
+// hard-coded. Also reports whether free-form ("Other") requests are allowed.
+async function listRequestableTemplates(req, res, next) {
+  try {
+    const { businessId } = req.customer;
+    const employee = await resolveSelfEmployee(businessId, req.customer);
+    if (!employee) return res.json({ items: [], allowCustom: false });
+    const [rows, allowCustom] = await Promise.all([
+      prisma.letterTemplate.findMany({
+        where: { businessId, isActive: true, selfServe: true, deletedAt: null },
+        orderBy: { name: 'asc' },
+        select: { id: true, code: true, name: true, category: true, categoryTag: { select: { name: true } } },
+      }),
+      allowsCustomRequests(businessId),
+    ]);
+    res.json({
+      items: rows.map((t) => ({ id: t.id, code: t.code, name: t.name, category: (t.categoryTag && t.categoryTag.name) || t.category })),
+      allowCustom,
+    });
+  } catch (e) { next(e); }
+}
+
 async function createLetterRequest(req, res, next) {
   try {
     const { businessId } = req.customer;
@@ -167,10 +199,36 @@ async function createLetterRequest(req, res, next) {
       return res.status(403).json({ message: 'Your account is no longer active; this action is unavailable', reason: 'separated' });
     }
 
-    const { templateKind, purpose } = req.body || {};
-    if (!templateKind) return res.status(400).json({ message: 'templateKind is required' });
+    const { templateKind, letterTemplateId, purpose } = req.body || {};
+
+    // Feature 42 — TEMPLATE-BOUND request: the employee picked a real template
+    // from the tenant's selfServe library. Validated against that library
+    // (published + selfServe + not deleted) so a forged id can't request an
+    // internal template; recorded on the row so HR fulfils from the exact one.
+    if (letterTemplateId) {
+      const tpl = await prisma.letterTemplate.findFirst({
+        where: { id: String(letterTemplateId), businessId, isActive: true, selfServe: true, deletedAt: null },
+        select: { id: true, name: true },
+      });
+      if (!tpl) return res.status(404).json({ message: 'This letter type is not available to request' });
+      const created = await prisma.documentRequest.create({
+        data: {
+          businessId, employeeId: employee.id,
+          templateKind: 'OTHER', letterTemplateId: tpl.id,
+          purpose: purpose ? String(purpose).slice(0, 2000) : null,
+          status: 'PENDING',
+        },
+      });
+      return res.status(201).json(created);
+    }
+
+    if (!templateKind) return res.status(400).json({ message: 'letterTemplateId or templateKind is required' });
     if (!TEMPLATE_KINDS.has(templateKind)) {
       return res.status(422).json({ message: `Invalid templateKind: ${templateKind}`, types: [...TEMPLATE_KINDS] });
+    }
+    // Feature 42 — free-form ("Other") requests are tenant-switchable.
+    if (templateKind === 'OTHER' && !(await allowsCustomRequests(businessId))) {
+      return res.status(403).json({ message: 'Custom letter requests are disabled — pick one of the listed letter types', reason: 'custom_disabled' });
     }
 
     const created = await prisma.documentRequest.create({
@@ -232,6 +290,18 @@ async function listMyLetterRequests(req, res, next) {
     }
     const rows = await prisma.documentRequest.findMany(findArgs);
 
+    // Feature 42 — template-bound requests display the REAL template name, not
+    // the legacy kind label. Batched lookup, tenant-scoped.
+    const tplIds = [...new Set(rows.map((r) => r.letterTemplateId).filter(Boolean))];
+    const tplNameById = {};
+    if (tplIds.length) {
+      const tpls = await prisma.letterTemplate.findMany({
+        where: { businessId, id: { in: tplIds } },
+        select: { id: true, name: true },
+      });
+      for (const t of tpls) tplNameById[t.id] = t.name;
+    }
+
     // For fulfilled requests, resolve the downloadable ISSUED letter. We link via
     // IssuedLetter.documentRequestId (set by the fulfilment hook). Only ISSUED,
     // non-voided letters are downloadable (mirrors myLetterWhere). Batch the lookup.
@@ -255,7 +325,8 @@ async function listMyLetterRequests(req, res, next) {
       return {
         id: r.id,
         templateKind: r.templateKind,
-        templateKindLabel: TEMPLATE_KIND_LABELS[r.templateKind] || r.templateKind,
+        templateKindLabel: (r.letterTemplateId && tplNameById[r.letterTemplateId])
+          || TEMPLATE_KIND_LABELS[r.templateKind] || r.templateKind,
         purpose: r.purpose || null,
         status: essRequestStatus(r),
         createdAt: r.createdAt,
@@ -325,6 +396,7 @@ module.exports = {
   // ESS self-service (customer session)
   listMyLetters,
   listMyLetterRequests,
+  listRequestableTemplates,
   downloadMyLetter,
   createLetterRequest,
   // DocumentRequest fulfilment hook (called by 9E issuance — see MERGE TODO above)

@@ -100,6 +100,7 @@ const PRORATION_MAP = Object.freeze({
   CALENDAR_DAYS: PRORATION.CALENDAR_DAYS,
   WORKING_DAYS: PRORATION.WORKING_DAYS,
   THIRTY_DAY_STANDARD: PRORATION.FIXED_30,
+  TWENTYSIX_DAY_STANDARD: PRORATION.FIXED_26, // Feature 42 — the factory 26-day basis
   NONE: PRORATION.NONE,
 });
 
@@ -586,7 +587,11 @@ function buildEmployeePayInput(rows) {
   // ── entity / establishment statutory policy ──
   const entityArg = {
     countryCode: entity.countryCode,
-    stateCode: sp.ptStateCode || employee.stateCode || entity.stateCode || undefined,
+    // Feature 42 — PT/LWF state precedence: explicit per-employee override >
+    // WORK LOCATION state (posted-office jurisdiction) > employee address >
+    // entity registered state. rows.workStateCode is resolved at preload from
+    // the current EmploymentRecord's Location.stateCode.
+    stateCode: sp.ptStateCode || rows.workStateCode || employee.stateCode || entity.stateCode || undefined,
     // Feature 21 — LWF follows the PT/work-state precedence unless an explicit LWF
     // state override is set (the rare case the LWF jurisdiction ≠ the PT state).
     lwfStateCode: sp.lwfStateCode || undefined,
@@ -857,6 +862,19 @@ async function loadRunRowBundles(businessId, payRun, db = prisma) {
     include: { statutoryProfile: true },
   });
 
+  // Feature 42 — statutory WORK-STATE: PT/LWF jurisdiction follows the employee's
+  // assigned work Location's state when one is set (Location.stateCode documents
+  // exactly this — "drives Professional Tax slab selection" — but was never read;
+  // a Pune-entity employee posted to the Bengaluru office was taxed on MH slabs).
+  // Precedence stays: explicit StatutoryProfile.ptStateCode override beats this.
+  const workLocRows = await db.employmentRecord.findMany({
+    where: { businessId, employeeId: { in: employeeIds }, isCurrent: true, locationId: { not: null } },
+    select: { employeeId: true, location: { select: { stateCode: true } } },
+  });
+  const workStateByEmp = new Map(
+    workLocRows.filter((r) => r.location && r.location.stateCode).map((r) => [r.employeeId, r.location.stateCode]),
+  );
+
   // Frozen attendance inputs for this run, indexed by employee.
   const attendanceRows = await db.attendancePayInput.findMany({
     where: { businessId, payRunId: payRun.id },
@@ -934,6 +952,7 @@ async function loadRunRowBundles(businessId, payRun, db = prisma) {
       compensation,
       taxOverride,
       statutory,
+      workStateCode: workStateByEmp.get(emp.id) || null, // Feature 42 — work-location state
       attendance: attendanceByEmp.get(emp.id) || null,
       entity,
       period: {

@@ -57,5 +57,6 @@ class Api {
   // Letters
   static const letters = '/api/hr/me/letters'; // ?page=&pageSize=
   static const letterRequests = '/api/hr/me/letters/requests'; // GET + POST
+  static const letterRequestable = '/api/hr/me/letters/requestable'; // { items, allowCustom } (Feature 42)
   static String letterDownload(String id) => '/api/hr/me/letters/$id/download';
 }

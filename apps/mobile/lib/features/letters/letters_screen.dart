@@ -30,14 +30,51 @@ final letterRequestsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) 
   }
 });
 
-const _requestTypes = [
+// Feature 42 — what the employee may request is DYNAMIC: the tenant's published
+// selfServe templates (+ whether free-form "Other" is allowed), from
+// GET /api/hr/me/letters/requestable. `legacy: true` marks the fallback for
+// older environments where the route isn't deployed yet.
+final letterRequestableProvider = FutureProvider<Map<String, dynamic>>((ref) async {
+  final api = ref.watch(apiClientProvider);
+  try {
+    final res = await api.get(Api.letterRequestable);
+    if (res is Map) return res.cast<String, dynamic>();
+    return const {'items': [], 'allowCustom': false};
+  } catch (_) {
+    return const {'legacy': true};
+  }
+});
+
+// The legacy hard-coded kinds — used ONLY when /requestable is unavailable.
+const _legacyRequestTypes = [
   ('SALARY_CERTIFICATE', 'Salary Certificate'),
   ('EXPERIENCE_LETTER', 'Experience Certificate'),
   ('RELIEVING_LETTER', 'Relieving Letter'),
   ('APPOINTMENT_LETTER', 'Appointment Letter'),
   ('CONFIRMATION_LETTER', 'Confirmation Letter'),
-  ('OTHER', 'Other'),
+  ('OTHER', 'Other (describe below)'),
 ];
+
+/// One entry of the request dropdown. Template-bound entries submit
+/// `{ letterTemplateId }`; kind entries submit legacy `{ templateKind }`.
+class _RequestOption {
+  const _RequestOption(this.value, this.label, {this.isTemplate = false});
+
+  final String value;
+  final String label;
+  final bool isTemplate;
+}
+
+List<_RequestOption> _requestOptions(Map<String, dynamic> requestable) {
+  if (requestable['legacy'] == true) {
+    return _legacyRequestTypes.map((t) => _RequestOption(t.$1, t.$2)).toList();
+  }
+  return [
+    for (final t in asList(requestable))
+      _RequestOption(t['id'].toString(), (t['name'] ?? t['code'] ?? 'Letter').toString(), isTemplate: true),
+    if (requestable['allowCustom'] == true) const _RequestOption('OTHER', 'Other (describe below)'),
+  ];
+}
 
 const _categoryLabels = {
   'EXPERIENCE': 'Experience',
@@ -56,6 +93,7 @@ class LettersScreen extends ConsumerWidget {
     await Future.wait([
       ref.refresh(lettersProvider.future),
       ref.refresh(letterRequestsProvider.future),
+      ref.refresh(letterRequestableProvider.future),
     ]);
   }
 
@@ -71,6 +109,11 @@ class LettersScreen extends ConsumerWidget {
         onRefresh: () => _refresh(ref),
         data: (letters) {
           final requests = ref.watch(letterRequestsProvider).valueOrNull ?? const [];
+          // Feature 42 — dynamic request list: null while loading, otherwise the
+          // requestable payload (or the `legacy` fallback marker on error).
+          final requestable = ref.watch(letterRequestableProvider).valueOrNull;
+          final options = requestable == null ? const <_RequestOption>[] : _requestOptions(requestable);
+          final requestsEnabled = requestable != null && options.isNotEmpty;
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
@@ -89,7 +132,27 @@ class LettersScreen extends ConsumerWidget {
               const SizedBox(height: 22),
               const SectionHeading(text: 'Request a letter'),
               const SizedBox(height: 8),
-              _RequestForm(onSubmitted: () => ref.invalidate(letterRequestsProvider)),
+              if (requestable == null)
+                const SectionCard(
+                  child: Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(12),
+                      child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                    ),
+                  ),
+                )
+              else if (!requestsEnabled)
+                const SectionCard(
+                  child: Text(
+                    "Your HR team hasn't enabled letter requests yet.",
+                    style: TextStyle(color: BrandColors.muted, fontSize: 13),
+                  ),
+                )
+              else
+                _RequestForm(
+                  options: options,
+                  onSubmitted: () => ref.invalidate(letterRequestsProvider),
+                ),
               const SizedBox(height: 24),
             ],
           );
@@ -232,8 +295,9 @@ class _RequestTile extends ConsumerWidget {
 }
 
 class _RequestForm extends ConsumerStatefulWidget {
-  const _RequestForm({required this.onSubmitted});
+  const _RequestForm({required this.options, required this.onSubmitted});
 
+  final List<_RequestOption> options;
   final VoidCallback onSubmitted;
 
   @override
@@ -241,11 +305,18 @@ class _RequestForm extends ConsumerStatefulWidget {
 }
 
 class _RequestFormState extends ConsumerState<_RequestForm> {
-  String _type = 'SALARY_CERTIFICATE';
+  String? _type;
   final _purpose = TextEditingController();
   bool _submitting = false;
   bool _success = false;
   String? _error;
+
+  // The selected option — falls back to the first when the picked value is gone
+  // (e.g. HR flipped a template off between refreshes).
+  _RequestOption get _selected => widget.options.firstWhere(
+        (o) => o.value == _type,
+        orElse: () => widget.options.first,
+      );
 
   @override
   void dispose() {
@@ -254,15 +325,27 @@ class _RequestFormState extends ConsumerState<_RequestForm> {
   }
 
   Future<void> _submit() async {
+    final option = _selected;
+    final purpose = _purpose.text.trim();
+    // Free-form "Other" must say what letter is needed.
+    if (!option.isTemplate && option.value == 'OTHER' && purpose.isEmpty) {
+      setState(() {
+        _error = 'Please describe the letter you need in the Purpose field.';
+        _success = false;
+      });
+      return;
+    }
     setState(() {
       _submitting = true;
       _error = null;
       _success = false;
     });
     try {
+      // Template-bound request ({ letterTemplateId }) for a picked template;
+      // legacy { templateKind } for "Other" / the fallback kinds.
       await ref.read(apiClientProvider).post(Api.letterRequests, {
-        'templateKind': _type,
-        if (_purpose.text.trim().isNotEmpty) 'purpose': _purpose.text.trim(),
+        if (option.isTemplate) 'letterTemplateId': option.value else 'templateKind': option.value,
+        if (purpose.isNotEmpty) 'purpose': purpose,
       });
       setState(() {
         _success = true;
@@ -280,6 +363,8 @@ class _RequestFormState extends ConsumerState<_RequestForm> {
 
   @override
   Widget build(BuildContext context) {
+    final selected = _selected;
+    final isOther = !selected.isTemplate && selected.value == 'OTHER';
     return SectionCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -293,22 +378,22 @@ class _RequestFormState extends ConsumerState<_RequestForm> {
             const SizedBox(height: 12),
           ],
           DropdownButtonFormField<String>(
-            value: _type,
+            value: selected.value,
             isExpanded: true,
             decoration: const InputDecoration(labelText: 'Letter type'),
-            items: _requestTypes
-                .map((t) => DropdownMenuItem(value: t.$1, child: Text(t.$2)))
+            items: widget.options
+                .map((o) => DropdownMenuItem(value: o.value, child: Text(o.label)))
                 .toList(),
-            onChanged: (v) => setState(() => _type = v ?? 'SALARY_CERTIFICATE'),
+            onChanged: (v) => setState(() => _type = v),
           ),
           const SizedBox(height: 10),
           TextField(
             controller: _purpose,
             maxLines: 2,
             maxLength: 2000,
-            decoration: const InputDecoration(
-              labelText: 'Purpose (optional)',
-              hintText: 'e.g. for a visa application / bank loan',
+            decoration: InputDecoration(
+              labelText: isOther ? 'Purpose (required)' : 'Purpose (optional)',
+              hintText: isOther ? 'Describe the letter you need' : 'e.g. for a visa application / bank loan',
             ),
           ),
           const SizedBox(height: 4),

@@ -25,6 +25,35 @@ router.use(requirePermission('canManageLetters'));
 // Merge-field palette (literal path — MUST precede /:id).
 router.get('/merge-fields', c.listMergeFields);
 
+// Feature 42 — tenant letters settings: whether employees may file FREE-FORM
+// ("Other") letter requests (template-bound requests are governed per-template
+// by selfServe). Stored on Business.featureFlags.letters.
+router.get('/settings', async (req, res, next) => {
+  try {
+    const prisma = require('../../../core/lib/prisma');
+    const biz = await prisma.business.findUnique({ where: { id: req.user.businessId }, select: { featureFlags: true } });
+    const letters = biz && biz.featureFlags && typeof biz.featureFlags === 'object' ? biz.featureFlags.letters : null;
+    res.json({ allowCustomRequests: !(letters && letters.allowCustomRequests === false) });
+  } catch (e) { next(e); }
+});
+router.patch('/settings', async (req, res, next) => {
+  try {
+    const prisma = require('../../../core/lib/prisma');
+    const { writeAudit } = require('../../../core/lib/audit');
+    const businessId = req.user.businessId;
+    const allow = req.body && req.body.allowCustomRequests !== false;
+    const biz = await prisma.business.findUnique({ where: { id: businessId }, select: { featureFlags: true } });
+    const flags = biz && biz.featureFlags && typeof biz.featureFlags === 'object' ? biz.featureFlags : {};
+    const letters = flags.letters && typeof flags.letters === 'object' ? flags.letters : {};
+    await prisma.business.update({
+      where: { id: businessId },
+      data: { featureFlags: { ...flags, letters: { ...letters, allowCustomRequests: allow } } },
+    });
+    await writeAudit({ businessId, actorId: req.user.id, action: 'letters.settings.allowCustomRequests', entityType: 'Business', entityId: businessId, meta: { allowCustomRequests: allow } }).catch(() => {});
+    res.json({ allowCustomRequests: allow });
+  } catch (e) { next(e); }
+});
+
 router.get('/', c.listTemplates);
 router.post('/', c.createTemplate);
 
