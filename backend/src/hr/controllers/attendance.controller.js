@@ -549,7 +549,9 @@ async function removeShift(req, res, next) {
 //   { employeeId }                        one employee (original contract), or
 //   { employeeIds: [...] }                an explicit list, or
 //   { departmentId }                      every active employee of a department, or
+//   { locationId }                        every active employee of an OFFICE location, or
 //   { entityId }                          every active employee of an entity.
+// Filters combine (e.g. departmentId + locationId = that department AT that office).
 // Feature 42 — working days are decided by the assigned shift's weeklyOffDays, so
 // bulk assignment IS how a company sets working days department-/company-wide
 // while individual assignment overrides employee-wise. Bulk is best-effort per
@@ -559,10 +561,10 @@ async function assignShift(req, res, next) {
   try {
     const { businessId } = req.user;
     const shiftPatternId = req.params.id;
-    const { employeeId, employeeIds, departmentId, entityId, effectiveFrom, effectiveTo } = req.body;
+    const { employeeId, employeeIds, departmentId, locationId, entityId, effectiveFrom, effectiveTo } = req.body;
 
-    // ── Feature 42: bulk targets (department / entity / explicit list) ────────
-    if (!employeeId && (departmentId || entityId || Array.isArray(employeeIds))) {
+    // ── Feature 42: bulk targets (department / location / entity / list) ──────
+    if (!employeeId && (departmentId || locationId || entityId || Array.isArray(employeeIds))) {
       if (!effectiveFrom) return res.status(400).json({ message: 'effectiveFrom is required' });
       const shift = await prisma.shiftPattern.findFirst({ where: { id: shiftPatternId, businessId, deletedAt: null } });
       if (!shift) return res.status(404).json({ message: 'Shift not found' });
@@ -575,6 +577,7 @@ async function assignShift(req, res, next) {
           where: {
             businessId, isCurrent: true,
             ...(departmentId ? { departmentId: String(departmentId) } : {}),
+            ...(locationId ? { locationId: String(locationId) } : {}),
             ...(entityId ? { entityId: String(entityId) } : {}),
           },
           select: { employeeId: true },
