@@ -9,11 +9,12 @@
 //   GET  /api/hr/me/engagement/celebrations           → { birthdays, anniversaries }
 // Customer/cookie session; self-only (the subject is resolved server-side).
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { ErrorBanner, Empty, Spinner, Centered } from '@hr/ui';
 import InfoTip from '@/components/InfoTip';
-import { apiPost, fetchMyCelebrationPreferences, updateMyCelebrationPreferences } from '@/lib/api';
+import NotificationPrefsCard from '@/components/NotificationPrefsCard';
+import { apiPost } from '@/lib/api';
 import { useApi } from '@/lib/useApi';
 import { formatDate } from '@/lib/format';
 import { ServerPagination } from '@/lib/pagination';
@@ -76,55 +77,6 @@ function AnnouncementCard({ a, onMarkRead, busy }) {
         )}
       </div>
     </article>
-  );
-}
-
-// ── self opt-out (hide me from the company celebration feed) ──────────────────
-// The WRITE path for the celebrations privacy control. The backend honours
-// notifyPrefs.celebrationsOptOut on every reader's feed; this toggle is how the
-// employee SETS it. Self-only — the subject is the session employee.
-function CelebrationOptOutBar() {
-  const [optOut, setOptOut] = useState(null); // null = loading / not available
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-
-  useEffect(() => {
-    let alive = true;
-    fetchMyCelebrationPreferences()
-      .then((p) => { if (alive) setOptOut(!!p.celebrationsOptOut); })
-      .catch(() => { if (alive) setOptOut(null); }); // route not deployed / no employee → hide
-    return () => { alive = false; };
-  }, []);
-
-  if (optOut === null) return null;
-
-  async function toggle() {
-    setBusy(true); setErr('');
-    try {
-      const r = await updateMyCelebrationPreferences({ celebrationsOptOut: !optOut });
-      setOptOut(!!r.celebrationsOptOut);
-    } catch (e) { setErr(e.message || 'Could not update your preference'); }
-    finally { setBusy(false); }
-  }
-
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-white px-4 py-3 text-sm shadow-sm"
-         style={{ borderColor: 'var(--theme-border)' }}>
-      <div className="flex items-center" style={{ color: 'var(--theme-muted)' }}>
-        <span>
-          {optOut
-            ? 'Your birthday and work anniversary are hidden from the company celebration feed.'
-            : 'Your birthday and work anniversary appear in the company celebration feed.'}
-        </span>
-        <InfoTip text="Celebrations show only the day and month of a birthday (never the year) and your years of service for an anniversary. Turn this off to hide yourself from the celebration feed entirely." />
-      </div>
-      <button type="button" onClick={toggle} disabled={busy}
-              className="rounded-lg border px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
-              style={{ borderColor: 'var(--theme-primary)', color: 'var(--theme-primary)' }}>
-        {optOut ? 'Show me in celebrations' : 'Hide me from celebrations'}
-      </button>
-      {err && <span className="text-xs" style={{ color: '#dc2626' }}>{err}</span>}
-    </div>
   );
 }
 
@@ -192,8 +144,10 @@ function FeedInner() {
       {/* Celebrations — derived feed (birthdays + anniversaries), privacy-aware. */}
       <CelebrationsWidget />
 
-      {/* Self opt-out — the WRITE path for the celebrations privacy control. */}
-      <CelebrationOptOutBar />
+      {/* Notification preferences (P1.6) — the unified write surface replaces
+          the old celebrations-only opt-out bar: announcement pushes + the
+          celebrations privacy control, via /me/engagement/notification-prefs. */}
+      <NotificationPrefsCard />
 
       {actionError && <ErrorBanner message={actionError} />}
 

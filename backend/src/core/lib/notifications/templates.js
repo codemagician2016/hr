@@ -269,13 +269,21 @@ function render({ key, vars = {} }) {
     err.missing = missing;
     throw err;
   }
-  let body = tpl.body;
+  return substituteVars(tpl.body, vars);
+}
+
+/**
+ * substituteVars(body, vars) — replace ALL occurrences of {NAME} with the
+ * value. Exported for Program P1.6 tenant body overrides: the router renders a
+ * TenantMessageTemplate body with the SAME substitution the registry uses
+ * (variable validation stays with the registry template).
+ */
+function substituteVars(body, vars = {}) {
+  let out = String(body);
   for (const [name, value] of Object.entries(vars)) {
-    // Replace ALL occurrences of {NAME} with the value. Variables are
-    // uppercase-only by convention (matches DLT templates).
-    body = body.split(`{${name}}`).join(String(value));
+    out = out.split(`{${name}}`).join(String(value));
   }
-  return body;
+  return out;
 }
 
 // Get a template's metadata by key (without rendering). Used by the smart
@@ -346,6 +354,7 @@ async function seedTemplates({ logger = console } = {}) {
 module.exports = {
   TEMPLATES,
   render,
+  substituteVars,
   getTemplate,
   listTemplates,
   seedTemplates,

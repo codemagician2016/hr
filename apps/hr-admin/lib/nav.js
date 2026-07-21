@@ -200,6 +200,12 @@ export const NAV_ITEMS = [
   // gated on canManageOnboarding (Owner + HR-Admin); the page shows a read-only
   // banner for operators who lack it. The server is the real boundary.
   { key: 'settings-lifecycle', label: 'Lifecycle & probation', href: '/settings/lifecycle', permission: 'canManageOnboarding', parent: 'settings', icon: 'onboarding' },
+  // Program P1.6 — Notification templates: per-tenant overrides of the message
+  // BODY for every HR notification the platform sends (payslip published, leave
+  // approved, approvals, helpdesk, announcements, birthdays, probation, …).
+  // Gated on canManageOrg (already in the settings group's anyPermission list);
+  // the server is the real boundary (/api/hr/notifications/* is canManageOrg).
+  { key: 'settings-notifications', label: 'Notification templates', href: '/settings/notifications', permission: 'canManageOrg', parent: 'settings', icon: 'bell' },
 ];
 
 // ── Sidebar grouping ─────────────────────────────────────────────────────────

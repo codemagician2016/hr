@@ -221,7 +221,65 @@ async function updateCelebrationPreferences(req, res, next) {
   } catch (e) { return next(e); }
 }
 
+// ── Program P1.6 — unified notification preferences ──────────────────────────
+// One SELF-ONLY surface over Employee.notifyPrefs for every employee-controllable
+// category. Transactional sends (payslips, approvals, letters) are NOT here by
+// design — those stay always-on. Keys map onto the flags the fanouts already
+// honour: `optOut` (announcements multi-channel push, announcements.service) and
+// `celebrationsOptOut` (celebration feed + wishes).
+
+// GET /me/engagement/notification-prefs
+async function getNotificationPrefs(req, res, next) {
+  try {
+    const ctx = await withSelf(req, res); if (!ctx) return undefined;
+    const { businessId, employee } = ctx;
+    const me = await prisma.employee.findFirst({
+      where: { id: employee.id, businessId }, select: { notifyPrefs: true },
+    });
+    const prefs = (me && me.notifyPrefs && typeof me.notifyPrefs === 'object') ? me.notifyPrefs : {};
+    return res.json({
+      announcementsOptOut: prefs.optOut === true,
+      celebrationsOptOut: prefs.celebrationsOptOut === true,
+    });
+  } catch (e) { return next(e); }
+}
+
+// PATCH /me/engagement/notification-prefs { announcementsOptOut?, celebrationsOptOut? }
+async function updateNotificationPrefs(req, res, next) {
+  try {
+    const ctx = await withSelf(req, res); if (!ctx) return undefined;
+    const { businessId, employee } = ctx;
+    const b = req.body || {};
+    const patch = {};
+    if (b.announcementsOptOut !== undefined) {
+      if (typeof b.announcementsOptOut !== 'boolean') return res.status(400).json({ message: 'announcementsOptOut must be a boolean' });
+      patch.optOut = b.announcementsOptOut;
+    }
+    if (b.celebrationsOptOut !== undefined) {
+      if (typeof b.celebrationsOptOut !== 'boolean') return res.status(400).json({ message: 'celebrationsOptOut must be a boolean' });
+      patch.celebrationsOptOut = b.celebrationsOptOut;
+    }
+    if (!Object.keys(patch).length) return res.status(400).json({ message: 'Nothing to update.' });
+    const me = await prisma.employee.findFirst({
+      where: { id: employee.id, businessId, deletedAt: null }, select: { notifyPrefs: true },
+    });
+    if (!me) return res.status(404).json({ message: 'No employee record is linked to your account' });
+    const base = (me.notifyPrefs && typeof me.notifyPrefs === 'object') ? me.notifyPrefs : {};
+    const nextPrefs = { ...base, ...patch };
+    const r = await prisma.employee.updateMany({
+      where: { id: employee.id, businessId, deletedAt: null },
+      data: { notifyPrefs: nextPrefs },
+    });
+    if (r.count === 0) return res.status(404).json({ message: 'No employee record is linked to your account' });
+    return res.json({
+      announcementsOptOut: nextPrefs.optOut === true,
+      celebrationsOptOut: nextPrefs.celebrationsOptOut === true,
+    });
+  } catch (e) { return next(e); }
+}
+
 module.exports = {
   feed, unreadCount, markRead, markAllRead, celebrations,
   getCelebrationPreferences, updateCelebrationPreferences,
+  getNotificationPrefs, updateNotificationPrefs,
 };

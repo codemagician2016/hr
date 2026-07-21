@@ -11411,6 +11411,23 @@ enum RegularizationKind {
 /// as a month-context pass inside attendance recompute — the penalty adjusts
 /// lopFraction on the offending late days, idempotently (recomputed from scratch
 /// each pass, marked in exceptionsJson.latePenalty).
+/// Program P1.6 — per-tenant notification template override. The in-code
+/// registry (core templates.js + HR_TEMPLATES) stays the KEY/variable
+/// authority and fallback body; an active override row replaces the rendered
+/// BODY only (tokens validated at save time against the registry variables).
+model TenantMessageTemplate {
+  id              String   @id @default(uuid())
+  businessId      String
+  templateKey     String
+  body            String   @db.Text
+  isActive        Boolean  @default(true)
+  updatedByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([businessId, templateKey])
+}
+
 /// Program P1.4 — tenant probation policy (replaces the hardcoded 90-day
 /// default). Scoped rows, most-specific wins: (entity+type) > entity > type >
 /// tenant-wide. autoConfirm drives the nightly probationSweep (PROBATION→ACTIVE

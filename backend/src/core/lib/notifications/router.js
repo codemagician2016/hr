@@ -37,7 +37,7 @@ const prisma = new PrismaClient();
 const { detectCountryFromPhone, getRoute, PROVIDERS } = require('./countryRouting');
 const { CHANNELS, getCostOrFallback } = require('./priceCache');
 const { checkBudget, recordSpend } = require('./budgetEngine');
-const { render, getTemplate } = require('./templates');
+const { render, getTemplate, substituteVars } = require('./templates');
 const { getAdapter } = require('./providers');
 
 // Default channel cascade when a tenant hasn't customised eventChannels.
@@ -197,16 +197,25 @@ async function sendNotification({
     recipientPhone = null;
   }
 
-  // 4. Load NotificationConfig + DB-side template (for provider IDs)
-  const [config, dbTemplate] = await Promise.all([
+  // 4. Load NotificationConfig + DB-side template (for provider IDs) + the
+  //    tenant's body override (Program P1.6 — registry stays the key/variable
+  //    authority; an active TenantMessageTemplate replaces the BODY only).
+  const [config, dbTemplate, tenantOverride] = await Promise.all([
     prisma.notificationConfig.findUnique({ where: { businessId } }),
     prisma.messageTemplate.findUnique({ where: { templateKey } }),
+    prisma.tenantMessageTemplate.findUnique({
+      where: { businessId_templateKey: { businessId, templateKey } },
+    }).catch(() => null),
   ]);
 
   // 5. Render the body (with merge tags). Surface user errors clearly.
   let body;
   try {
-    body = render({ key: templateKey, vars: variables });
+    if (tenantOverride && tenantOverride.isActive) {
+      body = substituteVars(tenantOverride.body, variables);
+    } else {
+      body = render({ key: templateKey, vars: variables });
+    }
   } catch (err) {
     return { ok: false, reason: err.code || 'RENDER_ERROR', attempts: [{ error: err.message }] };
   }

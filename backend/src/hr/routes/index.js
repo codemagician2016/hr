@@ -101,6 +101,8 @@ router.use('/letters/templates', require('../letters/routes/templates.routes'));
 router.use('/onboarding', require('../lifecycle/routes/onboarding.routes'));
 // Program P1.4 — lifecycle template authoring + probation policies.
 router.use('/lifecycle', require('../lifecycle/routes/templates.routes'));
+// Program P1.6 — tenant notification template overrides.
+router.use('/notifications', require('./notificationTemplates.routes'));
 router.use('/separations', require('../lifecycle/routes/offboarding.routes'));
 router.use('/esign', require('../lifecycle/routes/esign.routes'));
 

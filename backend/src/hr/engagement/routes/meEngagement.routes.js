@@ -27,4 +27,8 @@ router.get('/celebrations', c.celebrations);
 router.get('/celebrations/preferences', c.getCelebrationPreferences);
 router.patch('/celebrations/preferences', c.updateCelebrationPreferences);
 
+// Program P1.6 — unified notification preferences (announcements + celebrations).
+router.get('/notification-prefs', c.getNotificationPrefs);
+router.patch('/notification-prefs', c.updateNotificationPrefs);
+
 module.exports = router;

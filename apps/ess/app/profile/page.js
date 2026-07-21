@@ -22,6 +22,7 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import AppShell from '@/components/AppShell';
+import NotificationPrefsCard from '@/components/NotificationPrefsCard';
 import { Spinner, Centered, ErrorBanner, Empty } from '@hr/ui';
 import { apiPost, apiSend } from '@/lib/api';
 import { useApi } from '@/lib/useApi';
@@ -132,6 +133,9 @@ function Section({ title, hint, children, action }) {
 const SECTIONS = [
   { key: 'personal', label: 'Personal' },
   { key: 'contact', label: 'Contact' },
+  // Program P1.6 — unified notification preferences (announcements pushes +
+  // celebrations inclusion), self-served via the shared NotificationPrefsCard.
+  { key: 'notifications', label: 'Notifications' },
   { key: 'address', label: 'Address' },
   { key: 'family', label: 'Family' },
   { key: 'bank', label: 'Bank' },
@@ -258,6 +262,7 @@ function ProfileInner() {
             </Section>
           )}
 
+          {active === 'notifications' && <NotificationPrefsCard />}
           {active === 'address' && <AddressSection addresses={sections.addresses} reload={reload} flash={flash} readOnly={readOnly} />}
           {active === 'family' && <FamilySection family={sections.family} emergency={sections.emergencyContacts} reload={reload} flash={flash} readOnly={readOnly} />}
           {active === 'bank' && (
