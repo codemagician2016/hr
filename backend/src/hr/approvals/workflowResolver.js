@@ -123,6 +123,21 @@ function scopeMatches(scopeJson, ctx = {}) {
 async function resolveDefinition(businessId, module, ctx = {}, opts = {}) {
   const db = opts.prismaClient || require('../../core/lib/prisma');
 
+  // Leave-audit — an explicitly BOUND definition wins over scope matching: a
+  // producer may carry a policy-level binding (e.g. LeavePolicy.workflowDefinitionId
+  // — writable since F6 but never consumed until now). Tenant + module + published
+  // + active validated; an unusable binding falls through to normal resolution so
+  // a stale id can never strand a request.
+  if (ctx.workflowDefinitionId) {
+    const bound = await db.workflowDefinition.findFirst({
+      where: { id: String(ctx.workflowDefinitionId), businessId, module, isActive: true, isPublished: true },
+      include: { steps: { orderBy: { stepOrder: 'asc' } } },
+    });
+    if (bound && bound.steps.length) {
+      return { definition: bound, steps: bound.steps, source: 'POLICY_BOUND' };
+    }
+  }
+
   const defs = await db.workflowDefinition.findMany({
     where: { businessId, module, isActive: true, isPublished: true },
     orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],

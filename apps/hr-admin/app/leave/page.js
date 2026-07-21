@@ -7,8 +7,12 @@
 //  - Calendar:  GET /calendar — who is off across the team in a date window.
 //  - Reports:   GET /reports/summary — taken/pending/LOP rolled up by type.
 //  - Carry-fwd: POST /runs/carry-forward — year-end roll (dry-run preview → apply).
-//  - Types:     GET/POST /types   (config; create gated by canManageOrg backend-side).
-//  - Policies:  GET/POST /policies.
+//  - Types:     GET/POST/PATCH/DELETE /types   (config; writes gated by canManageOrg backend-side).
+//  - Policies:  GET/POST/PATCH/DELETE /policies (+ per-policy tenure tiers and
+//               applicability assignments under /policies/:id/{tiers,assignments}).
+// Leave-audit additions: an ORG-WIDE reconciliation sweep (GET /reconciliation/org,
+// CSV export, per-lot POST /balances/:id/repair) plus full policy authoring
+// (probation gate, F31 in-service encashment knobs, F10 workflow binding).
 // List envelopes are {items[,total,page,pageSize]}; request decisions POST to
 // /requests/:id/{approve,reject} and we optimistically refetch on success.
 
@@ -19,14 +23,15 @@ import {
   Empty,
   PrimaryButton,
   TextInput,
+  DateField,
   Modal,
   ModalActions,
   formatAdminDate,
 } from '@hr/ui';
-import { get, post } from '@/lib/api';
+import { get, post, patch, del, downloadFile, qs } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, employeeLabel, ServerPagination } from '@/lib/ui';
 import { useTenantCountries } from '@/lib/useTenantCountries';
-import { InfoTip } from '@/lib/widgets';
+import { InfoTip, SectionTitle } from '@/lib/widgets';
 import EmployeeSearchSelect from '@/components/EmployeeSearchSelect';
 import ModuleGuide from '@/components/ModuleGuide';
 
@@ -541,6 +546,201 @@ function ReconCard({ group }) {
   );
 }
 
+// ─── Organization sweep (leave-audit) ────────────────────────────────────────
+// GET /reconciliation/org?periodCode=&leaveTypeId=&driftedOnly= — every persisted
+// lot in the period re-derived from its ledger; drifted lots highlighted with a
+// one-click ledger-truth Repair (POST /balances/:id/repair) + CSV export.
+
+function OrgSweepSection({ defaultPeriod, types }) {
+  const [periodCode, setPeriodCode] = useState(defaultPeriod);
+  const [leaveTypeId, setLeaveTypeId] = useState('');
+  const [driftedOnly, setDriftedOnly] = useState(false);
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [busyId, setBusyId] = useState('');
+  const [repaired, setRepaired] = useState({}); // balanceId -> {before, after}
+
+  const load = useCallback(() => {
+    if (!periodCode.trim()) return;
+    setLoading(true);
+    setError('');
+    const params = { periodCode: periodCode.trim() };
+    if (leaveTypeId) params.leaveTypeId = leaveTypeId;
+    if (driftedOnly) params.driftedOnly = 'true';
+    get('/api/hr/leave/reconciliation/org', params)
+      .then(setData)
+      .catch((e) => {
+        setError(e.data?.message || e.message || 'Failed to run the organization sweep.');
+        setData(null);
+      })
+      .finally(() => setLoading(false));
+  }, [periodCode, leaveTypeId, driftedOnly]);
+
+  async function repair(row) {
+    if (!window.confirm(`Repair ${row.employeeName || row.employeeCode || 'this employee'}'s ${row.leaveType} lot to its ledger truth? The stored balance will be overwritten from the append-only ledger (audited, before/after recorded).`)) return;
+    setBusyId(row.balanceId);
+    setError('');
+    try {
+      const res = await post(`/api/hr/leave/balances/${row.balanceId}/repair`);
+      setRepaired((m) => ({ ...m, [row.balanceId]: { before: res.before, after: res.after } }));
+      load();
+    } catch (e) {
+      setError(e.data?.message || e.message || 'Repair failed.');
+    } finally {
+      setBusyId('');
+    }
+  }
+
+  async function exportCsv() {
+    setError('');
+    try {
+      const params = { periodCode: periodCode.trim() };
+      if (leaveTypeId) params.leaveTypeId = leaveTypeId;
+      if (driftedOnly) params.driftedOnly = 'true';
+      await downloadFile(`/api/hr/leave/reconciliation/org${qs({ ...params, format: 'csv' })}`);
+    } catch (e) {
+      setError(e.data?.message || e.message || 'CSV export failed.');
+    }
+  }
+
+  const items = data?.items || [];
+  const columns = [
+    {
+      key: 'employee',
+      header: 'Employee',
+      render: (r) => (
+        <span className="font-medium text-gray-900">
+          {r.employeeName || '—'}
+          {r.employeeCode && <span className="ml-1 font-normal text-gray-500">({r.employeeCode})</span>}
+        </span>
+      ),
+    },
+    { key: 'leaveType', header: 'Type', render: (r) => r.leaveType || '—' },
+    { key: 'opening', header: 'Opening', className: 'text-right', cellClassName: 'text-right tabular-nums text-gray-700', render: (r) => qty(r.opening) },
+    { key: 'accrued', header: 'Accrued', className: 'text-right', cellClassName: 'text-right tabular-nums text-gray-700', render: (r) => qty(r.accrued) },
+    { key: 'taken', header: 'Taken', className: 'text-right', cellClassName: 'text-right tabular-nums text-gray-700', render: (r) => qty(r.taken) },
+    { key: 'storedClosing', header: 'Stored closing', className: 'text-right', cellClassName: 'text-right tabular-nums text-gray-700', render: (r) => qty(r.storedClosing) },
+    { key: 'ledgerClosing', header: 'Ledger closing', className: 'text-right', cellClassName: 'text-right tabular-nums font-medium text-gray-900', render: (r) => qty(r.ledgerClosing) },
+    {
+      key: 'drift',
+      header: 'Drift',
+      className: 'text-right',
+      cellClassName: 'text-right tabular-nums',
+      render: (r) =>
+        r.reconciled ? (
+          <span className="text-emerald-700 font-medium">✓ 0</span>
+        ) : (
+          <span className="text-red-700 font-semibold">{qty(r.drift)}</span>
+        ),
+    },
+    {
+      key: 'actions',
+      header: '',
+      className: 'text-right',
+      cellClassName: 'text-right',
+      render: (r) => {
+        const rep = repaired[r.balanceId];
+        if (rep) {
+          return (
+            <span className="text-xs text-emerald-700">
+              Repaired ✓ <span className="tabular-nums">{qty(rep.before.closing)} → {qty(rep.after.closing)}</span>
+            </span>
+          );
+        }
+        if (r.reconciled) return null;
+        return (
+          <ActionButton tone="danger" disabled={busyId === r.balanceId} onClick={() => repair(r)}>
+            {busyId === r.balanceId ? 'Repairing…' : 'Repair'}
+          </ActionButton>
+        );
+      },
+    },
+  ];
+
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-5 space-y-4">
+      <SectionTitle tip="Sweeps EVERY stored leave balance in the period and recomputes it from the append-only ledger (the source of truth). Drifted lots are highlighted; Repair overwrites the stored figures from the ledger — audited with before/after.">
+        Organization sweep
+      </SectionTitle>
+
+      <div className="flex flex-wrap items-end gap-3">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="sweep-period">Period code</label>
+          <input
+            id="sweep-period"
+            type="text"
+            value={periodCode}
+            onChange={(e) => setPeriodCode(e.target.value)}
+            placeholder='e.g. "2026-27"'
+            className="w-40 px-4 py-2.5 border border-gray-300 rounded-lg text-sm"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="sweep-type">Leave type</label>
+          <select
+            id="sweep-type"
+            value={leaveTypeId}
+            onChange={(e) => setLeaveTypeId(e.target.value)}
+            className="w-52 px-4 py-2.5 border border-gray-300 rounded-lg text-sm bg-white"
+          >
+            <option value="">All leave types</option>
+            {(types || []).map((t) => (
+              <option key={t.id} value={t.id}>{t.name}{t.code ? ` (${t.code})` : ''}</option>
+            ))}
+          </select>
+        </div>
+        <label className="flex items-center gap-2 text-sm text-gray-700 pb-3 cursor-pointer">
+          <input type="checkbox" checked={driftedOnly} onChange={(e) => setDriftedOnly(e.target.checked)} />
+          Only drifted
+        </label>
+        <PrimaryButton onClick={load} loading={loading} disabled={!periodCode.trim()}>
+          Run sweep
+        </PrimaryButton>
+        {data && (
+          <button
+            type="button"
+            onClick={exportCsv}
+            className="px-4 py-2 text-sm font-medium border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+          >
+            Export CSV
+          </button>
+        )}
+      </div>
+
+      {error && <ErrorBanner message={error} />}
+
+      {data && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-700 tabular-nums">
+            {data.total} lot{data.total === 1 ? '' : 's'}
+          </span>
+          {data.driftedCount > 0 ? (
+            <span className="rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700 tabular-nums">
+              {data.driftedCount} drifted
+            </span>
+          ) : (
+            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+              0 drifted ✓
+            </span>
+          )}
+        </div>
+      )}
+
+      {data && (
+        <DataTable
+          columns={columns}
+          rows={items}
+          loading={loading}
+          emptyText={driftedOnly ? 'No drifted lots in this period — the ledger and stored balances agree.' : 'No leave balances in this period.'}
+          rowKey={(r) => r.balanceId}
+          rowClassName={(r) => (!r.reconciled ? 'bg-red-50/60 hover:bg-red-50' : '')}
+        />
+      )}
+    </div>
+  );
+}
+
 function ReconciliationTab() {
   const defaultPeriod = useMemo(() => {
     // India FY "YYYY-YY" for the current year (the most common period code shape).
@@ -590,6 +790,12 @@ function ReconciliationTab() {
         <span className="font-medium text-gray-700">Opening + Accrued − Taken − Encashed − Lapsed + Adjusted = Closing</span>.
         Recomputed from the ledger and cross-checked against the recorded balance — any drift is flagged.
       </p>
+
+      <OrgSweepSection defaultPeriod={defaultPeriod} types={types} />
+
+      <SectionTitle tip="Zoom into ONE employee: each leave type gets a statement whose line items visibly sum to the closing balance.">
+        Per-employee statement
+      </SectionTitle>
 
       <div className="flex flex-wrap items-end gap-3">
         <div className="max-w-md flex-1 min-w-[240px]">
@@ -930,6 +1136,17 @@ const COUNTRY_OPTS = ['', 'IN'];
 const ACCRUAL_METHOD_OPTS = ['UPFRONT_ANNUAL', 'MONTHLY_ACCRUAL', 'ANNIVERSARY_GRANT', 'WORKED_HOURS_RATIO', 'NONE'];
 const ACCRUAL_FREQ_OPTS = ['MONTHLY', 'QUARTERLY', 'ANNUAL', 'PER_PAY_PERIOD'];
 const GENDER_OPTS = ['', 'MALE', 'FEMALE', 'OTHER'];
+// prisma enum EncashmentBasis — the per-day money basis for F31 in-service encashment.
+const ENCASH_BASIS_OPTS = [
+  { value: 'BASIC_DA_26', label: '(Basic+DA) / 26 — market standard' },
+  { value: 'BASIC_30', label: 'Basic / 30' },
+  { value: 'GROSS_30', label: 'Gross / 30' },
+];
+const MONTH_OPTS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+  .map((m, i) => ({ value: String(i + 1), label: `${i + 1} — ${m}` }));
+// prisma enum EmploymentType — assignment scope EMPLOYMENT_TYPE targets.
+const EMPLOYMENT_TYPE_OPTS = ['FULL_TIME', 'PART_TIME', 'FIXED_TERM', 'CONTRACT', 'INTERN', 'APPRENTICE', 'CASUAL', 'CONSULTANT'];
+const ASSIGNMENT_SCOPE_OPTS = ['ENTITY', 'DEPARTMENT', 'GRADE', 'EMPLOYMENT_TYPE', 'EMPLOYEE'];
 
 function prettyEnum(v) {
   return String(v || '')
@@ -982,11 +1199,160 @@ function policyColumns(typeById) {
   ];
 }
 
-function ConfigTab({ resource, title, fields, columns }) {
+// Real fields only (section markers filtered out).
+function realFields(fields) {
+  return fields.filter((f) => f.type !== 'section');
+}
+
+// Blank draft for the create form. Checkboxes start at the SERVER default
+// (field.default) so always-sending booleans never silently flips a
+// schema-default-true flag (e.g. LeaveType.isPaid) on create.
+function emptyDraft(fields) {
+  return Object.fromEntries(realFields(fields).map((f) => [f.key, f.type === 'checkbox' ? f.default === true : '']));
+}
+
+// Pre-fill a draft from an existing row (edit): checkboxes → booleans, the rest
+// → strings ('' for null) so every input stays controlled.
+function draftFromRow(fields, row) {
+  return Object.fromEntries(
+    realFields(fields).map((f) => {
+      const v = row?.[f.key];
+      if (f.type === 'checkbox') return [f.key, v === true];
+      return [f.key, v == null ? '' : String(v)];
+    }),
+  );
+}
+
+// Build the POST/PATCH payload: checkboxes always sent as booleans; number and
+// numeric-select values coerced to Number (Prisma Int fields reject strings);
+// blank fields are OMITTED on create, and on edit sent as null when the row had
+// a value (so a cap can be CLEARED) — required fields are never nulled.
+function buildConfigPayload(fields, draft, existingRow = null) {
+  const out = {};
+  for (const f of realFields(fields)) {
+    const v = draft[f.key];
+    if (f.type === 'checkbox') {
+      out[f.key] = v === true;
+      continue;
+    }
+    if (v === '' || v == null) {
+      if (existingRow && existingRow[f.key] != null && !f.required) out[f.key] = null;
+      continue;
+    }
+    out[f.key] = f.type === 'number' || f.numeric ? Number(v) : v;
+  }
+  return out;
+}
+
+// Sectioned field renderer shared by the create panel and the edit modal.
+// Supports { type:'section', label, hint? } markers and per-field
+// showIf(draft) predicates (e.g. the F31 encashment knobs).
+function ConfigFormFields({ fields, draft, setDraft }) {
+  return (
+    <>
+      {fields.map((f, i) => {
+        if (f.type === 'section') {
+          return (
+            <div key={`section-${i}`} className={i === 0 ? '' : 'pt-2 border-t border-gray-100'}>
+              <span className="flex items-center text-xs font-semibold uppercase tracking-wide text-gray-500">
+                {f.label}
+                {f.hint ? <InfoTip text={f.hint} /> : null}
+              </span>
+            </div>
+          );
+        }
+        if (f.showIf && !f.showIf(draft)) return null;
+        const set = (v) => setDraft((d) => ({ ...d, [f.key]: v }));
+        if (f.type === 'select') {
+          return (
+            <label key={f.key} className="block text-sm">
+              <span className="mb-1 flex items-center font-medium text-gray-700">{f.label}{f.required ? ' *' : ''}{f.hint ? <InfoTip text={f.hint} /> : null}</span>
+              <select
+                value={draft[f.key]} required={f.required} onChange={(e) => set(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+              >
+                <option value="">{f.placeholder || 'Select…'}</option>
+                {(f.options || []).map((o) => (
+                  <option key={o.value ?? o} value={o.value ?? o}>{o.label ?? o}</option>
+                ))}
+              </select>
+            </label>
+          );
+        }
+        if (f.type === 'checkbox') {
+          return (
+            <label key={f.key} className="flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" checked={draft[f.key] === true || draft[f.key] === 'true'}
+                onChange={(e) => set(e.target.checked)} />
+              {f.label}{f.hint ? <InfoTip text={f.hint} /> : null}
+            </label>
+          );
+        }
+        return (
+          <div key={f.key} className="flex items-end gap-1">
+            <div className="flex-1">
+              <TextInput
+                label={f.label} type={f.type === 'number' ? 'number' : undefined}
+                value={draft[f.key]} onChange={set} required={f.required}
+              />
+            </div>
+            {f.hint ? <span className="pb-2"><InfoTip text={f.hint} /></span> : null}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+// Edit modal — the SAME field set as the create panel, pre-filled → PATCH.
+function ConfigEditModal({ resource, title, fields, row, onClose, onSaved }) {
+  const [draft, setDraft] = useState(() => draftFromRow(fields, row));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  async function save(e) {
+    e.preventDefault();
+    setSaving(true);
+    setError('');
+    try {
+      await patch(`/api/hr/leave/${resource}/${row.id}`, buildConfigPayload(fields, draft, row));
+      onSaved();
+    } catch (err) {
+      // 4xx surfaced verbatim (e.g. India statutory-floor 422s carry the floor detail).
+      setError(err.data?.message || err.message || 'Failed to save changes.');
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal title={`Edit ${title.replace(/s$/, '').toLowerCase()} — ${row.name || row.code || ''}`} onClose={onClose} size="lg">
+      {error && (
+        <div className="mb-3">
+          <ErrorBanner message={error} />
+        </div>
+      )}
+      <form onSubmit={save} className="space-y-3">
+        <ConfigFormFields fields={fields} draft={draft} setDraft={setDraft} />
+        <ModalActions>
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50">
+            Cancel
+          </button>
+          <PrimaryButton type="submit" loading={saving}>
+            Save changes
+          </PrimaryButton>
+        </ModalActions>
+      </form>
+    </Modal>
+  );
+}
+
+function ConfigTab({ resource, title, fields, columns, extraRowActions }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const [draft, setDraft] = useState(() => Object.fromEntries(fields.map((f) => [f.key, ''])));
+  const [draft, setDraft] = useState(() => emptyDraft(fields));
+  const [editing, setEditing] = useState(null); // row being edited
+  const [deletingId, setDeletingId] = useState('');
 
   const load = useCallback(() => {
     setError('');
@@ -1007,9 +1373,8 @@ function ConfigTab({ resource, title, fields, columns }) {
     setSaving(true);
     setError('');
     try {
-      const payload = Object.fromEntries(Object.entries(draft).filter(([, v]) => v !== ''));
-      await post(`/api/hr/leave/${resource}`, payload);
-      setDraft(Object.fromEntries(fields.map((f) => [f.key, ''])));
+      await post(`/api/hr/leave/${resource}`, buildConfigPayload(fields, draft));
+      setDraft(emptyDraft(fields));
       load();
     } catch (err) {
       setError(err.data?.message || err.message || 'Failed to create.');
@@ -1018,57 +1383,67 @@ function ConfigTab({ resource, title, fields, columns }) {
     }
   }
 
+  async function onDelete(row) {
+    const noun = title.replace(/s$/, '').toLowerCase();
+    if (!window.confirm(`Delete ${noun} "${row.name || row.code}"? It is soft-deleted (kept for history) and stops applying immediately.`)) return;
+    setDeletingId(row.id);
+    setError('');
+    try {
+      await del(`/api/hr/leave/${resource}/${row.id}`);
+      load();
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Failed to delete.');
+    } finally {
+      setDeletingId('');
+    }
+  }
+
+  const allColumns = [
+    ...columns,
+    {
+      key: '_actions',
+      header: '',
+      className: 'text-right',
+      cellClassName: 'text-right whitespace-nowrap',
+      render: (r) => (
+        <div className="inline-flex gap-2">
+          {extraRowActions ? extraRowActions(r) : null}
+          <ActionButton onClick={() => setEditing(r)}>Edit</ActionButton>
+          <ActionButton tone="danger" disabled={deletingId === r.id} onClick={() => onDelete(r)}>
+            Delete
+          </ActionButton>
+        </div>
+      ),
+    },
+  ];
+
   return (
     <div className="grid lg:grid-cols-3 gap-4">
       <div className="lg:col-span-2">
         {error && <ErrorBanner message={error} />}
-        <DataTable columns={columns} rows={rows} loading={rows === null} emptyText={`No ${title.toLowerCase()} yet.`} />
+        <DataTable columns={allColumns} rows={rows} loading={rows === null} emptyText={`No ${title.toLowerCase()} yet.`} />
       </div>
       <form onSubmit={onCreate} className="rounded-2xl border border-gray-200 bg-white p-5 space-y-3 h-fit">
         <h2 className="text-sm font-semibold text-gray-900">Add {title.replace(/s$/, '').toLowerCase()}</h2>
-        {fields.map((f) => {
-          const set = (v) => setDraft((d) => ({ ...d, [f.key]: v }));
-          if (f.type === 'select') {
-            return (
-              <label key={f.key} className="block text-sm">
-                <span className="mb-1 flex items-center font-medium text-gray-700">{f.label}{f.required ? ' *' : ''}{f.hint ? <InfoTip text={f.hint} /> : null}</span>
-                <select
-                  value={draft[f.key]} required={f.required} onChange={(e) => set(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                >
-                  <option value="">{f.placeholder || 'Select…'}</option>
-                  {(f.options || []).map((o) => (
-                    <option key={o.value ?? o} value={o.value ?? o}>{o.label ?? o}</option>
-                  ))}
-                </select>
-              </label>
-            );
-          }
-          if (f.type === 'checkbox') {
-            return (
-              <label key={f.key} className="flex items-center gap-2 text-sm text-gray-700">
-                <input type="checkbox" checked={draft[f.key] === true || draft[f.key] === 'true'}
-                  onChange={(e) => set(e.target.checked)} />
-                {f.label}{f.hint ? <InfoTip text={f.hint} /> : null}
-              </label>
-            );
-          }
-          return (
-            <div key={f.key} className="flex items-end gap-1">
-              <div className="flex-1">
-                <TextInput
-                  label={f.label} type={f.type === 'number' ? 'number' : undefined}
-                  value={draft[f.key]} onChange={set} required={f.required}
-                />
-              </div>
-              {f.hint ? <span className="pb-2"><InfoTip text={f.hint} /></span> : null}
-            </div>
-          );
-        })}
+        <ConfigFormFields fields={fields} draft={draft} setDraft={setDraft} />
         <PrimaryButton type="submit" loading={saving}>
           Save
         </PrimaryButton>
       </form>
+
+      {editing && (
+        <ConfigEditModal
+          resource={resource}
+          title={title}
+          fields={fields}
+          row={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            load();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1091,7 +1466,7 @@ function typeFields(countries) {
   ];
   fields.push(
     { key: 'color', label: 'Calendar colour (#hex)' },
-    { key: 'isPaid', label: 'Paid', type: 'checkbox' },
+    { key: 'isPaid', label: 'Paid', type: 'checkbox', default: true },
     { key: 'isStatutory', label: 'Statutory', type: 'checkbox' },
     { key: 'requiresReason', label: 'Requires reason', type: 'checkbox' },
     { key: 'affectsLOP', label: 'Affects LOP (unpaid)', type: 'checkbox', hint: 'When on, the days taken are Loss-of-Pay and reduce salary pro-rata (an authorised unpaid absence, not a balance deduction). A paid type cannot also affect LOP. UNPAID-category types force this on automatically.' },
@@ -1100,16 +1475,23 @@ function typeFields(countries) {
   return fields;
 }
 
-// Full LeavePolicy allow-list (sectioned: entitlement/carry-forward/rules/eligibility/exit).
-function policyFields(typeOptions) {
+// Full LeavePolicy allow-list, sectioned. Matches the controller's
+// LEAVE_POLICY_FIELDS: probation gate, F31 in-service encashment knobs and the
+// F10 workflowDefinitionId binding are all PATCHable. The F31 knobs only show
+// when encashInService is ON (showIf).
+function policyFields(typeOptions, workflowOptions) {
+  const encashOn = (d) => d.encashInService === true || d.encashInService === 'true';
   return [
+    { type: 'section', label: 'Basics' },
     { key: 'leaveTypeId', label: 'Leave type', type: 'select', required: true, options: (typeOptions || []).map((t) => ({ value: t.id, label: `${t.name} (${t.code})` })) },
     { key: 'name', label: 'Policy name', required: true },
     { key: 'code', label: 'Code', required: true },
+    { type: 'section', label: 'Entitlement & accrual' },
     { key: 'accrualMethod', label: 'Accrual method', type: 'select', options: ACCRUAL_METHOD_OPTS, required: true, hint: 'How the balance grows. Choose NONE for Leave Without Pay (LWP): it never creates a balance and must have no entitlement.' },
     { key: 'entitlementPerYear', label: 'Entitlement / year', type: 'number', hint: 'Days granted per year. For India EL/SL/CL this must be at or above the state statutory floor (e.g. Maharashtra EL ≥ 21/yr) — saving below the floor is blocked. Leave blank for LWP.' },
     { key: 'accrualFrequency', label: 'Accrual frequency', type: 'select', options: ACCRUAL_FREQ_OPTS },
-    { key: 'accrualProrateOnJoin', label: 'Pro-rate on join', type: 'checkbox' },
+    { key: 'accrualProrateOnJoin', label: 'Pro-rate on join', type: 'checkbox', default: true },
+    { type: 'section', label: 'Carry-forward & limits' },
     { key: 'carryForwardCap', label: 'Carry-forward cap (blank = unbounded)', type: 'number' },
     { key: 'carryForwardExpiryMonths', label: 'Carry-forward expiry (months)', type: 'number' },
     { key: 'maxBalanceCap', label: 'Max balance cap', type: 'number' },
@@ -1117,12 +1499,371 @@ function policyFields(typeOptions) {
     { key: 'minNoticeDays', label: 'Min notice days', type: 'number' },
     { key: 'allowNegative', label: 'Allow advance (negative)', type: 'checkbox' },
     { key: 'negativeCap', label: 'Negative cap', type: 'number' },
+    { type: 'section', label: 'Probation & eligibility' },
     { key: 'minTenureMonths', label: 'Min tenure (months)', type: 'number' },
-    { key: 'appliesToEmploymentTypes', label: 'Employment types (CSV)' },
+    { key: 'blockDuringProbation', label: 'Block during probation', type: 'checkbox', hint: 'Blocks applications while employee status is PROBATION — separate from tenure months.' },
+    { key: 'appliesToEmploymentTypes', label: 'Employment types (CSV)', hint: 'Legacy CSV filter (e.g. FULL_TIME,PART_TIME). Prefer the "Applies to" assignments in Tiers & scope for entity/department/grade/employee targeting.' },
     { key: 'genderRestriction', label: 'Gender restriction', type: 'select', options: GENDER_OPTS },
+    { type: 'section', label: 'Exit encashment', hint: 'Leave encashed at Full & Final settlement (§10(10AA) exemption applies on exit).' },
     { key: 'encashOnExit', label: 'Encash on exit', type: 'checkbox' },
     { key: 'maxEncashCap', label: 'Max encash cap', type: 'number' },
+    { type: 'section', label: 'In-service encashment (F31)', hint: 'The annual encashment window while still employed. Fully taxable under §17 — §10(10AA) is exit-only.' },
+    { key: 'encashInService', label: 'Allow in-service encashment', type: 'checkbox' },
+    { key: 'encashBasis', label: 'Per-day money basis', type: 'select', options: ENCASH_BASIS_OPTS, showIf: encashOn },
+    { key: 'encashMaxDaysPerYear', label: 'Max days / year', type: 'number', showIf: encashOn },
+    { key: 'encashMinDaysPerRequest', label: 'Min days / request', type: 'number', showIf: encashOn },
+    { key: 'encashMinBalanceAfter', label: 'Min balance after', type: 'number', showIf: encashOn, hint: 'The employee must keep at least this many days after encashing (statutory carry intent).' },
+    { key: 'encashMaxRequestsPerYear', label: 'Max requests / year', type: 'number', showIf: encashOn },
+    { key: 'encashWindowOpenMonth', label: 'Window opens (month)', type: 'select', numeric: true, options: MONTH_OPTS, placeholder: 'Always open', showIf: encashOn },
+    { key: 'encashWindowCloseMonth', label: 'Window closes (month)', type: 'select', numeric: true, options: MONTH_OPTS, placeholder: 'Always open', showIf: encashOn },
+    { key: 'encashPfWages', label: 'Count as PF wages', type: 'checkbox', showIf: encashOn },
+    { key: 'encashEsiWages', label: 'Count as ESI wages', type: 'checkbox', showIf: encashOn },
+    { key: 'encashPtWages', label: 'Count as PT wages', type: 'checkbox', default: true, showIf: encashOn },
+    { type: 'section', label: 'Approval routing' },
+    { key: 'workflowDefinitionId', label: 'Approval workflow', type: 'select', options: workflowOptions || [], placeholder: '(default — manager chain)', hint: "Binds this policy's requests to a specific approval chain." },
   ];
+}
+
+// ─── Per-policy tenure tiers (AccrualRule) ───────────────────────────────────
+// GET/POST /policies/:id/tiers (+ DELETE /tiers/:tierId). POST upserts: pass the
+// row id to edit in place.
+
+function TiersEditor({ policyId }) {
+  const [items, setItems] = useState(null);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ id: '', min: '', max: '', rate: '' });
+
+  const load = useCallback(() => {
+    get(`/api/hr/leave/policies/${policyId}/tiers`)
+      .then((r) => setItems(asList(r)))
+      .catch((e) => {
+        setError(e.data?.message || e.message || 'Failed to load tiers.');
+        setItems([]);
+      });
+  }, [policyId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function save(e) {
+    e.preventDefault();
+    setSaving(true);
+    setError('');
+    try {
+      await post(`/api/hr/leave/policies/${policyId}/tiers`, {
+        ...(form.id ? { id: form.id } : {}),
+        minTenureMonths: Number(form.min),
+        maxTenureMonths: form.max === '' ? null : Number(form.max),
+        ratePerPeriod: Number(form.rate),
+      });
+      setForm({ id: '', min: '', max: '', rate: '' });
+      load();
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Failed to save the tier.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function remove(tier) {
+    if (!window.confirm(`Delete the ${tier.minTenureMonths}–${tier.maxTenureMonths ?? '∞'} month tier?`)) return;
+    setError('');
+    try {
+      await del(`/api/hr/leave/policies/${policyId}/tiers/${tier.id}`);
+      if (form.id === tier.id) setForm({ id: '', min: '', max: '', rate: '' });
+      load();
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Failed to delete the tier.');
+    }
+  }
+
+  const numCls = 'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm';
+
+  return (
+    <div className="space-y-3">
+      <SectionTitle tip="Accrual rate per tick by tenure band (overrides the flat entitlement rate).">
+        Tenure tiers
+      </SectionTitle>
+      {error && <ErrorBanner message={error} />}
+      {items === null ? (
+        <Spinner small />
+      ) : items.length === 0 ? (
+        <p className="text-sm text-gray-500">No tiers — the flat entitlement rate applies to everyone.</p>
+      ) : (
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs uppercase tracking-wide text-gray-500 border-b border-gray-100">
+              <th className="py-2 pr-3 font-medium">From (months)</th>
+              <th className="py-2 pr-3 font-medium">To (months)</th>
+              <th className="py-2 pr-3 font-medium text-right">Rate / period</th>
+              <th className="py-2 font-medium" />
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((t) => (
+              <tr key={t.id} className="border-b border-gray-50 last:border-0">
+                <td className="py-2 pr-3 tabular-nums text-gray-700">{t.minTenureMonths}</td>
+                <td className="py-2 pr-3 tabular-nums text-gray-700">{t.maxTenureMonths ?? '∞'}</td>
+                <td className="py-2 pr-3 tabular-nums text-right text-gray-900 font-medium">{qty(t.ratePerPeriod)}</td>
+                <td className="py-2 text-right whitespace-nowrap">
+                  <div className="inline-flex gap-2">
+                    <ActionButton onClick={() => setForm({ id: t.id, min: String(t.minTenureMonths), max: t.maxTenureMonths == null ? '' : String(t.maxTenureMonths), rate: qty(t.ratePerPeriod) })}>
+                      Edit
+                    </ActionButton>
+                    <ActionButton tone="danger" onClick={() => remove(t)}>Delete</ActionButton>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <form onSubmit={save} className="flex flex-wrap items-end gap-2">
+        <div className="w-28">
+          <label className="block text-xs font-medium text-gray-600 mb-1">From (months)</label>
+          <input type="number" min="0" required value={form.min} onChange={(e) => setForm((f) => ({ ...f, min: e.target.value }))} className={numCls} />
+        </div>
+        <div className="w-28">
+          <label className="block text-xs font-medium text-gray-600 mb-1">To (blank = ∞)</label>
+          <input type="number" min="0" value={form.max} onChange={(e) => setForm((f) => ({ ...f, max: e.target.value }))} className={numCls} />
+        </div>
+        <div className="w-28">
+          <label className="block text-xs font-medium text-gray-600 mb-1">Rate / period</label>
+          <input type="number" min="0" step="any" required value={form.rate} onChange={(e) => setForm((f) => ({ ...f, rate: e.target.value }))} className={numCls} />
+        </div>
+        <PrimaryButton type="submit" loading={saving}>
+          {form.id ? 'Update tier' : 'Add tier'}
+        </PrimaryButton>
+        {form.id && (
+          <button type="button" onClick={() => setForm({ id: '', min: '', max: '', rate: '' })} className="px-3 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50">
+            Cancel edit
+          </button>
+        )}
+      </form>
+    </div>
+  );
+}
+
+// ─── Per-policy applicability assignments (LeavePolicyAssignment) ────────────
+// GET/POST /policies/:id/assignments (+ DELETE /assignments/:assignmentId).
+// Scope targets: entity/department/grade pickers from /api/hr/org/*, the shared
+// employee picker for EMPLOYEE, and the EmploymentType enum for EMPLOYMENT_TYPE.
+
+function AssignmentsEditor({ policyId }) {
+  const [items, setItems] = useState(null);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [scope, setScope] = useState('');
+  const [scopeRefId, setScopeRefId] = useState('');
+  const [employee, setEmployee] = useState(null);
+  const [effectiveFrom, setEffectiveFrom] = useState(todayISO());
+  const [effectiveTo, setEffectiveTo] = useState('');
+  const [orgOpts, setOrgOpts] = useState({}); // ENTITY/DEPARTMENT/GRADE -> [{id,name,code}]
+
+  const load = useCallback(() => {
+    get(`/api/hr/leave/policies/${policyId}/assignments`)
+      .then((r) => setItems(asList(r)))
+      .catch((e) => {
+        setError(e.data?.message || e.message || 'Failed to load assignments.');
+        setItems([]);
+      });
+  }, [policyId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // Lazily fetch the org list for the picked scope (cached per scope).
+  useEffect(() => {
+    const paths = { ENTITY: 'entities', DEPARTMENT: 'departments', GRADE: 'grades' };
+    if (!paths[scope] || orgOpts[scope]) return;
+    get(`/api/hr/org/${paths[scope]}`)
+      .then((r) => setOrgOpts((o) => ({ ...o, [scope]: asList(r) })))
+      .catch(() => setOrgOpts((o) => ({ ...o, [scope]: [] })));
+  }, [scope, orgOpts]);
+
+  function refIdForSubmit() {
+    if (scope === 'EMPLOYEE') return employee?.id || '';
+    return scopeRefId;
+  }
+
+  async function create(e) {
+    e.preventDefault();
+    setSaving(true);
+    setError('');
+    try {
+      await post(`/api/hr/leave/policies/${policyId}/assignments`, {
+        scope,
+        scopeRefId: refIdForSubmit(),
+        effectiveFrom,
+        ...(effectiveTo ? { effectiveTo } : {}),
+      });
+      setScope('');
+      setScopeRefId('');
+      setEmployee(null);
+      setEffectiveTo('');
+      load();
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Failed to add the assignment.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function remove(a) {
+    if (!window.confirm(`Remove the ${prettyEnum(a.scope)} assignment "${a.scopeLabel || a.scopeRefId || ''}"?`)) return;
+    setError('');
+    try {
+      await del(`/api/hr/leave/policies/${policyId}/assignments/${a.id}`);
+      load();
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Failed to remove the assignment.');
+    }
+  }
+
+  const selCls = 'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white';
+
+  return (
+    <div className="space-y-3">
+      <SectionTitle tip="No assignments = policy applies tenant-wide by leave type.">
+        Applies to (assignments)
+      </SectionTitle>
+      {error && <ErrorBanner message={error} />}
+      {items === null ? (
+        <Spinner small />
+      ) : items.length === 0 ? (
+        <p className="text-sm text-gray-500">No assignments — this policy applies tenant-wide for its leave type.</p>
+      ) : (
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs uppercase tracking-wide text-gray-500 border-b border-gray-100">
+              <th className="py-2 pr-3 font-medium">Scope</th>
+              <th className="py-2 pr-3 font-medium">Target</th>
+              <th className="py-2 pr-3 font-medium">Effective</th>
+              <th className="py-2 font-medium" />
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((a) => (
+              <tr key={a.id} className="border-b border-gray-50 last:border-0">
+                <td className="py-2 pr-3 text-gray-700">{prettyEnum(a.scope)}</td>
+                <td className="py-2 pr-3 font-medium text-gray-900">{a.scope === 'EMPLOYMENT_TYPE' ? prettyEnum(a.scopeRefId) : (a.scopeLabel || a.scopeRefId || '—')}</td>
+                <td className="py-2 pr-3 text-gray-600 whitespace-nowrap">
+                  {formatAdminDate(a.effectiveFrom)}{a.effectiveTo ? ` → ${formatAdminDate(a.effectiveTo)}` : ' → open-ended'}
+                </td>
+                <td className="py-2 text-right">
+                  <ActionButton tone="danger" onClick={() => remove(a)}>Remove</ActionButton>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <form onSubmit={create} className="space-y-3">
+        <div className="grid sm:grid-cols-2 gap-3">
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium text-gray-700">Scope *</span>
+            <select
+              value={scope}
+              required
+              onChange={(e) => {
+                setScope(e.target.value);
+                setScopeRefId('');
+                setEmployee(null);
+              }}
+              className={selCls}
+            >
+              <option value="">Select scope…</option>
+              {ASSIGNMENT_SCOPE_OPTS.map((s) => (
+                <option key={s} value={s}>{prettyEnum(s)}</option>
+              ))}
+            </select>
+          </label>
+          {scope === 'EMPLOYEE' ? (
+            <EmployeePicker value={employee} onChange={setEmployee} label="Employee *" />
+          ) : scope === 'EMPLOYMENT_TYPE' ? (
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium text-gray-700">Employment type *</span>
+              <select value={scopeRefId} required onChange={(e) => setScopeRefId(e.target.value)} className={selCls}>
+                <option value="">Select…</option>
+                {EMPLOYMENT_TYPE_OPTS.map((t) => (
+                  <option key={t} value={t}>{prettyEnum(t)}</option>
+                ))}
+              </select>
+            </label>
+          ) : scope ? (
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium text-gray-700">{prettyEnum(scope)} *</span>
+              <select value={scopeRefId} required onChange={(e) => setScopeRefId(e.target.value)} className={selCls}>
+                <option value="">{orgOpts[scope] ? 'Select…' : 'Loading…'}</option>
+                {(orgOpts[scope] || []).map((o) => (
+                  <option key={o.id} value={o.id}>{o.name || o.code}{o.code && o.name ? ` (${o.code})` : ''}</option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+        </div>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <DateField label="Effective from" value={effectiveFrom} onChange={setEffectiveFrom} required />
+          <DateField label="Effective to" value={effectiveTo} onChange={setEffectiveTo} hint="Blank = open-ended" />
+        </div>
+        <PrimaryButton type="submit" loading={saving} disabled={!scope || !refIdForSubmit() || !effectiveFrom}>
+          Add assignment
+        </PrimaryButton>
+      </form>
+    </div>
+  );
+}
+
+// Drawer for one policy's tiers + assignments (opened from the Policies table).
+function PolicyExtrasModal({ policy, onClose }) {
+  return (
+    <Modal title={`Tiers & scope — ${policy.name}`} onClose={onClose} size="lg">
+      <div className="space-y-6">
+        <TiersEditor policyId={policy.id} />
+        <div className="border-t border-gray-100 pt-5">
+          <AssignmentsEditor policyId={policy.id} />
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// Policies tab = ConfigTab (create/edit/delete) + published-LEAVE-workflow options
+// for approval routing + the per-policy Tiers & scope drawer.
+function PoliciesTab({ types, typeById }) {
+  const [workflowOpts, setWorkflowOpts] = useState([]);
+  const [extras, setExtras] = useState(null); // policy row whose drawer is open
+
+  useEffect(() => {
+    // Published LEAVE workflow definitions (F10). The endpoint is gated by
+    // canManageApprovalWorkflows — an operator without it just gets the
+    // "(default — manager chain)" option.
+    get('/api/hr/approvals/workflows', { module: 'LEAVE' })
+      .then((r) => setWorkflowOpts(
+        asList(r)
+          .filter((w) => w.module === 'LEAVE' && w.isPublished)
+          .map((w) => ({ value: w.id, label: `${w.name}${w.isLiveDefault ? ' (live default)' : ''}` })),
+      ))
+      .catch(() => setWorkflowOpts([]));
+  }, []);
+
+  return (
+    <>
+      <ConfigTab
+        resource="policies"
+        title="Policies"
+        fields={policyFields(types, workflowOpts)}
+        columns={policyColumns(typeById)}
+        extraRowActions={(r) => (
+          <ActionButton onClick={() => setExtras(r)}>Tiers &amp; scope</ActionButton>
+        )}
+      />
+      {extras && <PolicyExtrasModal policy={extras} onClose={() => setExtras(null)} />}
+    </>
+  );
 }
 
 function LeaveInner() {
@@ -1169,9 +1910,7 @@ function LeaveInner() {
       {tab === 'types' && (
         <ConfigTab resource="types" title="Leave types" fields={typeFields(countries)} columns={typeColumns()} />
       )}
-      {tab === 'policies' && (
-        <ConfigTab resource="policies" title="Policies" fields={policyFields(types)} columns={policyColumns(typeById)} />
-      )}
+      {tab === 'policies' && <PoliciesTab types={types} typeById={typeById} />}
     </div>
   );
 }

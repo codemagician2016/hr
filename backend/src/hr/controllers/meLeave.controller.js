@@ -264,6 +264,9 @@ async function applyForLeave(req, res, next) {
             entityId: created.id, days: units,
             departmentId: (ctx.employee && ctx.employee.departmentId) || null,
             employeeLevel: (ctx.employee && ctx.employee.gradeId) || null,
+            // Leave-audit — the policy's bound approval chain finally routes
+            // (LeavePolicy.workflowDefinitionId, consumed by workflowResolver).
+            workflowDefinitionId: (ctx.policy && ctx.policy.workflowDefinitionId) || null,
           },
         }, tx);
       }

@@ -50,7 +50,8 @@ export function Tabs({ tabs, active, onChange }) {
 
 // Generic styled table card. `columns` = [{ key, header, render?, className? }].
 // `rowKey` resolves a stable key per row. Renders Spinner / Empty states.
-export function DataTable({ columns, rows, loading, emptyText = 'Nothing here yet.', rowKey, caption }) {
+// `rowClassName(row)` (optional) appends per-row classes (e.g. drift highlight).
+export function DataTable({ columns, rows, loading, emptyText = 'Nothing here yet.', rowKey, caption, rowClassName }) {
   return (
     <div className="rounded-2xl border border-gray-200 bg-white overflow-x-auto shadow-sm">
       {loading ? (
@@ -75,7 +76,7 @@ export function DataTable({ columns, rows, loading, emptyText = 'Nothing here ye
             {rows.map((row, i) => (
               <tr
                 key={rowKey ? rowKey(row, i) : row.id ?? i}
-                className="border-b border-gray-50 last:border-0 hover:bg-gray-50"
+                className={`border-b border-gray-50 last:border-0 hover:bg-gray-50 ${rowClassName ? rowClassName(row) || '' : ''}`}
               >
                 {columns.map((c) => (
                   <td key={c.key} className={`px-4 py-3 ${c.cellClassName || 'text-gray-700'}`}>

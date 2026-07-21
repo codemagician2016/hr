@@ -129,6 +129,12 @@ function validateRequest(input = {}) {
     }
   }
 
+  // 6b. probation gate (leave-audit) — orthogonal to tenure months: a confirmed
+  // employee with short tenure passes; a long-probation employee is blocked.
+  if (policy.blockDuringProbation === true && employee.status === 'PROBATION') {
+    errors.push(fail('PROBATION_BLOCKED', 'This leave type is not available during probation'));
+  }
+
   // 7. genderRestriction (maternity/paternity)
   if (policy.genderRestriction && employee.gender && policy.genderRestriction !== employee.gender) {
     errors.push(fail('GENDER_INELIGIBLE', 'This leave type is restricted by gender', { required: policy.genderRestriction }));

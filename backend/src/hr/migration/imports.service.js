@@ -414,6 +414,7 @@ async function commitOneRow(tx, job, row, actorId, opts) {
     // (recomputeBatchForJob) keyed on distinct (employee, civil-day). All ingest
     // logic lives in attendance/biometric/* — this is a one-line dispatch.
     case 'BIOMETRIC': return require('../attendance/biometric/committer').commitBiometricPunch(tx, job, n, opts);
+    case 'LEAVE_BALANCE': return commitLeaveBalance(tx, job, n, opts);
     default: throw new Error(`no committer for kind ${job.kind}`);
   }
 }
@@ -568,6 +569,65 @@ async function commitAttendance(tx, job, n, _opts) {
   // payroll autogen reads them and writes AttendancePayInput AFTER the MIGRATED
   // run exists (AttendancePayInput requires a payRunId). Nothing to write now.
   return { action: 'created', targetType: 'AttendanceSummary', targetId: `${n.employeeCode}|${n.periodMonth}`, staged: { payableDays: n.payableDays, lopDays: n.lopDays, paidLeaveDays: n.paidLeaveDays, otHours: n.otHours } };
+}
+
+// ── LEAVE_BALANCE committer (leave-audit) ─────────────────────────────────────
+// Lands an OPENING leave balance for migration: upserts the (employee, type,
+// period) lot and posts an OPENING_BALANCE ledger row so reconciliation
+// re-derives cleanly. IDEMPOTENT: same opening re-imported → skipped; a
+// DIFFERENT opening on a lot that already has one → the opening is REPLACED by
+// posting a correcting OPENING_BALANCE delta only when the lot has no other
+// movement; a lot with real movement (accrual/taken/…) is never clobbered.
+async function commitLeaveBalance(tx, job, n, _opts) {
+  const { businessId } = job;
+  const emp = await tx.employee.findFirst({ where: { businessId, code: n.employeeCode }, select: { id: true } });
+  if (!emp) throw new Error(`employee "${n.employeeCode}" not found`);
+  const type = await tx.leaveType.findFirst({ where: { businessId, code: n.leaveTypeCode, deletedAt: null }, select: { id: true, unit: true, isActive: true } });
+  if (!type) throw new Error(`leave type "${n.leaveTypeCode}" not found`);
+  if (type.isActive === false) throw new Error(`leave type "${n.leaveTypeCode}" is inactive`);
+
+  const key = { businessId, employeeId: emp.id, leaveTypeId: type.id, periodCode: n.periodCode };
+  const existing = await tx.leaveBalance.findFirst({ where: key });
+
+  if (existing) {
+    const currentOpening = Number(existing.opening);
+    if (Math.abs(currentOpening - n.opening) < 0.0001) {
+      return { action: 'skipped', targetType: 'LeaveBalance', targetId: existing.id, reason: 'opening already matches' };
+    }
+    const hasMovement = Number(existing.accrued) !== 0 || Number(existing.taken) !== 0
+      || Number(existing.encashed) !== 0 || Number(existing.lapsed) !== 0 || Number(existing.adjusted) !== 0;
+    if (hasMovement) {
+      return { action: 'skipped', targetType: 'LeaveBalance', targetId: existing.id, reason: 'lot has real movement; opening not clobbered (use balance adjust)' };
+    }
+    const delta = n.opening - currentOpening;
+    await tx.leaveTransaction.create({
+      data: {
+        businessId, employeeId: emp.id, leaveTypeId: type.id, leaveBalanceId: existing.id,
+        txnType: 'OPENING_BALANCE', unit: type.unit, quantity: delta,
+        reason: n.note || 'Opening balance import (correction)',
+        status: 'APPROVED', appliedAt: new Date(),
+      },
+    });
+    const flip = await tx.leaveBalance.updateMany({
+      where: { id: existing.id, version: existing.version },
+      data: { opening: n.opening, closing: { increment: delta }, version: { increment: 1 } },
+    });
+    if (flip.count === 0) throw new Error('balance changed concurrently; retry the import');
+    return { action: 'updated', targetType: 'LeaveBalance', targetId: existing.id };
+  }
+
+  const created = await tx.leaveBalance.create({
+    data: { ...key, unit: type.unit, opening: n.opening, closing: n.opening },
+  });
+  await tx.leaveTransaction.create({
+    data: {
+      businessId, employeeId: emp.id, leaveTypeId: type.id, leaveBalanceId: created.id,
+      txnType: 'OPENING_BALANCE', unit: type.unit, quantity: n.opening,
+      reason: n.note || 'Opening balance import',
+      status: 'APPROVED', appliedAt: new Date(),
+    },
+  });
+  return { action: 'created', targetType: 'LeaveBalance', targetId: created.id };
 }
 
 // ── PAYROLL_HISTORY committer — the commit only STAGES; autogen generates. ────

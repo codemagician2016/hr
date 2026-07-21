@@ -9054,6 +9054,7 @@ model LeavePolicy {
   negativeCap              Decimal?                @db.Decimal(8, 4)
   // Eligibility gates
   minTenureMonths          Int                     @default(0) // NZ annual leave vests at 12 months
+  blockDuringProbation     Boolean                 @default(false) // leave-audit: gate on EmployeeStatus.PROBATION (orthogonal to tenure months)
   appliesToEmploymentTypes String? // CSV of EmploymentType
   genderRestriction        Gender? // maternity/paternity
   // Encashment (EXIT — F&F, §10(10AA) exemption applies)
@@ -13009,6 +13010,7 @@ enum ImportKind {
   PAYROLL_HISTORY
   REIMBURSEMENT
   BIOMETRIC // Feature 28 — device punch logs (eSSL/ZKTeco/Matrix/...) → AttendancePunch
+  LEAVE_BALANCE // Feature 44 — opening leave balances (client migration)
 }
 
 enum ImportStatus {

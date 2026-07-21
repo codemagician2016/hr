@@ -51,6 +51,7 @@ async function loadApplyContext({ businessId, employeeId, leaveTypeId, startDate
     select: {
       id: true, businessId: true, gender: true, hireDate: true,
       countryCode: true, managerEmployeeId: true,
+      status: true, // leave-audit — probation gate (validators §6b)
     },
   });
   if (!empRow) return { employee: null };

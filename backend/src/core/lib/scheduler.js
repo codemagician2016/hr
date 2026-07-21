@@ -1107,6 +1107,14 @@ function initScheduler() {
       if (r.accrued > 0 || r.errors > 0) {
         console.log(`[Scheduler] leave accrual: ${JSON.stringify(r)}`);
       }
+      // Leave-audit — carried-lot expiry sweep (carryForwardExpiryMonths was
+      // schema-only; this enforces it). Idempotent per lot; cheap when nothing
+      // is due, so it rides the same nightly tick.
+      const { runCarriedLotExpiry } = require('../../hr/leave/accrualRunner');
+      const lx = await runCarriedLotExpiry({ asOf: new Date() });
+      if (lx.lapsed > 0 || lx.errors > 0) {
+        console.log(`[Scheduler] leave lot-expiry: ${JSON.stringify(lx)}`);
+      }
     } catch (err) {
       console.error('[Scheduler] leave accrual failed:', err.message);
     }

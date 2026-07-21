@@ -65,6 +65,19 @@ router.get('/reports/summary', withEmployeeScope('canViewEmployees'), c.reportsS
 router.post('/runs/carry-forward', requirePermission('canManageOrg'), validateBody(carryForwardRunSchema), c.carryForwardRun);
 router.post('/balances/adjust', requirePermission('canManageOrg'), validateBody(adjustBalanceSchema), c.adjustBalance);
 
+// Leave-audit — org-wide reconciliation sweep (+CSV) and ledger-truth repair.
+router.get('/reconciliation/org', requirePermission('canManageOrg'), c.orgReconciliation);
+router.post('/balances/:id/repair', requirePermission('canManageOrg'), c.repairBalance);
+
+// Leave-audit — accrual tenure tiers + policy applicability assignments
+// (consumed by policyResolver/accrual all along; finally writable).
+router.get('/policies/:id/tiers', requirePermission('canManageOrg'), c.listPolicyTiers);
+router.post('/policies/:id/tiers', requirePermission('canManageOrg'), c.upsertPolicyTier);
+router.delete('/policies/:id/tiers/:tierId', requirePermission('canManageOrg'), c.deletePolicyTier);
+router.get('/policies/:id/assignments', requirePermission('canManageOrg'), c.listPolicyAssignments);
+router.post('/policies/:id/assignments', requirePermission('canManageOrg'), c.createPolicyAssignment);
+router.delete('/policies/:id/assignments/:assignmentId', requirePermission('canManageOrg'), c.deletePolicyAssignment);
+
 // ── (e) Employee leave balances + history + reconciliation ──────────────────
 // History + reconciliation are scope-filtered server-side (canViewEmployees
 // sub-tree); the controller 404s when the target employee is out of scope.

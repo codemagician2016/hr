@@ -42,7 +42,7 @@ const LEAVE_POLICY_FIELDS = [
   'statutoryFloorPerYear', // Feature 16 — as-authored India floor stamp
   'accrualFrequency', 'accrualProrateOnJoin', 'carryForwardCap', 'carryForwardExpiryMonths',
   'maxBalanceCap', 'maxConsecutive', 'minNoticeDays', 'allowNegative', 'negativeCap',
-  'minTenureMonths', 'appliesToEmploymentTypes', 'genderRestriction', 'encashOnExit',
+  'minTenureMonths', 'blockDuringProbation', 'appliesToEmploymentTypes', 'genderRestriction', 'encashOnExit',
   'encashFormula', 'maxEncashCap', 'workflowDefinitionId', 'isActive',
   // Feature 31 — IN-SERVICE encashment knobs (beside the EXIT encashOnExit ones).
   'encashInService', 'encashBasis', 'encashMaxDaysPerYear', 'encashMinDaysPerRequest',
@@ -412,6 +412,8 @@ async function createRequest(req, res, next) {
           days: units,
           departmentId: (ctx.employee && ctx.employee.departmentId) || null,
           employeeLevel: (ctx.employee && ctx.employee.gradeId) || null,
+          // Leave-audit — the policy's bound approval chain finally routes.
+          workflowDefinitionId: (ctx.policy && ctx.policy.workflowDefinitionId) || null,
         },
       }, tx);
 
@@ -844,6 +846,124 @@ async function employeeReconciliation(req, res, next) {
   } catch (e) { next(e); }
 }
 
+// ── GET /reconciliation/org?periodCode=&leaveTypeId=&driftedOnly=&format=csv ──
+// Leave-audit: ORG-WIDE reconciliation sweep — every persisted lot in the period
+// re-derived from its ledger, drift flagged, exportable as CSV. One balances
+// query + one batched ledger query (no per-employee N+1). canManageOrg (route).
+async function orgReconciliation(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const { periodCode, leaveTypeId, driftedOnly, format } = req.query;
+    if (!periodCode) return res.status(400).json({ message: 'periodCode is required' });
+    const { reconcileBuckets } = require('../leave/history');
+
+    const balWhere = { businessId, periodCode };
+    if (leaveTypeId) balWhere.leaveTypeId = leaveTypeId;
+    const balances = await prisma.leaveBalance.findMany({
+      where: balWhere,
+      take: 10000,
+      include: {
+        leaveType: { select: { code: true, name: true, unit: true } },
+        employee: { select: { code: true, firstName: true, lastName: true, isActive: true } },
+      },
+    });
+    const lotIds = balances.map((b) => b.id);
+    const txns = lotIds.length
+      ? await prisma.leaveTransaction.findMany({
+          where: { businessId, leaveBalanceId: { in: lotIds } },
+          select: { leaveBalanceId: true, txnType: true, quantity: true, status: true, appliedAt: true, createdAt: true, id: true },
+        })
+      : [];
+    const byLot = new Map();
+    for (const t of txns) {
+      if (!byLot.has(t.leaveBalanceId)) byLot.set(t.leaveBalanceId, []);
+      byLot.get(t.leaveBalanceId).push(t);
+    }
+
+    let rows = balances.map((b) => {
+      const r = reconcileBuckets(byLot.get(b.id) || [], b);
+      return {
+        balanceId: b.id,
+        employeeCode: b.employee ? b.employee.code : null,
+        employeeName: b.employee ? `${b.employee.firstName} ${b.employee.lastName}` : null,
+        active: b.employee ? b.employee.isActive : null,
+        leaveType: b.leaveType ? b.leaveType.code : b.leaveTypeId,
+        unit: b.unit,
+        opening: Number(b.opening), accrued: Number(b.accrued), taken: Number(b.taken),
+        pendingApproval: Number(b.pendingApproval), encashed: Number(b.encashed),
+        lapsed: Number(b.lapsed), adjusted: Number(b.adjusted),
+        storedClosing: Number(b.closing),
+        ledgerClosing: r.closing,
+        reconciled: r.reconciled,
+        drift: r.drift,
+      };
+    });
+    const drifted = rows.filter((r) => !r.reconciled);
+    if (driftedOnly === 'true' || driftedOnly === '1') rows = drifted;
+
+    if (format === 'csv') {
+      const cols = ['employeeCode', 'employeeName', 'leaveType', 'unit', 'opening', 'accrued', 'taken', 'pendingApproval', 'encashed', 'lapsed', 'adjusted', 'storedClosing', 'ledgerClosing', 'drift', 'reconciled'];
+      const esc = (v) => (v == null ? '' : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
+      const csv = [cols.join(','), ...rows.map((r) => cols.map((c) => esc(r[c])).join(','))].join('\n');
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="leave-reconciliation-${periodCode}.csv"`);
+      return res.send(csv);
+    }
+    res.json({
+      periodCode,
+      total: balances.length,
+      driftedCount: drifted.length,
+      items: rows,
+    });
+  } catch (e) { next(e); }
+}
+
+// ── POST /balances/:id/repair — align a drifted lot to its LEDGER truth ───────
+// Leave-audit: reconciliation previously only DETECTED drift. Repair re-derives
+// every bucket from the append-only ledger (the source of truth), recomputes the
+// pendingApproval soft-hold from open PENDING applications, and overwrites the
+// persisted lot under the version lock. No transaction rows are written — the
+// ledger IS the truth being restored. Audited with before/after.
+async function repairBalance(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const ledger = require('../leave/ledger');
+    const balance = await prisma.leaveBalance.findFirst({ where: { id: req.params.id, businessId } });
+    if (!balance) return res.status(404).json({ message: 'Balance not found' });
+
+    const txns = await prisma.leaveTransaction.findMany({
+      where: { businessId, leaveBalanceId: balance.id },
+    });
+    const b = ledger.reconstructBuckets(txns); // includes the pendingApproval soft-hold
+    const pending = b.pendingApproval;
+
+    const before = {
+      opening: Number(balance.opening), accrued: Number(balance.accrued), taken: Number(balance.taken),
+      pendingApproval: Number(balance.pendingApproval), encashed: Number(balance.encashed),
+      lapsed: Number(balance.lapsed), adjusted: Number(balance.adjusted), closing: Number(balance.closing),
+    };
+    const after = {
+      opening: b.opening, accrued: b.accrued, taken: b.taken,
+      pendingApproval: pending, encashed: b.encashed,
+      lapsed: b.lapsed, adjusted: b.adjusted, closing: b.closing,
+    };
+
+    const flip = await prisma.leaveBalance.updateMany({
+      where: { id: balance.id, version: balance.version },
+      data: { ...after, version: { increment: 1 } },
+    });
+    if (flip.count === 0) return res.status(409).json({ message: 'Balance changed concurrently; please retry' });
+
+    const { writeAudit } = require('../../core/lib/audit');
+    await writeAudit({
+      businessId, actorId: req.user.id, action: 'leave.balance.repair',
+      entityType: 'LeaveBalance', entityId: balance.id,
+      meta: { before, after, employeeId: balance.employeeId, periodCode: balance.periodCode },
+    }).catch(() => {});
+    res.json({ repaired: true, before, after });
+  } catch (e) { next(e); }
+}
+
 // ── (NEW endpoints, §4.8) ────────────────────────────────────────────────────
 
 // GET /me/requests — ESS self-list of own requests. employeeId from the
@@ -1081,10 +1201,19 @@ async function adjustBalance(req, res, next) {
         },
       });
       const before = Number(balance.closing);
-      const updatedBal = await tx.leaveBalance.update({
-        where: { id: balance.id },
+      // Leave-audit fix — version optimistic-lock, same as every other balance
+      // write (a racing apply/accrual between the upsert and this update would
+      // otherwise double-post silently; 0-rowcount → 409 retry).
+      const flip = await tx.leaveBalance.updateMany({
+        where: { id: balance.id, version: balance.version },
         data: { adjusted: { increment: d }, closing: { increment: d }, version: { increment: 1 } },
       });
+      if (flip.count === 0) {
+        const err = new Error('Balance changed concurrently; please retry');
+        err.statusCode = 409;
+        throw err;
+      }
+      const updatedBal = await tx.leaveBalance.findUnique({ where: { id: balance.id } });
       return { row, before, after: Number(updatedBal.closing), balance: updatedBal };
     });
     res.status(201).json({ transaction: out.row, before: out.before, after: out.after });
@@ -1137,6 +1266,128 @@ async function reportsSummary(req, res, next) {
   } catch (e) { next(e); }
 }
 
+// ═══ Leave-audit — AccrualRule tiers + LeavePolicyAssignment CRUD ═════════════
+// The resolver + accrual engine already CONSUME both (tiered rates; policy
+// applicability by entity/department/grade/employment-type/employee) — they just
+// had no write path. All tenant-scoped, canManageOrg-gated at the route.
+
+async function loadTenantPolicy(businessId, policyId) {
+  return prisma.leavePolicy.findFirst({ where: { id: policyId, businessId, deletedAt: null } });
+}
+
+async function listPolicyTiers(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const policy = await loadTenantPolicy(businessId, req.params.id);
+    if (!policy) return res.status(404).json({ message: 'Leave policy not found' });
+    const items = await prisma.accrualRule.findMany({
+      where: { businessId, leavePolicyId: policy.id },
+      orderBy: { minTenureMonths: 'asc' },
+    });
+    res.json({ items });
+  } catch (e) { next(e); }
+}
+
+async function upsertPolicyTier(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const policy = await loadTenantPolicy(businessId, req.params.id);
+    if (!policy) return res.status(404).json({ message: 'Leave policy not found' });
+    const { id, minTenureMonths, maxTenureMonths, ratePerPeriod } = req.body || {};
+    const min = Number(minTenureMonths);
+    const max = maxTenureMonths == null || maxTenureMonths === '' ? null : Number(maxTenureMonths);
+    const rate = Number(ratePerPeriod);
+    if (!Number.isInteger(min) || min < 0) return res.status(400).json({ message: 'minTenureMonths must be a non-negative integer' });
+    if (max != null && (!Number.isInteger(max) || max <= min)) return res.status(400).json({ message: 'maxTenureMonths must be an integer greater than minTenureMonths' });
+    if (!Number.isFinite(rate) || rate < 0) return res.status(400).json({ message: 'ratePerPeriod must be a non-negative number' });
+    let row;
+    if (id) {
+      const existing = await prisma.accrualRule.findFirst({ where: { id, businessId, leavePolicyId: policy.id } });
+      if (!existing) return res.status(404).json({ message: 'Tier not found' });
+      row = await prisma.accrualRule.update({ where: { id }, data: { minTenureMonths: min, maxTenureMonths: max, ratePerPeriod: rate } });
+    } else {
+      row = await prisma.accrualRule.create({ data: { businessId, leavePolicyId: policy.id, minTenureMonths: min, maxTenureMonths: max, ratePerPeriod: rate } });
+    }
+    res.status(201).json(row);
+  } catch (e) { next(e); }
+}
+
+async function deletePolicyTier(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const row = await prisma.accrualRule.findFirst({ where: { id: req.params.tierId, businessId, leavePolicyId: req.params.id } });
+    if (!row) return res.status(404).json({ message: 'Tier not found' });
+    await prisma.accrualRule.delete({ where: { id: row.id } });
+    res.json({ deleted: true });
+  } catch (e) { next(e); }
+}
+
+const ASSIGNMENT_SCOPES = ['ENTITY', 'DEPARTMENT', 'GRADE', 'EMPLOYMENT_TYPE', 'EMPLOYEE'];
+
+async function listPolicyAssignments(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const policy = await loadTenantPolicy(businessId, req.params.id);
+    if (!policy) return res.status(404).json({ message: 'Leave policy not found' });
+    const items = await prisma.leavePolicyAssignment.findMany({
+      where: { businessId, leavePolicyId: policy.id },
+      orderBy: { createdAt: 'asc' },
+    });
+    // Human labels for the scope targets (batched per model).
+    const byModel = { ENTITY: 'entity', DEPARTMENT: 'department', GRADE: 'grade', EMPLOYEE: 'employee' };
+    const labels = {};
+    for (const scope of Object.keys(byModel)) {
+      const ids = items.filter((a) => a.scope === scope && a.scopeRefId).map((a) => a.scopeRefId);
+      if (!ids.length) continue;
+      const rows = await prisma[byModel[scope]].findMany({
+        where: { businessId, id: { in: ids } },
+        select: scope === 'EMPLOYEE'
+          ? { id: true, code: true, firstName: true, lastName: true }
+          : { id: true, name: true, code: true },
+      });
+      for (const r of rows) labels[r.id] = r.firstName ? `${r.firstName} ${r.lastName} (${r.code})` : (r.name || r.code);
+    }
+    res.json({ items: items.map((a) => ({ ...a, scopeLabel: a.scopeRefId ? labels[a.scopeRefId] || a.scopeRefId : a.scope })) });
+  } catch (e) { next(e); }
+}
+
+async function createPolicyAssignment(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const policy = await loadTenantPolicy(businessId, req.params.id);
+    if (!policy) return res.status(404).json({ message: 'Leave policy not found' });
+    const { scope, scopeRefId, effectiveFrom, effectiveTo } = req.body || {};
+    if (!ASSIGNMENT_SCOPES.includes(scope)) return res.status(400).json({ message: `scope must be one of ${ASSIGNMENT_SCOPES.join(', ')}` });
+    if (!effectiveFrom) return res.status(400).json({ message: 'effectiveFrom is required' });
+    // Tenant-validate the scope target (EMPLOYMENT_TYPE is a plain enum string).
+    const modelByScope = { ENTITY: 'entity', DEPARTMENT: 'department', GRADE: 'grade', EMPLOYEE: 'employee' };
+    if (modelByScope[scope]) {
+      if (!scopeRefId) return res.status(400).json({ message: `scopeRefId is required for scope ${scope}` });
+      const target = await prisma[modelByScope[scope]].findFirst({ where: { id: scopeRefId, businessId }, select: { id: true } });
+      if (!target) return res.status(404).json({ message: `${scope.toLowerCase()} not found in this tenant` });
+    }
+    const row = await prisma.leavePolicyAssignment.create({
+      data: {
+        businessId, leavePolicyId: policy.id, scope,
+        scopeRefId: scopeRefId || null,
+        effectiveFrom: new Date(`${String(effectiveFrom).slice(0, 10)}T00:00:00Z`),
+        effectiveTo: effectiveTo ? new Date(`${String(effectiveTo).slice(0, 10)}T00:00:00Z`) : null,
+      },
+    });
+    res.status(201).json(row);
+  } catch (e) { next(e); }
+}
+
+async function deletePolicyAssignment(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const row = await prisma.leavePolicyAssignment.findFirst({ where: { id: req.params.assignmentId, businessId, leavePolicyId: req.params.id } });
+    if (!row) return res.status(404).json({ message: 'Assignment not found' });
+    await prisma.leavePolicyAssignment.delete({ where: { id: row.id } });
+    res.json({ deleted: true });
+  } catch (e) { next(e); }
+}
+
 module.exports = {
   leaveTypes,
   leavePolicies,
@@ -1158,4 +1409,14 @@ module.exports = {
   adjustBalance,
   carryForwardRun,
   reportsSummary,
+  // Leave-audit — org-wide reconciliation + ledger repair
+  orgReconciliation,
+  repairBalance,
+  // Leave-audit — accrual tiers + policy assignments CRUD
+  listPolicyTiers,
+  upsertPolicyTier,
+  deletePolicyTier,
+  listPolicyAssignments,
+  createPolicyAssignment,
+  deletePolicyAssignment,
 };

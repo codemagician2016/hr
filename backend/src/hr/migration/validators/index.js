@@ -248,6 +248,36 @@ function validateBiometric(row, _ctx) {
   return done(f, normalized, naturalKey);
 }
 
+// ── LEAVE_BALANCE (leave-audit) ─────────────────────────────────────────────
+function validateLeaveBalance(row, ctx) {
+  const f = [];
+  const empCode = row.employeeCode ? String(row.employeeCode).trim() : null;
+  if (isBlank(empCode)) f.push(finding('REQUIRED', 'ERROR', 'employeeCode is required', 'employeeCode'));
+  else if (ctx.employeeCodes && !ctx.employeeCodes.has(empCode)) f.push(finding('UNKNOWN_EMPLOYEE', 'ERROR', `employeeCode "${empCode}" not found`, 'employeeCode'));
+
+  const typeCode = row.leaveTypeCode ? String(row.leaveTypeCode).trim().toUpperCase() : null;
+  if (isBlank(typeCode)) f.push(finding('REQUIRED', 'ERROR', 'leaveTypeCode is required', 'leaveTypeCode'));
+
+  const periodCode = row.periodCode ? String(row.periodCode).trim() : null;
+  if (isBlank(periodCode)) f.push(finding('REQUIRED', 'ERROR', 'periodCode is required', 'periodCode'));
+  else if (!/^\d{4}(-\S{1,10})?$/.test(periodCode)) f.push(finding('BAD_PERIOD', 'ERROR', `periodCode "${periodCode}" must look like "2026-27" or "2026-ANNIV"`, 'periodCode'));
+
+  const opening = toNumber(row.openingBalance);
+  if (row.openingBalance == null || row.openingBalance === '' || Number.isNaN(opening)) {
+    f.push(finding('REQUIRED', 'ERROR', 'openingBalance must be a number', 'openingBalance'));
+  } else if (opening < 0) {
+    f.push(finding('BAD_NUMBER', 'ERROR', 'openingBalance must be ≥ 0 (use a manual adjustment for negatives)', 'openingBalance'));
+  }
+
+  const normalized = {
+    employeeCode: empCode, leaveTypeCode: typeCode, periodCode,
+    opening: Number.isNaN(opening) ? 0 : opening,
+    note: row.note ? String(row.note).slice(0, 500) : null,
+  };
+  const naturalKey = empCode && typeCode && periodCode ? `${empCode}|${typeCode}|${periodCode}` : null;
+  return done(f, normalized, naturalKey);
+}
+
 const VALIDATORS = {
   EMPLOYEE: validateEmployee,
   COMPENSATION: validateCompensation,
@@ -255,6 +285,7 @@ const VALIDATORS = {
   PAYROLL_HISTORY: validatePayrollHistory,
   REIMBURSEMENT: validateReimbursement,
   BIOMETRIC: validateBiometric,
+  LEAVE_BALANCE: validateLeaveBalance,
 };
 
 function validateRow(kind, row, ctx) {

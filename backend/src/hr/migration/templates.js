@@ -25,7 +25,10 @@ const { toCsv } = require('./parsers/csv');
 // requires options.deviceId (the device pins vendor/adapter/TZ/location). Its
 // committer (commitBiometricPunch) lands raw device punches + a post-commit pass
 // recomputes — see backend/src/hr/attendance/biometric/committer.js.
-const KINDS = ['EMPLOYEE', 'COMPENSATION', 'ATTENDANCE', 'PAYROLL_HISTORY', 'REIMBURSEMENT', 'BIOMETRIC'];
+// Leave-audit (shared edit): LEAVE_BALANCE — opening leave balances for client
+// migration (previously the ONLY way to seed balances was per-employee manual
+// adjustment). Lands LeaveBalance lots + OPENING_BALANCE ledger rows.
+const KINDS = ['EMPLOYEE', 'COMPENSATION', 'ATTENDANCE', 'PAYROLL_HISTORY', 'REIMBURSEMENT', 'BIOMETRIC', 'LEAVE_BALANCE'];
 
 const TEMPLATES = Object.freeze({
   EMPLOYEE: {
@@ -92,6 +95,16 @@ const TEMPLATES = Object.freeze({
       { name: 'priorPf', required: false, type: 'money', rule: 'RECONCILE: prior PF (₹).', example: '' },
       { name: 'priorPt', required: false, type: 'money', rule: 'RECONCILE: prior PT (₹).', example: '' },
       { name: 'priorTds', required: false, type: 'money', rule: 'RECONCILE: prior TDS (₹).', example: '' },
+    ],
+  },
+  LEAVE_BALANCE: {
+    naturalKeyHint: 'employeeCode + leaveTypeCode + periodCode',
+    fields: [
+      { name: 'employeeCode', required: true, type: 'string', rule: 'Must resolve to an Employee in this tenant.', example: 'EMP-IMP-001' },
+      { name: 'leaveTypeCode', required: true, type: 'string', rule: 'Must resolve to an ACTIVE LeaveType code (EL/SL/CL/…).', example: 'EL' },
+      { name: 'periodCode', required: true, type: 'string', rule: 'Leave period, e.g. "2026-27" (IN FY) or an NZ anniversary code.', example: '2026-27' },
+      { name: 'openingBalance', required: true, type: 'number', rule: 'Opening units (days/weeks per the type unit). ≥ 0; lands as an OPENING_BALANCE ledger row.', example: '12.5' },
+      { name: 'note', required: false, type: 'string', rule: 'Optional migration note (kept on the ledger row).', example: 'Migrated from legacy HRMS' },
     ],
   },
   REIMBURSEMENT: {

@@ -49,8 +49,21 @@ function nextPeriodCode(periodCode) {
  * { scanned, accrued, skipped, errors }.
  */
 async function runNightlyAccrual({ businessId = null, asOf = new Date(), dryRun = false } = {}) {
-  const tickStart = monthStart(asOf); // monthly tick boundary
+  const tickStart = monthStart(asOf); // monthly tick boundary (candidate superset)
   const summary = { scanned: 0, accrued: 0, skipped: 0, errors: 0 };
+
+  // Leave-audit — the tick boundary honours the POLICY's accrualFrequency (it was
+  // monthly for everyone): MONTHLY/PER_PAY_PERIOD tick at the month boundary;
+  // QUARTERLY at Jan/Apr/Jul/Oct; ANNUAL once a year at the IN fiscal start
+  // (1 April — the same gate the year-end roll uses). The candidate query stays
+  // on the monthly superset; the per-policy boundary decides below.
+  const d = new Date(asOf);
+  const q = Math.floor(d.getUTCMonth() / 3) * 3;
+  const quarterStart = new Date(Date.UTC(d.getUTCFullYear(), q, 1));
+  const fyStart = d.getUTCMonth() >= 3
+    ? new Date(Date.UTC(d.getUTCFullYear(), 3, 1))
+    : new Date(Date.UTC(d.getUTCFullYear() - 1, 3, 1));
+  const boundaryFor = (freq) => (freq === 'QUARTERLY' ? quarterStart : freq === 'ANNUAL' ? fyStart : tickStart);
 
   // Candidate balances: a tick is due when lastAccrualAt is null or before the
   // current month boundary. We accrue against the persisted current-period balance.
@@ -90,20 +103,45 @@ async function runNightlyAccrual({ businessId = null, asOf = new Date(), dryRun 
       if (policy.accrualMethod === 'UPFRONT_ANNUAL' || policy.accrualMethod === 'ANNIVERSARY_GRANT') {
         summary.skipped += 1; continue;
       }
+      // Leave-audit — honour the policy's own tick boundary (frequency).
+      const policyTickStart = boundaryFor(policy.accrualFrequency);
+      if (bal.lastAccrualAt && new Date(bal.lastAccrualAt) >= policyTickStart) { summary.skipped += 1; continue; }
+
       const tenureMonths = emp.hireDate ? accrual.tenureMonthsBetween(emp.hireDate, asOf) : 0;
-      const grant = accrual.accrueForPeriod(policy, resolved.accrualRules, {
-        tenureMonths,
-        currentClosing: Number(bal.closing),
-        grain: policy.accrualMethod === 'CONTINUOUS_NZ' ? 0.0001 : 0.5,
-        workedWeeks: 1, // monthly proxy; a per-pay-period runner would pass the real count
-      });
+
+      // Leave-audit — JOIN-MONTH PRORATION finally wired: on a balance's FIRST-ever
+      // tick where the employee joined inside the current tick window, the grant is
+      // prorataOnJoin (join-cutoff-day rule for monthly; day-proration otherwise)
+      // instead of a full-period rate — a 28th-of-month joiner no longer gets a
+      // full month's accrual.
+      let units = null;
+      const hire = emp.hireDate ? new Date(emp.hireDate) : null;
+      const firstTick = !bal.lastAccrualAt;
+      if (firstTick && hire && hire >= policyTickStart && hire <= asOf) {
+        const windowEnd = new Date(Date.UTC(
+          policyTickStart.getUTCFullYear(),
+          policyTickStart.getUTCMonth() + (policy.accrualFrequency === 'QUARTERLY' ? 3 : policy.accrualFrequency === 'ANNUAL' ? 12 : 1),
+          0,
+        ));
+        units = accrual.prorataOnJoin(policy, hire, policyTickStart, windowEnd, {
+          grain: policy.accrualMethod === 'CONTINUOUS_NZ' ? 0.0001 : 0.5,
+        });
+      }
+      const grant = units != null
+        ? { units }
+        : accrual.accrueForPeriod(policy, resolved.accrualRules, {
+          tenureMonths,
+          currentClosing: Number(bal.closing),
+          grain: policy.accrualMethod === 'CONTINUOUS_NZ' ? 0.0001 : 0.5,
+          workedWeeks: 1, // monthly proxy; a per-pay-period runner would pass the real count
+        });
       if (grant.units <= 0) { summary.skipped += 1; continue; }
       if (dryRun) { summary.accrued += 1; continue; }
 
       await prisma.$transaction(async (tx) => {
         // re-guard inside the tx: only accrue if still due (idempotent on re-run)
         const fresh = await tx.leaveBalance.findUnique({ where: { id: bal.id }, select: { lastAccrualAt: true, version: true } });
-        if (fresh && fresh.lastAccrualAt && new Date(fresh.lastAccrualAt) >= tickStart) return; // already ticked this window
+        if (fresh && fresh.lastAccrualAt && new Date(fresh.lastAccrualAt) >= policyTickStart) return; // already ticked this window
         await tx.leaveTransaction.create({
           data: {
             businessId: bal.businessId, employeeId: emp.id, leaveTypeId: bal.leaveTypeId,
@@ -262,4 +300,98 @@ async function runCarryForward({ businessId, periodCode, leaveTypeId = null, dry
   };
 }
 
-module.exports = { runNightlyAccrual, runCarryForward, nextPeriodCode, _internals: { monthStart } };
+// ── carried-lot expiry (leave-audit) ──────────────────────────────────────────
+/**
+ * runCarriedLotExpiry({ businessId?, asOf, dryRun }) — enforce
+ * `carryForwardExpiryMonths` for ORDINARY leave (comp-off has its own runner;
+ * the pure carriedLotExpiry existed since F6 but no runner ever called it).
+ *
+ * A "lot" is the OPENING_BALANCE row runCarryForward writes (reason
+ * "Carry-forward from <period>") — openedAt = its appliedAt. Consumption is
+ * carried-first (FIFO): remaining = max(0, carried − (taken + encashed)),
+ * additionally capped by the live closing. Past expiry, the remainder lapses
+ * with a marked LAPSE row; the marker ("Carried-forward leave expired") is the
+ * idempotency guard — one expiry event per lot, re-runs are no-ops.
+ */
+async function runCarriedLotExpiry({ businessId = null, asOf = new Date(), dryRun = false } = {}) {
+  const summary = { scanned: 0, lapsed: 0, skipped: 0, errors: 0 };
+  const EXPIRY_MARK = 'Carried-forward leave expired';
+
+  const carryTxns = await prisma.leaveTransaction.findMany({
+    where: {
+      ...(businessId ? { businessId } : {}),
+      txnType: 'OPENING_BALANCE',
+      reason: { startsWith: 'Carry-forward from' },
+    },
+    select: { id: true, businessId: true, employeeId: true, leaveTypeId: true, leaveBalanceId: true, quantity: true, unit: true, appliedAt: true, createdAt: true },
+    take: 5000,
+  });
+
+  for (const t of carryTxns) {
+    summary.scanned += 1;
+    try {
+      if (!t.leaveBalanceId) { summary.skipped += 1; continue; }
+      const bal = await prisma.leaveBalance.findUnique({ where: { id: t.leaveBalanceId } });
+      if (!bal) { summary.skipped += 1; continue; }
+
+      // Already expired once → no-op (the marker row is the guard).
+      const already = await prisma.leaveTransaction.findFirst({
+        where: { businessId: t.businessId, leaveBalanceId: bal.id, txnType: 'LAPSE', reason: { startsWith: EXPIRY_MARK } },
+        select: { id: true },
+      });
+      if (already) { summary.skipped += 1; continue; }
+
+      const emp = await prisma.employee.findFirst({
+        where: { id: t.employeeId, businessId: t.businessId, deletedAt: null },
+        select: {
+          id: true, hireDate: true,
+          employmentRecords: { where: { isCurrent: true }, take: 1, select: { entityId: true, departmentId: true, gradeId: true, employmentType: true } },
+        },
+      });
+      if (!emp) { summary.skipped += 1; continue; }
+      const er = (emp.employmentRecords && emp.employmentRecords[0]) || {};
+      const resolved = await resolvePolicy(
+        { ...emp, businessId: t.businessId, entityId: er.entityId || null, departmentId: er.departmentId || null, gradeId: er.gradeId || null, employmentType: er.employmentType || null },
+        t.leaveTypeId,
+        asOf,
+      );
+      const months = resolved && resolved.policy ? resolved.policy.carryForwardExpiryMonths : null;
+      if (months == null) { summary.skipped += 1; continue; }
+
+      const carried = Math.abs(Number(t.quantity));
+      const consumed = Number(bal.taken) + Number(bal.encashed);
+      const remaining = Math.min(Math.max(0, carried - consumed), Math.max(0, Number(bal.closing)));
+      const verdict = accrual.carriedLotExpiry(
+        [{ openedAt: t.appliedAt || t.createdAt, remaining }],
+        asOf,
+        months,
+      );
+      if (verdict.lapsed <= 0) { summary.skipped += 1; continue; }
+      if (dryRun) { summary.lapsed += 1; continue; }
+
+      await prisma.$transaction(async (tx) => {
+        const fresh = await tx.leaveBalance.findUnique({ where: { id: bal.id }, select: { version: true } });
+        await tx.leaveTransaction.create({
+          data: {
+            businessId: t.businessId, employeeId: t.employeeId, leaveTypeId: t.leaveTypeId,
+            leaveBalanceId: bal.id, txnType: 'LAPSE', unit: t.unit, quantity: -verdict.lapsed,
+            reason: `${EXPIRY_MARK} (${months} months)`,
+            status: 'APPROVED', appliedAt: asOf, decidedAt: asOf,
+          },
+        });
+        const flip = await tx.leaveBalance.updateMany({
+          where: { id: bal.id, version: fresh.version },
+          data: { lapsed: { increment: verdict.lapsed }, closing: { decrement: verdict.lapsed }, version: { increment: 1 } },
+        });
+        if (flip.count === 0) throw Object.assign(new Error('race'), { code: 'P2025' });
+      });
+      summary.lapsed += 1;
+    } catch (e) {
+      summary.errors += 1;
+      if (e && e.code !== 'P2025') console.error('[leave lot-expiry] txn', t.id, e.message);
+    }
+  }
+  return summary;
+}
+
+module.exports = { runNightlyAccrual, runCarryForward, runCarriedLotExpiry, nextPeriodCode, _internals: { monthStart } };

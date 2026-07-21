@@ -29,7 +29,7 @@ import { PageHeader } from '@/lib/ui';
 import { InfoTip, SectionTitle } from '@/lib/widgets';
 import ModuleGuide from '@/components/ModuleGuide';
 
-// The five import kinds, in dependency order, with plain-English descriptions +
+// The import kinds, in dependency order, with plain-English descriptions +
 // the "what you need first" hint the spec asks for.
 const KINDS = [
   { kind: 'EMPLOYEE', title: 'Employees', blurb: 'The people master — names, work email, joining date, PAN/UAN.', needs: 'Nothing — start here.' },
@@ -37,6 +37,8 @@ const KINDS = [
   { kind: 'ATTENDANCE', title: 'Attendance', blurb: 'Back-dated attendance — daily (one row per day) or a monthly summary.', needs: 'Employees imported first.' },
   { kind: 'PAYROLL_HISTORY', title: 'Payroll history', blurb: 'The months to rebuild. Once CTC + attendance exist, payslips auto-prepare through the engine.', needs: 'Employees + CTC + attendance.' },
   { kind: 'REIMBURSEMENT', title: 'Reimbursements', blurb: 'Prior expense claims with their claimed + approved amounts.', needs: 'Employees imported first.' },
+  // Leave-audit — opening leave balances land as OPENING_BALANCE ledger rows.
+  { kind: 'LEAVE_BALANCE', title: 'Leave opening balances', blurb: 'Migrate employees’ current leave balances (employeeCode + leaveTypeCode + periodCode + openingBalance).', needs: 'Employees + leave types configured.' },
 ];
 
 const STATUS_DOT = { PASS: 'bg-green-500', WARN: 'bg-amber-500', ERROR: 'bg-red-500', COMMITTED: 'bg-green-600', SKIPPED: 'bg-gray-400', FAILED: 'bg-red-600', PARSED: 'bg-gray-300' };
