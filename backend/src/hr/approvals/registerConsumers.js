@@ -51,6 +51,12 @@ const { registerRegularizationConsumer } = require('./consumers.regularization')
 const { registerCompensationConsumer } = require('./consumers.compensation');
 const { registerAssetConsumer } = require('./consumers.asset');
 const { registerDocumentSignConsumer } = require('./consumers.documentSign');
+// Wave 2B — the maker-checker heavies: SEPARATION (FnF mint via the shared
+// core, idempotent on fnfPayRunId), PAYRUN (delegates to service.approveRun
+// guards), OFFER (dormant PENDING_APPROVAL/APPROVED states activated).
+const { registerSeparationConsumer } = require('./consumers.separation');
+const { registerPayrunConsumer } = require('./consumers.payrun');
+const { registerOfferConsumer } = require('./consumers.offer');
 
 let done = false;
 
@@ -70,6 +76,9 @@ function registerConsumers() {
   registerCompensationConsumer();
   registerAssetConsumer();
   registerDocumentSignConsumer();
+  registerSeparationConsumer();
+  registerPayrunConsumer();
+  registerOfferConsumer();
   done = true;
 }
 

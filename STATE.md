@@ -1,3 +1,9 @@
+> **ACTIVE PROGRAM (2026-07-21): the 5-phase "fully custom & dynamic" build is IN PROGRESS.**
+> Session-resume source of truth: `/Users/kp/.claude/projects/-Users-kp-hr/memory/master-custom-program.md`
+> (RESUME PROTOCOL at the top) + the locked plan `docs/MASTER-PLAN-CUSTOM-DYNAMIC.md` + per-wave docs
+> `docs/features/46-52`. Phase 1 ✅ (commits 70ac4cb…0861d6e) · Phase 2 Wave A ✅ (cd6ce6a) ·
+> Wave 2B built/deployed, commit pending E2E. The sections below describe the ORIGINAL pre-staging build.
+
 # STATE — DriftHR (Release Candidate)
 
 **DriftHR** — "Effortless HR & payroll." Multi-tenant, white-label HRMS & Payroll SaaS (India 🇮🇳 + New Zealand 🇳🇿), forked from Sitepresso. Brand: teal `#16B6A6` / ink `#16243B`, Manrope. Kit in `drifthr-brand-kit/`.

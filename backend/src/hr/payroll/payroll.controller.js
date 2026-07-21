@@ -103,6 +103,18 @@ async function approveRun(req, res) {
     // weaken separation-of-duties or the STALE_TOTALS gate. Any such field is
     // intentionally ignored here.
     const detail = await service.approveRun({ businessId, actorId, payRunId: req.params.id });
+    // Wave 2B — guards passed; mark the engine request decided (best-effort).
+    try {
+      const open = await prisma.approvalRequest.findFirst({
+        where: { businessId, module: 'PAYRUN', entityId: req.params.id, status: { in: ['PENDING', 'ESCALATED'] } },
+      });
+      if (open) {
+        await approvalsEngine.recordDecision({
+          approvalRequestId: open.id, actorUserId: actorId || 'SYSTEM',
+          decision: 'APPROVED', systemActor: true,
+        });
+      }
+    } catch (e) { console.error('[payrun] request mark failed:', e.message); }
     res.json(detail);
   } catch (err) { handleError(res, err); }
 }
@@ -188,10 +200,54 @@ async function updateThresholds(req, res) {
   } catch (err) { handleError(res, err); }
 }
 
+// Wave 2B — PAYRUN rides the engine for VISIBILITY + tenant-authored chains;
+// the run's own maker-checker (four-eyes / STALE_TOTALS / OPEN_BLOCKERS) stays
+// the guard authority (see approvals/consumers.payrun.js).
+const approvalsEngine = require('../approvals/engine');
+require('../approvals/consumers.payrun');
+
+async function openPayrunRequest(businessId, run) {
+  const prior = await prisma.approvalRequest.findFirst({
+    where: { businessId, module: 'PAYRUN', entityId: run.id, status: { in: ['PENDING', 'ESCALATED'] } },
+  });
+  if (prior) return prior;
+  const opened = await approvalsEngine.openRequest({
+    businessId,
+    module: 'PAYRUN',
+    entityType: 'PayRun',
+    entityId: run.id,
+    requesterEmployeeId: null,
+    payload: {
+      code: run.code || null,
+      period: run.periodStart ? `${String(run.periodStart).slice(0, 10)} → ${String(run.periodEnd).slice(0, 10)}` : null,
+      headcount: run.headcount || null,
+      totalNet: run.totalNet != null ? String(run.totalNet) : null,
+      amount: run.totalNet != null ? Number(run.totalNet) : null,
+    },
+    ctx: { entityId: run.id, amount: run.totalNet != null ? Number(run.totalNet) : null },
+  });
+  await prisma.payRun.update({ where: { id: run.id }, data: { approvalRequestId: opened.approvalRequest.id } });
+  return opened.approvalRequest;
+}
+
+async function closeOpenPayrunRequest(businessId, payRunId, actorUserId, comment) {
+  const open = await prisma.approvalRequest.findFirst({
+    where: { businessId, module: 'PAYRUN', entityId: payRunId, status: { in: ['PENDING', 'ESCALATED'] } },
+  });
+  if (!open) return;
+  await approvalsEngine.cancel({ approvalRequestId: open.id, actorUserId: actorUserId || 'SYSTEM', comment: comment || null }).catch(() => {});
+}
+
 async function submitRun(req, res) {
   try {
     const { businessId, id: actorId } = req.user;
     const out = await service.submitRun({ businessId, actorId, payRunId: req.params.id });
+    // Open the engine request AFTER a successful submit (best-effort — the run's
+    // own review state machine is the authority).
+    try {
+      const run = await prisma.payRun.findFirst({ where: { id: req.params.id, businessId } });
+      if (run) await openPayrunRequest(businessId, run);
+    } catch (e) { console.error('[payrun] request open failed:', e.message); }
     res.json(out);
   } catch (err) { handleError(res, err); }
 }
@@ -200,6 +256,7 @@ async function sendBackRun(req, res) {
   try {
     const { businessId, id: actorId } = req.user;
     const out = await service.sendBackRun({ businessId, actorId, payRunId: req.params.id, reason: (req.body || {}).reason });
+    await closeOpenPayrunRequest(businessId, req.params.id, actorId, `Sent back: ${(req.body || {}).reason || ''}`);
     res.json(out);
   } catch (err) { handleError(res, err); }
 }
@@ -240,6 +297,7 @@ async function cancelRun(req, res) {
   try {
     const { businessId, id: actorId } = req.user;
     const out = await service.cancelRun({ businessId, actorId, payRunId: req.params.id, reason: (req.body || {}).reason });
+    await closeOpenPayrunRequest(businessId, req.params.id, actorId, `Run cancelled: ${(req.body || {}).reason || ''}`);
     res.json(out);
   } catch (err) { handleError(res, err); }
 }
@@ -248,6 +306,7 @@ async function reopenRun(req, res) {
   try {
     const { businessId, id: actorId } = req.user;
     const out = await service.reopenRun({ businessId, actorId, payRunId: req.params.id });
+    await closeOpenPayrunRequest(businessId, req.params.id, actorId, 'Run reopened for recompute');
     res.json(out);
   } catch (err) { handleError(res, err); }
 }

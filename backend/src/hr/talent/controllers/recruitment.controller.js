@@ -1093,6 +1093,43 @@ async function sendOffer(req, res, next) {
     if (!['DRAFT', 'APPROVED', 'PENDING_APPROVAL'].includes(offer.status)) {
       return res.status(409).json({ message: `Cannot send an offer in status ${offer.status}` });
     }
+    // Wave 2B — internal approval gate. Pre-resolve: the built-in OFFER default
+    // is AUTO_APPROVE (no gate — send proceeds exactly as before). A
+    // tenant-authored chain with a real approver parks a DRAFT offer
+    // PENDING_APPROVAL + opens the request; once APPROVED, send proceeds.
+    if (offer.status === 'DRAFT') {
+      const { resolveDefinition } = require('../../approvals/workflowResolver');
+      const resolvedDef = await resolveDefinition(businessId, 'OFFER', { entityId: offer.id });
+      const needsApproval = (resolvedDef.steps || []).some((st) => st.approverType !== 'AUTO_APPROVE');
+      if (needsApproval) {
+        const engine = require('../../approvals/engine');
+        require('../../approvals/consumers.offer');
+        const gated = await prisma.$transaction(async (tx) => {
+          await tx.offer.update({ where: { id: offer.id }, data: { status: 'PENDING_APPROVAL' } });
+          const opened = await engine.openRequest({
+            businessId,
+            module: 'OFFER',
+            entityType: 'Offer',
+            entityId: offer.id,
+            requesterEmployeeId: req.user.employeeId || null,
+            payload: { offerId: offer.id, applicationId: offer.applicationId || null },
+            ctx: { entityId: offer.id },
+          }, tx);
+          await tx.offer.update({ where: { id: offer.id }, data: { approvalRequestId: opened.approvalRequest.id } });
+          return opened;
+        });
+        if (!(gated.terminal && gated.approvalRequest.status === 'APPROVED')) {
+          const pending = await prisma.offer.findFirst({ where: { id: offer.id, businessId } });
+          return res.status(202).json({
+            pendingApproval: true,
+            approvalRequestId: gated.approvalRequest.id,
+            offer: pending,
+            message: 'Offer awaits internal approval per your OFFER workflow; send it once approved.',
+          });
+        }
+        // Conditional steps all skipped → APPROVED in-tx; fall through to send.
+      }
+    }
     const item = await prisma.offer.update({
       where: { id: offer.id },
       data: { status: 'SENT', sentAt: new Date() },

@@ -114,6 +114,19 @@ const BUILT_IN_DEFAULT = Object.freeze({
   DOCUMENT_SIGN: [
     step(1, 'AUTO_APPROVE', { name: 'Auto (no approval configured)' }),
   ],
+  // ── Wave 2B — the maker-checker heavies. Defaults mirror pre-engine reality:
+  // FnF approval and payrun approval were canApprovePayroll acts → the payroll
+  // manager owns the step; OFFER had NO internal approval (only send/accept
+  // SoD) → AUTO until a tenant authors a chain.
+  SEPARATION: [
+    step(1, 'PAYROLL_MANAGER', { name: 'Payroll approver (FnF)', slaHours: 72, onTimeoutAction: 'ESCALATE' }),
+  ],
+  PAYRUN: [
+    step(1, 'PAYROLL_MANAGER', { name: 'Payroll approver', slaHours: 48, onTimeoutAction: 'ESCALATE' }),
+  ],
+  OFFER: [
+    step(1, 'AUTO_APPROVE', { name: 'Auto (no approval configured)' }),
+  ],
 });
 
 // Generic fallback for any module without a bespoke built-in: manager approves,

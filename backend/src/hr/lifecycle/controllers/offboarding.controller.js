@@ -494,6 +494,16 @@ async function getSeparation(req, res, next) {
 // =====================================================================
 async function updateClearance(req, res, next) {
   try {
+    // Wave 2B — a canApprovePayroll holder (finance lane's persona) may lack
+    // canViewEmployees, leaving scope NONE; widen to ALL for THIS endpoint (the
+    // per-lane permission checks below still gate what they can clear).
+    {
+      const { effectivePermissions } = require('../../../core/lib/rbac');
+      const perms = effectivePermissions(req.user) || {};
+      if (req.scope && req.scope.kind !== 'ALL' && perms.canApprovePayroll) {
+        req.scope = { kind: 'ALL' };
+      }
+    }
     const sep = await loadScopedCase(req, res);
     if (!sep) return undefined;
     const { lane, status: laneStatus, note } = req.body || {};
@@ -724,6 +734,41 @@ async function computeFnfEndpoint(req, res, next) {
       meta: { code: sep.code, netSettlement: fnf.snapshot.netSettlementMinor, recoverable: fnf.recoverableBalance },
     });
 
+    // Wave 2B — (re)open the SEPARATION approval for this FnF. A recompute
+    // cancels any prior open request (its totals are stale) and opens a fresh
+    // one, so the approver always decides on the CURRENT snapshot.
+    try {
+      const engine = require('../../approvals/engine');
+      require('../../approvals/consumers.separation');
+      const prior = await prisma.approvalRequest.findFirst({
+        where: { businessId, module: 'SEPARATION', entityId: sep.id, status: { in: ['PENDING', 'ESCALATED'] } },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (prior) {
+        await engine.cancel({ approvalRequestId: prior.id, actorUserId: req.user.id || 'SYSTEM', comment: 'Superseded by FnF recompute' });
+      }
+      const opened = await engine.openRequest({
+        businessId,
+        module: 'SEPARATION',
+        entityType: 'SeparationCase',
+        entityId: sep.id,
+        requesterEmployeeId: sep.employeeId,
+        payload: {
+          code: sep.code,
+          separationType: sep.type,
+          netSettlementMinor: fnf.snapshot.netSettlementMinor,
+          amount: Math.round((fnf.snapshot.netSettlementMinor || 0) / 100),
+        },
+        ctx: { entityId: sep.id, amount: Math.round((fnf.snapshot.netSettlementMinor || 0) / 100) },
+      });
+      await prisma.separationCase.update({
+        where: { id: sep.id },
+        data: { approvalRequestId: opened.approvalRequest.id },
+      });
+    } catch (e) {
+      console.error('[separation] failed to open FnF approval request:', e.message);
+    }
+
     res.json({
       separation: updated,
       fnf: { lines: fnf.lines, snapshot: fnf.snapshot, payRunInput: fnf.payRunInput, recoverableBalance: fnf.recoverableBalance },
@@ -735,39 +780,29 @@ async function computeFnfEndpoint(req, res, next) {
 // POST /separations/:id/approve-fnf — SoD-gated approval (canApprovePayroll +
 //   approver ≠ initiator). On approve: mint PayRun(type=FNF), link, status SETTLED-ready.
 // =====================================================================
-async function approveFnf(req, res, next) {
-  try {
-    const sep = await loadScopedCase(req, res);
-    if (!sep) return undefined;
-    if (sep.status !== 'FNF_COMPUTED') {
-      return res.status(409).json({ message: `FnF must be computed before approval (status: ${sep.status})`, reason: 'precondition' });
-    }
-    // ── SoD (S7): the approver must NOT be the initiator (separation of duties).
-    //    The initiator is persisted on the case (initiatedByUserId) in the SAME tx
-    //    as initiate / ESS-resign — NOT read from an audit row that the ESS path
-    //    never wrote. We FAIL CLOSED: a null/unknown initiator is a 403 (an
-    //    un-attributable case cannot be self-approved), and so is initiator ==
-    //    approver. (canApprovePayroll + APPROVAL_ACTIONS self-strip still apply.)
-    const initiatorUserId = sep.initiatedByUserId || null;
-    if (!initiatorUserId) {
-      return res.status(403).json({ message: 'Separation of duties: the initiator of this case is unknown; it cannot be approved (fail-closed)', reason: 'sod-initiator-unknown' });
-    }
-    if (initiatorUserId === req.user.id) {
-      return res.status(403).json({ message: 'Separation of duties: the initiator of a separation cannot approve its FnF', reason: 'sod-initiator-equals-approver' });
-    }
-
-    // M1+M2: mint the PayRun from the persisted full snapshot's payRunInput, so the
-    // run reconciles exactly and carries every component. A pre-snapshot row (none
-    // exist post-migration, but be safe) is rejected — never re-derive from the 6
-    // Decimal columns (that dropped pay-in-lieu / unpaid salary / statutory).
-    const snap = sep.fnfSnapshotJson || null;
-    const payRunInput = snap && snap.payRunInput ? snap.payRunInput : null;
-    if (!payRunInput || !Array.isArray(payRunInput.earnings) || !Array.isArray(payRunInput.deductions)) {
-      return res.status(409).json({ message: 'FnF snapshot is missing or incomplete; re-run compute-fnf before approval', reason: 'snapshot-missing' });
-    }
-
-    const businessId = req.user.businessId;
-    const out = await prisma.$transaction(async (tx) => {
+/**
+ * mintFnfApproval(tx, { businessId, sep, actorUserId }) — Wave 2B shared core:
+ * mint the FnF PayRun from the persisted snapshot + flip FNF_APPROVED. Used by
+ * BOTH the direct approve-fnf route and the SEPARATION engine consumer, so the
+ * mint is byte-identical on either path. IDEMPOTENT: a case already approved /
+ * already carrying fnfPayRunId returns without minting (the double-PayRun risk
+ * from the Phase-2 audit).
+ */
+async function mintFnfApproval(tx, { businessId, sep, actorUserId }) {
+  if (sep.status !== 'FNF_COMPUTED' || sep.fnfPayRunId) {
+    const current = await tx.separationCase.findFirst({ where: { id: sep.id, businessId } });
+    return { payRun: null, sep: current, grossMinor: 0, totalDeductionsMinor: 0, netMinor: 0, skipped: true };
+  }
+  // The snapshot's payRunInput is the ONLY mint source (M1+M2 — never re-derive
+  // from the Decimal columns). Was computed by the caller pre-extraction; the
+  // helper derives it itself so both entry paths are self-contained.
+  const snap = sep.fnfSnapshotJson || null;
+  const payRunInput = snap && snap.payRunInput ? snap.payRunInput : null;
+  if (!payRunInput || !Array.isArray(payRunInput.earnings) || !Array.isArray(payRunInput.deductions)) {
+    const err = new Error('FnF snapshot is missing or incomplete; re-run compute-fnf before approval');
+    err.status = 409; err.reason = 'snapshot-missing';
+    throw err;
+  }
       // Mint the FnF PayRun (type=FNF). Resolve the entity's active pay calendar
       // (required FK). Code via NumberSequence (FNF-…) so it never collides with a
       // regular run code. periodStart/End = the final period to LWD.
@@ -806,7 +841,7 @@ async function approveFnf(req, res, next) {
           totalDeductions: minorToDecimal(totalDeductionsMinor),
           totalNet: minorToDecimal(netMinor),
           approvedAt: new Date(),
-          approvedBy: req.user.id,
+          approvedBy: actorUserId,
           notes: `Full-and-final settlement for ${sep.code} — ${payRunInput.earnings.length} earning / ${payRunInput.deductions.length} deduction line(s)`,
         },
       });
@@ -836,7 +871,67 @@ async function approveFnf(req, res, next) {
         data: { status: 'FNF_APPROVED', fnfPayRunId: payRun.id, version: { increment: 1 } },
       });
       return { payRun, sep: updated, grossMinor, totalDeductionsMinor, netMinor };
-    });
+}
+
+async function approveFnf(req, res, next) {
+  try {
+    const sep = await loadScopedCase(req, res);
+    if (!sep) return undefined;
+    if (sep.status !== 'FNF_COMPUTED') {
+      return res.status(409).json({ message: `FnF must be computed before approval (status: ${sep.status})`, reason: 'precondition' });
+    }
+    // ── SoD (S7): the approver must NOT be the initiator (separation of duties).
+    //    The initiator is persisted on the case (initiatedByUserId) in the SAME tx
+    //    as initiate / ESS-resign — NOT read from an audit row that the ESS path
+    //    never wrote. We FAIL CLOSED: a null/unknown initiator is a 403 (an
+    //    un-attributable case cannot be self-approved), and so is initiator ==
+    //    approver. (canApprovePayroll + APPROVAL_ACTIONS self-strip still apply.)
+    const initiatorUserId = sep.initiatedByUserId || null;
+    if (!initiatorUserId) {
+      return res.status(403).json({ message: 'Separation of duties: the initiator of this case is unknown; it cannot be approved (fail-closed)', reason: 'sod-initiator-unknown' });
+    }
+    if (initiatorUserId === req.user.id) {
+      return res.status(403).json({ message: 'Separation of duties: the initiator of a separation cannot approve its FnF', reason: 'sod-initiator-equals-approver' });
+    }
+
+    // M1+M2: mint the PayRun from the persisted full snapshot's payRunInput, so the
+    // run reconciles exactly and carries every component. A pre-snapshot row (none
+    // exist post-migration, but be safe) is rejected — never re-derive from the 6
+    // Decimal columns (that dropped pay-in-lieu / unpaid salary / statutory).
+    const snap = sep.fnfSnapshotJson || null;
+    const payRunInput = snap && snap.payRunInput ? snap.payRunInput : null;
+    if (!payRunInput || !Array.isArray(payRunInput.earnings) || !Array.isArray(payRunInput.deductions)) {
+      return res.status(409).json({ message: 'FnF snapshot is missing or incomplete; re-run compute-fnf before approval', reason: 'snapshot-missing' });
+    }
+
+    const businessId = req.user.businessId;
+    // Program Phase 2 Wave B — an open SEPARATION engine request owns the
+    // decision (the consumer performs the identical mint). SoD above already
+    // enforced by this route; inbox decisions add engine SoD + membership.
+    {
+      const engine = require('../../approvals/engine');
+      require('../../approvals/consumers.separation');
+      const open = await prisma.approvalRequest.findFirst({
+        where: { businessId, module: 'SEPARATION', entityId: sep.id, status: { in: ['PENDING', 'ESCALATED'] } },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (open) {
+        await engine.recordDecision({
+          approvalRequestId: open.id,
+          actorUserId: req.user.id || 'SYSTEM',
+          decision: 'APPROVED',
+          systemActor: true,
+        });
+        const freshSep = await prisma.separationCase.findFirst({ where: { id: sep.id, businessId } });
+        await writeAudit({
+          businessId, actorId: req.user.id, action: 'separation.approve-fnf',
+          entityType: 'SeparationCase', entityId: sep.id,
+          meta: { code: sep.code, payRunId: freshSep.fnfPayRunId, initiatorUserId, via: 'engine' },
+        });
+        return res.json({ separation: freshSep, fnfPayRunId: freshSep.fnfPayRunId });
+      }
+    }
+    const out = await prisma.$transaction(async (tx) => mintFnfApproval(tx, { businessId, sep, actorUserId: req.user.id }));
 
     await writeAudit({
       businessId, actorId: req.user.id, action: 'separation.approve-fnf',
@@ -1174,6 +1269,8 @@ async function cancelSeparation(req, res, next) {
 }
 
 module.exports = {
+  // Wave 2B — shared FnF mint core (used by approvals/consumers.separation.js).
+  _mintFnfApproval: mintFnfApproval,
   initiateSeparation,
   listSeparations,
   getSeparation,

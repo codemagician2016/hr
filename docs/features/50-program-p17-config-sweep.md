@@ -69,3 +69,14 @@ ESS, allowance setting + bounds, RH lifecycle: create→list→elect→duplicate
 409→quota 422→withdraw, entity bank/notice save+clear, token preview
 expansion, compVisibility create/PUT/delete roundtrip, full cleanup).
 Regressions local: derive goldens 27+10, leave calendar 18, latePenalty 13.
+
+## Post-ship regression note (fixed same day)
+The token-expansion change introduced a null-ctx crash: `expandTokens(prefix,
+ctx = {})` — a parameter default does NOT apply to an explicit `null`, and
+`allocateCode` passes `tokenCtx = null` for every token-less caller. Every
+allocateCode-based mint (SEP/ONB/LTR/EXP/HD codes) 500'd between the P1.7 ship
+and the fix (caught by the Phase-2B separation E2E, staging only). Fixed with
+`const c = ctx || {}` + a dedicated regression suite
+(`lifecycle/__tests__/codes.unit.test.js`, 7 checks incl. the null path).
+Lesson: the P1.7 E2E exercised the settings PREVIEW (3-arg format) but never a
+real allocation — E2Es must hit the actual mint path of a changed allocator.

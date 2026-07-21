@@ -56,11 +56,15 @@ const SCOPE_DEFAULTS = Object.freeze({
  * output to before (full back-compat). Unresolvable tokens collapse to '' so a
  * code NEVER fails to mint (an employee create must not die on a missing dept).
  */
-function expandTokens(prefix, ctx = {}) {
-  const year = ctx.year != null ? String(ctx.year) : String(new Date().getUTCFullYear());
+function expandTokens(prefix, ctx) {
+  // NOTE: callers pass an EXPLICIT null (allocateCode's tokenCtx default) — a
+  // `ctx = {}` parameter default would NOT apply to null, and `null.year`
+  // brought down every token-less allocateCode call (SEP/ONB/LTR/EXP/HD…).
+  const c = ctx || {};
+  const year = c.year != null ? String(c.year) : String(new Date().getUTCFullYear());
   return String(prefix || '')
-    .split('{ENTITY}').join(ctx.entityCode || '')
-    .split('{DEPT}').join(ctx.deptCode || '')
+    .split('{ENTITY}').join(c.entityCode || '')
+    .split('{DEPT}').join(c.deptCode || '')
     .split('{YYYY}').join(year)
     .split('{YY}').join(year.slice(-2));
 }

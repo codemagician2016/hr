@@ -49,8 +49,25 @@ router.post('/',
 
 // ── Clearance lanes (scoped; per-lane ownership enforced in the controller) ──
 // A manager may clear ONLY the KT + asset-return lanes for their reports.
+// Wave 2B fix — the finance lane's designated persona (canApprovePayroll, e.g.
+// a Finance checker) may hold NO employee-view permission, which locked the
+// lane for everyone in a maker/checker tenant. The route admits either key; the
+// controller widens scope for payroll-approvers, and the per-lane permission
+// checks inside updateClearance are unchanged.
+const { effectivePermissions } = require('../../../core/lib/rbac');
+function requireEitherPermission(keyA, keyB) {
+  return function (req, res, next) {
+    if (!req.user) return res.status(401).json({ message: 'Not authenticated' });
+    const perms = effectivePermissions(req.user) || {};
+    if (perms[keyA] || perms[keyB]) return next();
+    return res.status(403).json({
+      message: `Forbidden: missing permission "${keyA}" or "${keyB}"`,
+      missingPermission: keyA,
+    });
+  };
+}
 router.patch('/:id/clearance',
-  requirePermission('canViewEmployees'),
+  requireEitherPermission('canViewEmployees', 'canApprovePayroll'),
   withEmployeeScope('canViewEmployees'),
   c.updateClearance);
 

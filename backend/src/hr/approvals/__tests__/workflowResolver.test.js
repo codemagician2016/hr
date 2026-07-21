@@ -33,9 +33,18 @@ test('TRAVEL has a built-in (manager + HR-over-threshold)', () => {
 });
 
 test('unknown module falls back to the generic single-manager default', () => {
-  const steps = builtInSteps('SEPARATION');
+  // Wave 2B gave SEPARATION a bespoke default — use a truly unmapped key here.
+  const steps = builtInSteps('NOT_A_REAL_MODULE');
   assert.equal(steps.length, 1);
   assert.equal(steps[0].approverType, 'REPORTING_MANAGER');
+});
+
+test('Wave 2B bespoke defaults: SEPARATION/PAYRUN payroll-manager, OFFER auto', () => {
+  assert.equal(builtInSteps('SEPARATION')[0].approverType, 'PAYROLL_MANAGER');
+  assert.equal(builtInSteps('PAYRUN')[0].approverType, 'PAYROLL_MANAGER');
+  assert.equal(builtInSteps('OFFER')[0].approverType, 'AUTO_APPROVE');
+  assert.equal(builtInSteps('ASSET')[0].approverType, 'AUTO_APPROVE');
+  assert.equal(builtInSteps('LOAN')[0].approverType, 'HR');
 });
 
 test('scopeMatches: null scope = default (matches anything)', () => {
