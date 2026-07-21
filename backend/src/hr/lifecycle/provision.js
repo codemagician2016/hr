@@ -307,15 +307,23 @@ async function provisionEmployee({ journeyId, actorId } = {}, prismaOrTx) {
     if (entity.countryCode) await assertCountry(businessId, entity.countryCode);
     const currencyCode = await tenantCurrency(businessId);
 
-    // Dates + status. PROBATION when a probation window applies (default 90d for
-    // a permanent hire unless the offer/journey says otherwise), else ACTIVE.
+    // Dates + status. PROBATION when a probation window applies, else ACTIVE.
+    // P1.4 — the window resolves self > offer > tenant ProbationPolicy
+    // (most-specific scope for this entity/employment type) > 90-day fallback.
     const joinDate = toDateOnly(journey.joinDate || offer.joiningDate) || toDateOnly(new Date());
+    const employmentType = (job && job.employmentType) || personal.employmentType || 'FULL_TIME';
+    let policyProbationDays = null;
+    try {
+      const { resolveProbationPolicy } = require('./controllers/probation.controller');
+      const policy = await resolveProbationPolicy(tx, { businessId, entityId, employmentType });
+      if (policy) policyProbationDays = policy.probationDays;
+    } catch (_e) { /* policy resolution is best-effort — fall through to 90 */ }
     const probationDays = Number(
       (self.probationDays != null ? self.probationDays : null)
       ?? (offer.probationDays != null ? offer.probationDays : null)
+      ?? policyProbationDays
       ?? 90,
     );
-    const employmentType = (job && job.employmentType) || personal.employmentType || 'FULL_TIME';
     // Interns/contractors are not on probation; permanent staff are.
     const onProbation = probationDays > 0 && ['FULL_TIME', 'PART_TIME', 'FIXED_TERM'].includes(employmentType);
     const status = onProbation ? 'PROBATION' : 'ACTIVE';

@@ -1237,6 +1237,29 @@ function initScheduler() {
     }
   });
 
+  // HR Probation (Program P1.4) — nightly sweep at 02:15 (after attendance
+  // 01:30 / comp-off earn 01:45). Reminds managers/HR remindDaysBefore the
+  // probation end date and, where the tenant's ProbationPolicy says
+  // autoConfirm, flips PROBATION→ACTIVE via provision.confirmProbation
+  // (idempotent) + issues the configured CONFIRMATION letter. Per-employee
+  // failures are counted, never thrown. In-process overlap guard.
+  let probationSweepRunning = false;
+  cron.schedule('15 2 * * *', async () => {
+    if (probationSweepRunning) { console.log('[Scheduler] probation sweep still running — skipping tick'); return; }
+    probationSweepRunning = true;
+    try {
+      const { runProbationSweep } = require('../../hr/lifecycle/probationSweep');
+      const r = await runProbationSweep({ asOf: new Date() });
+      if (r.reminded > 0 || r.confirmed > 0 || r.errors > 0) {
+        console.log(`[Scheduler] probation sweep: ${JSON.stringify(r)}`);
+      }
+    } catch (err) {
+      console.error('[Scheduler] probation sweep failed:', err.message);
+    } finally {
+      probationSweepRunning = false;
+    }
+  });
+
   // HR Comp-off (Feature 30) — nightly EXPIRY/LAPSE runner. Runs at 03:00. Lapses
   // ACTIVE comp-off lots whose per-credit expiresOn has passed (append-only LAPSE +
   // aggregate-balance drop, version-locked, idempotent), expires PENDING-past-expiry

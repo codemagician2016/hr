@@ -52,6 +52,9 @@ const HR_EVENT_TEMPLATES = Object.freeze({
   // Feature 22 — Statutory Bonus fan-out (operator on compute, employee on publish).
   'bonus.computed':  'HR_BONUS_COMPUTED',   // → operator when a cycle's awards are computed
   'bonus.published': 'HR_BONUS_PUBLISHED',  // → employee when their bonus slip is published
+  // Program P1.4 — probation sweep fan-out.
+  'probation.ending':    'HR_PROBATION_ENDING',    // → manager/HR N days before end date
+  'probation.confirmed': 'HR_PROBATION_CONFIRMED', // → employee on (auto-)confirmation
   // Feature 4 — Employee portal invitation (welcome + set-password link).
   'portal.invite':   'HR_PORTAL_INVITE',    // → new hire to claim their ESS login
   // Feature 20 — Investment-proof workflow fan-out (window lifecycle + verdicts + reminders).
@@ -280,6 +283,25 @@ const HR_TEMPLATES = Object.freeze([
     vertical: 'HR',
     body: 'Congratulations {NAME} on {YEARS} year(s) with {BIZ}! Thank you for everything you do.',
     variables: ['NAME', 'YEARS', 'BIZ'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  // ─── Program P1.4 — probation sweep ───
+  {
+    key: 'HR_PROBATION_ENDING',
+    displayName: 'Probation ending soon (manager/HR)',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Probation review due: {employeeName} completes probation on {endDate} ({days} days from now). Please confirm or extend from the HR console.',
+    variables: ['employeeName', 'endDate', 'days'],
+    channels: { sms: false, whatsapp: false, email: true },
+  },
+  {
+    key: 'HR_PROBATION_CONFIRMED',
+    displayName: 'Probation confirmed (employee)',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Congratulations {employeeName}! Your probation has been successfully completed and your employment is confirmed effective {effectiveDate}.',
+    variables: ['employeeName', 'effectiveDate'],
     channels: { sms: false, whatsapp: true, email: true },
   },
   // ─── Feature 4 — Employee portal invitation ───

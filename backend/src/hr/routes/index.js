@@ -99,6 +99,8 @@ router.use('/letters/templates', require('../letters/routes/templates.routes'));
 // hires), HR pipeline actions require canManageOnboarding. Separation/e-sign land
 // in later slices (4d/4f).
 router.use('/onboarding', require('../lifecycle/routes/onboarding.routes'));
+// Program P1.4 — lifecycle template authoring + probation policies.
+router.use('/lifecycle', require('../lifecycle/routes/templates.routes'));
 router.use('/separations', require('../lifecycle/routes/offboarding.routes'));
 router.use('/esign', require('../lifecycle/routes/esign.routes'));
 

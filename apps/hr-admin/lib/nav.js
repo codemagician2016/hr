@@ -151,7 +151,7 @@ export const NAV_ITEMS = [
   // Settings groups Branding, Roles, Domain and Billing. Show it to anyone who
   // can manage ANY of those — a Finance role (canEditBilling, no canEditBranding)
   // must still reach the Billing tab. Per-tab/per-action gating happens inside.
-  { key: 'settings', label: 'Settings', href: '/settings', anyPermission: ['canEditBranding', 'canEditBilling', 'canEditDomain', 'canManageCompanyProfile', 'canManageExpensePolicy', 'canManageImports', 'canManageAttendance', 'canManageOrg'], group: true, icon: 'settings' },
+  { key: 'settings', label: 'Settings', href: '/settings', anyPermission: ['canEditBranding', 'canEditBilling', 'canEditDomain', 'canManageCompanyProfile', 'canManageExpensePolicy', 'canManageImports', 'canManageAttendance', 'canManageOrg', 'canManageOnboarding'], group: true, icon: 'settings' },
   // White-label Branding (self-service) — logo/favicon/colours/display-name so a
   // tenant's OWN brand shows on the console, the ESS portal, and both login pages
   // (never the DriftHR vendor mark). Mirrors the backend OR-gate: visible to
@@ -195,6 +195,11 @@ export const NAV_ITEMS = [
   // late-coming penalties (grace count + per-N deduction). Entity/location scoped,
   // most-specific rule wins. Gated on canManageAttendance (writes server-gated).
   { key: 'settings-attendance-policies', label: 'Work policies', href: '/settings/attendance/work-policies', permission: 'canManageAttendance', parent: 'settings', icon: 'clock' },
+  // Program P1.4 — Lifecycle templates (onboarding/exit checklist authoring) +
+  // probation policy. Every /api/hr/lifecycle template + probation route is
+  // gated on canManageOnboarding (Owner + HR-Admin); the page shows a read-only
+  // banner for operators who lack it. The server is the real boundary.
+  { key: 'settings-lifecycle', label: 'Lifecycle & probation', href: '/settings/lifecycle', permission: 'canManageOnboarding', parent: 'settings', icon: 'onboarding' },
 ];
 
 // ── Sidebar grouping ─────────────────────────────────────────────────────────
