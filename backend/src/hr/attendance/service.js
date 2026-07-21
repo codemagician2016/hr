@@ -565,7 +565,64 @@ async function recompute(businessId, employeeId, fromDate, toDate, tx) {
     written += 1;
   }
 
-  return { employeeId, days: days.length, written, skippedLocked, skippedOutOfEmployment };
+  // ── Program P1.5 — late-coming penalty pass (month context) ────────────────
+  // After the per-day derive, reconcile each touched MONTH against the active
+  // LateComingRule (entity/location precedence, mirrors resolveOtRule). The
+  // penalty adjusts lopFraction ON the offending late days; the previously-
+  // applied amount lives at exceptionsJson.latePenalty so re-runs (and punch
+  // edits that remove a LATE_IN) reconcile instead of stacking. Locked rows are
+  // never touched. Failure is non-fatal to the recompute.
+  let latePenaltyUpdates = 0;
+  try {
+    const lateRules = await db.lateComingRule.findMany({ where: { businessId, isActive: true } });
+    if (lateRules.length) {
+      const entityId = employment ? employment.entityId : null;
+      const locationId = employment ? employment.locationId : null;
+      const rule = lateRules.find((r) => r.locationId && r.locationId === locationId)
+        || lateRules.find((r) => r.entityId && r.entityId === entityId && !r.locationId)
+        || lateRules.find((r) => !r.entityId && !r.locationId)
+        || null;
+      if (rule) {
+        const { computeLatePenalties } = require('./latePenalty');
+        // Distinct months touched by the recompute range.
+        const months = new Set();
+        for (const day of eachDay(from, to)) {
+          months.add(`${day.getUTCFullYear()}-${String(day.getUTCMonth() + 1).padStart(2, '0')}`);
+        }
+        for (const m of months) {
+          const [y, mo] = m.split('-').map(Number);
+          const mStart = new Date(Date.UTC(y, mo - 1, 1));
+          const mEnd = new Date(Date.UTC(y, mo, 0));
+          const rows = await db.attendance.findMany({
+            where: { businessId, employeeId, date: { gte: mStart, lte: mEnd } },
+            select: { id: true, date: true, lopFraction: true, exceptionsJson: true, isLocked: true },
+          });
+          const penalties = computeLatePenalties(rows, rule);
+          for (const row of rows) {
+            if (row.isLocked) continue;
+            const key = row.date.toISOString().slice(0, 10);
+            const computed = penalties.has(key) ? penalties.get(key) : 0;
+            const ex = row.exceptionsJson && typeof row.exceptionsJson === 'object' ? row.exceptionsJson : {};
+            const stored = Number(ex.latePenalty || 0);
+            if (Math.abs(stored - computed) < 0.0001) continue; // already reconciled
+            const base = Math.max(0, Number(row.lopFraction) - stored);
+            const nextLop = Math.min(1, base + computed);
+            const nextEx = { ...ex };
+            if (computed > 0) nextEx.latePenalty = computed; else delete nextEx.latePenalty;
+            const flip = await db.attendance.updateMany({
+              where: { id: row.id, isLocked: false },
+              data: { lopFraction: nextLop, exceptionsJson: nextEx },
+            });
+            latePenaltyUpdates += flip.count;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[attendance latePenalty]', employeeId, e.message);
+  }
+
+  return { employeeId, days: days.length, written, skippedLocked, skippedOutOfEmployment, latePenaltyUpdates };
 }
 
 module.exports = {

@@ -286,6 +286,55 @@ async function getPayslip(req, res) {
  * canViewPayrollReports route gate. The bytes' SHA-256 is recorded best-effort
  * as tamper evidence (mirrors the ESS path) and never blocks the download.
  */
+// ── Program P1.2 — payslip brand + PDF-password context ──────────────────────
+// TenantBrand (colors + logo URL) finally reaches the payslip renderer; the
+// logo is fetched once and cached in-process (3s timeout, ≤1MB, best-effort —
+// a fetch failure renders the text header exactly as before). PDF password is
+// a tenant setting (featureFlags.payroll.payslipPdfPassword = 'NONE'|'DOB'):
+// DOB = the common Indian convention DDMMYYYY from the employee's birth date.
+const _logoCache = new Map(); // url -> Buffer|null
+async function fetchLogoBytes(url) {
+  if (!url || !/^https:\/\//i.test(url)) return null;
+  if (_logoCache.has(url)) return _logoCache.get(url);
+  try {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 3000);
+    const resp = await fetch(url, { signal: ctl.signal });
+    clearTimeout(t);
+    if (!resp.ok) throw new Error(String(resp.status));
+    const buf = Buffer.from(await resp.arrayBuffer());
+    const out = buf.length > 0 && buf.length <= 1024 * 1024 ? buf : null;
+    _logoCache.set(url, out);
+    return out;
+  } catch (_e) {
+    _logoCache.set(url, null);
+    return null;
+  }
+}
+async function payslipRenderExtras(businessId, employee) {
+  const extras = { brand: null, pdfPassword: null };
+  try {
+    const brand = await prisma.tenantBrand.findFirst({
+      where: { businessId, entityId: null, isActive: true },
+      select: { primaryColor: true, accentColor: true, logoUrl: true },
+    });
+    if (brand) {
+      extras.brand = {
+        primaryColor: brand.primaryColor || null,
+        accentColor: brand.accentColor || null,
+        logoBytes: await fetchLogoBytes(brand.logoUrl),
+      };
+    }
+    const biz = await prisma.business.findUnique({ where: { id: businessId }, select: { featureFlags: true } });
+    const pf = biz && biz.featureFlags && typeof biz.featureFlags === 'object' ? biz.featureFlags.payroll : null;
+    if (pf && pf.payslipPdfPassword === 'DOB' && employee && employee.dateOfBirth) {
+      const d = new Date(employee.dateOfBirth);
+      extras.pdfPassword = `${String(d.getUTCDate()).padStart(2, '0')}${String(d.getUTCMonth() + 1).padStart(2, '0')}${d.getUTCFullYear()}`;
+    }
+  } catch (_e) { /* best-effort — plain render on any failure */ }
+  return extras;
+}
+
 async function getPayslipPdf(req, res) {
   try {
     const { businessId } = req.user;
@@ -293,7 +342,8 @@ async function getPayslipPdf(req, res) {
       businessId, payslipId: req.params.id,
     });
 
-    const pdf = await renderPayslipPdf({ payslip, employee, business });
+    const extras = await payslipRenderExtras(businessId, employee);
+    const pdf = await renderPayslipPdf({ payslip, employee, business, ...extras });
 
     try {
       const pdfHash = crypto.createHash('sha256').update(pdf).digest('hex');
@@ -395,7 +445,8 @@ async function getMyPayslipPdf(req, res) {
       businessId, customer: req.customer, payslipId: req.params.id,
     });
 
-    const pdf = await renderPayslipPdf({ payslip, employee, business });
+    const extras = await payslipRenderExtras(businessId, employee);
+    const pdf = await renderPayslipPdf({ payslip, employee, business, ...extras });
 
     // Tamper-evidence: persist the SHA-256 of the rendered bytes. Best-effort —
     // a write failure must NOT fail the employee's download.
@@ -430,12 +481,72 @@ async function getLwfFramework(req, res) {
   } catch (err) { handleError(res, err); }
 }
 
+// ── Program P1.2 — per-employee payslip HOLD / RELEASE + tenant settings ─────
+async function holdPayslip(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const line = await prisma.payRunLine.findFirst({ where: { id: req.params.lineId, businessId, payRunId: req.params.id } });
+    if (!line) return res.status(404).json({ message: 'Pay run line not found' });
+    if (line.payslipHeldAt) return res.status(409).json({ message: 'Already held' });
+    const row = await prisma.payRunLine.update({
+      where: { id: line.id },
+      data: { payslipHeldAt: new Date(), payslipHeldBy: req.user.id || null, payslipHoldNote: (req.body && req.body.note) || null },
+    });
+    const { writeAudit } = require('../../core/lib/audit');
+    await writeAudit({ businessId, actorId: req.user.id, action: 'payroll.payslip.hold', entityType: 'PayRunLine', entityId: line.id, meta: { employeeId: line.employeeId, note: row.payslipHoldNote } }).catch(() => {});
+    res.json({ held: true, payslipHeldAt: row.payslipHeldAt });
+  } catch (e) { next(e); }
+}
+
+async function releasePayslip(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const line = await prisma.payRunLine.findFirst({ where: { id: req.params.lineId, businessId, payRunId: req.params.id } });
+    if (!line) return res.status(404).json({ message: 'Pay run line not found' });
+    if (!line.payslipHeldAt) return res.status(409).json({ message: 'Not held' });
+    await prisma.payRunLine.update({
+      where: { id: line.id },
+      data: { payslipHeldAt: null, payslipHeldBy: null, payslipHoldNote: null },
+    });
+    const { writeAudit } = require('../../core/lib/audit');
+    await writeAudit({ businessId, actorId: req.user.id, action: 'payroll.payslip.release', entityType: 'PayRunLine', entityId: line.id, meta: { employeeId: line.employeeId } }).catch(() => {});
+    res.json({ held: false });
+  } catch (e) { next(e); }
+}
+
+async function getPayslipSettings(req, res, next) {
+  try {
+    const biz = await prisma.business.findUnique({ where: { id: req.user.businessId }, select: { featureFlags: true } });
+    const pf = biz && biz.featureFlags && typeof biz.featureFlags === 'object' ? biz.featureFlags.payroll : null;
+    res.json({ payslipPdfPassword: (pf && pf.payslipPdfPassword) || 'NONE' });
+  } catch (e) { next(e); }
+}
+
+async function updatePayslipSettings(req, res, next) {
+  try {
+    const businessId = req.user.businessId;
+    const mode = req.body && req.body.payslipPdfPassword;
+    if (!['NONE', 'DOB'].includes(mode)) return res.status(400).json({ message: "payslipPdfPassword must be 'NONE' or 'DOB'" });
+    const biz = await prisma.business.findUnique({ where: { id: businessId }, select: { featureFlags: true } });
+    const flags = biz && biz.featureFlags && typeof biz.featureFlags === 'object' ? biz.featureFlags : {};
+    const pf = flags.payroll && typeof flags.payroll === 'object' ? flags.payroll : {};
+    await prisma.business.update({ where: { id: businessId }, data: { featureFlags: { ...flags, payroll: { ...pf, payslipPdfPassword: mode } } } });
+    const { writeAudit } = require('../../core/lib/audit');
+    await writeAudit({ businessId, actorId: req.user.id, action: 'payroll.payslip.settings', entityType: 'Business', entityId: businessId, meta: { payslipPdfPassword: mode } }).catch(() => {});
+    res.json({ payslipPdfPassword: mode });
+  } catch (e) { next(e); }
+}
+
 module.exports = {
   createRun,
   computeRun,
   freezeRun,
   approveRun,
   listRuns,
+  holdPayslip,
+  releasePayslip,
+  getPayslipSettings,
+  updatePayslipSettings,
   getRun,
   getRunPayslips,
   getPayslip,

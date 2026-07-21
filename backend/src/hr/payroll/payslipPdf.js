@@ -113,8 +113,18 @@ const COLOR = {
  * @param {Object} [args.business] tenant identity ({ name/legalName, logoUrl?, ... })
  * @returns {Promise<Buffer>}
  */
-function renderPayslipPdf({ payslip, employee, business } = {}) {
+function renderPayslipPdf({ payslip, employee, business, brand, pdfPassword } = {}) {
   return new Promise((resolve, reject) => {
+    // Program P1.2 — tenant branding finally reaches the payslip: valid hex
+    // colors from TenantBrand override the module defaults for THIS render
+    // (drawing is fully synchronous, so the save/restore cannot interleave
+    // with another render), and the logo arrives as pre-fetched bytes.
+    const HEX = /^#[0-9a-fA-F]{6}$/;
+    const prevBrandColor = COLOR.brand;
+    const prevAccentColor = COLOR.accent;
+    if (brand && HEX.test(brand.primaryColor || '')) COLOR.brand = brand.primaryColor;
+    if (brand && HEX.test(brand.accentColor || '')) COLOR.accent = brand.accentColor;
+    const restoreColors = () => { COLOR.brand = prevBrandColor; COLOR.accent = prevAccentColor; };
     try {
       const slip = payslip || {};
       const snap = slip.snapshotJson || {};
@@ -123,6 +133,9 @@ function renderPayslipPdf({ payslip, employee, business } = {}) {
       const doc = new PDFDocument({
         size: PAGE.size,
         margin: PAGE.margin,
+        // Program P1.2 — optional tenant-configured PDF password (DOB mode);
+        // ownerPassword mirrors it so the doc is fully locked to the employee.
+        ...(pdfPassword ? { userPassword: pdfPassword, ownerPassword: pdfPassword } : {}),
         info: {
           Title: `Payslip ${slip.code || ''}`.trim(),
           Author: businessName(business),
@@ -141,7 +154,7 @@ function renderPayslipPdf({ payslip, employee, business } = {}) {
       const contentW = right - left;
 
       // ── HEADER ──────────────────────────────────────────────────────────
-      drawHeader(doc, { left, right, contentW, business, snap, slip, currencyCode });
+      drawHeader(doc, { left, right, contentW, business, snap, slip, currencyCode, logoBytes: brand && brand.logoBytes ? brand.logoBytes : null });
 
       // ── EMPLOYEE BLOCK ──────────────────────────────────────────────────
       drawEmployeeBlock(doc, { left, right, contentW, employee, payslip: slip });
@@ -199,7 +212,9 @@ function renderPayslipPdf({ payslip, employee, business } = {}) {
       drawFooter(doc, { left, right });
 
       doc.end();
+      restoreColors(); // drawing is synchronous — safe to restore here
     } catch (err) {
+      restoreColors();
       reject(err);
     }
   });
@@ -207,7 +222,7 @@ function renderPayslipPdf({ payslip, employee, business } = {}) {
 
 // ── drawing primitives ──────────────────────────────────────────────────────
 
-function drawHeader(doc, { left, right, contentW, business, snap, slip, currencyCode }) {
+function drawHeader(doc, { left, right, contentW, business, snap, slip, currencyCode, logoBytes }) {
   const top = doc.y;
   // Brand band.
   doc.save();
@@ -219,9 +234,12 @@ function drawHeader(doc, { left, right, contentW, business, snap, slip, currency
   const logoX = left + 14;
   let textX = logoX;
   const logoPath = business && (business.logoPath || business.logoFile);
-  if (logoPath) {
+  // Program P1.2 — the tenant's uploaded logo (pre-fetched bytes) wins; a local
+  // path remains the fallback; both fail soft to the name text.
+  const logoSource = logoBytes || logoPath;
+  if (logoSource) {
     try {
-      doc.image(logoPath, logoX, top + 12, { fit: [40, 40] });
+      doc.image(logoSource, logoX, top + 12, { fit: [40, 40] });
       textX = logoX + 52;
     } catch (_e) { /* fall back to name text */ }
   }

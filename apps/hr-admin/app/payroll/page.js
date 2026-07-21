@@ -25,7 +25,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Spinner, ErrorBanner, PrimaryButton, TextInput, DateField, Modal, ModalActions, formatAdminDate } from '@hr/ui';
+import { Spinner, ErrorBanner, PrimaryButton, TextArea, TextInput, DateField, Modal, ModalActions, formatAdminDate } from '@hr/ui';
 import { get, post, put, downloadFile } from '@/lib/api';
 import { DataTable, PageHeader, StatusBadge, ActionButton, employeeLabel, moneyish } from '@/lib/ui';
 import EmployeeSearchSelect from '@/components/EmployeeSearchSelect';
@@ -1151,6 +1151,61 @@ function DisbursementPanel({ run, runId, perms, onChanged }) {
   );
 }
 
+// ── Payslip HOLD / RELEASE (Program P1.2) ─────────────────────────────────────
+// Per-employee payslip hold within a run: POST runs/:id/lines/:lineId/hold
+// {note?} | .../release. The flags live on the PayRunLine (payslipHeldAt /
+// payslipHoldNote) — the run detail's `lines` carry them; the payslips list's
+// rows carry `payRunLineId` to join back to the line. A held payslip is
+// invisible to the employee (ESS + PDF) until released; the rest of the run
+// publishes normally.
+
+function HeldChip({ note }) {
+  return (
+    <span
+      title={note ? `Hold note: ${note}` : 'Payslip held — hidden from the employee until released'}
+      className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800 cursor-default"
+    >
+      Held{note ? ' ⓘ' : ''}
+    </span>
+  );
+}
+
+function HoldPayslipModal({ runId, line, onClose, onDone }) {
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  async function submit(e) {
+    e.preventDefault();
+    setSaving(true);
+    setError('');
+    try {
+      await post(`/api/hr/payroll/runs/${runId}/lines/${line.id}/hold`, note.trim() ? { note: note.trim() } : {});
+      onDone();
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Failed to hold the payslip.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal title={`Hold payslip — ${employeeLabel(line.employee || line)}`} onClose={onClose}>
+      <form onSubmit={submit} className="space-y-3">
+        {error && <ErrorBanner message={error} />}
+        <p className="text-xs text-gray-500">
+          A held payslip is invisible to the employee until released — the rest of the run pays and publishes normally.
+        </p>
+        <TextArea label="Note (optional — why is this payslip held?)" value={note} onChange={setNote} maxLength={500} rows={3} />
+        <ModalActions>
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+          <PrimaryButton type="submit" loading={saving}>Hold payslip</PrimaryButton>
+        </ModalActions>
+      </form>
+    </Modal>
+  );
+}
+
 // ── Run detail (guided run) ───────────────────────────────────────────────────
 function RunDetail({ runId, onBack, tab, setTab, me, perms }) {
   const [run, setRun] = useState(null);
@@ -1158,6 +1213,8 @@ function RunDetail({ runId, onBack, tab, setTab, me, perms }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState('');
+  const [holdFor, setHoldFor] = useState(null); // PayRunLine being held (note modal)
+  const [holdBusy, setHoldBusy] = useState(''); // lineId of an in-flight release
 
   const load = useCallback(() => {
     setLoading(true); setError('');
@@ -1181,6 +1238,19 @@ function RunDetail({ runId, onBack, tab, setTab, me, perms }) {
     finally { setBusy(''); }
   }
 
+  async function releaseLine(lineId) {
+    setHoldBusy(lineId);
+    setError('');
+    try {
+      await post(`/api/hr/payroll/runs/${runId}/lines/${lineId}/release`);
+      load();
+    } catch (e) {
+      setError(e.data?.message || e.message || 'Failed to release the payslip.');
+    } finally {
+      setHoldBusy('');
+    }
+  }
+
   const status = String(run?.status || '').toUpperCase();
   const lines = run?.lines || [];
   const totals = run?.totals || {};
@@ -1189,12 +1259,30 @@ function RunDetail({ runId, onBack, tab, setTab, me, perms }) {
   const warnings = anomalies.filter((a) => a.severity === 'WARNING');
   const slipRows = useMemo(() => (Array.isArray(payslips) ? payslips : payslips?.items || []), [payslips]);
   const immutable = IMMUTABLE.has(status);
+  // Join payslip rows back to their PayRunLine (hold flags live on the line).
+  const lineById = useMemo(() => new Map(lines.map((l) => [l.id, l])), [lines]);
+
+  // Hold/Release cell for a PayRunLine — shared by the Summary pay-lines table
+  // and the Disburse payslips table.
+  const holdCell = (line) => (
+    <span className="inline-flex items-center gap-1.5">
+      {line.payslipHeldAt && <HeldChip note={line.payslipHoldNote} />}
+      {line.payslipHeldAt
+        ? <ActionButton tone="positive" disabled={holdBusy === line.id} onClick={() => releaseLine(line.id)}>Release</ActionButton>
+        : <ActionButton tone="neutral" disabled={!!holdBusy} onClick={() => setHoldFor(line)}>Hold</ActionButton>}
+    </span>
+  );
 
   const lineColumns = [
     { key: 'employee', header: 'Employee', render: (r) => <span className="font-medium text-gray-900">{employeeLabel(r.employee || r)}</span> },
     { key: 'gross', header: 'Gross', render: (r) => moneyish(r.grossEarnings, r.currencyCode || run?.currencyCode) },
     { key: 'deductions', header: 'Deductions', render: (r) => moneyish(r.totalDeductions, r.currencyCode || run?.currencyCode) },
     { key: 'net', header: 'Net', render: (r) => moneyish(r.netPay, r.currencyCode || run?.currencyCode) },
+    {
+      key: 'payslipHold',
+      header: <span className="inline-flex items-center">Payslip<InfoTip text="Hold pauses ONE employee's payslip without blocking the run — a held payslip is invisible to the employee until released." /></span>,
+      render: (r) => holdCell(r),
+    },
     {
       key: 'flag', header: '',
       render: (r) => {
@@ -1336,11 +1424,31 @@ function RunDetail({ runId, onBack, tab, setTab, me, perms }) {
                 { key: 'employee', header: 'Employee', render: (r) => employeeLabel(r.employee || r) },
                 { key: 'net', header: 'Net pay', render: (r) => moneyish(r.netPay, r.currencyCode || run?.currencyCode) },
                 { key: 'status', header: 'Status', render: (r) => <StatusBadge status={r.status} /> },
+                {
+                  key: 'hold',
+                  header: <span className="inline-flex items-center">Hold<InfoTip text="A held payslip is invisible to the employee until released — the rest of the run publishes normally." /></span>,
+                  render: (r) => {
+                    const line = lineById.get(r.payRunLineId);
+                    return line ? holdCell(line) : '—';
+                  },
+                },
                 { key: 'view', header: '', render: (r) => <a href={`/api/hr/payroll/payslips/${r.id}/pdf`} target="_blank" rel="noreferrer" className="text-xs font-medium hover:underline" style={{ color: 'var(--theme-primary)' }}>View PDF</a> },
               ]}
               rows={slipRows} loading={false} emptyText="No payslips — compute the run first." />
+            <p className="text-xs text-gray-400 mt-2">
+              Hold pauses one employee&apos;s payslip — a held payslip is invisible to the employee until released.
+            </p>
           </div>
         </div>
+      )}
+
+      {holdFor && (
+        <HoldPayslipModal
+          runId={runId}
+          line={holdFor}
+          onClose={() => setHoldFor(null)}
+          onDone={() => { setHoldFor(null); load(); }}
+        />
       )}
     </div>
   );

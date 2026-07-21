@@ -45,6 +45,20 @@ router.post('/disbursement/:batchId/reconcile', payrollMutationLimiter, requireP
 // ── Pay runs ──
 // compute + approve are heavy, money-moving mutations — rate-limited per
 // (tenant, IP) by payrollMutationLimiter on top of the RBAC permission gate.
+// Program P1.1 — pay-calendar console (was seed-only; clients could not set
+// their own pay frequency / pay day / cutoff).
+const cal = require('./payCalendar.controller');
+router.get('/calendars', requirePermission('canRunPayroll'), cal.list);
+router.post('/calendars', requirePermission('canRunPayroll'), cal.create);
+router.patch('/calendars/:id', requirePermission('canRunPayroll'), cal.update);
+router.delete('/calendars/:id', requirePermission('canRunPayroll'), cal.deactivate);
+
+// Program P1.2 — per-employee payslip hold within a run + tenant payslip settings.
+router.post('/runs/:id/lines/:lineId/hold', requirePermission('canRunPayroll'), c.holdPayslip);
+router.post('/runs/:id/lines/:lineId/release', requirePermission('canRunPayroll'), c.releasePayslip);
+router.get('/payslip-settings', requirePermission('canRunPayroll'), c.getPayslipSettings);
+router.patch('/payslip-settings', requirePermission('canRunPayroll'), c.updatePayslipSettings);
+
 router.post('/runs', requirePermission('canRunPayroll'), c.createRun);
 router.post('/runs/:id/compute', payrollMutationLimiter, requirePermission('canRunPayroll'), c.computeRun);
 router.post('/runs/:id/freeze', payrollMutationLimiter, requirePermission('canRunPayroll'), c.freezeRun);

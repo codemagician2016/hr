@@ -8229,6 +8229,11 @@ model PayRunLine {
   payRun            PayRun           @relation(fields: [payRunId], references: [id], onDelete: Cascade)
   employeeId        String
   employee          Employee         @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  // Program P1.2 — per-employee payslip HOLD within a published run (dispute/
+  // legal hold): a held line's payslip is invisible to ESS/mobile until released.
+  payslipHeldAt     DateTime?
+  payslipHeldBy     String?
+  payslipHoldNote   String?
   compensationId    String // revision used
   // Period attendance inputs (snapshot)
   payableDays       Decimal          @db.Decimal(8, 4)
@@ -11394,6 +11399,27 @@ enum RegularizationKind {
 
 /// Overtime policy (entity/location scoped). Absent → derivation uses defaults
 /// and credits OT only when the ShiftPattern is otEligible.
+/// Program P1.5 — LATE-COMING PENALTY policy (India-common "N lates allowed per
+/// month, then every M further lates costs a half/quarter/full day"). Entity/
+/// location scoped like OvertimeRule (most-specific active rule wins). Enforced
+/// as a month-context pass inside attendance recompute — the penalty adjusts
+/// lopFraction on the offending late days, idempotently (recomputed from scratch
+/// each pass, marked in exceptionsJson.latePenalty).
+model LateComingRule {
+  id                  String   @id @default(uuid())
+  businessId          String
+  entityId            String?
+  locationId          String?
+  allowedLatesPerMonth Int     @default(3) // grace count before penalties start
+  perLates            Int      @default(1) // every N further lates → one penalty
+  penaltyDayFraction  Decimal  @default(0.5) @db.Decimal(4, 2) // 0.25 | 0.5 | 1
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([businessId, entityId, locationId, isActive])
+}
+
 model OvertimeRule {
   id                  String   @id @default(uuid())
   businessId          String

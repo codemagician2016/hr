@@ -29,6 +29,21 @@ router.use('/', require('./roster.routes'));
    RBAC (canManageAttendance on mutations + the review queue). */
 router.use('/capture', require('./captureAdmin.routes'));
 
+// Program P1.5 — OT + late-coming policy consoles (OvertimeRule had NO write
+// path; LateComingRule is the new N-lates penalty policy).
+{
+  const wp = require('../attendance/workPolicies.controller');
+  const { requirePermission } = require('../../core/middleware/auth.middleware');
+  router.get('/overtime-rules', requirePermission('canViewEmployees'), wp.listOtRules);
+  router.post('/overtime-rules', requirePermission('canManageAttendance'), wp.createOtRule);
+  router.patch('/overtime-rules/:id', requirePermission('canManageAttendance'), wp.updateOtRule);
+  router.delete('/overtime-rules/:id', requirePermission('canManageAttendance'), wp.deleteOtRule);
+  router.get('/late-rules', requirePermission('canViewEmployees'), wp.listLateRules);
+  router.post('/late-rules', requirePermission('canManageAttendance'), wp.createLateRule);
+  router.patch('/late-rules/:id', requirePermission('canManageAttendance'), wp.updateLateRule);
+  router.delete('/late-rules/:id', requirePermission('canManageAttendance'), wp.deleteLateRule);
+}
+
 /* Punches — clock in/out. Recording a punch is a self/manager action scoped to the
    sub-tree; an out-of-scope target → 404, a punch into a locked day → 409. On
    success the affected (employee, day) is re-derived. */

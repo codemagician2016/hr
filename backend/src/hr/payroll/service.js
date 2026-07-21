@@ -1959,7 +1959,12 @@ async function getMyPayslips({ businessId, customer, page, pageSize } = {}) {
   const pageNum = Math.max(parseInt(page, 10) || 1, 1);
   const employeeId = await resolveSelfEmployee(businessId, customer);
   if (!employeeId) return paged ? { items: [], total: 0, page: pageNum, pageSize: take } : { items: [], total: 0 };
-  const where = { businessId, employeeId, deletedAt: null, status: { in: ['PUBLISHED', 'VIEWED'] } };
+  // Program P1.2 — a HELD line's payslip is invisible to the employee until
+  // released (dispute/legal hold), even inside a published run.
+  const where = {
+    businessId, employeeId, deletedAt: null, status: { in: ['PUBLISHED', 'VIEWED'] },
+    payRunLine: { is: { payslipHeldAt: null } },
+  };
   const select = {
     id: true, code: true, periodStart: true, periodEnd: true, payDate: true,
     currencyCode: true, grossEarnings: true, totalDeductions: true, netPay: true, status: true,
@@ -1980,7 +1985,12 @@ async function getMyPayslip({ businessId, customer, payslipId }) {
   const employeeId = await resolveSelfEmployee(businessId, customer);
   if (!employeeId) throw notFound('Payslip not found');
   const payslip = await prisma.payslip.findFirst({
-    where: { id: payslipId, businessId, employeeId, deletedAt: null, status: { in: ['PUBLISHED', 'VIEWED'] } },
+    where: {
+      id: payslipId, businessId, employeeId, deletedAt: null,
+      status: { in: ['PUBLISHED', 'VIEWED'] },
+      // Program P1.2 — held line ⇒ 404 to the employee (indistinguishable from absent).
+      payRunLine: { is: { payslipHeldAt: null } },
+    },
   });
   if (!payslip) throw notFound('Payslip not found');
   // Mark first view.
@@ -2018,7 +2028,7 @@ async function resolvePayslipPdfIdentity({ businessId, payslip }) {
     where: { id: payslip.employeeId, businessId, deletedAt: null },
     select: {
       id: true, code: true, firstName: true, middleName: true, lastName: true,
-      preferredName: true, currentEmploymentRecordId: true,
+      preferredName: true, dateOfBirth: true, currentEmploymentRecordId: true,
     },
   });
 
@@ -2054,6 +2064,7 @@ async function resolvePayslipPdfIdentity({ businessId, payslip }) {
         middleName: employee.middleName,
         lastName: employee.lastName,
         preferredName: employee.preferredName,
+        dateOfBirth: employee.dateOfBirth,
         department,
         designation,
       }

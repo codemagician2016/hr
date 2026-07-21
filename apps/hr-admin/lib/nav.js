@@ -191,6 +191,10 @@ export const NAV_ITEMS = [
   // Feature 2 — multi-mode attendance capture policy (geo-fence / IP / face) + the
   // office-CIDR allow-list + the flagged-punch review queue. canManageAttendance.
   { key: 'settings-attendance-capture', label: 'Attendance capture', href: '/settings/attendance/capture', permission: 'canManageAttendance', parent: 'settings', icon: 'clock' },
+  // Program P1.5 — Work policies: overtime rules (threshold + multipliers) and
+  // late-coming penalties (grace count + per-N deduction). Entity/location scoped,
+  // most-specific rule wins. Gated on canManageAttendance (writes server-gated).
+  { key: 'settings-attendance-policies', label: 'Work policies', href: '/settings/attendance/work-policies', permission: 'canManageAttendance', parent: 'settings', icon: 'clock' },
 ];
 
 // ── Sidebar grouping ─────────────────────────────────────────────────────────
