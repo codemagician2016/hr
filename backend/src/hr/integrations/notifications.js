@@ -86,6 +86,10 @@ const HR_EVENT_TEMPLATES = Object.freeze({
   'learning.overdue':    'HR_LEARNING_OVERDUE',    // → learner when a mandatory course is past its due date
   'learning.completed':  'HR_LEARNING_COMPLETED',  // → learner when a course reaches COMPLETED
   'learning.cert-ready': 'HR_LEARNING_CERT_READY', // → learner when the completion certificate is minted to the vault
+  // Feature 33 — Pulse Surveys + eNPS listening fan-out.
+  'survey.invited':  'HR_SURVEY_INVITED',  // → each audience employee when an occurrence opens
+  'survey.reminder': 'HR_SURVEY_REMINDER', // → non-responders past ~50% of an open window
+  'survey.closed':   'HR_SURVEY_CLOSED',   // → the author when a survey/occurrence closes (with tally)
 });
 
 // HR template registry. vertical: 'HR' so listTemplates({vertical:'HR'}) scopes
@@ -525,6 +529,36 @@ const HR_TEMPLATES = Object.freeze([
     body: 'Hi {NAME}, your certificate for "{COURSE}" (Ref {REF}) is ready in your document vault. Download: {LINK} - {BIZ}',
     variables: ['NAME', 'COURSE', 'REF', 'LINK', 'BIZ'],
     channels: { sms: false, whatsapp: true, email: true },
+  },
+  // ─── Feature 33 — Pulse Surveys + eNPS (employee listening) ───
+  // Lowercase variable names (probation-template convention). {anonymityNote} carries
+  // the "your responses are anonymous…" line only for anonymous surveys.
+  {
+    key: 'HR_SURVEY_INVITED',
+    displayName: 'Survey invitation (employee)',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {employeeName}, {businessName} invites you to a short survey: "{surveyTitle}". It closes on {closesOn}. {anonymityNote} Fill it here: {link}',
+    variables: ['employeeName', 'businessName', 'surveyTitle', 'closesOn', 'anonymityNote', 'link'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_SURVEY_REMINDER',
+    displayName: 'Survey reminder (non-responder)',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Reminder {employeeName}: the survey "{surveyTitle}" closes on {closesOn}. It only takes a few minutes: {link}',
+    variables: ['employeeName', 'surveyTitle', 'closesOn', 'link'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_SURVEY_CLOSED',
+    displayName: 'Survey closed (author)',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Survey "{surveyTitle}" (run #{occurrenceSeq}) has closed with {responseCount} response(s) — {responseRate}% of {invitedCount} invited. View the results: {link}',
+    variables: ['surveyTitle', 'occurrenceSeq', 'responseCount', 'responseRate', 'invitedCount', 'link'],
+    channels: { sms: false, whatsapp: false, email: true },
   },
 ]);
 

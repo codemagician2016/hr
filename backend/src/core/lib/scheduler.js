@@ -1388,6 +1388,31 @@ function initScheduler() {
       learningSweepRunning = false;
     }
   });
+
+  // Feature 33 — Pulse Surveys + eNPS schedule sweep (daily 06:20 UTC). Three passes:
+  // CLOSE lapsed occurrences (one-shot surveys flip PUBLISHED→CLOSED + author notify),
+  // SPAWN the next occurrence of each due recurring pulse (idempotent on the
+  // @@unique([surveyId, seq]) + per-occurrence notifiedAt invite stamp — never
+  // re-blasts), and REMIND non-responders once past ~50% of an open window. Opening
+  // is date-driven (the ESS feed filters live occurrences itself), so a missed tick
+  // never loses a window — the next tick catches up idempotently. Tenant-safe,
+  // per-row fail-soft, in-process overlap guard (copied from the comp-off blocks).
+  let pulseSweepRunning = false;
+  cron.schedule('20 6 * * *', async () => {
+    if (pulseSweepRunning) { console.log('[Scheduler] pulse survey sweep still running — skipping tick'); return; }
+    pulseSweepRunning = true;
+    try {
+      const { runPulseScheduleSweep } = require('../../hr/engagement/surveys/pulseScheduleRunner');
+      const r = await runPulseScheduleSweep({ asOf: new Date() });
+      if (r.closedOccurrences + r.closedSurveys + r.spawned + r.goLiveNotified + r.remindersSent + r.errors > 0) {
+        console.log(`[Scheduler] pulse survey sweep: ${JSON.stringify(r)}`);
+      }
+    } catch (err) {
+      console.error('[Scheduler] pulse survey sweep failed:', err.message);
+    } finally {
+      pulseSweepRunning = false;
+    }
+  });
 }
 
 // Find PENDING orders older than `maxAgeMinutes` (default 30) and cancel

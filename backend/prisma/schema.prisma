@@ -476,26 +476,26 @@ model Business {
   incrementCycles              IncrementCycle[]
   incrementProposals           IncrementProposal[]
   // Payroll
-  payCalendars             PayCalendar[]
-  payRuns                  PayRun[]
-  payRunLines              PayRunLine[]
-  payRunLineComponents     PayRunLineComponent[]
-  bonusCycles              BonusCycle[]
-  bonusAwards              BonusAward[]
-  arrearCycles             ArrearCycle[]
-  attendancePayInputs      AttendancePayInput[]
-  payslips                 Payslip[]
-  statutoryRemittances     StatutoryRemittance[]
-  complianceObligations    ComplianceObligation[]
+  payCalendars                 PayCalendar[]
+  payRuns                      PayRun[]
+  payRunLines                  PayRunLine[]
+  payRunLineComponents         PayRunLineComponent[]
+  bonusCycles                  BonusCycle[]
+  bonusAwards                  BonusAward[]
+  arrearCycles                 ArrearCycle[]
+  attendancePayInputs          AttendancePayInput[]
+  payslips                     Payslip[]
+  statutoryRemittances         StatutoryRemittance[]
+  complianceObligations        ComplianceObligation[]
   // Feature 32 — statutory register definitions + generated-artefact log.
-  registerDefinitions      RegisterDefinition[]
-  registerExports          RegisterExport[]
-  payRunInputItems         PayRunInputItem[]
-  varianceThreshold        VarianceThreshold?
+  registerDefinitions          RegisterDefinition[]
+  registerExports              RegisterExport[]
+  payRunInputItems             PayRunInputItem[]
+  varianceThreshold            VarianceThreshold?
   // India salary disbursement — bank salary-advice batches + their per-employee lines.
-  payoutBatches            PayoutBatch[]
-  payoutLines              PayoutLine[]
-  anomalyAcks              AnomalyAcknowledgement[]
+  payoutBatches                PayoutBatch[]
+  payoutLines                  PayoutLine[]
+  anomalyAcks                  AnomalyAcknowledgement[]
   // Leave
   leaveTypes                   LeaveType[]
   leavePolicies                LeavePolicy[]
@@ -616,6 +616,9 @@ model Business {
   // Engagement (Cycle 1) — company announcements / news feed + read receipts.
   announcements                Announcement[]
   announcementReads            AnnouncementRead[]
+  // Feature 33 — Pulse Surveys + eNPS (employee listening).
+  surveys                      Survey[]
+  surveyResponses              SurveyResponse[]
   // Investment-proof workflow (Feature 20) — year-end §192(2D)/Rule 26C/Form 12BB.
   investmentDeclarationWindows InvestmentDeclarationWindow[]
   investmentProofs             InvestmentProof[]
@@ -6531,10 +6534,10 @@ model Entity {
   // Feature 32 — per-entity register definition overrides + generated exports.
   registerDefinitions   RegisterDefinition[]
   registerExports       RegisterExport[]
-  compensations CompensationRevision[]
-  importJobs    ImportJob[]
-  form16Batches Form16Batch[]
-  punchDevices  PunchDevice[] // Feature 28 — biometric devices live at an entity site
+  compensations         CompensationRevision[]
+  importJobs            ImportJob[]
+  form16Batches         Form16Batch[]
+  punchDevices          PunchDevice[] // Feature 28 — biometric devices live at an entity site
 
   @@unique([businessId, code])
   @@index([businessId, countryCode, status])
@@ -6769,76 +6772,79 @@ model Employee {
   anonymisedAt              DateTime? // mirrors User.anonymisedAt pattern
   version                   Int            @default(0)
 
-  employmentRecords      EmploymentRecord[]
-  statutoryProfile       StatutoryProfile?
-  compensations          CompensationRevision[]
-  bankAccounts           BankAccount[]
-  payoutLines            PayoutLine[] // India salary disbursement — per-employee credit lines
-  emergencyContacts      EmergencyContact[]
-  dependants             Dependant[]
-  leaveBalances          LeaveBalance[]
-  leaveTxns              LeaveTransaction[]
+  employmentRecords       EmploymentRecord[]
+  statutoryProfile        StatutoryProfile?
+  compensations           CompensationRevision[]
+  bankAccounts            BankAccount[]
+  payoutLines             PayoutLine[] // India salary disbursement — per-employee credit lines
+  emergencyContacts       EmergencyContact[]
+  dependants              Dependant[]
+  leaveBalances           LeaveBalance[]
+  leaveTxns               LeaveTransaction[]
   // Feature 29 — women/graveyard night-shift consent. Default false = must opt in;
   // the rotation generator + swap consumer refuse to place a non-consenting employee
   // on an isNightShift pattern (hard block, admin override audited).
-  nightShiftEligible     Boolean                           @default(false)
-  compOffCredits         CompOffCredit[] // Feature 30 — comp-off expiry lots
+  nightShiftEligible      Boolean                           @default(false)
+  compOffCredits          CompOffCredit[] // Feature 30 — comp-off expiry lots
   leaveEncashmentRequests LeaveEncashmentRequest[] // Feature 31 — in-service encashment
-  punches                AttendancePunch[]
-  deviceEmployeeMaps     DeviceEmployeeMap[] // Feature 28 — device enroll-no/PIN → this employee
-  shiftAssignments       ShiftAssignment[]
-  rosterDays             RosterDay[] // Feature 29 — per-day roster cells
-  swapsRequested         ShiftSwapRequest[]                @relation("SwapRequester") // Feature 29
-  swapsCounterparty      ShiftSwapRequest[]                @relation("SwapCounterparty") // Feature 29
-  timesheets             Timesheet[]
-  attendances            Attendance[]                      @relation("EmployeeAttendances")
-  attendancePayInputs    AttendancePayInput[]
-  expenseClaims          ExpenseClaim[]
-  travelRequests         TravelRequest[] // Feature 11
-  loans                  Loan[]
-  documents              EmployeeDocument[]
-  assets                 AssetAssignment[]
-  reviews                PerformanceReview[]               @relation("RevieweeReviews")
-  reviewsGiven           PerformanceReview[]               @relation("ReviewerReviews")
-  goals                  Goal[]
-  skills                 EmployeeSkill[]
+  punches                 AttendancePunch[]
+  deviceEmployeeMaps      DeviceEmployeeMap[] // Feature 28 — device enroll-no/PIN → this employee
+  shiftAssignments        ShiftAssignment[]
+  rosterDays              RosterDay[] // Feature 29 — per-day roster cells
+  swapsRequested          ShiftSwapRequest[]                @relation("SwapRequester") // Feature 29
+  swapsCounterparty       ShiftSwapRequest[]                @relation("SwapCounterparty") // Feature 29
+  timesheets              Timesheet[]
+  attendances             Attendance[]                      @relation("EmployeeAttendances")
+  attendancePayInputs     AttendancePayInput[]
+  expenseClaims           ExpenseClaim[]
+  travelRequests          TravelRequest[] // Feature 11
+  loans                   Loan[]
+  documents               EmployeeDocument[]
+  assets                  AssetAssignment[]
+  reviews                 PerformanceReview[]               @relation("RevieweeReviews")
+  reviewsGiven            PerformanceReview[]               @relation("ReviewerReviews")
+  goals                   Goal[]
+  skills                  EmployeeSkill[]
   // Performance — Feature 8
-  objectivesOwned        Objective[]                       @relation("ObjectiveOwner")
-  oneOnOnesAsManager     OneOnOne[]                        @relation("OneOnOneManager")
-  oneOnOnesAsEmployee    OneOnOne[]                        @relation("OneOnOneEmployee")
+  objectivesOwned         Objective[]                       @relation("ObjectiveOwner")
+  oneOnOnesAsManager      OneOnOne[]                        @relation("OneOnOneManager")
+  oneOnOnesAsEmployee     OneOnOne[]                        @relation("OneOnOneEmployee")
   // Talent depth — Feature 34
-  nineBoxPlacements      NineBoxPlacement[]                @relation("NineBoxSubject")
-  talentTags             TalentTag[]                       @relation("TalentTagSubject")
-  payRunLines            PayRunLine[]
-  payslips               Payslip[]
-  helpdeskTickets        HelpdeskTicket[]
-  approvalRequests       ApprovalRequest[]                 @relation("RequesterApprovals")
-  separations            SeparationCase[]
-  profileChangeRequests  ProfileChangeRequest[]
-  documentRequests       DocumentRequest[]
-  regularizationRequests AttendanceRegularizationRequest[]
-  bonusAwards            BonusAward[]
-  arrearCycles           ArrearCycle[]
+  nineBoxPlacements       NineBoxPlacement[]                @relation("NineBoxSubject")
+  talentTags              TalentTag[]                       @relation("TalentTagSubject")
+  payRunLines             PayRunLine[]
+  payslips                Payslip[]
+  helpdeskTickets         HelpdeskTicket[]
+  approvalRequests        ApprovalRequest[]                 @relation("RequesterApprovals")
+  separations             SeparationCase[]
+  profileChangeRequests   ProfileChangeRequest[]
+  documentRequests        DocumentRequest[]
+  regularizationRequests  AttendanceRegularizationRequest[]
+  bonusAwards             BonusAward[]
+  arrearCycles            ArrearCycle[]
   // Letters & Communication (Feature 9) — letters issued to this employee
-  issuedLetters          IssuedLetter[]
+  issuedLetters           IssuedLetter[]
   // Feature 13 — rich profile sub-models (Education + typed Addresses)
-  educations             EmployeeEducation[]
-  addresses              EmployeeAddress[]
+  educations              EmployeeEducation[]
+  addresses               EmployeeAddress[]
   // Engagement (Cycle 1) — per-employee announcement read receipts. Read receipts
   // are keyed by employee (the ESS session resolves the subject employee), so the
   // unread badge + per-row read state survive a userId remap.
-  announcementReads      AnnouncementRead[]
+  announcementReads       AnnouncementRead[]
+  // Feature 33 — survey participation ledger ONLY (never SurveyResponse: an anonymous
+  // ballot has no employee relation by design — the anonymity firewall).
+  surveyParticipations    SurveyParticipation[]
   // Portal-invitation flow — the welcome/set-password tokens minted for this
   // employee's ESS (Customer) login. Single-use, expiring, hashed-at-rest.
-  portalInvites          EmployeeInvite[]
+  portalInvites           EmployeeInvite[]
   // Investment-proof workflow (Feature 20) — the employee's uploaded year-end proofs.
-  investmentProofs       InvestmentProof[]
+  investmentProofs        InvestmentProof[]
   // Form 16 (Feature 24) — the employee's annual TDS certificates.
-  form16Certificates     Form16Certificate[]
+  form16Certificates      Form16Certificate[]
   // Feature 25 — FBP / Flexi Basket allocations.
-  fbpAllocations         FbpAllocation[]
+  fbpAllocations          FbpAllocation[]
   // Feature 37 — LMS: the employee's training enrollments (per-employee learner records).
-  enrollments            Enrollment[]
+  enrollments             Enrollment[]
 
   @@unique([businessId, code])
   // FLAG (Feature 17 — review HIGH fix): a PARTIAL unique index backs the
@@ -7918,18 +7924,18 @@ model StatutoryElectionHistory {
 // the window closes). Additive — nothing about the existing withholding math changes;
 // the resolver simply falls back to defaultRegime when the profile is silent.
 model TaxRegimePolicy {
-  id             String      @id @default(uuid())
-  businessId     String
-  business       Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  fy             String      @db.VarChar(7) // "2026-27" (StatutoryProfile.prevEmployerFY format)
-  defaultRegime  INTaxRegime @default(NEW) // what an un-elected employee is withheld under
+  id               String      @id @default(uuid())
+  businessId       String
+  business         Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  fy               String      @db.VarChar(7) // "2026-27" (StatutoryProfile.prevEmployerFY format)
+  defaultRegime    INTaxRegime @default(NEW) // what an un-elected employee is withheld under
   electionOpenFrom DateTime? // employees may self-elect on/after this (null = always open)
   electionLockDate DateTime? // employees may self-elect strictly before this (null = no deadline)
-  lockedGlobally Boolean     @default(false) // hard freeze: no election for this FY, period
-  updatedBy      String?
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
-  version        Int         @default(0)
+  lockedGlobally   Boolean     @default(false) // hard freeze: no election for this FY, period
+  updatedBy        String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  version          Int         @default(0)
 
   @@unique([businessId, fy]) // one policy per tenant per FY
   @@index([businessId])
@@ -8866,8 +8872,8 @@ model RegisterDefinition {
   // Definitions are usually TENANT-DEFAULT (businessId-only, entityId NULL) seeded
   // rows that all entities inherit; an entityId-scoped row OVERRIDES the default
   // for one entity (e.g. a factory entity adopting a different state's forms).
-  entityId String?
-  entity   Entity? @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  entityId   String?
+  entity     Entity?  @relation(fields: [entityId], references: [id], onDelete: Cascade)
 
   kind      RegisterKind // MUSTER_ROLL | WAGE_REGISTER | ... (the §2.1 families)
   formCode  String // "FORM_25" | "FORM_Q" | "FORM_D" | "FORM_3A" ...
@@ -8908,13 +8914,13 @@ model RegisterDefinition {
 // evidence + idempotent re-download + tamper evidence (fileHash). Optionally
 // archives the bytes to S3 for the statutory retention window. No source mutation.
 model RegisterExport {
-  id           String             @id @default(uuid())
+  id           String              @id @default(uuid())
   businessId   String
-  business     Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business     Business            @relation(fields: [businessId], references: [id], onDelete: Cascade)
   definitionId String?
   definition   RegisterDefinition? @relation(fields: [definitionId], references: [id], onDelete: SetNull)
   entityId     String
-  entity       Entity             @relation(fields: [entityId], references: [id], onDelete: Restrict)
+  entity       Entity              @relation(fields: [entityId], references: [id], onDelete: Restrict)
   kind         RegisterKind
   formCode     String
   stateCode    String?
@@ -8975,29 +8981,29 @@ enum RegisterSource {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model LeaveType {
-  id             String             @id @default(uuid())
+  id             String                   @id @default(uuid())
   businessId     String
-  business       Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  countryCode    String?            @db.Char(2) // NULL = both
+  business       Business                 @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  countryCode    String?                  @db.Char(2) // NULL = both
   code           String // "EL","SL","CL","ANNUAL","SICK","BEREAVEMENT","PUBLIC","ALT"
   name           String
   category       LeaveCategory
-  unit           LeaveUnit          @default(DAYS) // NZ ANNUAL = WEEKS
-  isPaid         Boolean            @default(true)
-  isStatutory    Boolean            @default(false)
+  unit           LeaveUnit                @default(DAYS) // NZ ANNUAL = WEEKS
+  isPaid         Boolean                  @default(true)
+  isStatutory    Boolean                  @default(false)
   nzPayBasis     NZLeavePayBasis? // RDP | ADP | AWE_8PCT | OWP
-  requiresReason Boolean            @default(false)
-  affectsLOP     Boolean            @default(false) // unpaid → loss of pay on payroll
-  isEncashable   Boolean            @default(false)
+  requiresReason Boolean                  @default(false)
+  affectsLOP     Boolean                  @default(false) // unpaid → loss of pay on payroll
+  isEncashable   Boolean                  @default(false)
   // Sandwich-leave behaviour for interior holidays/weekoffs inside a leave block
   // (Feature 6 §3.2). NULL ⇒ derive from countryCode (NZ ⇒ EXCLUSIVE, IN ⇒ INCLUSIVE).
   sandwichPolicy SandwichPolicy?
   color          String? // ESS calendar chip
-  isActive       Boolean            @default(true)
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
+  isActive       Boolean                  @default(true)
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
   deletedAt      DateTime?
-  version        Int                @default(0)
+  version        Int                      @default(0)
   policies       LeavePolicy[]
   balances       LeaveBalance[]
   txns           LeaveTransaction[]
@@ -9086,17 +9092,17 @@ model LeavePolicy {
   // shared with F&F (fnf.perDay26 for BASIC_DA_26). maxEncashCap (exit) and
   // encashMaxDaysPerYear (in-service) are SEPARATE caps. NZ tenants leave these inert.
   encashInService          Boolean                 @default(false) // master opt-in for this type
-  encashBasis              EncashmentBasis          @default(BASIC_DA_26) // per-day money basis
+  encashBasis              EncashmentBasis         @default(BASIC_DA_26) // per-day money basis
   encashMaxDaysPerYear     Decimal?                @db.Decimal(8, 4) // cap on days/policy-year (e.g. 15)
   encashMinDaysPerRequest  Decimal?                @db.Decimal(8, 4) // floor (e.g. must encash >= 5)
   encashMinBalanceAfter    Decimal?                @db.Decimal(8, 4) // must leave >= N days (statutory carry intent)
-  encashMaxRequestsPerYear Int                     @default(1)       // typically once/year
-  encashWindowOpenMonth    Int?                    // 1–12; NULL = always open (e.g. only in March)
+  encashMaxRequestsPerYear Int                     @default(1) // typically once/year
+  encashWindowOpenMonth    Int? // 1–12; NULL = always open (e.g. only in March)
   encashWindowCloseMonth   Int?
-  encashPfWages            Boolean                 @default(false)   // §1.4 — usually NOT PF wages
-  encashEsiWages           Boolean                 @default(false)   // periodicity > 2 months => not ESI wages
-  encashPtWages            Boolean                 @default(true)    // part of month gross for PT slab
-  encashWorkflowId         String?                 // F10 approval chain; NULL => built-in default
+  encashPfWages            Boolean                 @default(false) // §1.4 — usually NOT PF wages
+  encashEsiWages           Boolean                 @default(false) // periodicity > 2 months => not ESI wages
+  encashPtWages            Boolean                 @default(true) // part of month gross for PT slab
+  encashWorkflowId         String? // F10 approval chain; NULL => built-in default
   // Feature 30 — comp-off knobs (only meaningful for a COMP_OFF-type policy).
   // { expiryDays:60, requireApproval:true, autoEarn:true, minWorkedMinutesForCredit:240,
   //   fullDayMinutes:480, allowHalfDay:true, allowEncash:false,
@@ -9282,34 +9288,34 @@ enum DayHalf {
 
 enum EncashmentBasis {
   BASIC_DA_26 // (Basic+DA)/26 — reuses fnf.perDay26 (DEFAULT, market standard)
-  BASIC_30    // Basic/30
-  GROSS_30    // Gross/30
+  BASIC_30 // Basic/30
+  GROSS_30 // Gross/30
 }
 
 enum EncashmentStatus {
-  PENDING   // soft-hold placed; awaiting approval
-  APPROVED  // balance DEBITED; queued for next run (un-paid: payRunId NULL)
-  REJECTED  // hold released; no debit
+  PENDING // soft-hold placed; awaiting approval
+  APPROVED // balance DEBITED; queued for next run (un-paid: payRunId NULL)
+  REJECTED // hold released; no debit
   CANCELLED // employee withdrew while PENDING; hold released
-  PAID      // run disbursed; payRunId + paidAmountMinor stamped (terminal)
+  PAID // run disbursed; payRunId + paidAmountMinor stamped (terminal)
 }
 
 /// The in-service encashment request. Mirrors LeaveTransaction's workflow fields +
 /// ExpenseClaim's payRunId/paidViaPayrollAmount payout-stamp fields (the two
 /// idempotency anchors: the balance debit at APPROVE, the cash stamp at DISBURSE).
 model LeaveEncashmentRequest {
-  id                  String           @id @default(uuid())
-  businessId          String
-  business            Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  employeeId          String
-  employee            Employee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  leaveTypeId         String
-  leaveType           LeaveType        @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
-  leavePolicyId       String? // the resolved policy at request time (audit)
-  periodCode          String // the LeaveBalance period the days come from ("2026-27")
+  id            String    @id @default(uuid())
+  businessId    String
+  business      Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId    String
+  employee      Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveTypeId   String
+  leaveType     LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+  leavePolicyId String? // the resolved policy at request time (audit)
+  periodCode    String // the LeaveBalance period the days come from ("2026-27")
 
   // What & how much
-  days                Decimal          @db.Decimal(8, 4) // requested days
+  days                Decimal         @db.Decimal(8, 4) // requested days
   basis               EncashmentBasis // snapshot of policy.encashBasis at request
   basicDaMonthlyMinor BigInt? // snapshot of last-drawn Basic+DA (paise) at APPROVE
   perDayMinor         BigInt? // snapshot perDay at APPROVE (display)
@@ -9317,22 +9323,22 @@ model LeaveEncashmentRequest {
   reason              String?
 
   // Workflow (mirror LeaveTransaction)
-  status              EncashmentStatus @default(PENDING)
-  approvalRequestId   String? // F10 ApprovalRequest link
-  appliedAt           DateTime?
-  decidedAt           DateTime?
-  decidedBy           String?
+  status            EncashmentStatus @default(PENDING)
+  approvalRequestId String? // F10 ApprovalRequest link
+  appliedAt         DateTime?
+  decidedAt         DateTime?
+  decidedBy         String?
   // The append-only ledger row that carried the balance debit (set at APPROVE).
-  encashmentTxnId     String? // → LeaveTransaction(txnType=ENCASHMENT)
+  encashmentTxnId   String? // → LeaveTransaction(txnType=ENCASHMENT)
 
   // Payout stamp (set by the pay pass at DISBURSE — mirror ExpenseClaim.payRunId)
-  payRunId            String? // owning run; the idempotency anchor
-  paidAmountMinor     BigInt? // paise actually paid through the run (== amountMinor)
-  paidAt              DateTime?
+  payRunId        String? // owning run; the idempotency anchor
+  paidAmountMinor BigInt? // paise actually paid through the run (== amountMinor)
+  paidAt          DateTime?
 
-  createdAt           DateTime         @default(now())
-  updatedAt           DateTime         @updatedAt
-  version             Int              @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  version   Int      @default(0)
 
   @@index([businessId, employeeId, status])
   @@index([businessId, status, payRunId]) // pay-pass selection scan
@@ -9377,7 +9383,7 @@ model CompOffCredit {
   updatedAt         DateTime            @updatedAt
   version           Int                 @default(0)
 
-  consumptions      CompOffConsumption[]
+  consumptions CompOffConsumption[]
 
   // Idempotent earn keyed on the IMMUTABLE attendance row, NOT the runtime-derived
   // sourceKind (Feature 30 finding #2). A worked rest-day maps to exactly one
@@ -9625,17 +9631,17 @@ enum HolidayType {
 }
 
 model AttendancePunch {
-  id                      String      @id @default(uuid())
+  id                      String             @id @default(uuid())
   businessId              String
-  business                Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business                Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
   employeeId              String
-  employee                Employee    @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee                Employee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   locationId              String?
   punchType               PunchType
   punchAt                 DateTime // stored UTC; rendered in location TZ
   source                  PunchSource
-  geoLat                  Decimal?    @db.Decimal(9, 6)
-  geoLng                  Decimal?    @db.Decimal(9, 6)
+  geoLat                  Decimal?           @db.Decimal(9, 6)
+  geoLng                  Decimal?           @db.Decimal(9, 6)
   // Out-of-geofence marker, stamped at punch time when the punch carries coords
   // AND the employee's assigned Location has a geofence (geoLat/geoLng/geofenceM).
   // null = not evaluated (no location geofence or no punch coords); false = inside
@@ -9644,8 +9650,8 @@ model AttendancePunch {
   geoDistanceM            Int? // Haversine distance (m) from the assigned location, when evaluated
   ipAddress               String?
   deviceId                String?
-  selfieUrl               String?     @db.Text // @pii:sensitive (optional)
-  isManual                Boolean     @default(false) // regularization
+  selfieUrl               String?            @db.Text // @pii:sensitive (optional)
+  isManual                Boolean            @default(false) // regularization
   regularizationRequestId String?
   // Feature 28 — biometric/device punch provenance (additive, nullable → existing
   // rows unaffected). When source=BIOMETRIC the punch carries its registered device
@@ -9664,18 +9670,18 @@ model AttendancePunch {
   // punch needs a human; CLEARED/REJECTED once an HR admin acts. captureFlagged =
   // "this punch tripped a capture rule" (off-network / low face score / missing selfie
   // when the policy is warn-not-block).
-  captureMethods          String[]    @default([])
+  captureMethods          String[]           @default([])
   ipAllowed               Boolean?
   faceMatchScore          Float?
   faceMatched             Boolean?
   faceMatchStatus         FaceMatchStatus?
-  captureFlagged          Boolean     @default(false)
-  captureFlagReasons      String[]    @default([]) // e.g. ["OFF_NETWORK","FACE_LOW_SCORE"]
+  captureFlagged          Boolean            @default(false)
+  captureFlagReasons      String[]           @default([]) // e.g. ["OFF_NETWORK","FACE_LOW_SCORE"]
   reviewStatus            PunchReviewStatus?
   reviewedBy              String? // operator userId who cleared/rejected
   reviewedAt              DateTime?
-  reviewNote              String?     @db.Text
-  createdAt               DateTime    @default(now())
+  reviewNote              String?            @db.Text
+  createdAt               DateTime           @default(now())
 
   @@index([businessId, employeeId, punchAt])
   @@index([businessId, locationId, punchAt])
@@ -9822,7 +9828,7 @@ model FaceEnrollment {
   approvalRequestId String? // the open/decided F10 ApprovalRequest gating this reference
   decidedBy         String? // operator userId who approved/rejected/revoked
   decidedAt         DateTime?
-  decisionNote      String?  @db.Text // HR's reject/revoke reason (shown to the employee)
+  decisionNote      String?              @db.Text // HR's reject/revoke reason (shown to the employee)
   detScore          Float? // detector confidence at enrol (quality audit)
 
   version Int @default(0)
@@ -9852,7 +9858,7 @@ enum FaceEnrollmentStatus {
 /// at save: ≥3 distinct vertices, coords in range, non-degenerate area. Centroid is
 /// stamped at save for map centering + nearest-zone distance hints.
 model AttendanceGeoFence {
-  id          String  @id @default(uuid())
+  id          String   @id @default(uuid())
   businessId  String
   name        String
   description String?
@@ -9905,54 +9911,54 @@ enum FenceScopeKind {
 /// A physical biometric / access-control terminal registered to a tenant site.
 /// The trust + mapping anchor: every inbound punch must name a known device.
 model PunchDevice {
-  id            String    @id @default(uuid())
-  businessId    String
-  business      Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  id         String    @id @default(uuid())
+  businessId String
+  business   Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
   // Site scoping — a device lives at one entity (drives country/TZ) and optionally
   // a location (seeds the punch's locationId so geofence/holiday scope work).
-  entityId      String
-  entity        Entity    @relation(fields: [entityId], references: [id], onDelete: Cascade)
-  locationId    String?
-  location      Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  entityId   String
+  entity     Entity    @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
 
-  vendor        DeviceVendor // ESSL | ZKTECO | MATRIX | MANTRA | CAMS | REALTIME | BIOMAX | GENERIC
-  adapterKey    String // resolves the normaliser, e.g. "zkteco.adms", "essl.csv", "cams.rest"
-  name          String // operator-facing, e.g. "Plant-A Main Gate"
+  vendor                 DeviceVendor // ESSL | ZKTECO | MATRIX | MANTRA | CAMS | REALTIME | BIOMAX | GENERIC
+  adapterKey             String // resolves the normaliser, e.g. "zkteco.adms", "essl.csv", "cams.rest"
+  name                   String // operator-facing, e.g. "Plant-A Main Gate"
   // Device identity AS THE DEVICE REPORTS IT — the join key for push/SFTP. ZK ADMS
   // sends the terminal serial (SN=...); CSV imports may carry it as a column.
-  serialNumber  String?
+  serialNumber           String?
   // Direction handling: TRUST_DEVICE (use the device's IN/OUT) | DERIVE (ignore
   // device direction, alternate by time order per employee-day) | ALL_IN (single
   // reader gate — every punch is an IN; OUT inferred downstream by derive.js).
-  directionMode DeviceDirectionMode @default(DERIVE)
+  directionMode          DeviceDirectionMode @default(DERIVE)
   // De-bounce: two events for the same employee within this window collapse to one
   // (a double-tap on the reader). The 2nd → DUPLICATE, never deleted.
-  dedupWindowSec Int      @default(60)
+  dedupWindowSec         Int                 @default(60)
   // When no DeviceEmployeeMap row resolves a code, fall back to Employee.code.
-  fallbackToEmployeeCode Boolean @default(true)
+  fallbackToEmployeeCode Boolean             @default(true)
   // Optional per-device clock correction (seconds) applied BEFORE zonedWallTimeToUtc
   // for a device whose wall-clock is known-skewed. Default 0 (trust as-reported).
-  clockOffsetSec Int      @default(0)
+  clockOffsetSec         Int                 @default(0)
   // Push/SFTP auth: a per-device shared secret (hashed) the device/agent presents.
   // NEVER the raw secret in the DB.
-  ingestSecretHash  String?
-  ingestSecretLast4 String? // display hint only
+  ingestSecretHash       String?
+  ingestSecretLast4      String? // display hint only
   // Polling (SFTP/folder) config, when this device is pulled rather than pushed.
-  pollKind      PollKind? // SFTP | FOLDER | null (push/CSV-only)
-  pollConfigJson Json? // { host, port, user, path, keyRef } — secrets BY REFERENCE
-  pollCursor    String? // last consumed file / offset (idempotent poll)
+  pollKind               PollKind? // SFTP | FOLDER | null (push/CSV-only)
+  pollConfigJson         Json? // { host, port, user, path, keyRef } — secrets BY REFERENCE
+  pollCursor             String? // last consumed file / offset (idempotent poll)
   // Health / watchdog
-  lastSeenAt    DateTime? // last successful inbound batch
-  expectedSilenceMin Int? // alert if no punch for N minutes during site hours
-  timezone      String? // override; else resolved location→entity→business
-  isActive      Boolean   @default(true)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  deletedAt     DateTime?
-  version       Int       @default(0)
+  lastSeenAt             DateTime? // last successful inbound batch
+  expectedSilenceMin     Int? // alert if no punch for N minutes during site hours
+  timezone               String? // override; else resolved location→entity→business
+  isActive               Boolean             @default(true)
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+  deletedAt              DateTime?
+  version                Int                 @default(0)
 
-  maps          DeviceEmployeeMap[]
-  events        RawPunchEvent[]
+  maps   DeviceEmployeeMap[]
+  events RawPunchEvent[]
 
   @@unique([businessId, serialNumber]) // a serial is unique per tenant (push join key)
   @@index([businessId, entityId, isActive])
@@ -10009,27 +10015,27 @@ model DeviceEmployeeMap {
 /// produces an AttendancePunch (linked); one that can't (unmapped / unknown device
 /// / locked day) is parked with a reason and surfaced on the error report.
 model RawPunchEvent {
-  id          String       @id @default(uuid())
-  businessId  String
-  business    Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  deviceId    String?
-  device      PunchDevice? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
-  importJobId String? // set when ingested via the file-import surface (F18 job)
+  id                String         @id @default(uuid())
+  businessId        String
+  business          Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  deviceId          String?
+  device            PunchDevice?   @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  importJobId       String? // set when ingested via the file-import surface (F18 job)
   // As-reported, before mapping
-  deviceCode  String // enroll-no / PIN string
-  localTimeRaw String // the device's literal "YYYY-MM-DD HH:MM:SS" (no TZ)
-  punchAt     DateTime // resolved UTC instant (zonedWallTimeToUtc in device TZ)
-  rawDirection String? // device's raw direction token, if any ("0","C/In","OUT")
-  resolvedType PunchType? // IN/OUT/BREAK_* after direction resolution (null until resolved)
-  rawPayloadJson Json // the full original record (every column the adapter saw)
+  deviceCode        String // enroll-no / PIN string
+  localTimeRaw      String // the device's literal "YYYY-MM-DD HH:MM:SS" (no TZ)
+  punchAt           DateTime // resolved UTC instant (zonedWallTimeToUtc in device TZ)
+  rawDirection      String? // device's raw direction token, if any ("0","C/In","OUT")
+  resolvedType      PunchType? // IN/OUT/BREAK_* after direction resolution (null until resolved)
+  rawPayloadJson    Json // the full original record (every column the adapter saw)
   // Lifecycle
-  status      RawPunchStatus @default(RECEIVED)
-  reason      String?
-  employeeId  String? // resolved subject (null when UNMAPPED)
+  status            RawPunchStatus @default(RECEIVED)
+  reason            String?
+  employeeId        String? // resolved subject (null when UNMAPPED)
   attendancePunchId String? // the AttendancePunch this produced (null until MATERIALISED)
   // DEDUP / idempotency natural key: sha256(businessId|deviceId|deviceCode|punchAt|rawDirection)
-  dedupKey    String
-  createdAt   DateTime     @default(now())
+  dedupKey          String
+  createdAt         DateTime       @default(now())
 
   @@unique([businessId, dedupKey]) // exactly-once: same device+code+instant lands once
   @@index([businessId, deviceId, punchAt])
@@ -10188,9 +10194,9 @@ model ExpensePolicy {
   deletedAt      DateTime?
   version        Int               @default(0)
 
-  @@index([businessId, categoryId])
-
   gradeRules ExpenseGradeRule[] // Feature 45 — per-JOB-LEVEL cap overrides
+
+  @@index([businessId, categoryId])
 }
 
 /// Feature 45 — per-grade cap override for a category's reimbursement policy
@@ -11171,34 +11177,34 @@ model CompanyLetterhead {
 }
 
 model LetterTemplate {
-  id                  String             @id @default(uuid())
-  businessId          String
-  business            Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  entityId            String?
-  code                String // tenant-unique, e.g. "EXP-STD-IN"
-  name                String
-  category            LetterCategory
-  countryCode         String?            @db.Char(2) // "IN" / "NZ" (IN/NZ wording split)
-  subject             String? // "Re:" / subject line (mergeable)
+  id                   String             @id @default(uuid())
+  businessId           String
+  business             Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId             String?
+  code                 String // tenant-unique, e.g. "EXP-STD-IN"
+  name                 String
+  category             LetterCategory
+  countryCode          String?            @db.Char(2) // "IN" / "NZ" (IN/NZ wording split)
+  subject              String? // "Re:" / subject line (mergeable)
   // Body with placeholders {{employee.name}} — MERGE FIELDS ONLY, no raw HTML/script
-  bodyMarkdown        String             @db.Text
+  bodyMarkdown         String             @db.Text
   // Declared allow-list of merge fields → validation + UI palette
-  mergeFieldsJson     Json?
+  mergeFieldsJson      Json?
   // Default letterhead for this template (else resolve by category at issue). SetNull keeps history.
-  defaultLetterheadId String?
-  defaultLetterhead   CompanyLetterhead? @relation(fields: [defaultLetterheadId], references: [id], onDelete: SetNull)
-  requiresSignature   Boolean            @default(false) // route minted letters through e-sign (CONTRACT)
-  refNoPrefix         String? // override sequence prefix, e.g. "ACME/HR"
-  locale              String? // BCP-47, e.g. "en-IN" / "en-NZ" (date/number format)
+  defaultLetterheadId  String?
+  defaultLetterhead    CompanyLetterhead? @relation(fields: [defaultLetterheadId], references: [id], onDelete: SetNull)
+  requiresSignature    Boolean            @default(false) // route minted letters through e-sign (CONTRACT)
+  refNoPrefix          String? // override sequence prefix, e.g. "ACME/HR"
+  locale               String? // BCP-47, e.g. "en-IN" / "en-NZ" (date/number format)
   // Phase 2 — per-template STATIC signature image (uploaded once, auto-stamped on
   // every issued letter) + the authority/signatory block text. Storage mirrors the
   // letterhead convention: an S3 key/URL when configured, else an inline data-URL.
-  signatureImageUrl    String?           @db.Text // PNG: S3 URL or inline data-URL
+  signatureImageUrl    String?            @db.Text // PNG: S3 URL or inline data-URL
   signatureImageHash   String? // SHA-256 of the signature bytes
   signatureMimeType    String? // image/png
   signatureSizeBytes   Int?
   signatureBoxJson     Json? // normalized {x,y,w,h} placement over the letterhead
-  signatureOnLastPage  Boolean           @default(true) // stamp on the last page vs page 1
+  signatureOnLastPage  Boolean            @default(true) // stamp on the last page vs page 1
   authorityName        String? // signatory name (fills {{authority.name}}/{{company.signatoryName}})
   authorityDesignation String? // signatory designation
   // Phase 3 — template-declared MANUAL (at-issue) fields the issuer fills in the
@@ -11216,16 +11222,16 @@ model LetterTemplate {
   stampAssetId         String?
   stampAsset           LetterAsset?       @relation("TemplateStamp", fields: [stampAssetId], references: [id], onDelete: SetNull)
   stampBoxJson         Json? // normalized {x,y,w,h} placement for the stamp
-  isSystem            Boolean            @default(false) // seeded IN/NZ template (non-deletable)
-  isActive            Boolean            @default(true) // PUBLISHED. false = DRAFT/ARCHIVED
+  isSystem             Boolean            @default(false) // seeded IN/NZ template (non-deletable)
+  isActive             Boolean            @default(true) // PUBLISHED. false = DRAFT/ARCHIVED
   // Feature 42 — employee self-service: HR decides PER TEMPLATE whether employees
   // can request this letter from ESS/mobile. The ESS request list is driven by
   // the tenant's published+selfServe templates — nothing hard-coded.
-  selfServe           Boolean            @default(false)
-  createdAt           DateTime           @default(now())
-  updatedAt           DateTime           @updatedAt
-  deletedAt           DateTime?
-  version             Int                @default(0) // bumped on edit; pinned onto IssuedLetter at issue
+  selfServe            Boolean            @default(false)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  deletedAt            DateTime?
+  version              Int                @default(0) // bumped on edit; pinned onto IssuedLetter at issue
 
   issuedLetters IssuedLetter[]
 
@@ -11474,16 +11480,16 @@ model ProbationPolicy {
 }
 
 model LateComingRule {
-  id                  String   @id @default(uuid())
-  businessId          String
-  entityId            String?
-  locationId          String?
-  allowedLatesPerMonth Int     @default(3) // grace count before penalties start
-  perLates            Int      @default(1) // every N further lates → one penalty
-  penaltyDayFraction  Decimal  @default(0.5) @db.Decimal(4, 2) // 0.25 | 0.5 | 1
-  isActive            Boolean  @default(true)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id                   String   @id @default(uuid())
+  businessId           String
+  entityId             String?
+  locationId           String?
+  allowedLatesPerMonth Int      @default(3) // grace count before penalties start
+  perLates             Int      @default(1) // every N further lates → one penalty
+  penaltyDayFraction   Decimal  @default(0.5) @db.Decimal(4, 2) // 0.25 | 0.5 | 1
+  isActive             Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   @@index([businessId, entityId, locationId, isActive])
 }
@@ -12321,31 +12327,31 @@ enum StageKind {
 }
 
 model Candidate {
-  id               String        @id @default(uuid())
-  businessId       String
-  business         Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  firstName        String // @pii:identity
-  lastName         String
-  email            String // @pii:contact
-  phone            String?
-  resumeUrl        String?       @db.Text
-  source           String? // referral/job-board/agency
-  linkedinUrl      String?
-  consentAt        DateTime? // candidate data-processing consent
-  consentExpiresAt DateTime? // auto-purge after retention window
+  id                    String                @id @default(uuid())
+  businessId            String
+  business              Business              @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  firstName             String // @pii:identity
+  lastName              String
+  email                 String // @pii:contact
+  phone                 String?
+  resumeUrl             String?               @db.Text
+  source                String? // referral/job-board/agency
+  linkedinUrl           String?
+  consentAt             DateTime? // candidate data-processing consent
+  consentExpiresAt      DateTime? // auto-purge after retention window
   // Feature 38 — candidate PORTAL account (passwordless magic-link) + rich profile.
-  emailVerifiedAt  DateTime? // set when they first click a magic link
-  lastLoginAt      DateTime?
-  headline         String? // "Senior Backend Engineer"
-  location         String?
+  emailVerifiedAt       DateTime? // set when they first click a magic link
+  lastLoginAt           DateTime?
+  headline              String? // "Senior Backend Engineer"
+  location              String?
   totalExperienceMonths Int? // self-reported summary
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
-  deletedAt        DateTime?
-  applications     Application[]
-  educations       CandidateEducation[]
-  experiences      CandidateExperience[]
-  skills           CandidateSkill[]
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  deletedAt             DateTime?
+  applications          Application[]
+  educations            CandidateEducation[]
+  experiences           CandidateExperience[]
+  skills                CandidateSkill[]
 
   @@unique([businessId, email])
   @@index([businessId, email])
@@ -13319,6 +13325,236 @@ model AnnouncementRead {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// Feature 33 — Pulse Surveys + eNPS (employee listening)
+// Orchestration layer over the engagement engine: the Survey carries the IDENTICAL
+// audience + lifecycle columns as Announcement so engagement/audience.js is reused
+// verbatim. The one net-new idea is the ANONYMITY FIREWALL: anonymous responses
+// carry NO employeeId (no FK to join back); the "who already answered" fact lives
+// in a SEPARATE participation ledger that holds zero answer data; k-anonymity
+// suppression + the coarse single-dimension segmentLabel snapshot guard the output.
+// ════════════════════════════════════════════════════════════════════════════
+
+// The survey template + audience + schedule (mirrors Announcement).
+model Survey {
+  id           String   @id @default(uuid())
+  businessId   String
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  authorUserId String // operator; bare id (no FK) — survives author offboard
+  authorName   String?
+
+  title              String
+  description        String?    @db.Text
+  type               SurveyType @default(PULSE) // PULSE | ENPS | CUSTOM
+  // ANONYMITY — the hard guarantee. Immutable once a response exists (§5.1).
+  anonymous          Boolean    @default(true)
+  // k-anonymity floor: smallest segment/total that may be shown. Default 5 (industry norm).
+  minResponsesToShow Int        @default(5)
+
+  // Audience — IDENTICAL columns to Announcement so engagement/audience.js is reused as-is.
+  audienceScope       SurveyAudienceScope @default(ALL)
+  audienceEntityIds   String[]            @default([])
+  audienceDeptIds     String[]            @default([])
+  audienceEmployeeIds String[]            @default([])
+
+  // Lifecycle (mirrors Announcement) + a response window close.
+  status      SurveyStatus @default(DRAFT) // DRAFT | PUBLISHED | CLOSED | ARCHIVED
+  publishedAt DateTime? // go-live; feed filters publishedAt <= now (no cron to OPEN)
+  closesAt    DateTime? // response window end; runner flips PUBLISHED→CLOSED at closesAt
+  notifiedAt  DateTime? // idempotent invite fan-out stamp (NULL = never blasted)
+
+  // Recurrence — NULL cadence = one-shot. A recurring Survey is the *template*; each run
+  // is a SurveyOccurrence so anonymous responses are bucketed per occurrence.
+  cadence          SurveyCadence? // WEEKLY | FORTNIGHTLY | MONTHLY | QUARTERLY
+  cadenceAnchorDay Int? // day-of-week (1–7) or day-of-month per cadence
+  windowDays       Int            @default(7) // each occurrence stays open this many days
+  recurrenceEndsAt DateTime? // stop spawning occurrences after this (NULL = until paused)
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  archivedAt DateTime?
+  version    Int       @default(0) // optimistic lock (mirrors Announcement)
+
+  questions   SurveyQuestion[]
+  occurrences SurveyOccurrence[]
+
+  @@index([businessId, status, publishedAt])
+  @@index([businessId, type, status])
+}
+
+enum SurveyType {
+  PULSE
+  ENPS
+  CUSTOM
+}
+
+enum SurveyStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+  ARCHIVED
+}
+
+enum SurveyAudienceScope {
+  ALL // every active employee in the tenant
+  ENTITY // employees whose current entity ∈ audienceEntityIds
+  DEPARTMENT // employees whose current department ∈ audienceDeptIds
+  SPECIFIC // explicitly-named employees (audienceEmployeeIds)
+}
+
+enum SurveyCadence {
+  WEEKLY
+  FORTNIGHTLY
+  MONTHLY
+  QUARTERLY
+}
+
+// Typed questions + sections.
+model SurveyQuestion {
+  id         String @id @default(uuid())
+  businessId String // denormalised for tenant-scoped reads
+  surveyId   String
+  survey     Survey @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+
+  section    String? // group label (e.g. "Wellbeing"); null = ungrouped
+  orderIndex Int                @default(0)
+  type       SurveyQuestionType // SCALE | LIKERT | NPS | SINGLE | MULTI | TEXT
+  prompt     String             @db.Text
+  required   Boolean            @default(true)
+
+  // Type-specific config (kept as columns + one JSON for options — no per-type tables).
+  scaleMin      Int? // SCALE/LIKERT/NPS bounds (NPS pins 0..10 in service)
+  scaleMax      Int?
+  scaleMinLabel String? // e.g. "Strongly disagree"
+  scaleMaxLabel String?
+  options       Json? // SINGLE/MULTI: [{ value, label }] (stable values for aggregation)
+  allowOther    Boolean @default(false) // MULTI/SINGLE "Other" free-text
+  // ENPS computation only runs on questions flagged the eNPS driver (exactly one per ENPS survey).
+  isEnpsDriver  Boolean @default(false)
+
+  answers SurveyAnswer[]
+
+  @@index([surveyId, orderIndex])
+}
+
+enum SurveyQuestionType {
+  SCALE
+  LIKERT
+  NPS
+  SINGLE
+  MULTI
+  TEXT
+}
+
+// One submission (a "ballot") — THE ANONYMITY FIREWALL. For an ANONYMOUS survey this
+// row carries NO employeeId — there is structurally no column to join back to a
+// person. The only retained slice is a COARSE, k-checked segment label captured AT
+// SUBMIT TIME (e.g. "Engineering") for the breakdown — never the raw entity/dept
+// ids, never tenure/manager/location combos that could re-identify. For a
+// NON-anonymous (attributed) survey, employeeId IS stored.
+model SurveyResponse {
+  id           String           @id @default(uuid())
+  businessId   String
+  business     Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  surveyId     String
+  occurrenceId String // every response belongs to a SurveyOccurrence (one-shot has one)
+  occurrence   SurveyOccurrence @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
+
+  // ── identity firewall ──
+  // anonymous == true  → employeeId is ALWAYS null (enforced in service)
+  // anonymous == false → employeeId set (attributed survey, e.g. manager-effectiveness)
+  employeeId   String? // intentionally nullable; NO @relation — no FK to join back
+  // Coarse segment label snapshot for the breakdown. A SINGLE bucket name only (dept
+  // OR entity, the survey's breakdown dimension), never a tuple. Suppressed in output
+  // when its group < minResponsesToShow (k-anonymity).
+  segmentLabel String?
+
+  submittedAt  DateTime @default(now())
+  // Anti-tamper: random per-response token shown to ESS as a receipt; NOT a person link.
+  receiptToken String   @default(uuid())
+
+  answers SurveyAnswer[]
+
+  // NOTE: deliberately NO @@index on (occurrenceId, employeeId) — we never query
+  // "this person's response". Double-submit is blocked by SurveyParticipation, a
+  // SEPARATE table, so content and identity never share a row or an index.
+  @@index([surveyId, occurrenceId])
+  @@index([businessId, surveyId])
+}
+
+model SurveyAnswer {
+  id         String         @id @default(uuid())
+  responseId String
+  response   SurveyResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+  questionId String
+  question   SurveyQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  // Exactly one of these is populated per the question type:
+  numericValue Int? // SCALE | LIKERT | NPS (0..10)
+  choiceValues String[] @default([]) // SINGLE (len 1) | MULTI (len ≥0) — stores option `value`s
+  textValue    String?  @db.Text // TEXT, or "Other" free-text (a re-id risk → gated verbatims)
+
+  @@index([questionId])
+  @@index([responseId])
+}
+
+// One run of a (possibly recurring) survey. A one-shot survey has exactly ONE
+// occurrence (created at publish). A recurring survey spawns one per cadence tick
+// (pulseScheduleRunner). eNPS trend = score per occurrence over time. Anonymous
+// responses bucket per occurrence so "this month's pulse" is a clean cohort.
+model SurveyOccurrence {
+  id         String @id @default(uuid())
+  businessId String
+  surveyId   String
+  survey     Survey @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+
+  seq          Int // 1,2,3… for display ("Pulse #4")
+  opensAt      DateTime // publishedAt of this run
+  closesAt     DateTime // opensAt + windowDays
+  status       OccurrenceStatus @default(OPEN) // OPEN | CLOSED
+  // Denormalised audience size at open (the invite count) — the response-rate denominator.
+  invitedCount Int              @default(0)
+  notifiedAt   DateTime? // per-occurrence idempotent invite stamp
+
+  responses      SurveyResponse[]
+  participations SurveyParticipation[]
+
+  @@unique([surveyId, seq])
+  @@index([businessId, status, closesAt])
+}
+
+enum OccurrenceStatus {
+  OPEN
+  CLOSED
+}
+
+// Double-submit guard WITHOUT linking content. Records THAT an employee submitted to
+// an occurrence — never WHAT. This is the *only* place an employeeId touches an
+// anonymous survey, and it holds ZERO answer data. The split is the whole trick:
+// content lives in SurveyResponse (no employeeId), the "already done" flag lives here
+// (employeeId, no content). Nothing joins the two. Powers: block double-submit, the
+// ESS "Done ✓ / Pending" badge, response rate, and reminders to non-responders.
+model SurveyParticipation {
+  id           String             @id @default(uuid())
+  businessId   String
+  occurrenceId String
+  occurrence   SurveyOccurrence   @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
+  employeeId   String
+  employee     Employee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  // Status lets us count "invited but skipped" for reminders without storing a response.
+  state        ParticipationState @default(PENDING) // PENDING | SUBMITTED | DISMISSED
+  submittedAt  DateTime?
+
+  @@unique([occurrenceId, employeeId]) // one ballot per person per occurrence (the guard)
+  @@index([businessId, employeeId, state])
+}
+
+enum ParticipationState {
+  PENDING
+  SUBMITTED
+  DISMISSED
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // Feature 37 — LMS (Learning Management System)
 // India-first compliance training (POSH annual + new-joiner-30-day, safety, ISMS,
 // code-of-conduct). Content tree (Course → Module → Lesson → Quiz → Question);
@@ -13336,27 +13572,27 @@ model AnnouncementRead {
 
 // ───────────────────────────────  CONTENT (config)  ──────────────────────────
 model Course {
-  id            String   @id @default(uuid())
-  businessId    String
-  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  entityId      String? // null = tenant-wide catalog item
-  code          String // "POSH-2026", "ISMS-101" (human; per-tenant unique)
-  title         String
-  description   String?  @db.Text
-  category      LearningCategory @default(GENERAL)
-  thumbnailUrl  String?  @db.Text
-  estMinutes    Int? // est. duration for the calendar/UX
-  passThreshold Int?     @default(70) // % across graded quizzes (course-level default)
-  completionRule CompletionRule @default(ALL_LESSONS) // ALL_LESSONS | QUIZ_PASS | BOTH
-  certificateEnabled    Boolean @default(true)
+  id                    String           @id @default(uuid())
+  businessId            String
+  business              Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId              String? // null = tenant-wide catalog item
+  code                  String // "POSH-2026", "ISMS-101" (human; per-tenant unique)
+  title                 String
+  description           String?          @db.Text
+  category              LearningCategory @default(GENERAL)
+  thumbnailUrl          String?          @db.Text
+  estMinutes            Int? // est. duration for the calendar/UX
+  passThreshold         Int?             @default(70) // % across graded quizzes (course-level default)
+  completionRule        CompletionRule   @default(ALL_LESSONS) // ALL_LESSONS | QUIZ_PASS | BOTH
+  certificateEnabled    Boolean          @default(true)
   certificateTemplateId String? // -> LetterTemplate (LMS_CERTIFICATE); null = tenant default
-  status        CourseStatus @default(DRAFT)
-  publishedAt   DateTime?
-  publishedBy   String?
-  version       Int      @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  deletedAt     DateTime?
+  status                CourseStatus     @default(DRAFT)
+  publishedAt           DateTime?
+  publishedBy           String?
+  version               Int              @default(0)
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  deletedAt             DateTime?
 
   modules     CourseModule[]
   assignments CourseAssignment[]
@@ -13389,16 +13625,16 @@ enum CompletionRule {
 }
 
 model CourseModule {
-  id         String   @id @default(uuid())
+  id         String    @id @default(uuid())
   businessId String
-  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business   Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
   courseId   String
-  course     Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  course     Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
   title      String
-  orderIndex Int      @default(0)
-  version    Int      @default(0)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  orderIndex Int       @default(0)
+  version    Int       @default(0)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
   deletedAt  DateTime?
 
   lessons Lesson[]
@@ -13443,17 +13679,17 @@ enum LessonKind {
 }
 
 model Quiz {
-  id            String   @id @default(uuid())
+  id            String    @id @default(uuid())
   businessId    String
-  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  lessonId      String   @unique
-  lesson        Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
-  passThreshold Int      @default(70) // % to pass this quiz
-  maxAttempts   Int?     @default(3) // null = unlimited
-  shuffle       Boolean  @default(true)
-  version       Int      @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  business      Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  lessonId      String    @unique
+  lesson        Lesson    @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  passThreshold Int       @default(70) // % to pass this quiz
+  maxAttempts   Int?      @default(3) // null = unlimited
+  shuffle       Boolean   @default(true)
+  version       Int       @default(0)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
   deletedAt     DateTime?
 
   questions QuizQuestion[]
@@ -13463,23 +13699,23 @@ model Quiz {
 }
 
 model QuizQuestion {
-  id         String   @id @default(uuid())
-  businessId String
-  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  quizId     String
-  quiz       Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
-  orderIndex Int      @default(0)
-  prompt     String   @db.Text
-  kind       QuestionKind @default(SINGLE) // SINGLE | MULTI | TRUE_FALSE
+  id               String       @id @default(uuid())
+  businessId       String
+  business         Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  quizId           String
+  quiz             Quiz         @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  orderIndex       Int          @default(0)
+  prompt           String       @db.Text
+  kind             QuestionKind @default(SINGLE) // SINGLE | MULTI | TRUE_FALSE
   // options as JSON: [{ id, text }]; correctOptionIds = string[] of option ids.
   // correctOptionIds is NEVER serialized to the ESS learner runtime (answer-key leak guard).
   optionsJson      Json
   correctOptionIds String[]
-  points     Int      @default(1)
-  version    Int      @default(0)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  deletedAt  DateTime?
+  points           Int          @default(1)
+  version          Int          @default(0)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  deletedAt        DateTime?
 
   @@index([businessId, quizId, orderIndex])
 }
@@ -13492,28 +13728,28 @@ enum QuestionKind {
 
 // ──────────────────────────  ASSIGNMENT (audience rule)  ──────────────────────
 model CourseAssignment {
-  id         String   @id @default(uuid())
-  businessId String
-  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  courseId   String
-  course     Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  id                  String                @id @default(uuid())
+  businessId          String
+  business            Business              @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  courseId            String
+  course              Course                @relation(fields: [courseId], references: [id], onDelete: Cascade)
   // audience — mirrors engagement Announcement (audience.js SCOPE), + ROLE.
   audienceScope       LearningAudienceScope @default(ALL) // ALL | ENTITY | DEPARTMENT | ROLE | SPECIFIC
-  audienceEntityIds   String[] @default([])
-  audienceDeptIds     String[] @default([])
-  audienceRoleIds     String[] @default([]) // BusinessRole ids
-  audienceEmployeeIds String[] @default([])
-  isMandatory         Boolean  @default(true)
+  audienceEntityIds   String[]              @default([])
+  audienceDeptIds     String[]              @default([])
+  audienceRoleIds     String[]              @default([]) // BusinessRole ids
+  audienceEmployeeIds String[]              @default([])
+  isMandatory         Boolean               @default(true)
   dueInDays           Int? // due = assignedAt + dueInDays (relative; good for new-joiner)
-  dueOn               DateTime? @db.Date // OR an absolute due date (campaign style)
-  recurrence          RecurrenceRule @default(NONE) // NONE | ANNUAL | HALF_YEARLY | QUARTERLY
-  newJoinerRule       Boolean  @default(false) // auto-assign to anyone who joins after this assignment
-  newJoinerWithinDays Int?     @default(30) // POSH: 30-day onboarding window
-  active              Boolean  @default(true)
+  dueOn               DateTime?             @db.Date // OR an absolute due date (campaign style)
+  recurrence          RecurrenceRule        @default(NONE) // NONE | ANNUAL | HALF_YEARLY | QUARTERLY
+  newJoinerRule       Boolean               @default(false) // auto-assign to anyone who joins after this assignment
+  newJoinerWithinDays Int?                  @default(30) // POSH: 30-day onboarding window
+  active              Boolean               @default(true)
   createdBy           String
-  version             Int      @default(0)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  version             Int                   @default(0)
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
   deletedAt           DateTime?
 
   enrollments Enrollment[]
@@ -13539,32 +13775,32 @@ enum RecurrenceRule {
 
 // ──────────────────────────  LEARNER RECORDS (per employee)  ──────────────────
 model Enrollment {
-  id           String   @id @default(uuid())
-  businessId   String
-  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  courseId     String
-  course       Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  assignmentId String? // null = self-enrolled (optional catalog course)
-  assignment   CourseAssignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
-  employeeId   String
-  employee     Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  isMandatory  Boolean  @default(false)
-  status       EnrollmentStatus @default(ASSIGNED)
-  assignedAt   DateTime @default(now())
-  startedAt    DateTime?
-  completedAt  DateTime?
-  dueAt        DateTime? // resolved from assignment.dueInDays/dueOn at fan-out
-  cycleKey     String // recurrence cycle, e.g. "2026" (annual) | "once" (self/one-off) — uniqueness axis
-  progressPct  Int      @default(0) // denormalised 0..100 for cheap dashboards
+  id                  String            @id @default(uuid())
+  businessId          String
+  business            Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  courseId            String
+  course              Course            @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  assignmentId        String? // null = self-enrolled (optional catalog course)
+  assignment          CourseAssignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
+  employeeId          String
+  employee            Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  isMandatory         Boolean           @default(false)
+  status              EnrollmentStatus  @default(ASSIGNED)
+  assignedAt          DateTime          @default(now())
+  startedAt           DateTime?
+  completedAt         DateTime?
+  dueAt               DateTime? // resolved from assignment.dueInDays/dueOn at fan-out
+  cycleKey            String // recurrence cycle, e.g. "2026" (annual) | "once" (self/one-off) — uniqueness axis
+  progressPct         Int               @default(0) // denormalised 0..100 for cheap dashboards
   certificateLetterId String? // -> IssuedLetter (F9). Set on completion when certificateEnabled
-  waivedReason String? // HR exemption/waiver audit
-  waivedBy     String?
+  waivedReason        String? // HR exemption/waiver audit
+  waivedBy            String?
   // reminder dedup cursor (mirrors proof-window/compliance last-sent guard) — avoids a storm.
-  lastReminderStage String? // null | DUE_T7 | DUE_T1 | OVERDUE
-  lastReminderAt    DateTime?
-  version      Int      @default(0)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  lastReminderStage   String? // null | DUE_T7 | DUE_T1 | OVERDUE
+  lastReminderAt      DateTime?
+  version             Int               @default(0)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
 
   lessonProgress LessonProgress[]
   quizAttempts   QuizAttempt[]
@@ -13586,20 +13822,20 @@ enum EnrollmentStatus {
 }
 
 model LessonProgress {
-  id           String     @id @default(uuid())
-  businessId   String
-  business     Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  enrollmentId String
-  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
-  lessonId     String
-  lesson       Lesson     @relation(fields: [lessonId], references: [id], onDelete: Cascade)
-  status       LessonProgressStatus @default(NOT_STARTED)
-  lastPositionSec Int     @default(0) // VIDEO resume point
-  watchedPct   Int        @default(0)
-  completedAt  DateTime?
-  version      Int        @default(0)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  id              String               @id @default(uuid())
+  businessId      String
+  business        Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  enrollmentId    String
+  enrollment      Enrollment           @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  lessonId        String
+  lesson          Lesson               @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  status          LessonProgressStatus @default(NOT_STARTED)
+  lastPositionSec Int                  @default(0) // VIDEO resume point
+  watchedPct      Int                  @default(0)
+  completedAt     DateTime?
+  version         Int                  @default(0)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
 
   @@unique([businessId, enrollmentId, lessonId])
   @@index([businessId, enrollmentId, status])
@@ -13632,10 +13868,10 @@ model QuizAttempt {
 
 // Thin index row for fast cert lookups (the source of truth is IssuedLetter/F9).
 model LearningCertificate {
-  id                 String   @id @default(uuid())
+  id                 String     @id @default(uuid())
   businessId         String
-  business           Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  enrollmentId       String   @unique
+  business           Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  enrollmentId       String     @unique
   enrollment         Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
   employeeId         String
   courseId           String
@@ -13643,7 +13879,7 @@ model LearningCertificate {
   employeeDocumentId String? // -> EmployeeDocument (vault copy)
   referenceNo        String
   cycleKey           String?
-  issuedAt           DateTime @default(now())
+  issuedAt           DateTime   @default(now())
 
   @@index([businessId, employeeId])
   @@index([businessId, courseId])
@@ -13669,34 +13905,34 @@ model LearningCertificate {
 
 /// One salary-advice batch: a PayRun rendered for a specific bank rail.
 model PayoutBatch {
-  id              String             @id @default(uuid())
+  id              String            @id @default(uuid())
   businessId      String
-  business        Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business        Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
   payRunId        String
-  payRun          PayRun             @relation(fields: [payRunId], references: [id], onDelete: Restrict)
+  payRun          PayRun            @relation(fields: [payRunId], references: [id], onDelete: Restrict)
   // Which bank salary-upload format this batch is rendered for (HDFC/ICICI/…) or
   // the generic NEFT/RTGS rail. Drives the pure formatter in bankFormats.js.
   bank            PayoutBank
-  status          PayoutBatchStatus  @default(QUEUED)
+  status          PayoutBatchStatus @default(QUEUED)
   // Money (paise). totalMinor == Σ line.amountMinor == run net (round-tripped).
-  totalMinor      BigInt             @default(0)
-  count           Int                @default(0)
-  currencyCode    String             @db.Char(3)
+  totalMinor      BigInt            @default(0)
+  count           Int               @default(0)
+  currencyCode    String            @db.Char(3)
   // Company debit account the bank pulls the aggregate credit from (optional —
   // some banks key it off the channel login). Free-text account number.
   debitAccount    String?
   // Requested value date (credit date) for the bank file (YYYY-MM-DD).
-  valueDate       DateTime?          @db.Date
+  valueDate       DateTime?         @db.Date
   // Optional gateway rail (RazorpayX/Cashfree) — null = bank-file path only.
   gatewayProvider String?
   gatewayBatchId  String?
   createdBy       String
-  fileGeneratedAt DateTime?          // stamped when the advice file is first generated
-  reconciledAt    DateTime?          // stamped when reconciliation rolls the batch to a terminal state
+  fileGeneratedAt DateTime? // stamped when the advice file is first generated
+  reconciledAt    DateTime? // stamped when reconciliation rolls the batch to a terminal state
   notes           String?
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
-  version         Int                @default(0)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  version         Int               @default(0)
 
   lines PayoutLine[]
 
@@ -13714,14 +13950,14 @@ model PayoutLine {
   batch           PayoutBatch      @relation(fields: [batchId], references: [id], onDelete: Cascade)
   employeeId      String
   employee        Employee         @relation(fields: [employeeId], references: [id], onDelete: Restrict)
-  amountMinor     BigInt           // net pay to credit (paise) — snapshot of PayRunLine.netPay
-  beneficiaryName String           // snapshot of the bank account holder name
-  accountNumber   String           // snapshot of BankAccount.accountNumber
+  amountMinor     BigInt // net pay to credit (paise) — snapshot of PayRunLine.netPay
+  beneficiaryName String // snapshot of the bank account holder name
+  accountNumber   String // snapshot of BankAccount.accountNumber
   ifsc            String           @db.Char(11) // snapshot of BankAccount.ifsc (IN)
-  narration       String?          // statement narration (e.g. "SAL JUN2026")
+  narration       String? // statement narration (e.g. "SAL JUN2026")
   status          PayoutLineStatus @default(PENDING)
-  utr             String?          // bank Unique Transaction Reference once credited
-  failureReason   String?          // populated on FAILED/RETURNED
+  utr             String? // bank Unique Transaction Reference once credited
+  failureReason   String? // populated on FAILED/RETURNED
   reconciledAt    DateTime?
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt

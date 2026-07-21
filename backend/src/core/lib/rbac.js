@@ -102,6 +102,13 @@ const PERMISSIONS = Object.freeze({
   // in-audience feed via the customer session); this gates only the operator authoring
   // surface. Seeded true for Owner (all) + HR-Admin below.
   canManageAnnouncements:   'Create, publish, pin + archive company announcements (news feed)',
+  // Feature 33 — Pulse Surveys + eNPS (employee listening). Gates the operator
+  // authoring + results surface (create/publish/schedule/close + the k-anonymised
+  // dashboard + the gated verbatims tab). ESS read/respond needs NO key — every
+  // employee answers their own in-audience surveys via the customer session,
+  // exactly like the news feed. Granted wherever canManageAnnouncements is
+  // (Owner via all-true + HR-Admin below).
+  canManageSurveys:         'Create, publish, schedule + analyse pulse surveys / eNPS (employee listening)',
   // Learning / LMS (Feature 37) — additive; no migration. canManageLearning is the
   // L&D / HR-Admin author+assign key (courses, lessons, quizzes, assignments,
   // certificate issue/revoke); canViewTeamLearning is the Manager TEAM-band read key
@@ -153,6 +160,8 @@ const SYSTEM_ROLES = Object.freeze({
     canManageHelpdesk: true,
     // Engagement (Cycle 1) — HR-Admin authors + publishes company announcements.
     canManageAnnouncements: true,
+    // Feature 33 — HR-Admin runs employee listening (pulse surveys + eNPS).
+    canManageSurveys: true,
     // Feature 37 — HR-Admin owns the LMS: author courses + assign + view all compliance.
     canManageLearning: true, canViewTeamLearning: true,
     // No canEditBilling / canEditDomain / canApprovePayroll — Owner/Finance only

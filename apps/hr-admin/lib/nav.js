@@ -59,6 +59,11 @@ export const NAV_ITEMS = [
   // authoring workspace. Gated on the new canManageAnnouncements rbac key (seeded true
   // for Owner + HR-Admin). The server is the real boundary; this just hides the link.
   { key: 'announcements', label: 'Announcements', href: '/announcements', feature: 'hr', permission: 'canManageAnnouncements', icon: 'letter' },
+  // FLAG (Feature 33 — NEW nav item): Pulse Surveys + eNPS (employee listening) —
+  // builder, audience/schedule and the k-anonymised results dashboard. Gated on the
+  // new canManageSurveys rbac key (seeded true for Owner + HR-Admin, like
+  // canManageAnnouncements). The server is the real boundary; this just hides the link.
+  { key: 'surveys', label: 'Surveys & eNPS', href: '/surveys', feature: 'hr', permission: 'canManageSurveys', icon: 'chart' },
   // Performance & Goals (Feature 8). Visible to Managers (TEAM band — their reports'
   // goals/reviews, server-scoped) + HR-Admin (cycle config behind
   // canManagePerformanceCycle, hidden via hasPermission on the page). Server is the
@@ -220,7 +225,7 @@ export const NAV_ITEMS = [
 // own native parent/child structure (group:true + parent:'letters') and is
 // emitted as its own expandable section, so it is intentionally omitted here.
 export const NAV_GROUPS = [
-  { key: 'people-org', label: 'People & Org', icon: 'people', items: ['people', 'org', 'profile-changes', 'profile-policy', 'helpdesk', 'announcements'] },
+  { key: 'people-org', label: 'People & Org', icon: 'people', items: ['people', 'org', 'profile-changes', 'profile-policy', 'helpdesk', 'announcements', 'surveys'] },
   { key: 'talent', label: 'Talent', icon: 'onboarding', items: ['recruitment', 'onboarding', 'separations', 'performance'] },
   { key: 'time', label: 'Time', icon: 'calendar', items: ['leave', 'comp-off', 'leave-encashment', 'attendance'] },
   { key: 'pay', label: 'Pay', icon: 'wallet', items: ['compensation', 'ctc-policies', 'fbp-plans', 'fbp-allocations', 'payroll', 'bonus', 'arrears', 'form16', 'compliance', 'registers', 'tax-declaration-window', 'tax-proof-verification', 'tax-regime', 'expenses', 'travel', 'loans', 'reports'] },
@@ -323,6 +328,8 @@ const PERMISSION_KEYS = [
   'canManageHelpdesk',
   // Engagement Cycle 1 — Announcements (FLAG FOR MERGE)
   'canManageAnnouncements',
+  // Feature 33 — Pulse Surveys + eNPS (FLAG FOR MERGE)
+  'canManageSurveys',
 ];
 const ALL_TRUE = Object.fromEntries(PERMISSION_KEYS.map((k) => [k, true]));
 

@@ -68,6 +68,10 @@ const NAV = [
   // Engagement Cycle 1 — the company news feed (announcements). Carries an unread
   // badge sourced from /api/hr/me/engagement/feed/unread-count.
   { type: 'item', href: '/feed', label: 'News', icon: 'news', badgeKey: 'news' },
+  // Feature 33 — Pulse surveys + eNPS: "Surveys for you" (open pulses with a
+  // Pending / Done badge) + the anonymous fill flow. The survey invite email
+  // links straight to /surveys, so this page must exist at that route.
+  { type: 'item', href: '/surveys', label: 'Surveys', icon: 'approvals' },
   { type: 'item', href: '/profile', label: 'Personal Information', icon: 'user' },
   // Cycle 1 — Company Directory (available to every employee; a tenant-wide,
   // privacy-safe colleague directory).

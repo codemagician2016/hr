@@ -257,6 +257,19 @@ router.use('/me/directory', require('../profile/meDirectory.routes'));
 //                                  paginated) + mark-as-read + unread count + the
 //                                  privacy-aware celebration feed (no DOB-year leak).
 router.use('/announcements', require('../engagement/routes/announcements.routes'));
+// FLAG (Feature 33 — NEW mounts): Pulse Surveys + eNPS (employee listening).
+//   /api/hr/surveys                → operator authoring + results (protect +
+//                                    canManageSurveys): builder/publish/close/
+//                                    archive + the k-anonymised dashboard
+//                                    (results / trend / segments / gated verbatims).
+//   /api/hr/me/engagement/surveys  → ESS (customer session, SELF_ONLY): my open
+//                                    occurrences + fill/submit (the anonymity
+//                                    firewall — anonymous ballots carry NO
+//                                    employeeId) + dismiss. Mounted BEFORE
+//                                    /me/engagement so the feed router's
+//                                    middleware never double-runs.
+router.use('/surveys', require('../engagement/routes/surveys.routes'));
+router.use('/me/engagement/surveys', require('../engagement/routes/meSurveys.routes'));
 router.use('/me/engagement', require('../engagement/routes/meEngagement.routes'));
 
 // Reports / analytics — read-only payroll register, statutory summary,
