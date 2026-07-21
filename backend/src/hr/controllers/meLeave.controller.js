@@ -243,12 +243,15 @@ async function applyForLeave(req, res, next) {
           data: { pendingApproval: { increment: units }, version: { increment: 1 } },
         });
       }
-      // Feature 30 — a COMP_OFF avail MUST route through the approval engine so the
-      // comp-off seam (consumers.leave#onApprove) debits the FIFO lots on approval.
-      // Category-gated: zero behaviour change for every other ESS leave type (which
-      // keep their existing simplified self-apply path). Mirrors the operator
+      // F10 — EVERY ESS leave application routes through the approval engine
+      // (module LEAVE, built-in default chain = reporting manager), so the
+      // manager's approvals inbox — mobile app, web ESS and operator console —
+      // actually receives it; consumers.leave flips the transaction + moves the
+      // soft-hold on decision. Previously only COMP_OFF routed here: a plain
+      // EL/SL/CL self-apply created a stranded PENDING row that NO inbox ever
+      // saw (found by the Feature-40 end-to-end audit). Mirrors the operator
       // createRequest engine.openRequest call shape exactly.
-      if (ctx.leaveType.category === 'COMP_OFF') {
+      {
         const engine = require('../approvals/engine');
         await engine.openRequest({
           businessId,
@@ -325,6 +328,20 @@ async function cancelRequest(req, res, next) {
       }
       return tx.leaveTransaction.findUnique({ where: { id: txn.id } });
     });
+
+    // F10 — withdraw the engine request too (AFTER the authoritative flip: the
+    // consumer's onCancel is tolerant of the already-CANCELLED transaction, and
+    // cancelling clears the request from every approver inbox). Best-effort.
+    try {
+      const openReq = await prisma.approvalRequest.findFirst({
+        where: { businessId, module: 'LEAVE', entityId: txn.id, status: 'PENDING' },
+        select: { id: true },
+      });
+      if (openReq) {
+        const engine = require('../approvals/engine');
+        await engine.cancel({ approvalRequestId: openReq.id, actorUserId: 'SYSTEM', comment: 'Withdrawn by employee' });
+      }
+    } catch (_e) { /* the flip above is authoritative */ }
 
     res.json(updated);
   } catch (e) {

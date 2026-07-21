@@ -87,11 +87,22 @@ async function upsertPolicy(req, res, next) {
       isActive: asBool(b.isActive, true),
     };
 
-    const row = await prisma.attendanceCapturePolicy.upsert({
-      where: { businessId_scope_scopeId: { businessId, scope, scopeId } },
-      create: { businessId, scope, scopeId, createdBy: req.user.id || null, ...data },
-      update: { ...data, version: { increment: 1 } },
+    // find-then-write, NOT prisma.upsert: the compound unique includes the
+    // NULLABLE scopeId, and Prisma rejects null inside a unique `where` input —
+    // a TENANT-scope save (scopeId null) 500s under upsert (found by the
+    // Feature-40 end-to-end audit; the @@unique still guards racing creates).
+    const existing = await prisma.attendanceCapturePolicy.findFirst({
+      where: { businessId, scope, scopeId },
+      select: { id: true },
     });
+    const row = existing
+      ? await prisma.attendanceCapturePolicy.update({
+          where: { id: existing.id },
+          data: { ...data, version: { increment: 1 } },
+        })
+      : await prisma.attendanceCapturePolicy.create({
+          data: { businessId, scope, scopeId, createdBy: req.user.id || null, ...data },
+        });
     await writeAudit({ businessId, actorId: req.user.id, action: 'attendance.capture.policy.upsert', entityType: 'AttendanceCapturePolicy', entityId: row.id }).catch(() => {});
     res.status(201).json(row);
   } catch (e) { next(e); }
