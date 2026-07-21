@@ -265,7 +265,18 @@ async function create(req, res, next) {
       // (businessId, scope:'EMPLOYEE') NumberSequence row inside THIS tx, so the
       // allocated value and the Employee row that uses it commit together.
       if (autoCode) {
-        data.code = await allocateCode(tx, { businessId, scope: 'EMPLOYEE' });
+        // P1.7 — token context so a tenant prefix like "EMP-{ENTITY}-{YY}-"
+        // expands with the hire's entity/department codes + the current year.
+        const tokenCtx = { year: new Date().getUTCFullYear() };
+        if (body.entityId) {
+          const ent = await tx.entity.findFirst({ where: { id: body.entityId, businessId }, select: { code: true } });
+          if (ent) tokenCtx.entityCode = ent.code;
+        }
+        if (departmentId) {
+          const dept = await tx.department.findFirst({ where: { id: departmentId, businessId }, select: { code: true } });
+          if (dept) tokenCtx.deptCode = dept.code;
+        }
+        data.code = await allocateCode(tx, { businessId, scope: 'EMPLOYEE', tokenCtx });
       }
       const created = await tx.employee.create({ data });
 

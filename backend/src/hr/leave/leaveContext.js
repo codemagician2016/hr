@@ -152,11 +152,17 @@ async function loadApplyContext({ businessId, employeeId, leaveTypeId, startDate
     });
   }
 
+  // P1.7 — restricted-holiday elections: the engines (calendar/leaveToAttendance)
+  // already consume optedRestrictedDates; this populates it at last.
+  const { loadOptedRestrictedDates } = require('../attendance/restrictedHolidays.controller');
+  const optedRestrictedDates = await loadOptedRestrictedDates(db, { businessId, employeeId }).catch(() => new Set());
+
   return {
     employee,
     leaveType,
     weeklyOffDays: schedule ? schedule.weeklyOffDays : null,
     holidays,
+    optedRestrictedDates,
     policy: resolved ? resolved.policy : null,
     accrualRules: resolved ? resolved.accrualRules : [],
     assignment: resolved ? resolved.assignment : null,

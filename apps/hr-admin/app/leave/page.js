@@ -31,6 +31,7 @@ import {
 import { get, post, patch, del, downloadFile, qs } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, employeeLabel, ServerPagination } from '@/lib/ui';
 import { useTenantCountries } from '@/lib/useTenantCountries';
+import { useHrMeta } from '@/lib/useHrMeta';
 import { InfoTip, SectionTitle } from '@/lib/widgets';
 import EmployeeSearchSelect from '@/components/EmployeeSearchSelect';
 import ModuleGuide from '@/components/ModuleGuide';
@@ -1135,7 +1136,8 @@ const SANDWICH_OPTS = ['', 'INCLUSIVE', 'EXCLUSIVE'];
 const COUNTRY_OPTS = ['', 'IN'];
 const ACCRUAL_METHOD_OPTS = ['UPFRONT_ANNUAL', 'MONTHLY_ACCRUAL', 'ANNIVERSARY_GRANT', 'WORKED_HOURS_RATIO', 'NONE'];
 const ACCRUAL_FREQ_OPTS = ['MONTHLY', 'QUARTERLY', 'ANNUAL', 'PER_PAY_PERIOD'];
-const GENDER_OPTS = ['', 'MALE', 'FEMALE', 'OTHER'];
+// Gender + EmploymentType vocabularies come from GET /api/hr/meta (P1.7) via
+// useHrMeta (hardcoded fallback lives in the hook).
 // prisma enum EncashmentBasis — the per-day money basis for F31 in-service encashment.
 const ENCASH_BASIS_OPTS = [
   { value: 'BASIC_DA_26', label: '(Basic+DA) / 26 — market standard' },
@@ -1144,8 +1146,6 @@ const ENCASH_BASIS_OPTS = [
 ];
 const MONTH_OPTS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
   .map((m, i) => ({ value: String(i + 1), label: `${i + 1} — ${m}` }));
-// prisma enum EmploymentType — assignment scope EMPLOYMENT_TYPE targets.
-const EMPLOYMENT_TYPE_OPTS = ['FULL_TIME', 'PART_TIME', 'FIXED_TERM', 'CONTRACT', 'INTERN', 'APPRENTICE', 'CASUAL', 'CONSULTANT'];
 const ASSIGNMENT_SCOPE_OPTS = ['ENTITY', 'DEPARTMENT', 'GRADE', 'EMPLOYMENT_TYPE', 'EMPLOYEE'];
 
 function prettyEnum(v) {
@@ -1479,7 +1479,7 @@ function typeFields(countries) {
 // LEAVE_POLICY_FIELDS: probation gate, F31 in-service encashment knobs and the
 // F10 workflowDefinitionId binding are all PATCHable. The F31 knobs only show
 // when encashInService is ON (showIf).
-function policyFields(typeOptions, workflowOptions) {
+function policyFields(typeOptions, workflowOptions, genderOptions) {
   const encashOn = (d) => d.encashInService === true || d.encashInService === 'true';
   return [
     { type: 'section', label: 'Basics' },
@@ -1503,7 +1503,7 @@ function policyFields(typeOptions, workflowOptions) {
     { key: 'minTenureMonths', label: 'Min tenure (months)', type: 'number' },
     { key: 'blockDuringProbation', label: 'Block during probation', type: 'checkbox', hint: 'Blocks applications while employee status is PROBATION — separate from tenure months.' },
     { key: 'appliesToEmploymentTypes', label: 'Employment types (CSV)', hint: 'Legacy CSV filter (e.g. FULL_TIME,PART_TIME). Prefer the "Applies to" assignments in Tiers & scope for entity/department/grade/employee targeting.' },
-    { key: 'genderRestriction', label: 'Gender restriction', type: 'select', options: GENDER_OPTS },
+    { key: 'genderRestriction', label: 'Gender restriction', type: 'select', options: genderOptions || [] },
     { type: 'section', label: 'Exit encashment', hint: 'Leave encashed at Full & Final settlement (§10(10AA) exemption applies on exit).' },
     { key: 'encashOnExit', label: 'Encash on exit', type: 'checkbox' },
     { key: 'maxEncashCap', label: 'Max encash cap', type: 'number' },
@@ -1652,6 +1652,7 @@ function TiersEditor({ policyId }) {
 // employee picker for EMPLOYEE, and the EmploymentType enum for EMPLOYMENT_TYPE.
 
 function AssignmentsEditor({ policyId }) {
+  const meta = useHrMeta(); // P1.7 — employmentTypes for the EMPLOYMENT_TYPE scope
   const [items, setItems] = useState(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -1788,7 +1789,7 @@ function AssignmentsEditor({ policyId }) {
               <span className="mb-1 block font-medium text-gray-700">Employment type *</span>
               <select value={scopeRefId} required onChange={(e) => setScopeRefId(e.target.value)} className={selCls}>
                 <option value="">Select…</option>
-                {EMPLOYMENT_TYPE_OPTS.map((t) => (
+                {meta.employmentTypes.map((t) => (
                   <option key={t} value={t}>{prettyEnum(t)}</option>
                 ))}
               </select>
@@ -1836,6 +1837,7 @@ function PolicyExtrasModal({ policy, onClose }) {
 function PoliciesTab({ types, typeById }) {
   const [workflowOpts, setWorkflowOpts] = useState([]);
   const [extras, setExtras] = useState(null); // policy row whose drawer is open
+  const meta = useHrMeta(); // P1.7 — genders for the genderRestriction select
 
   useEffect(() => {
     // Published LEAVE workflow definitions (F10). The endpoint is gated by
@@ -1855,7 +1857,7 @@ function PoliciesTab({ types, typeById }) {
       <ConfigTab
         resource="policies"
         title="Policies"
-        fields={policyFields(types, workflowOpts)}
+        fields={policyFields(types, workflowOpts, meta.genders)}
         columns={policyColumns(typeById)}
         extraRowActions={(r) => (
           <ActionButton onClick={() => setExtras(r)}>Tiers &amp; scope</ActionButton>

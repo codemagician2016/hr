@@ -49,8 +49,24 @@ const SCOPE_DEFAULTS = Object.freeze({
   FORM16: { prefix: 'FORM16-', padding: 4 },
 });
 
-function format(prefix, value, padding) {
-  return `${prefix}${String(value).padStart(padding, '0')}`;
+/**
+ * P1.7 — token expansion in the stored prefix/pattern. A tenant prefix may now
+ * embed {ENTITY} (entity code), {DEPT} (department code), {YYYY}/{YY} (year):
+ * "EMP-{ENTITY}-{YY}-" + padding 4 → "EMP-BLR-26-0042". No tokens → identical
+ * output to before (full back-compat). Unresolvable tokens collapse to '' so a
+ * code NEVER fails to mint (an employee create must not die on a missing dept).
+ */
+function expandTokens(prefix, ctx = {}) {
+  const year = ctx.year != null ? String(ctx.year) : String(new Date().getUTCFullYear());
+  return String(prefix || '')
+    .split('{ENTITY}').join(ctx.entityCode || '')
+    .split('{DEPT}').join(ctx.deptCode || '')
+    .split('{YYYY}').join(year)
+    .split('{YY}').join(year.slice(-2));
+}
+
+function format(prefix, value, padding, tokenCtx) {
+  return `${expandTokens(prefix, tokenCtx)}${String(value).padStart(padding, '0')}`;
 }
 
 /**
@@ -63,7 +79,7 @@ function format(prefix, value, padding) {
  * lifecycle scopes (ONBOARD/OFFBOARD/SEP) that pass no periodKey continue to use the
  * single tenant-wide, non-resetting (…, periodKey: null) row exactly as before.
  */
-async function allocateCode(tx, { businessId, entityId = null, scope, prefix, padding, periodKey = null }) {
+async function allocateCode(tx, { businessId, entityId = null, scope, prefix, padding, periodKey = null, tokenCtx = null }) {
   if (!tx || !businessId || !scope) {
     throw new Error('allocateCode requires (tx, { businessId, scope })');
   }
@@ -89,7 +105,7 @@ async function allocateCode(tx, { businessId, entityId = null, scope, prefix, pa
     data: { nextValue: { increment: 1 } },
   });
 
-  return format(seq.prefix || pfx, value, seq.padding || pad);
+  return format(seq.prefix || pfx, value, seq.padding || pad, tokenCtx);
 }
 
-module.exports = { allocateCode, format, SCOPE_DEFAULTS };
+module.exports = { allocateCode, format, expandTokens, SCOPE_DEFAULTS };

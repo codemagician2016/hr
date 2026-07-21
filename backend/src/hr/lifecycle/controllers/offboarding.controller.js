@@ -659,6 +659,8 @@ async function computeFnfEndpoint(req, res, next) {
       currencyCode: entity ? entity.payCurrency : sep.currencyCode,
       separationType: sep.type,
       disablement: req.body && req.body.disablement === true,
+      // P1.7 — the entity's notice per-day divisor (NULL = 30-day convention).
+      noticeDaysInMonth: entity && entity.noticeDivisorDays ? entity.noticeDivisorDays : undefined,
       basicDaMonthlyMinor: pay.basicDaMonthlyMinor,
       grossMonthlyMinor: pay.grossMonthlyMinor,
       serviceYears,

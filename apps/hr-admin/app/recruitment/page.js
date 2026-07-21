@@ -17,10 +17,12 @@ import { ErrorBanner, PrimaryButton, TextInput, TextArea, Modal, ModalActions } 
 import { get, post, patch } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton } from '@/lib/ui';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
+import { useHrMeta, labelize } from '@/lib/useHrMeta';
 import { Info, FieldLabel, Pager, NumberInput } from './_components';
 import ModuleGuide from '@/components/ModuleGuide';
 
-const EMPLOYMENT_TYPES = ['FULL_TIME', 'PART_TIME', 'CONTRACT', 'INTERN', 'TEMPORARY'];
+// EmploymentType options come from GET /api/hr/meta (P1.7) via useHrMeta — the
+// old hardcoded list here had drifted (TEMPORARY is not a real enum value).
 const TABS = [
   { key: 'jobs', label: 'Jobs' },
   { key: 'templates', label: 'Scorecard templates' },
@@ -184,6 +186,7 @@ function JobsTab() {
 }
 
 function NewJobModal({ onClose, onCreated }) {
+  const meta = useHrMeta(); // P1.7 — employmentTypes vocabulary
   const [d, setD] = useState({
     code: '', title: '', countryCode: 'IN', employmentType: 'FULL_TIME', openings: 1,
     description: '', applicationWeightPct: 40, interviewWeightPct: 60, isPublic: false,
@@ -230,7 +233,7 @@ function NewJobModal({ onClose, onCreated }) {
           <div>
             <FieldLabel hint="Employment type for this role.">Employment type</FieldLabel>
             <select value={d.employmentType} onChange={(e) => set('employmentType')(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
-              {EMPLOYMENT_TYPES.map((t) => <option key={t} value={t}>{t.replace('_', ' ')}</option>)}
+              {meta.employmentTypes.map((t) => <option key={t} value={t}>{labelize(t).toUpperCase()}</option>)}
             </select>
           </div>
           <div>

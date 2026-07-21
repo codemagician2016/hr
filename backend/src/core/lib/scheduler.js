@@ -1260,6 +1260,27 @@ function initScheduler() {
     }
   });
 
+  // HR Documents (Program P1.7) — nightly expiry reminders at 03:30 (after the
+  // comp-off expiry family). Notifies employee + HR for documents expiring in
+  // exactly 30/7/1/0 days (exact-day match = naturally deduped). Per-row
+  // fail-soft; in-process overlap guard.
+  let docExpiryRunning = false;
+  cron.schedule('30 3 * * *', async () => {
+    if (docExpiryRunning) { console.log('[Scheduler] doc-expiry sweep still running — skipping tick'); return; }
+    docExpiryRunning = true;
+    try {
+      const { runDocumentExpirySweep } = require('../../hr/documents/documentExpiryRunner');
+      const r = await runDocumentExpirySweep({ asOf: new Date() });
+      if (r.reminded > 0 || r.errors > 0) {
+        console.log(`[Scheduler] doc-expiry sweep: ${JSON.stringify(r)}`);
+      }
+    } catch (err) {
+      console.error('[Scheduler] doc-expiry sweep failed:', err.message);
+    } finally {
+      docExpiryRunning = false;
+    }
+  });
+
   // HR Comp-off (Feature 30) — nightly EXPIRY/LAPSE runner. Runs at 03:00. Lapses
   // ACTIVE comp-off lots whose per-credit expiresOn has passed (append-only LAPSE +
   // aggregate-balance drop, version-locked, idempotent), expires PENDING-past-expiry

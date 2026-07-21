@@ -439,6 +439,88 @@ function LateRulesSection({ entities, locations, canManage, flash }) {
   );
 }
 
+/* ── Restricted holidays (P1.7) ───────────────────────────────────────────── */
+// GET/PATCH /api/hr/attendance/rh-settings → { allowance }: how many restricted
+// (optional) holidays each employee may elect per calendar year. PATCH is
+// canManageAttendance-gated server-side; this section just disables the editor.
+
+function RestrictedHolidaySettingsSection({ canManage, flash }) {
+  const [allowance, setAllowance] = useState(null); // null = loading
+  const [savedAllowance, setSavedAllowance] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    get('/api/hr/attendance/rh-settings')
+      .then((res) => {
+        const a = res?.allowance ?? 2;
+        setAllowance(a);
+        setSavedAllowance(a);
+      })
+      .catch((e) => setError(e.data?.message || e.message || 'Failed to load the restricted-holiday setting.'));
+  }, []);
+
+  async function save() {
+    setSaving(true);
+    setError('');
+    try {
+      const res = await patch('/api/hr/attendance/rh-settings', { allowance: Number(allowance) });
+      const a = res?.allowance ?? Number(allowance);
+      setAllowance(a);
+      setSavedAllowance(a);
+      flash('Restricted-holiday allowance saved.');
+    } catch (e) {
+      setError(e.data?.message || e.message || 'Failed to save the restricted-holiday allowance.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const dirty = allowance !== null && String(allowance) !== String(savedAllowance);
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <SectionTitle tip="Restricted (optional) holidays are published on the holiday calendar but only apply to employees who elect them. This allowance caps how many each employee may pick per calendar year.">
+          Restricted holidays
+        </SectionTitle>
+        <p className="text-xs text-gray-500 mt-0.5">
+          How many restricted/optional holidays each employee may elect per calendar year.
+        </p>
+      </div>
+      {error && <ErrorBanner message={error} />}
+      <div className="rounded-2xl border border-gray-200 bg-white p-5 max-w-md">
+        {allowance === null && !error ? (
+          <p className="text-sm text-gray-500">Loading…</p>
+        ) : (
+          <div className="flex items-end gap-3">
+            <label className="block text-sm w-44">
+              <span className="flex items-center text-gray-700 font-medium">Allowance per year (0–30)</span>
+              <input
+                type="number"
+                min={0}
+                max={30}
+                value={allowance ?? ''}
+                onChange={(e) => setAllowance(e.target.value)}
+                disabled={!canManage}
+                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-50"
+              />
+            </label>
+            {canManage && (
+              <PrimaryButton loading={saving} onClick={save} disabled={!dirty || allowance === ''}>
+                Save
+              </PrimaryButton>
+            )}
+          </div>
+        )}
+        <p className="text-xs text-gray-500 mt-2">
+          How many restricted/optional holidays each employee may elect per calendar year (default 2).
+        </p>
+      </div>
+    </div>
+  );
+}
+
 /* ── Page ─────────────────────────────────────────────────────────────────── */
 
 export default function WorkPoliciesPage() {
@@ -498,6 +580,8 @@ export default function WorkPoliciesPage() {
 
       <OvertimeRulesSection entities={entities} locations={locations} canManage={canManage} flash={flash} />
       <LateRulesSection entities={entities} locations={locations} canManage={canManage} flash={flash} />
+      {/* P1.7 — the yearly restricted/optional-holiday election allowance. */}
+      <RestrictedHolidaySettingsSection canManage={canManage} flash={flash} />
     </div>
   );
 }

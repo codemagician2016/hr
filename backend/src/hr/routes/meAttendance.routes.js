@@ -47,4 +47,10 @@ router.post('/regularizations', c.createRegularization);
 router.get('/schedule', c.getSchedule);
 router.get('/holidays', c.listHolidays);
 
+// Program P1.7 — restricted/optional holiday elections (pick N per year).
+const rh = require('../attendance/restrictedHolidays.controller');
+router.get('/restricted-holidays', rh.listMine);
+router.post('/restricted-holidays', rh.elect);
+router.delete('/restricted-holidays/:holidayId', rh.withdraw);
+
 module.exports = router;

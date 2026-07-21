@@ -18,13 +18,24 @@ import { FieldLabel, SectionTitle, InfoTip } from '@/lib/widgets';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
 import ModuleGuide from '@/components/ModuleGuide';
 
-// Client-side preview that mirrors the backend `format(prefix, value, padding)`.
+// Client-side preview that mirrors the backend `format(prefix, value, padding)`
+// including the P1.7 prefix tokens, expanded with the same sample values the
+// server's `preview` field uses ({ENTITY}→ENT, {DEPT}→DEPT, {YYYY}/{YY}→now).
+function expandTokens(prefix) {
+  const year = String(new Date().getFullYear());
+  return String(prefix || '')
+    .replaceAll('{ENTITY}', 'ENT')
+    .replaceAll('{DEPT}', 'DEPT')
+    .replaceAll('{YYYY}', year)
+    .replaceAll('{YY}', year.slice(-2));
+}
+
 function previewCode(prefix, nextValue, padding) {
   const n = Number.parseInt(nextValue, 10);
   const pad = Number.parseInt(padding, 10);
   if (!Number.isFinite(n) || n < 1) return '—';
   const width = Number.isFinite(pad) && pad >= 1 ? pad : 0;
-  return `${prefix || ''}${String(n).padStart(width, '0')}`;
+  return `${expandTokens(prefix)}${String(n).padStart(width, '0')}`;
 }
 
 export default function EmployeeNumberPage() {
@@ -143,7 +154,7 @@ export default function EmployeeNumberPage() {
         <div className="rounded-xl border border-gray-200 bg-gradient-to-br from-indigo-50/60 to-white p-5">
           <p className="text-xs font-medium uppercase tracking-wide text-gray-500 inline-flex items-center">
             Next will be
-            <InfoTip text="The exact code the next auto-numbered employee will receive." />
+            <InfoTip text="The exact code the next auto-numbered employee will receive. Prefix tokens show sample values here (ENT, DEPT, the current year) — the real code expands them from the employee's entity, department and join year." />
           </p>
           <p className="mt-1 text-2xl font-semibold tracking-tight text-gray-900">{preview}</p>
         </div>
@@ -155,16 +166,20 @@ export default function EmployeeNumberPage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-              <FieldLabel tip="The fixed text at the start of every employee number. India-first example: 'EMP-IN-'. Leave it as 'EMP-' for the standard format.">Prefix</FieldLabel>
+              <FieldLabel tip="The fixed text at the start of every employee number. Can include the tokens {ENTITY} {DEPT} {YYYY} {YY}, expanded per employee when the code is minted. India-first example: 'EMP-IN-'. Leave it as 'EMP-' for the standard format.">Prefix</FieldLabel>
               <input
                 type="text"
                 value={prefix}
                 onChange={(e) => { setSaved(false); setPrefix(e.target.value); }}
-                maxLength={24}
+                maxLength={40}
                 disabled={ro}
                 placeholder="EMP-"
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none text-sm disabled:bg-gray-50 disabled:text-gray-500"
               />
+              <p className="text-xs text-gray-500 mt-1">
+                Tokens: <code className="text-[11px]">{'{ENTITY}'}</code> (entity code) · <code className="text-[11px]">{'{DEPT}'}</code> (department code) · <code className="text-[11px]">{'{YYYY}'}</code> / <code className="text-[11px]">{'{YY}'}</code> (join year).
+                E.g. <code className="text-[11px]">EMP-{'{ENTITY}'}-{'{YY}'}-</code> → <code className="text-[11px]">EMP-ENT-26-000001</code>.
+              </p>
             </div>
             <div>
               <FieldLabel tip="How many digits to pad the number to. 4 → 0001, 6 → 000001. Padding keeps codes the same length so they sort neatly.">Number length (padding)</FieldLabel>

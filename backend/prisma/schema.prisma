@@ -6506,6 +6506,14 @@ model Entity {
   // settles via payroll flips this to PAY_VIA_PAYROLL so every approved claim rides
   // the next run. A per-claim override always wins over this default.
   reimbursementDefaultChannel ReimbursementPayoutChannel @default(PAY_SEPARATELY)
+  // Program P1.7 — per-entity DEFAULT bank payout file format, preselected when
+  // a disbursement batch is created without an explicit bank. NULL = the batch
+  // must name one (today's behaviour).
+  defaultPayoutBank           PayoutBank?
+  // Program P1.7 — the per-day divisor for notice pay-in-lieu/recovery
+  // (monthly gross ÷ divisor). NULL = the 30-day convention. The statutory
+  // 26-day gratuity/encashment basis is unaffected.
+  noticeDivisorDays           Int?
   createdAt                   DateTime                   @default(now())
   updatedAt                   DateTime                   @updatedAt
   deletedAt                   DateTime?
@@ -11411,6 +11419,22 @@ enum RegularizationKind {
 /// as a month-context pass inside attendance recompute — the penalty adjusts
 /// lopFraction on the offending late days, idempotently (recomputed from scratch
 /// each pass, marked in exceptionsJson.latePenalty).
+/// Program P1.7 — an employee's election of a restricted/optional holiday
+/// (IN: pick N from the tenant's restricted list per calendar year; N lives at
+/// Business.featureFlags.leave.restrictedHolidayAllowance, default 2). Elected
+/// dates flow into attendance recompute + leave netting as optedRestrictedDates.
+model RestrictedHolidayElection {
+  id         String   @id @default(uuid())
+  businessId String
+  employeeId String
+  holidayId  String
+  year       Int
+  createdAt  DateTime @default(now())
+
+  @@unique([businessId, employeeId, holidayId])
+  @@index([businessId, employeeId, year])
+}
+
 /// Program P1.6 — per-tenant notification template override. The in-code
 /// registry (core templates.js + HR_TEMPLATES) stays the KEY/variable
 /// authority and fallback body; an active override row replaces the rendered

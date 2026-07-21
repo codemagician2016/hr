@@ -240,8 +240,11 @@ module.exports = {
     // configured from Settings → Payroll; consumed at attendance freeze + engine.
     // Feature 45 — reimbursementDefaultChannel: the tenant default for new
     // claims (PAY_SEPARATELY | PAY_VIA_PAYROLL), settable from Settings → Payroll.
+    // P1.7 — defaultPayoutBank (disbursement batch default) + noticeDivisorDays
+    // (notice pay-in-lieu/recovery per-day divisor; NULL = 30).
     fields: ['code', 'legalName', 'tradeName', 'countryCode', 'payCurrency', 'timezone', 'taxYearStartMonth',
       'addressLine1', 'addressLine2', 'city', 'stateCode', 'postalCode', 'prorationBasis', 'reimbursementDefaultChannel',
+      'defaultPayoutBank', 'noticeDivisorDays',
       'pan', 'tan', 'gstin', 'cin', 'nzbn', 'irdEntityNumber', 'status', 'activeFrom', 'activeTo'],
     required: ['code', 'legalName', 'countryCode', 'payCurrency', 'timezone'],
     dates: ['activeFrom', 'activeTo'],

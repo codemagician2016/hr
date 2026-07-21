@@ -36,7 +36,7 @@ import Link from 'next/link';
 import AppShell from '@/components/AppShell';
 import { ErrorBanner, Empty, Spinner, Centered } from '@hr/ui';
 import { useApi } from '@/lib/useApi';
-import { apiPost } from '@/lib/api';
+import { apiPost, apiSend } from '@/lib/api';
 import { useProfile } from '@/lib/useProfile';
 import { formatTime, formatDate } from '@/lib/format';
 import InfoTip from '@/components/InfoTip';
@@ -1529,6 +1529,102 @@ function RegularizationsSection({ canAct }) {
 
 const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
+// ─── Restricted holidays (P1.7) ──────────────────────────────────────────────
+// The employee's optional-holiday elections for the year:
+//   GET    /api/hr/me/attendance/restricted-holidays?year= → { year, allowance, used, items }
+//   POST   /api/hr/me/attendance/restricted-holidays       { holidayId }  (elect)
+//   DELETE /api/hr/me/attendance/restricted-holidays/:holidayId          (withdraw)
+// Server 409 (already elected) / 422 (past date, quota full) messages surface
+// verbatim. Hidden entirely when the tenant has no restricted holidays.
+function RestrictedHolidaysSection() {
+  const year = new Date().getFullYear();
+  const { data, loading, error, reload } = useApi(
+    `/api/hr/me/attendance/restricted-holidays?year=${year}`
+  );
+  const [busyId, setBusyId] = useState('');
+  const [actionErr, setActionErr] = useState('');
+
+  const items = data?.items || [];
+  // No restricted holidays for this tenant (or still loading / failed) → no card.
+  if (loading || error || items.length === 0) return null;
+
+  const allowance = data.allowance ?? 0;
+  const used = data.used ?? 0;
+  const today = todayISO();
+
+  async function act(h) {
+    setBusyId(h.id);
+    setActionErr('');
+    try {
+      if (h.elected) await apiSend(`/api/hr/me/attendance/restricted-holidays/${h.id}`, 'DELETE');
+      else await apiPost('/api/hr/me/attendance/restricted-holidays', { holidayId: h.id });
+      await reload();
+    } catch (e) {
+      // 409 already elected / 422 past-date or quota-full — show verbatim.
+      setActionErr(e.message || 'Could not update your election.');
+    } finally {
+      setBusyId('');
+    }
+  }
+
+  return (
+    <section>
+      <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--theme-muted)' }}>
+        Restricted holidays
+      </h2>
+      <div className="rounded-2xl border bg-white shadow-sm" style={{ borderColor: 'var(--theme-border)' }}>
+        <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: 'var(--theme-border)' }}>
+          <span className="text-sm" style={{ color: 'var(--theme-muted)' }}>
+            Pick which optional holidays you want to take this year.
+          </span>
+          <span className="text-sm font-semibold whitespace-nowrap" style={{ color: 'var(--theme-text)' }}>
+            Elected {used} of {allowance} for {data.year || year}
+          </span>
+        </div>
+        {actionErr && (
+          <div className="px-4 pt-3">
+            <ErrorBanner message={actionErr} />
+          </div>
+        )}
+        <ul>
+          {items.map((h) => {
+            const isPast = isoDayKey(h.date) < today;
+            return (
+              <li
+                key={h.id}
+                className="flex items-center justify-between gap-3 border-b px-4 py-3 text-sm last:border-b-0"
+                style={{ borderColor: 'var(--theme-border)' }}
+              >
+                <span className="min-w-0">
+                  <span className="block font-medium truncate" style={{ color: isPast ? 'var(--theme-muted)' : 'var(--theme-text)' }}>
+                    {h.name}
+                  </span>
+                  <span className="text-xs" style={{ color: 'var(--theme-muted)' }}>
+                    {formatDate(h.date)}
+                    {h.elected && <span className="ml-2 rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: 'var(--theme-primary-soft)', color: 'var(--theme-primary)' }}>Elected</span>}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => act(h)}
+                  disabled={isPast || busyId === h.id}
+                  title={isPast ? 'This date has passed.' : undefined}
+                  className="shrink-0 rounded px-3 py-1 text-xs font-semibold disabled:opacity-50"
+                  style={h.elected
+                    ? { border: '1px solid var(--theme-border)', color: 'var(--theme-text)' }
+                    : { background: 'var(--theme-primary)', color: 'white' }}
+                >
+                  {busyId === h.id ? 'Saving…' : h.elected ? 'Withdraw' : 'Elect'}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </section>
+  );
+}
+
 function ScheduleSection() {
   const year = new Date().getFullYear();
 
@@ -1637,6 +1733,9 @@ function ScheduleSection() {
           </ul>
         )}
       </section>
+
+      {/* P1.7 — elect/withdraw restricted (optional) holidays for the year. */}
+      <RestrictedHolidaysSection />
     </div>
   );
 }

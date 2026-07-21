@@ -55,6 +55,8 @@ const HR_EVENT_TEMPLATES = Object.freeze({
   // Program P1.4 — probation sweep fan-out.
   'probation.ending':    'HR_PROBATION_ENDING',    // → manager/HR N days before end date
   'probation.confirmed': 'HR_PROBATION_CONFIRMED', // → employee on (auto-)confirmation
+  // Program P1.7 — document expiry sweep (passport/visa/licence + company docs).
+  'document.expiring':   'HR_DOCUMENT_EXPIRING_SOON', // → employee + HR at T-30/7/1/0
   // Feature 4 — Employee portal invitation (welcome + set-password link).
   'portal.invite':   'HR_PORTAL_INVITE',    // → new hire to claim their ESS login
   // Feature 20 — Investment-proof workflow fan-out (window lifecycle + verdicts + reminders).
@@ -303,6 +305,16 @@ const HR_TEMPLATES = Object.freeze([
     body: 'Congratulations {employeeName}! Your probation has been successfully completed and your employment is confirmed effective {effectiveDate}.',
     variables: ['employeeName', 'effectiveDate'],
     channels: { sms: false, whatsapp: true, email: true },
+  },
+  // ─── Program P1.7 — document expiry sweep ───
+  {
+    key: 'HR_DOCUMENT_EXPIRING_SOON',
+    displayName: 'Document expiring soon',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Document expiry notice: {docName} for {employeeName} expires on {expiryDate} ({days} day(s) from now). Please renew and upload the updated document.',
+    variables: ['employeeName', 'docName', 'expiryDate', 'days'],
+    channels: { sms: false, whatsapp: false, email: true },
   },
   // ─── Feature 4 — Employee portal invitation ───
   // Welcome + set-password link for a new hire to claim their ESS login. India

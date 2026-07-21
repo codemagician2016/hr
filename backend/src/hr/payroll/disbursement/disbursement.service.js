@@ -83,7 +83,7 @@ const DISBURSABLE_STATUSES = new Set(['LOCKED', 'APPROVED', 'PAID', 'FILED']);
 async function loadRunForDisbursement({ businessId, payRunId }) {
   const run = await prisma.payRun.findFirst({
     where: { id: payRunId, businessId, deletedAt: null },
-    include: { entity: { select: { id: true, countryCode: true, payCurrency: true, legalName: true, code: true } } },
+    include: { entity: { select: { id: true, countryCode: true, payCurrency: true, legalName: true, code: true, defaultPayoutBank: true } } },
   });
   if (!run) throw notFound('Pay run not found');
   if (run.entity.countryCode !== 'IN') {
@@ -102,10 +102,12 @@ async function loadRunForDisbursement({ businessId, payRunId }) {
  * a single transaction. Round-trips the total (Σ lines == batch total).
  */
 async function createBatch({ businessId, actorId, payRunId, bank, debitAccount, valueDate, narration, force = false }) {
+  const run = await loadRunForDisbursement({ businessId, payRunId });
+  // P1.7 — the entity's default bank format fills in when the request names none.
+  if (!bank) bank = run.entity.defaultPayoutBank || null;
   if (!bank || !bankFormats.isSupportedBank(bank)) {
     throw badRequest('MISSING_FIELDS', `bank must be one of ${bankFormats.listBanks().map((b) => b.value).join(', ')}`);
   }
-  const run = await loadRunForDisbursement({ businessId, payRunId });
   if (!DISBURSABLE_STATUSES.has(run.status)) {
     throw badRequest('BAD_STATE', `Disbursement requires a frozen or approved run (current: ${run.status}).`);
   }

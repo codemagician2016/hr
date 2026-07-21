@@ -355,6 +355,11 @@ async function recompute(businessId, employeeId, fromDate, toDate, tx) {
     ? { OR: [{ entityId: employee.entityId }, { entityId: null }] }
     : { entityId: null };
 
+  // P1.7 — the employee's restricted-holiday elections: restricted rows only
+  // count as holidays on elected dates (isHoliday consumes the Set).
+  const { loadOptedRestrictedDates } = require('./restrictedHolidays.controller');
+  const optedRestrictedDates = await loadOptedRestrictedDates(db, { businessId, employeeId }).catch(() => new Set());
+
   const [assignments, defaultPatterns, leaveTxns, regs, holidays, otRules, lockedRows, rosterRows] = await Promise.all([
     db.shiftAssignment.findMany({
       where: { businessId, employeeId, effectiveFrom: { lt: winEnd } },
@@ -484,7 +489,7 @@ async function recompute(businessId, employeeId, fromDate, toDate, tx) {
       }
     }
 
-    const holiday = isHoliday(employee, day, holidays, null);
+    const holiday = isHoliday(employee, day, holidays, optedRestrictedDates);
     // A roster OFF cell is a weekly-off for THIS day (rotating weekly-off, F29);
     // otherwise fall back to the pattern's weekly-off CSV exactly as before.
     const weeklyOff = rosterOff || (schedule ? isWeeklyOff(day, schedule.weeklyOffDays) : false);

@@ -26,6 +26,7 @@ import NotificationPrefsCard from '@/components/NotificationPrefsCard';
 import { Spinner, Centered, ErrorBanner, Empty } from '@hr/ui';
 import { apiPost, apiSend } from '@/lib/api';
 import { useApi } from '@/lib/useApi';
+import { useMeta, labelize } from '@/lib/useMeta';
 import { formatDate } from '@/lib/format';
 
 // ── tooltip ⓘ — every field gets one (premium + layman-friendly) ──────────────
@@ -146,20 +147,26 @@ const SECTIONS = [
   { key: 'photo', label: 'Photo ID' },
 ];
 
-const GENDER_OPTS = [
-  { value: 'MALE', label: 'Male' }, { value: 'FEMALE', label: 'Female' },
-  { value: 'NON_BINARY', label: 'Non-binary' }, { value: 'UNDISCLOSED', label: 'Prefer not to say' }, { value: 'OTHER', label: 'Other' },
-];
-const MARITAL_OPTS = [
-  { value: 'SINGLE', label: 'Single' }, { value: 'MARRIED', label: 'Married' }, { value: 'DIVORCED', label: 'Divorced' },
-  { value: 'WIDOWED', label: 'Widowed' }, { value: 'SEPARATED', label: 'Separated' }, { value: 'CIVIL_UNION', label: 'Civil union' }, { value: 'UNDISCLOSED', label: 'Prefer not to say' },
-];
+// Enum vocabularies come from GET /api/hr/me/meta (P1.7) via useMeta — the
+// hook keeps a hardcoded fallback so selects never render empty. The overrides
+// keep the friendlier labels the page has always shown for a few values.
+const LABEL_OVERRIDES = {
+  NON_BINARY: 'Non-binary',
+  UNDISCLOSED: 'Prefer not to say',
+  CIVIL_UNION: 'Civil union',
+  BACHELORS: "Bachelor's",
+  MASTERS: "Master's",
+};
+function optLabel(v) { return LABEL_OVERRIDES[v] || labelize(v); }
 
 function ProfileInner() {
   const router = useRouter();
   const { data, loading, error, reload } = useApi('/api/hr/me/profile/full');
   const [active, setActive] = useState('personal');
   const [toast, setToast] = useState(null);
+  const meta = useMeta(); // P1.7 — genders + maritalStatuses vocabularies
+  const genderOpts = meta.genders.map((v) => ({ value: v, label: optLabel(v) }));
+  const maritalOpts = meta.maritalStatuses.map((v) => ({ value: v, label: optLabel(v) }));
 
   const sections = data?.sections;
   const pending = data?.pendingChangeRequests || {};
@@ -233,8 +240,8 @@ function ProfileInner() {
               <FieldRow fieldKey="lastName" label="Last name" hint="Your legal last name." field={sections.personal.lastName} pending={pending.lastName} onSave={saveField} />
               <FieldRow fieldKey="preferredName" label="Preferred name" hint="The name you'd like to be called — managed by HR." field={{ value: sections.personal.preferredName?.value ?? null, policy: 'read-only', optional: true }} onSave={saveField} />
               <FieldRow fieldKey="dateOfBirth" label="Date of birth" hint="Used for statutory records; changing it needs HR approval." field={sections.personal.dateOfBirth} pending={pending.dateOfBirth} onSave={saveField} />
-              <FieldRow fieldKey="gender" label="Gender" hint="As you identify; changing it needs HR approval." field={sections.personal.gender} options={GENDER_OPTS} pending={pending.gender} onSave={saveField} />
-              <FieldRow fieldKey="maritalStatus" label="Marital status" hint="Your current marital status." field={sections.personal.maritalStatus} options={MARITAL_OPTS} pending={pending.maritalStatus} onSave={saveField} />
+              <FieldRow fieldKey="gender" label="Gender" hint="As you identify; changing it needs HR approval." field={sections.personal.gender} options={genderOpts} pending={pending.gender} onSave={saveField} />
+              <FieldRow fieldKey="maritalStatus" label="Marital status" hint="Your current marital status." field={sections.personal.maritalStatus} options={maritalOpts} pending={pending.maritalStatus} onSave={saveField} />
               <FieldRow fieldKey="bloodGroup" label="Blood group" hint="Optional — useful in emergencies." field={sections.personal.bloodGroup} pending={pending.bloodGroup} onSave={saveField} />
               <FieldRow fieldKey="religion" label="Religion" hint="Optional and private." field={sections.personal.religion} pending={pending.religion} onSave={saveField} />
               <FieldRow fieldKey="community" label="Community" hint="Optional and private." field={sections.personal.community} pending={pending.community} onSave={saveField} />
@@ -340,7 +347,8 @@ function ProfileInner() {
 
 // ── Address section (typed + "same as") ──────────────────────────────────────
 function AddressSection({ addresses, reload, flash, readOnly }) {
-  const types = [['CORRESPONDENCE', 'Correspondence address'], ['PERMANENT', 'Permanent address'], ['OFFICE', 'Office address']];
+  const meta = useMeta(); // P1.7 — addressTypes vocabulary
+  const types = meta.addressTypes.map((t) => [t, `${optLabel(t)} address`]);
   return (
     <Section title="Address" hint="Where you live and work. You can edit these freely.">
       {types.map(([type, label]) => <AddressBlock key={type} type={type} label={label} addr={addresses?.[type]} reload={reload} flash={flash} readOnly={readOnly} />)}
@@ -414,11 +422,12 @@ function EducationSection({ education, reload, flash, readOnly }) {
   );
 }
 
-const REL_OPTS = [['SPOUSE', 'Spouse'], ['CHILD', 'Child'], ['PARENT', 'Parent'], ['SIBLING', 'Sibling'], ['OTHER', 'Other']];
-const EDU_OPTS = [['SCHOOL', 'School'], ['DIPLOMA', 'Diploma'], ['BACHELORS', "Bachelor's"], ['MASTERS', "Master's"], ['DOCTORATE', 'Doctorate'], ['CERTIFICATION', 'Certification'], ['OTHER', 'Other']];
-
 // A tiny add/edit/delete list editor for the self-service collections.
+// Relationship + education-level options come from /api/hr/me/meta (P1.7).
 function ListEditor({ items, columns, render, newItem, base, max, readOnly, reload, flash }) {
+  const meta = useMeta();
+  const relOpts = meta.dependantRelations.map((v) => [v, optLabel(v)]);
+  const eduOpts = meta.educationLevels.map((v) => [v, optLabel(v)]);
   const [draft, setDraft] = useState(null);
   const [busy, setBusy] = useState(false);
   const atMax = max && (items?.length || 0) >= max;
@@ -439,8 +448,8 @@ function ListEditor({ items, columns, render, newItem, base, max, readOnly, relo
     await apiSend(`${base}/${id}`, 'DELETE'); await reload(); flash('Removed');
   }
   function field([k, label, kind]) {
-    if (kind === 'select-rel') return <select key={k} value={draft[k]} onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.value }))} className="rounded border px-2 py-1 text-sm" style={{ borderColor: 'var(--theme-border)' }}>{REL_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>;
-    if (kind === 'select-edu') return <select key={k} value={draft[k]} onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.value }))} className="rounded border px-2 py-1 text-sm" style={{ borderColor: 'var(--theme-border)' }}>{EDU_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>;
+    if (kind === 'select-rel') return <select key={k} value={draft[k]} onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.value }))} className="rounded border px-2 py-1 text-sm" style={{ borderColor: 'var(--theme-border)' }}>{relOpts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>;
+    if (kind === 'select-edu') return <select key={k} value={draft[k]} onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.value }))} className="rounded border px-2 py-1 text-sm" style={{ borderColor: 'var(--theme-border)' }}>{eduOpts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>;
     return <input key={k} placeholder={label} type={kind === 'number' ? 'number' : 'text'} value={draft[k] ?? ''} onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.value }))} className="rounded border px-2 py-1 text-sm" style={{ borderColor: 'var(--theme-border)' }} />;
   }
   return (

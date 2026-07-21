@@ -31,6 +31,14 @@ import { asList, PageHeader, Tabs } from '@/lib/ui';
 
 const SCOPE_BANDS = ['ALL', 'DEPARTMENT', 'TEAM', 'SELF', 'NONE'];
 
+// Compensation visibility bands (persisted by rbac.controller on create/update).
+const COMP_VISIBILITY = [
+  { value: 'ABSOLUTE', label: 'Absolute', desc: 'sees full salary figures' },
+  { value: 'RANGE_ONLY', label: 'Range only', desc: 'sees bands/compa-ratio, not amounts' },
+  { value: 'SELF_ONLY', label: 'Self only', desc: 'own pay only' },
+  { value: 'NONE', label: 'None', desc: 'no compensation access' },
+];
+
 function ScopeBadge({ band }) {
   const b = String(band || 'ALL').toUpperCase();
   const cls =
@@ -59,6 +67,7 @@ function RoleEditor({ permCatalog, role, onClose, onSaved }) {
   const [name, setName] = useState(role?.name || '');
   const [perms, setPerms] = useState(() => ({ ...permsOf(role) }));
   const [scope, setScope] = useState(role?.defaultScope || 'TEAM');
+  const [compVisibility, setCompVisibility] = useState(role?.compVisibility || 'NONE');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const readOnly = !isNew && role?.isSystem;
@@ -73,7 +82,7 @@ function RoleEditor({ permCatalog, role, onClose, onSaved }) {
     setError('');
     try {
       // Only send true permissions; the backend validates against the catalog.
-      const payload = { name: name.trim(), permissions: perms, defaultScope: scope };
+      const payload = { name: name.trim(), permissions: perms, defaultScope: scope, compVisibility };
       if (isNew) await post('/api/rbac/roles', payload);
       else await request(`/api/rbac/roles/${role.id}`, { method: 'PUT', body: JSON.stringify(payload) });
       onSaved();
@@ -113,6 +122,24 @@ function RoleEditor({ permCatalog, role, onClose, onSaved }) {
             ))}
           </select>
           <p className="text-xs text-gray-400 mt-1">TEAM = reporting sub-tree · SELF = own record · ALL = whole tenant.</p>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Compensation visibility</label>
+          <select
+            value={compVisibility}
+            onChange={(e) => setCompVisibility(e.target.value)}
+            disabled={readOnly}
+            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm bg-white disabled:bg-gray-50 disabled:text-gray-500"
+          >
+            {COMP_VISIBILITY.map((c) => (
+              <option key={c.value} value={c.value}>
+                {c.value} — {c.desc}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-gray-400 mt-1">
+            {COMP_VISIBILITY.find((c) => c.value === compVisibility)?.desc || 'no compensation access'}.
+          </p>
         </div>
       </div>
 
@@ -225,6 +252,7 @@ function RolesTab() {
                 <th scope="col" className="px-4 py-3 font-medium">Role</th>
                 <th scope="col" className="px-4 py-3 font-medium">Type</th>
                 <th scope="col" className="px-4 py-3 font-medium">Scope</th>
+                <th scope="col" className="px-4 py-3 font-medium">Comp</th>
                 <th scope="col" className="px-4 py-3 font-medium">Permissions</th>
                 <th scope="col" className="px-4 py-3 font-medium text-right">Actions</th>
               </tr>
@@ -239,6 +267,12 @@ function RolesTab() {
                     <td className="px-4 py-3 text-gray-600">{role.isSystem ? 'System' : 'Custom'}</td>
                     <td className="px-4 py-3">
                       <ScopeBadge band={role.defaultScope} />
+                    </td>
+                    <td
+                      className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap"
+                      title={COMP_VISIBILITY.find((c) => c.value === (role.compVisibility || 'NONE'))?.desc}
+                    >
+                      {role.compVisibility || 'NONE'}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-1 max-w-md">

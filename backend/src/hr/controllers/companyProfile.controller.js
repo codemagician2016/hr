@@ -314,7 +314,9 @@ function findEmployeeSequence(businessId) {
 }
 
 function previewNext(prefix, nextValue, padding) {
-  return formatCode(prefix, nextValue, padding);
+  // P1.7 — sample token context so "EMP-{ENTITY}-{YY}-" previews as
+  // "EMP-ENT-26-0001" (real codes use the hire's actual entity/dept codes).
+  return formatCode(prefix, nextValue, padding, { entityCode: 'ENT', deptCode: 'DEPT' });
 }
 
 // GET /company-profile/employee-number — the current scheme + a live preview.
@@ -346,10 +348,11 @@ async function updateEmployeeNumberScheme(req, res, next) {
     const { businessId } = req.user;
     const body = req.body || {};
 
-    // Validate inputs. Prefix: ≤24 chars, printable. Padding: 1..12. nextValue ≥ 1.
+    // Validate inputs. Prefix: ≤40 chars (P1.7 tokens {ENTITY}/{DEPT}/{YYYY}/{YY}
+    // may appear), printable. Padding: 1..12. nextValue ≥ 1.
     let prefix;
     if (body.prefix !== undefined) {
-      prefix = String(body.prefix || '').slice(0, 24);
+      prefix = String(body.prefix || '').slice(0, 40);
       if (/[\r\n\t]/.test(prefix)) {
         return res.status(422).json({ message: 'Prefix cannot contain line breaks or tabs.' });
       }

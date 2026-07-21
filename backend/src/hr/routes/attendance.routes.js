@@ -42,6 +42,10 @@ router.use('/capture', require('./captureAdmin.routes'));
   router.post('/late-rules', requirePermission('canManageAttendance'), wp.createLateRule);
   router.patch('/late-rules/:id', requirePermission('canManageAttendance'), wp.updateLateRule);
   router.delete('/late-rules/:id', requirePermission('canManageAttendance'), wp.deleteLateRule);
+  // Program P1.7 — restricted-holiday allowance (elections per year).
+  const rh = require('../attendance/restrictedHolidays.controller');
+  router.get('/rh-settings', requirePermission('canViewEmployees'), rh.getSettings);
+  router.patch('/rh-settings', requirePermission('canManageAttendance'), rh.updateSettings);
 }
 
 /* Punches — clock in/out. Recording a punch is a self/manager action scoped to the

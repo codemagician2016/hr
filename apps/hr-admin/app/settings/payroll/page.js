@@ -27,6 +27,7 @@ import { get, patch, post, del } from '@/lib/api';
 import { asList, PageHeader, DataTable, ActionButton } from '@/lib/ui';
 import { InfoTip, SectionTitle } from '@/lib/widgets';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
+import { useHrMeta } from '@/lib/useHrMeta';
 import ModuleGuide from '@/components/ModuleGuide';
 
 // The four salary-day bases (null/unset on the entity ⇒ CALENDAR_DAYS).
@@ -57,13 +58,24 @@ const BASES = [
   },
 ];
 
+// P1.7 — banks are acronyms, so show them raw; only NEFT_RTGS needs a label.
+function payoutBankLabel(v) {
+  return v === 'NEFT_RTGS' ? 'NEFT / RTGS (generic)' : v;
+}
+
 function EntityBasisCard({ entity, canEdit, onError }) {
+  const meta = useHrMeta(); // P1.7 — payoutBanks vocabulary
   // '' = unset on the entity → treated as CALENDAR_DAYS (default).
   const [value, setValue] = useState(entity.prorationBasis || '');
   const [savedValue, setSavedValue] = useState(entity.prorationBasis || '');
+  // P1.7 — per-entity payout bank + notice-recovery divisor ('' = unset/null).
+  const [bank, setBank] = useState(entity.defaultPayoutBank || '');
+  const [savedBank, setSavedBank] = useState(entity.defaultPayoutBank || '');
+  const [divisor, setDivisor] = useState(entity.noticeDivisorDays ?? '');
+  const [savedDivisor, setSavedDivisor] = useState(entity.noticeDivisorDays ?? '');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const dirty = value !== savedValue;
+  const dirty = value !== savedValue || bank !== savedBank || String(divisor) !== String(savedDivisor);
 
   async function save() {
     setSaving(true);
@@ -72,13 +84,21 @@ function EntityBasisCard({ entity, canEdit, onError }) {
     try {
       const row = await patch(`/api/hr/org/entities/${entity.id}`, {
         prorationBasis: value || 'CALENDAR_DAYS',
+        defaultPayoutBank: bank || null,
+        noticeDivisorDays: divisor === '' || divisor == null ? null : Number(divisor),
       });
       const next = row?.prorationBasis || value || 'CALENDAR_DAYS';
       setValue(next);
       setSavedValue(next);
+      const nextBank = row && 'defaultPayoutBank' in row ? (row.defaultPayoutBank || '') : bank;
+      setBank(nextBank);
+      setSavedBank(nextBank);
+      const nextDivisor = row && 'noticeDivisorDays' in row ? (row.noticeDivisorDays ?? '') : divisor;
+      setDivisor(nextDivisor);
+      setSavedDivisor(nextDivisor);
       setSaved(true);
     } catch (e) {
-      onError(e.data?.message || e.message || `Failed to save the basis for ${entity.legalName}.`);
+      onError(e.data?.message || e.message || `Failed to save the settings for ${entity.legalName}.`);
     } finally {
       setSaving(false);
     }
@@ -140,6 +160,48 @@ function EntityBasisCard({ entity, canEdit, onError }) {
         })}
       </fieldset>
 
+      {/* P1.7 — payout bank + notice-recovery divisor, saved with the basis. */}
+      <div className="mt-4 pt-4 border-t border-gray-100 grid sm:grid-cols-2 gap-3">
+        <label className="block text-sm">
+          <span className="flex items-center text-gray-700 font-medium">
+            Salary payout bank
+            <InfoTip text="Preselects the bank-file format for salary disbursement batches from this entity. Blank = choose at download time." />
+          </span>
+          <select
+            value={bank}
+            onChange={(e) => { setSaved(false); setBank(e.target.value); }}
+            disabled={!canEdit}
+            className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-50"
+          >
+            <option value="">Not set</option>
+            {meta.payoutBanks.map((b) => (
+              <option key={b} value={b}>{payoutBankLabel(b)}</option>
+            ))}
+          </select>
+          <span className="block text-xs text-gray-500 mt-1">
+            Preselects the bank-file format for salary disbursement batches.
+          </span>
+        </label>
+        <label className="block text-sm">
+          <span className="flex items-center text-gray-700 font-medium">
+            Notice divisor (days)
+            <InfoTip text="Per-day pay divisor for notice recovery / pay-in-lieu; blank = 30-day convention." />
+          </span>
+          <input
+            type="number"
+            min={1}
+            value={divisor}
+            onChange={(e) => { setSaved(false); setDivisor(e.target.value); }}
+            disabled={!canEdit}
+            placeholder="30"
+            className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-50"
+          />
+          <span className="block text-xs text-gray-500 mt-1">
+            Per-day pay divisor for notice recovery/pay-in-lieu; blank = 30-day convention.
+          </span>
+        </label>
+      </div>
+
       {canEdit && (
         <div className="mt-3 flex items-center gap-3">
           <button
@@ -149,7 +211,7 @@ function EntityBasisCard({ entity, canEdit, onError }) {
             className="rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
             style={{ background: 'var(--theme-primary)' }}
           >
-            {saving ? 'Saving…' : 'Save basis'}
+            {saving ? 'Saving…' : 'Save entity settings'}
           </button>
           {dirty && <span className="text-xs text-amber-600">Unsaved change</span>}
         </div>

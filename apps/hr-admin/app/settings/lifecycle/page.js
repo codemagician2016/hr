@@ -28,11 +28,12 @@ import { get, post, patch, put, del } from '@/lib/api';
 import { DataTable, PageHeader, ActionButton, Tabs, asList } from '@/lib/ui';
 import { InfoTip, SectionTitle } from '@/lib/widgets';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
+import { useHrMeta } from '@/lib/useHrMeta';
 import ModuleGuide from '@/components/ModuleGuide';
 
-// EmploymentType enum (mirrors backend probation.controller.js EMPLOYMENT_TYPES
-// — the only vocabulary /templates/meta does not carry).
-const EMPLOYMENT_TYPES = ['FULL_TIME', 'PART_TIME', 'FIXED_TERM', 'CONTRACT', 'INTERN', 'APPRENTICE', 'CASUAL', 'CONSULTANT'];
+// EmploymentType options come from GET /api/hr/meta (P1.7) via useHrMeta —
+// the only vocabulary /templates/meta does not carry (hardcoded fallback lives
+// in the hook so the select never renders empty).
 
 // Task keys whose system action needs an extra qualifier select.
 const DOC_TASK_KEYS = ['UPLOAD_DOCS', 'COLLECT_STATUTORY', 'VERIFY_DOCS'];
@@ -648,6 +649,8 @@ function TemplatesSection({ meta, entities, departments, designations, canManage
 
 function ProbationModal({ policy, entities, letters, lettersDenied, onClose, onSaved }) {
   const editing = !!policy?.id;
+  // Named hrMeta — `meta` on this page means the /templates/meta vocabularies.
+  const hrMeta = useHrMeta();
   const [entityId, setEntityId] = useState(policy?.entityId || '');
   const [employmentType, setEmploymentType] = useState(policy?.employmentType || '');
   const [probationDays, setProbationDays] = useState(policy?.probationDays ?? 90);
@@ -718,7 +721,7 @@ function ProbationModal({ policy, entities, letters, lettersDenied, onClose, onS
               className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-50"
             >
               <option value="">All types</option>
-              {EMPLOYMENT_TYPES.map((t) => <option key={t} value={t}>{prettyEnum(t)}</option>)}
+              {hrMeta.employmentTypes.map((t) => <option key={t} value={t}>{prettyEnum(t)}</option>)}
             </select>
           </label>
           {editing && <p className="col-span-2 text-xs text-gray-400 -mt-1">Scope is fixed after creation — delete and recreate the policy to change it.</p>}

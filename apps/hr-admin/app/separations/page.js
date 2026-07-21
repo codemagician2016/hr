@@ -25,14 +25,12 @@ import {
 import { get, post, patch } from '@/lib/api';
 import { asList, DataTable, PageHeader, StatusBadge, moneyish } from '@/lib/ui';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
+import { useHrMeta } from '@/lib/useHrMeta';
 import ManagerPicker from '@/components/ManagerPicker';
 import ModuleGuide from '@/components/ModuleGuide';
 
-// SeparationType enum (mirrors the controller's SEPARATION_TYPES set).
-const SEPARATION_TYPES = [
-  'RESIGNATION', 'TERMINATION_FOR_CAUSE', 'RETRENCHMENT', 'REDUNDANCY', 'END_OF_CONTRACT',
-  'RETIREMENT', 'DEATH', 'ABSCONDING', 'PROBATION_FAILURE', 'MUTUAL_SEPARATION',
-];
+// SeparationType options come from GET /api/hr/meta (P1.7) via useHrMeta
+// (hardcoded fallback lives in the hook so the select never renders empty).
 
 // Clearance lanes + the permission each requires (mirrors the controller's
 // CLEARANCE_LANES). Managers (TEAM band) may clear only the manager-allowed lanes.
@@ -55,6 +53,7 @@ function minorMoney(minor, currency) {
 
 // ─── Initiate wizard ─────────────────────────────────────────────────────────
 function InitiateModal({ onClose, onCreated }) {
+  const meta = useHrMeta(); // P1.7 — separationTypes vocabulary
   const [employeeId, setEmployeeId] = useState('');
   const [type, setType] = useState('RESIGNATION');
   const [reason, setReason] = useState('');
@@ -97,7 +96,7 @@ function InitiateModal({ onClose, onCreated }) {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
             <select value={type} onChange={(e) => setType(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm bg-white">
-              {SEPARATION_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
+              {meta.separationTypes.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
             </select>
           </div>
           <DateField label="Notice / resignation date" value={resignationDate} onChange={setResignationDate} />
