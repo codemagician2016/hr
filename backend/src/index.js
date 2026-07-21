@@ -152,15 +152,34 @@ async function isAllowedCustomDomainOrigin(origin) {
   return allowed;
 }
 
+async function isOriginAllowed(origin) {
+  if (allowedOrigins.has(origin)) return true;
+  if (allowLocalDevOrigins && LOCAL_DEV_ORIGIN_RE.test(origin)) return true;
+  if (PLATFORM_SUBDOMAIN_RE.test(origin)) return true;
+  if (PLATFORM_MOBILE_SUBDOMAIN_RE.test(origin)) return true;
+  if (await isAllowedCustomDomainOrigin(origin)) return true;
+  return false;
+}
+
 async function originCheck(origin, callback) {
   // No origin = server-to-server / curl / same-origin — allow
   if (!origin) return callback(null, true);
 
-  if (allowedOrigins.has(origin)) return callback(null, true);
-  if (allowLocalDevOrigins && LOCAL_DEV_ORIGIN_RE.test(origin)) return callback(null, true);
-  if (PLATFORM_SUBDOMAIN_RE.test(origin)) return callback(null, true);
-  if (PLATFORM_MOBILE_SUBDOMAIN_RE.test(origin)) return callback(null, true);
-  if (await isAllowedCustomDomainOrigin(origin)) return callback(null, true);
+  if (await isOriginAllowed(origin)) return callback(null, true);
+
+  // Feature 41 — mobile-web hosts: an `m-<host>` / `m.<host>` origin is allowed
+  // exactly when its BASE host's origin is (m-demo-staging inherits
+  // demo-staging's allowance; m.acme.com inherits acme.com's bound-domain
+  // allowance). Single rule via core/lib/mobileHost.js — no per-host env
+  // entries, and every future tenant's m-host works untouched.
+  {
+    const { hostCandidates } = require('./core/lib/mobileHost');
+    const candidates = hostCandidates(hostFromOrigin(origin));
+    if (candidates.length > 1) {
+      const proto = origin.toLowerCase().startsWith('http://') ? 'http://' : 'https://';
+      if (await isOriginAllowed(`${proto}${candidates[1]}`)) return callback(null, true);
+    }
+  }
 
   return callback(new Error(`Origin ${origin} not allowed by CORS`));
 }
