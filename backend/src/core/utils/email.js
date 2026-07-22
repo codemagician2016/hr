@@ -75,7 +75,11 @@ function buildEmailPalette() {
 const { resolveRecipient, isProductionDeploy } = require('../lib/emailOverride');
 
 function wrapBase64(content) {
-  return Buffer.from(String(content || ''), 'utf8')
+  // Buffer-aware: binary attachments (XLSX/PDF report exports) must NOT go
+  // through String() — that utf8-decodes and corrupts the bytes. Strings keep
+  // the original text path unchanged.
+  const buf = Buffer.isBuffer(content) ? content : Buffer.from(String(content || ''), 'utf8');
+  return buf
     .toString('base64')
     .replace(/.{1,76}/g, '$&\r\n')
     .trim();

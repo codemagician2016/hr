@@ -653,6 +653,8 @@ model Business {
   awardNominations             AwardNomination[]
   catalogItems                 CatalogItem[]
   redemptions                  Redemption[]
+  ReportDefinition             ReportDefinition[]
+  ReportSchedule               ReportSchedule[]
 }
 
 // BusinessPage — multi-page CMS. Each row is a single sub-page under one
@@ -14334,4 +14336,76 @@ enum RedemptionStatus {
   FULFILLED
   REJECTED
   CANCELLED
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reports Platform (gap-fill wave) — saved report definitions + email schedules.
+// A ReportDefinition is a saved query over ONE whitelisted dataset in
+// backend/src/hr/reports/datasets.js (chosen columns + filters + optional
+// group-by + sort). It is validated against that registry on every write AND
+// every run — the registry is the single source of truth for what may be
+// queried, so a definition can never reach outside its dataset's whitelist.
+// A ReportSchedule emails a definition's export (CSV/XLSX/PDF) on a simple
+// cron preset (hourly runner in core/lib/scheduler.js).
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum ReportCronPreset {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum ReportExportFormat {
+  CSV
+  XLSX
+  PDF
+}
+
+model ReportDefinition {
+  id              String    @id @default(uuid())
+  businessId      String
+  business        Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name            String
+  description     String?
+  datasetKey      String // whitelisted key in reports/datasets.js (validated, never free-form)
+  columnsJson     Json // ordered chosen column keys ["code","firstName",...] ⊆ dataset.columns
+  filtersJson     Json? // { status:"ACTIVE", from:"2026-01-01", ... } — keys ⊆ dataset.filters
+  groupBy         String? // one of dataset.groupable (NULL = flat row listing)
+  sortJson        Json? // { key, dir:"asc"|"desc" }
+  // Visibility: isShared=true → every report viewer in the tenant sees it;
+  // false → only its creator (list/read/run all filter on this).
+  isShared        Boolean   @default(false)
+  createdByUserId String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime? // soft delete (schedules of a deleted definition stop firing)
+
+  schedules ReportSchedule[]
+
+  @@index([businessId, deletedAt])
+  @@index([businessId, datasetKey])
+}
+
+model ReportSchedule {
+  id                 String             @id @default(uuid())
+  businessId         String
+  business           Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  reportDefinitionId String
+  reportDefinition   ReportDefinition   @relation(fields: [reportDefinitionId], references: [id], onDelete: Cascade)
+  cronPreset         ReportCronPreset
+  // WEEKLY: dayOfWeek 0-6 (Sunday=0). MONTHLY: dayOfMonth 1-31 (clamped to the
+  // month's last day, so 31 fires on Feb 28/29). DAILY: unused (NULL).
+  anchor             Int?
+  hourUtc            Int // 0-23 — the UTC hour the window opens
+  format             ReportExportFormat @default(CSV)
+  recipientsJson     Json // ["ops@acme.com", ...] — validated email list
+  isActive           Boolean            @default(true)
+  lastRunAt          DateTime? // stamp of the last attempted window (dedupe within a window)
+  lastStatus         String? // "SENT" | "FAILED: <reason>" (fail-soft per schedule)
+  createdByUserId    String // the actor whose F1 data scope the scheduled run executes under
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([businessId, isActive])
+  @@index([businessId, reportDefinitionId])
 }

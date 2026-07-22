@@ -1457,6 +1457,31 @@ function initScheduler() {
       awardLifecycleRunning = false;
     }
   });
+
+  // Reports Platform — scheduled report deliveries (hourly at :25). A schedule
+  // is due when its cronPreset+anchor+hourUtc window opens (pure due-ness math,
+  // unit-tested) and lastRunAt is not already inside the window, so a restart
+  // never double-sends and a missed tick is simply skipped until the next
+  // window. Renders the saved definition under the CREATOR's F1 scope and
+  // emails the CSV/XLSX/PDF as an attachment. Per-schedule fail-soft; the
+  // in-process flag prevents a slow render batch from overlapping the next tick
+  // (copied verbatim from the compliance/learning sweep blocks above).
+  let reportSchedulesRunning = false;
+  cron.schedule('25 * * * *', async () => {
+    if (reportSchedulesRunning) { console.log('[Scheduler] report schedules still running — skipping tick'); return; }
+    reportSchedulesRunning = true;
+    try {
+      const { runDueReportSchedules } = require('../../hr/reports/reportScheduleRunner');
+      const r = await runDueReportSchedules({ asOf: new Date() });
+      if (r.due > 0 || r.failed > 0 || r.errors > 0) {
+        console.log(`[Scheduler] report schedules: ${JSON.stringify(r)}`);
+      }
+    } catch (err) {
+      console.error('[Scheduler] report schedules failed:', err.message);
+    } finally {
+      reportSchedulesRunning = false;
+    }
+  });
 }
 
 // Find PENDING orders older than `maxAgeMinutes` (default 30) and cancel

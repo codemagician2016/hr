@@ -120,7 +120,11 @@ export const NAV_ITEMS = [
   // canRunPayroll; the batch/line reads on canViewPayrollReports). India-only — the
   // server 422s a non-IN run. The server is the real boundary; this just hides the link.
   { key: 'disbursement', label: 'Salary Disbursement', href: '/payroll/disbursement', feature: 'payroll', anyPermission: ['canRunPayroll', 'canViewPayrollReports'], icon: 'wallet' },
-  { key: 'reports', label: 'Reports', href: '/reports', feature: 'payroll', permission: 'canViewPayrollReports', icon: 'report' },
+  // Reports Platform: legacy fixed reports read with canViewPayrollReports; the
+  // new builder/saved/schedules surface with canViewReports — OR-gated so a
+  // builder-only analyst still sees the link (mirrors the recognition pattern).
+  // The server is the real boundary (routes OR the same keys).
+  { key: 'reports', label: 'Reports', href: '/reports', feature: 'payroll', anyPermission: ['canViewPayrollReports', 'canViewReports'], icon: 'report' },
   // FLAG (Feature 20 — NEW nav items): Investment-proof workflow (India year-end §192(2D)/
   // Rule 26C/Form 12BB). Two flat items in the Pay group. The window admin actions are
   // server-gated on canManageStatutory; the verify console on canManageEmployees (the
@@ -339,6 +343,8 @@ const PERMISSION_KEYS = [
   'canManageSurveys',
   // Feature 35 — Rewards & Recognition (FLAG FOR MERGE)
   'canManageRecognition', 'canFulfilRedemptions',
+  // Reports Platform — builder/saved reports + scheduled email delivery
+  'canViewReports', 'canScheduleReports',
 ];
 const ALL_TRUE = Object.fromEntries(PERMISSION_KEYS.map((k) => [k, true]));
 

@@ -13,6 +13,7 @@
 const prisma = require('../../core/lib/prisma');
 const agg = require('./aggregations');
 const { scopeWhere } = require('../lib/scopeResolver');
+const { exportTabular, slugify, FORMATS } = require('./export/tabular');
 
 function handleError(res, err) {
   const status = err && err.statusCode ? err.statusCode : (err && err.code === 'NOT_FOUND' ? 404 : 500);
@@ -73,56 +74,63 @@ async function listRuns(req, res) {
 }
 
 // ── 1. Payroll register ───────────────────────────────────────────────────────
+async function fetchPayrollRegister(req) {
+  const { businessId } = req.user;
+  const run = await loadRun(businessId, req.params.id);
+  // Feature 1: scope the register to the actor's reporting sub-tree.
+  const lines = await prisma.payRunLine.findMany({
+    where: { businessId, payRunId: run.id, ...scopeWhere(req.scope, 'employeeId') },
+    include: {
+      employee: { select: { id: true, code: true, firstName: true, lastName: true } },
+      payslip: { select: { id: true, code: true, netPay: true } },
+    },
+    orderBy: { employee: { code: 'asc' } },
+  });
+  const register = agg.buildPayrollRegister({ run, lines });
+  register.run.entityName = run.entity ? (run.entity.tradeName || run.entity.legalName) : null;
+  register.run.countryCode = run.entity ? run.entity.countryCode : null;
+  return register;
+}
+
 async function payrollRegister(req, res) {
   try {
-    const { businessId } = req.user;
-    const run = await loadRun(businessId, req.params.id);
-    // Feature 1: scope the register to the actor's reporting sub-tree.
-    const lines = await prisma.payRunLine.findMany({
-      where: { businessId, payRunId: run.id, ...scopeWhere(req.scope, 'employeeId') },
-      include: {
-        employee: { select: { id: true, code: true, firstName: true, lastName: true } },
-        payslip: { select: { id: true, code: true, netPay: true } },
-      },
-      orderBy: { employee: { code: 'asc' } },
-    });
-    const register = agg.buildPayrollRegister({ run, lines });
-    register.run.entityName = run.entity ? (run.entity.tradeName || run.entity.legalName) : null;
-    register.run.countryCode = run.entity ? run.entity.countryCode : null;
-    res.json(register);
+    res.json(await fetchPayrollRegister(req));
   } catch (err) { handleError(res, err); }
 }
 
 // ── 2. Statutory summary ──────────────────────────────────────────────────────
+async function fetchStatutorySummary(req) {
+  const { businessId } = req.user;
+  const run = await loadRun(businessId, req.params.id);
+  // Feature 1: scope the statutory roll-up to the actor's reporting sub-tree.
+  const lines = await prisma.payRunLine.findMany({
+    where: { businessId, payRunId: run.id, ...scopeWhere(req.scope, 'employeeId') },
+    select: {
+      currencyCode: true,
+      pfEmployee: true, pfEmployer: true, esiEmployee: true, esiEmployer: true, pt: true, tds: true,
+      paye: true, kiwiSaverEmployee: true, kiwiSaverEmployer: true, esct: true, accLevy: true, studentLoan: true,
+    },
+  });
+  const countryCode = run.entity ? run.entity.countryCode : 'IN';
+  const taxPeriod = run.taxYear && run.periodStart
+    ? new Date(run.periodStart).toISOString().slice(0, 7)
+    : null;
+  const summary = agg.buildStatutorySummary({ lines, countryCode, currencyCode: run.currencyCode, taxPeriod });
+  summary.run = { id: run.id, code: run.code, status: run.status, periodStart: run.periodStart, periodEnd: run.periodEnd };
+  summary.entityName = run.entity ? (run.entity.tradeName || run.entity.legalName) : null;
+  return summary;
+}
+
 async function statutorySummary(req, res) {
   try {
-    const { businessId } = req.user;
-    const run = await loadRun(businessId, req.params.id);
-    // Feature 1: scope the statutory roll-up to the actor's reporting sub-tree.
-    const lines = await prisma.payRunLine.findMany({
-      where: { businessId, payRunId: run.id, ...scopeWhere(req.scope, 'employeeId') },
-      select: {
-        currencyCode: true,
-        pfEmployee: true, pfEmployer: true, esiEmployee: true, esiEmployer: true, pt: true, tds: true,
-        paye: true, kiwiSaverEmployee: true, kiwiSaverEmployer: true, esct: true, accLevy: true, studentLoan: true,
-      },
-    });
-    const countryCode = run.entity ? run.entity.countryCode : 'IN';
-    const taxPeriod = run.taxYear && run.periodStart
-      ? new Date(run.periodStart).toISOString().slice(0, 7)
-      : null;
-    const summary = agg.buildStatutorySummary({ lines, countryCode, currencyCode: run.currencyCode, taxPeriod });
-    summary.run = { id: run.id, code: run.code, status: run.status, periodStart: run.periodStart, periodEnd: run.periodEnd };
-    summary.entityName = run.entity ? (run.entity.tradeName || run.entity.legalName) : null;
-    res.json(summary);
+    res.json(await fetchStatutorySummary(req));
   } catch (err) { handleError(res, err); }
 }
 
 // ── 3. Headcount & attrition ──────────────────────────────────────────────────
-async function headcount(req, res) {
-  try {
-    const { businessId } = req.user;
-    const { from, to, groupBy } = req.query || {};
+async function fetchHeadcount(req) {
+  const { businessId } = req.user;
+  const { from, to, groupBy } = req.query || {};
     // Feature 1: scope headcount/attrition to the actor's reporting sub-tree
     // (employee table is keyed on `id`).
     // Pull active employment segments to attach department/entity to each employee.
@@ -157,14 +165,17 @@ async function headcount(req, res) {
         departmentName: rec && rec.department ? rec.department.name : null,
       };
     });
-    const report = agg.buildHeadcount({ employees: enriched, periodStart: from, periodEnd: to, groupBy });
-    res.json(report);
+    return agg.buildHeadcount({ employees: enriched, periodStart: from, periodEnd: to, groupBy });
+}
+
+async function headcount(req, res) {
+  try {
+    res.json(await fetchHeadcount(req));
   } catch (err) { handleError(res, err); }
 }
 
 // ── 4. Leave liability ────────────────────────────────────────────────────────
-async function leaveLiability(req, res) {
-  try {
+async function fetchLeaveLiability(req) {
     const { businessId } = req.user;
     const { periodCode } = req.query || {};
     // Feature 1: scope leave liability to the actor's reporting sub-tree.
@@ -213,8 +224,141 @@ async function leaveLiability(req, res) {
       };
     });
 
-    const report = agg.buildLeaveLiability({ balances: enriched });
-    res.json(report);
+    return agg.buildLeaveLiability({ balances: enriched });
+}
+
+async function leaveLiability(req, res) {
+  try {
+    res.json(await fetchLeaveLiability(req));
+  } catch (err) { handleError(res, err); }
+}
+
+// ── File export variants of the four fixed reports ────────────────────────────
+// GET …/export?format=CSV|XLSX|PDF — the SAME fetch + fold as the JSON handler,
+// rendered through the shared tabular exporter (export/tabular.js) so the four
+// legacy reports gain CSV/XLSX/PDF downloads with zero new aggregation code.
+
+function normFormat(raw) {
+  const f = String(raw || 'CSV').toUpperCase();
+  if (!FORMATS.includes(f)) {
+    const e = new Error(`Unsupported format "${raw}" (allowed: ${FORMATS.join(', ')})`);
+    e.statusCode = 400;
+    return { error: e };
+  }
+  return { format: f };
+}
+
+function sendFile(res, out) {
+  const bytes = Buffer.isBuffer(out.content) ? out.content : Buffer.from(out.content, 'utf8');
+  res.setHeader('Content-Type', out.contentType);
+  res.setHeader('Content-Disposition', `attachment; filename="${out.fileName}"`);
+  res.setHeader('Content-Length', bytes.length);
+  return res.end(bytes);
+}
+
+async function payrollRegisterExport(req, res) {
+  try {
+    const { format, error } = normFormat(req.query && req.query.format);
+    if (error) throw error;
+    const register = await fetchPayrollRegister(req);
+    const title = `Payroll register — ${register.run ? register.run.code : ''}`.trim();
+    const out = await exportTabular(format, {
+      title,
+      subtitle: register.run && register.run.entityName ? register.run.entityName : undefined,
+      columns: [
+        { key: 'employeeCode', label: 'Employee code', type: 'string' },
+        { key: 'employeeName', label: 'Employee name', type: 'string' },
+        { key: 'gross', label: 'Gross', type: 'money' },
+        { key: 'deductions', label: 'Deductions', type: 'money' },
+        { key: 'net', label: 'Net pay', type: 'money' },
+        { key: 'employerCost', label: 'Employer cost', type: 'money' },
+      ],
+      rows: register.rows,
+      totals: {
+        gross: register.totals.gross,
+        deductions: register.totals.deductions,
+        net: register.totals.net,
+        employerCost: register.totals.employerCost,
+      },
+      fileBase: slugify(title),
+    });
+    sendFile(res, out);
+  } catch (err) { handleError(res, err); }
+}
+
+async function statutorySummaryExport(req, res) {
+  try {
+    const { format, error } = normFormat(req.query && req.query.format);
+    if (error) throw error;
+    const summary = await fetchStatutorySummary(req);
+    const title = `Statutory summary — ${summary.run ? summary.run.code : ''}`.trim();
+    const out = await exportTabular(format, {
+      title,
+      subtitle: [summary.entityName, summary.taxPeriod].filter(Boolean).join(' · ') || undefined,
+      columns: [
+        { key: 'label', label: 'Contribution', type: 'string' },
+        { key: 'group', label: 'Group', type: 'string' },
+        { key: 'amount', label: `Amount (${summary.currencyCode})`, type: 'money' },
+      ],
+      rows: summary.items,
+      totals: { amount: summary.total },
+      fileBase: slugify(title),
+    });
+    sendFile(res, out);
+  } catch (err) { handleError(res, err); }
+}
+
+async function headcountExport(req, res) {
+  try {
+    const { format, error } = normFormat(req.query && req.query.format);
+    if (error) throw error;
+    const report = await fetchHeadcount(req);
+    const title = `Headcount & attrition by ${report.groupBy}`;
+    const out = await exportTabular(format, {
+      title,
+      subtitle: report.periodStart || report.periodEnd
+        ? `Period: ${report.periodStart || '…'} → ${report.periodEnd || '…'}`
+        : undefined,
+      columns: [
+        { key: 'label', label: report.groupBy === 'entity' ? 'Entity' : 'Department', type: 'string' },
+        { key: 'headcount', label: 'Headcount', type: 'number' },
+        { key: 'active', label: 'Active', type: 'number' },
+        { key: 'joined', label: 'Joined', type: 'number' },
+        { key: 'terminated', label: 'Terminated', type: 'number' },
+      ],
+      rows: report.buckets,
+      totals: {
+        headcount: report.totals.headcount,
+        active: report.totals.active,
+        joined: report.totals.joined,
+        terminated: report.totals.terminated,
+      },
+      fileBase: slugify(title),
+    });
+    sendFile(res, out);
+  } catch (err) { handleError(res, err); }
+}
+
+async function leaveLiabilityExport(req, res) {
+  try {
+    const { format, error } = normFormat(req.query && req.query.format);
+    if (error) throw error;
+    const report = await fetchLeaveLiability(req);
+    const title = 'Leave liability';
+    const out = await exportTabular(format, {
+      title,
+      columns: [
+        { key: 'employeeId', label: 'Employee', type: 'string' },
+        { key: 'leaveTypeName', label: 'Leave type', type: 'string' },
+        { key: 'unit', label: 'Unit', type: 'string' },
+        { key: 'quantity', label: 'Quantity', type: 'number' },
+        { key: 'value', label: `Value (${report.currencyCode})`, type: 'money' },
+      ],
+      rows: report.rows,
+      totals: { quantity: report.totalQuantity, value: report.totalValue },
+      fileBase: slugify(title),
+    });
+    sendFile(res, out);
   } catch (err) { handleError(res, err); }
 }
 
@@ -224,4 +368,8 @@ module.exports = {
   statutorySummary,
   headcount,
   leaveLiability,
+  payrollRegisterExport,
+  statutorySummaryExport,
+  headcountExport,
+  leaveLiabilityExport,
 };

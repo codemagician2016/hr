@@ -288,8 +288,12 @@ router.use('/me/engagement', require('../engagement/routes/meEngagement.routes')
 router.use('/recognition', require('../recognition/routes/recognition.routes'));
 router.use('/me', require('../recognition/routes/meRecognition.routes'));
 
-// Reports / analytics — read-only payroll register, statutory summary,
-// headcount & attrition, leave liability. RBAC: canViewPayrollReports.
+// Reports / analytics — the fixed reports (payroll register, statutory
+// summary, headcount & attrition, leave liability; JSON + CSV/XLSX/PDF export)
+// PLUS the Reports Platform builder (whitelisted dataset registry, saved
+// ReportDefinitions, ad-hoc preview, scheduled email deliveries). RBAC: fixed
+// reports = canViewPayrollReports OR canViewReports (legacy back-compat);
+// builder = canViewReports; schedules = canScheduleReports.
 router.use('/reports', require('../reports/reports.routes'));
 
 // FLAG (Feature 32 — NEW mount): Statutory Registers (muster roll + Form

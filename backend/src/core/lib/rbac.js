@@ -126,6 +126,15 @@ const PERMISSIONS = Object.freeze({
   // the ESS customer session + SELF scope band carry them (like ESS leave/expenses).
   canManageRecognition:  'Configure R&R: values, badges, budgets, catalog, award cycles, manual point adjustments',
   canFulfilRedemptions:  'Fulfil approved redemptions (issue voucher codes / grant perks)',
+  // Reports Platform (gap-fill wave) — additive; no migration. canViewReports is
+  // the report-builder read/run/export key (datasets registry, saved definitions,
+  // ad-hoc preview, file export); the fixed payroll reports additionally keep
+  // accepting the legacy canViewPayrollReports as an OR for back-compat.
+  // canScheduleReports gates the email-schedule CRUD + run-now (a delivery
+  // config surface — recipients receive data by mail, so it is a separate,
+  // deliberately-granted key rather than riding the view key).
+  canViewReports:       'Report builder: browse datasets, run/save/export reports (F1-scoped)',
+  canScheduleReports:   'Create/manage scheduled email deliveries of saved reports',
 });
 
 const PERMISSION_KEYS = Object.freeze(Object.keys(PERMISSIONS));
@@ -175,6 +184,8 @@ const SYSTEM_ROLES = Object.freeze({
     canManageLearning: true, canViewTeamLearning: true,
     // Feature 35 — HR-Admin owns R&R config + the redemption fulfilment console.
     canManageRecognition: true, canFulfilRedemptions: true,
+    // Reports Platform — HR-Admin builds/runs/exports reports + schedules deliveries.
+    canViewReports: true, canScheduleReports: true,
     // No canEditBilling / canEditDomain / canApprovePayroll — Owner/Finance only
   },
   // Finance — payroll + compensation + statutory + billing.
@@ -187,6 +198,8 @@ const SYSTEM_ROLES = Object.freeze({
     canEditBilling: true,
     // Feature 11 — Finance approves + reimburses expense claims (the settle action).
     canApproveExpense: true,
+    // Reports Platform — Finance builds/runs/exports reports + schedules deliveries.
+    canViewReports: true, canScheduleReports: true,
   },
   // Manager — view directory + approve leave + manage attendance
   // (scoped to direct reports — see §6.3 for the location/team-scoped
