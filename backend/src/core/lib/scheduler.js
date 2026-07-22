@@ -1413,6 +1413,50 @@ function initScheduler() {
       pulseSweepRunning = false;
     }
   });
+
+  // Feature 35 — R&R points expiry (nightly 03:40, after the comp-off expiry family).
+  // FIFO lapse of stale earned points for tenants with pointsExpiryMonths configured
+  // (OFF by default): ONE negative EXPIRY ledger row per employee (append-only,
+  // version-locked wallet debit), naturally idempotent — a re-run recomputes 0.
+  // Tenant-safe, per-employee fail-soft, in-process overlap guard.
+  let pointsExpiryRunning = false;
+  cron.schedule('40 3 * * *', async () => {
+    if (pointsExpiryRunning) { console.log('[Scheduler] points expiry still running — skipping tick'); return; }
+    pointsExpiryRunning = true;
+    try {
+      const { runPointsExpiry } = require('../../hr/recognition/pointsExpiryRunner');
+      const r = await runPointsExpiry({ asOf: new Date() });
+      if (r.employees > 0 || r.errors > 0) {
+        console.log(`[Scheduler] points expiry: ${JSON.stringify(r)}`);
+      }
+    } catch (err) {
+      console.error('[Scheduler] points expiry failed:', err.message);
+    } finally {
+      pointsExpiryRunning = false;
+    }
+  });
+
+  // Feature 35 — R&R award-cycle lifecycle (daily 06:50, beside the pulse sweep).
+  // Flips OPEN cycles past their nomination window → CLOSED (+ nudges the cycle
+  // creator to shortlist/decide) and catches up any WON nomination still missing
+  // its F9 certificate (eventual consistency for the consumer's deferred issue).
+  // Conditional flips = idempotent; per-row fail-soft; in-process overlap guard.
+  let awardLifecycleRunning = false;
+  cron.schedule('50 6 * * *', async () => {
+    if (awardLifecycleRunning) { console.log('[Scheduler] award lifecycle still running — skipping tick'); return; }
+    awardLifecycleRunning = true;
+    try {
+      const { runAwardCycleLifecycle } = require('../../hr/recognition/awardCycleRunner');
+      const r = await runAwardCycleLifecycle({ asOf: new Date() });
+      if (r.closed > 0 || r.certificates > 0 || r.errors > 0) {
+        console.log(`[Scheduler] award lifecycle: ${JSON.stringify(r)}`);
+      }
+    } catch (err) {
+      console.error('[Scheduler] award lifecycle failed:', err.message);
+    } finally {
+      awardLifecycleRunning = false;
+    }
+  });
 }
 
 // Find PENDING orders older than `maxAgeMinutes` (default 30) and cancel

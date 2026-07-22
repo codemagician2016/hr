@@ -90,6 +90,14 @@ const HR_EVENT_TEMPLATES = Object.freeze({
   'survey.invited':  'HR_SURVEY_INVITED',  // → each audience employee when an occurrence opens
   'survey.reminder': 'HR_SURVEY_REMINDER', // → non-responders past ~50% of an open window
   'survey.closed':   'HR_SURVEY_CLOSED',   // → the author when a survey/occurrence closes (with tally)
+  // Feature 35 — Rewards & Recognition lifecycle fan-out.
+  'recognition.received':        'HR_RECOGNITION_RECEIVED',        // → each recipient when a recognition posts
+  'recognition.points-posted':   'HR_RECOGNITION_POINTS_POSTED',   // → employee on a non-recognition points credit (award / adjustment)
+  'recognition.budget-low':      'HR_RECOGNITION_BUDGET_LOW',      // → giver when their period budget runs low
+  'award.nomination-submitted':  'HR_AWARD_NOMINATION_SUBMITTED',  // → nominator confirmation on submit
+  'award.won':                   'HR_AWARD_WON',                   // → the winner (with certificate note)
+  'redemption.approved':         'HR_REDEMPTION_APPROVED',         // → employee when points are debited (approved)
+  'redemption.fulfilled':        'HR_REDEMPTION_FULFILLED',        // → employee when the reward is fulfilled (voucher/perk)
 });
 
 // HR template registry. vertical: 'HR' so listTemplates({vertical:'HR'}) scopes
@@ -559,6 +567,70 @@ const HR_TEMPLATES = Object.freeze([
     body: 'Survey "{surveyTitle}" (run #{occurrenceSeq}) has closed with {responseCount} response(s) — {responseRate}% of {invitedCount} invited. View the results: {link}',
     variables: ['surveyTitle', 'occurrenceSeq', 'responseCount', 'responseRate', 'invitedCount', 'link'],
     channels: { sms: false, whatsapp: false, email: true },
+  },
+  // ─── Feature 35 — Rewards & Recognition ───
+  {
+    key: 'HR_RECOGNITION_RECEIVED',
+    displayName: 'Recognition received (kudos)',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {NAME}, {GIVER} recognised you{VALUE}{POINTS} at {BIZ}: "{MESSAGE}". See it on the wall: {LINK}',
+    variables: ['NAME', 'GIVER', 'VALUE', 'POINTS', 'MESSAGE', 'BIZ', 'LINK'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_RECOGNITION_POINTS_POSTED',
+    displayName: 'Points credited to wallet',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {NAME}, {POINTS} point(s) were credited to your rewards wallet ({REASON}). Balance: {BALANCE}. {LINK} - {BIZ}',
+    variables: ['NAME', 'POINTS', 'REASON', 'BALANCE', 'LINK', 'BIZ'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_RECOGNITION_BUDGET_LOW',
+    displayName: 'Recognition budget running low (giver)',
+    category: 'SERVICE',
+    vertical: 'HR',
+    body: 'Hi {NAME}, your recognition budget for this {PERIOD} is running low: {REMAINING} of {ALLOCATED} point(s) left. - {BIZ}',
+    variables: ['NAME', 'PERIOD', 'REMAINING', 'ALLOCATED', 'BIZ'],
+    channels: { sms: false, whatsapp: false, email: true },
+  },
+  {
+    key: 'HR_AWARD_NOMINATION_SUBMITTED',
+    displayName: 'Award nomination submitted (nominator)',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {NAME}, your nomination of {NOMINEE} for "{AWARD}" was submitted. The committee will review it after nominations close on {CLOSES}. - {BIZ}',
+    variables: ['NAME', 'NOMINEE', 'AWARD', 'CLOSES', 'BIZ'],
+    channels: { sms: false, whatsapp: false, email: true },
+  },
+  {
+    key: 'HR_AWARD_WON',
+    displayName: 'Award won (winner)',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Congratulations {NAME}! You have won "{AWARD}"{POINTS} at {BIZ}. {CERT} {LINK}',
+    variables: ['NAME', 'AWARD', 'POINTS', 'CERT', 'BIZ', 'LINK'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_REDEMPTION_APPROVED',
+    displayName: 'Redemption approved (points debited)',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {NAME}, your redemption of "{ITEM}" ({POINTS} points) is approved. You will be notified when it is fulfilled. Balance: {BALANCE}. - {BIZ}',
+    variables: ['NAME', 'ITEM', 'POINTS', 'BALANCE', 'BIZ'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_REDEMPTION_FULFILLED',
+    displayName: 'Redemption fulfilled (voucher/perk delivered)',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {NAME}, your reward "{ITEM}" is ready{REF}. Enjoy! - {BIZ}',
+    variables: ['NAME', 'ITEM', 'REF', 'BIZ'],
+    channels: { sms: false, whatsapp: true, email: true },
   },
 ]);
 

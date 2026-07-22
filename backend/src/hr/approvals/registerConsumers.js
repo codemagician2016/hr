@@ -57,6 +57,14 @@ const { registerDocumentSignConsumer } = require('./consumers.documentSign');
 const { registerSeparationConsumer } = require('./consumers.separation');
 const { registerPayrunConsumer } = require('./consumers.payrun');
 const { registerOfferConsumer } = require('./consumers.offer');
+// FLAG (Feature 35 — shared edit): the R&R trio. RECOGNITION (governed give →
+// POSTED + points + feed projection), AWARD (committee approve → WON + points +
+// certificate), REDEMPTION (approve → in-tx debit + stock + APPROVED). Each
+// self-registers on load like the others; wired here too so the explicit boot
+// path stays the single source of truth.
+const { registerRecognitionConsumer } = require('./consumers.recognition');
+const { registerAwardConsumer } = require('./consumers.award');
+const { registerRedemptionConsumer } = require('./consumers.redemption');
 
 let done = false;
 
@@ -79,6 +87,9 @@ function registerConsumers() {
   registerSeparationConsumer();
   registerPayrunConsumer();
   registerOfferConsumer();
+  registerRecognitionConsumer();
+  registerAwardConsumer();
+  registerRedemptionConsumer();
   done = true;
 }
 

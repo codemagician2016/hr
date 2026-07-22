@@ -641,6 +641,18 @@ model Business {
   lessonProgress               LessonProgress[]
   quizAttempts                 QuizAttempt[]
   learningCertificates         LearningCertificate[]
+  // Feature 35 — Rewards & Recognition: values/badges vocabulary, peer recognition,
+  // points wallet/ledger, budgets, nomination awards, redemption catalog.
+  recognitionValues            RecognitionValue[]
+  recognitionBadges            RecognitionBadge[]
+  recognitions                 Recognition[]
+  pointsWallets                PointsWallet[]
+  pointsLedgerEntries          PointsLedgerEntry[]
+  recognitionBudgets           RecognitionBudget[]
+  awardCycles                  AwardCycle[]
+  awardNominations             AwardNomination[]
+  catalogItems                 CatalogItem[]
+  redemptions                  Redemption[]
 }
 
 // BusinessPage — multi-page CMS. Each row is a single sub-page under one
@@ -6772,79 +6784,88 @@ model Employee {
   anonymisedAt              DateTime? // mirrors User.anonymisedAt pattern
   version                   Int            @default(0)
 
-  employmentRecords       EmploymentRecord[]
-  statutoryProfile        StatutoryProfile?
-  compensations           CompensationRevision[]
-  bankAccounts            BankAccount[]
-  payoutLines             PayoutLine[] // India salary disbursement — per-employee credit lines
-  emergencyContacts       EmergencyContact[]
-  dependants              Dependant[]
-  leaveBalances           LeaveBalance[]
-  leaveTxns               LeaveTransaction[]
+  employmentRecords        EmploymentRecord[]
+  statutoryProfile         StatutoryProfile?
+  compensations            CompensationRevision[]
+  bankAccounts             BankAccount[]
+  payoutLines              PayoutLine[] // India salary disbursement — per-employee credit lines
+  emergencyContacts        EmergencyContact[]
+  dependants               Dependant[]
+  leaveBalances            LeaveBalance[]
+  leaveTxns                LeaveTransaction[]
   // Feature 29 — women/graveyard night-shift consent. Default false = must opt in;
   // the rotation generator + swap consumer refuse to place a non-consenting employee
   // on an isNightShift pattern (hard block, admin override audited).
-  nightShiftEligible      Boolean                           @default(false)
-  compOffCredits          CompOffCredit[] // Feature 30 — comp-off expiry lots
-  leaveEncashmentRequests LeaveEncashmentRequest[] // Feature 31 — in-service encashment
-  punches                 AttendancePunch[]
-  deviceEmployeeMaps      DeviceEmployeeMap[] // Feature 28 — device enroll-no/PIN → this employee
-  shiftAssignments        ShiftAssignment[]
-  rosterDays              RosterDay[] // Feature 29 — per-day roster cells
-  swapsRequested          ShiftSwapRequest[]                @relation("SwapRequester") // Feature 29
-  swapsCounterparty       ShiftSwapRequest[]                @relation("SwapCounterparty") // Feature 29
-  timesheets              Timesheet[]
-  attendances             Attendance[]                      @relation("EmployeeAttendances")
-  attendancePayInputs     AttendancePayInput[]
-  expenseClaims           ExpenseClaim[]
-  travelRequests          TravelRequest[] // Feature 11
-  loans                   Loan[]
-  documents               EmployeeDocument[]
-  assets                  AssetAssignment[]
-  reviews                 PerformanceReview[]               @relation("RevieweeReviews")
-  reviewsGiven            PerformanceReview[]               @relation("ReviewerReviews")
-  goals                   Goal[]
-  skills                  EmployeeSkill[]
+  nightShiftEligible       Boolean                           @default(false)
+  compOffCredits           CompOffCredit[] // Feature 30 — comp-off expiry lots
+  leaveEncashmentRequests  LeaveEncashmentRequest[] // Feature 31 — in-service encashment
+  punches                  AttendancePunch[]
+  deviceEmployeeMaps       DeviceEmployeeMap[] // Feature 28 — device enroll-no/PIN → this employee
+  shiftAssignments         ShiftAssignment[]
+  rosterDays               RosterDay[] // Feature 29 — per-day roster cells
+  swapsRequested           ShiftSwapRequest[]                @relation("SwapRequester") // Feature 29
+  swapsCounterparty        ShiftSwapRequest[]                @relation("SwapCounterparty") // Feature 29
+  timesheets               Timesheet[]
+  attendances              Attendance[]                      @relation("EmployeeAttendances")
+  attendancePayInputs      AttendancePayInput[]
+  expenseClaims            ExpenseClaim[]
+  travelRequests           TravelRequest[] // Feature 11
+  loans                    Loan[]
+  documents                EmployeeDocument[]
+  assets                   AssetAssignment[]
+  reviews                  PerformanceReview[]               @relation("RevieweeReviews")
+  reviewsGiven             PerformanceReview[]               @relation("ReviewerReviews")
+  goals                    Goal[]
+  skills                   EmployeeSkill[]
   // Performance — Feature 8
-  objectivesOwned         Objective[]                       @relation("ObjectiveOwner")
-  oneOnOnesAsManager      OneOnOne[]                        @relation("OneOnOneManager")
-  oneOnOnesAsEmployee     OneOnOne[]                        @relation("OneOnOneEmployee")
+  objectivesOwned          Objective[]                       @relation("ObjectiveOwner")
+  oneOnOnesAsManager       OneOnOne[]                        @relation("OneOnOneManager")
+  oneOnOnesAsEmployee      OneOnOne[]                        @relation("OneOnOneEmployee")
   // Talent depth — Feature 34
-  nineBoxPlacements       NineBoxPlacement[]                @relation("NineBoxSubject")
-  talentTags              TalentTag[]                       @relation("TalentTagSubject")
-  payRunLines             PayRunLine[]
-  payslips                Payslip[]
-  helpdeskTickets         HelpdeskTicket[]
-  approvalRequests        ApprovalRequest[]                 @relation("RequesterApprovals")
-  separations             SeparationCase[]
-  profileChangeRequests   ProfileChangeRequest[]
-  documentRequests        DocumentRequest[]
-  regularizationRequests  AttendanceRegularizationRequest[]
-  bonusAwards             BonusAward[]
-  arrearCycles            ArrearCycle[]
+  nineBoxPlacements        NineBoxPlacement[]                @relation("NineBoxSubject")
+  talentTags               TalentTag[]                       @relation("TalentTagSubject")
+  payRunLines              PayRunLine[]
+  payslips                 Payslip[]
+  helpdeskTickets          HelpdeskTicket[]
+  approvalRequests         ApprovalRequest[]                 @relation("RequesterApprovals")
+  separations              SeparationCase[]
+  profileChangeRequests    ProfileChangeRequest[]
+  documentRequests         DocumentRequest[]
+  regularizationRequests   AttendanceRegularizationRequest[]
+  bonusAwards              BonusAward[]
+  arrearCycles             ArrearCycle[]
   // Letters & Communication (Feature 9) — letters issued to this employee
-  issuedLetters           IssuedLetter[]
+  issuedLetters            IssuedLetter[]
   // Feature 13 — rich profile sub-models (Education + typed Addresses)
-  educations              EmployeeEducation[]
-  addresses               EmployeeAddress[]
+  educations               EmployeeEducation[]
+  addresses                EmployeeAddress[]
   // Engagement (Cycle 1) — per-employee announcement read receipts. Read receipts
   // are keyed by employee (the ESS session resolves the subject employee), so the
   // unread badge + per-row read state survive a userId remap.
-  announcementReads       AnnouncementRead[]
+  announcementReads        AnnouncementRead[]
   // Feature 33 — survey participation ledger ONLY (never SurveyResponse: an anonymous
   // ballot has no employee relation by design — the anonymity firewall).
-  surveyParticipations    SurveyParticipation[]
+  surveyParticipations     SurveyParticipation[]
   // Portal-invitation flow — the welcome/set-password tokens minted for this
   // employee's ESS (Customer) login. Single-use, expiring, hashed-at-rest.
-  portalInvites           EmployeeInvite[]
+  portalInvites            EmployeeInvite[]
   // Investment-proof workflow (Feature 20) — the employee's uploaded year-end proofs.
-  investmentProofs        InvestmentProof[]
+  investmentProofs         InvestmentProof[]
   // Form 16 (Feature 24) — the employee's annual TDS certificates.
-  form16Certificates      Form16Certificate[]
+  form16Certificates       Form16Certificate[]
   // Feature 25 — FBP / Flexi Basket allocations.
-  fbpAllocations          FbpAllocation[]
+  fbpAllocations           FbpAllocation[]
   // Feature 37 — LMS: the employee's training enrollments (per-employee learner records).
-  enrollments             Enrollment[]
+  enrollments              Enrollment[]
+  // Feature 35 — Rewards & Recognition: kudos given/received, points wallet + ledger,
+  // award nominations made/received, catalog redemptions.
+  recognitionsGiven        Recognition[]                     @relation("RecognitionGiver")
+  recognitionsReceived     RecognitionRecipient[]
+  pointsWallets            PointsWallet[]
+  pointsLedgerEntries      PointsLedgerEntry[]
+  awardNominationsMade     AwardNomination[]                 @relation("AwardNominator")
+  awardNominationsReceived AwardNomination[]                 @relation("AwardNominee")
+  redemptions              Redemption[]
 
   @@unique([businessId, code])
   // FLAG (Feature 17 — review HIGH fix): a PARTIAL unique index backs the
@@ -12826,6 +12847,9 @@ enum WorkflowModule {
   SHIFT_SWAP // Feature 29 — shift-swap approval (manager green-lights a roster-cell trade)
   LEAVE_ENCASHMENT // Feature 31 — in-service leave encashment request approval
   FACE_ENROLLMENT // Feature 39 — HR approves an employee's face reference before face punching
+  RECOGNITION // Feature 35 — over-budget / high-value peer recognition → manager approval
+  AWARD // Feature 35 — nomination committee review/approve
+  REDEMPTION // Feature 35 — catalog redemption fulfilment approval
 }
 
 model WorkflowStep {
@@ -13994,4 +14018,320 @@ enum PayoutLineStatus {
   CREDITED
   FAILED
   RETURNED
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Feature 35 — Rewards & Recognition (R&R). docs/features/35-rewards-recognition.md
+// A thin domain layer over four existing engines: the recognition WALL is the
+// engagement feed (a projected CELEBRATION Announcement), every approval (budget /
+// committee / redemption) is an F10 ApprovalRequest, every certificate is an F9
+// IssuedLetter, and the points wallet is an append-only ledger modelled exactly
+// like the proven CustomerWallet/WalletLedgerEntry pair (HR-scoped copies below).
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// A configurable company value an HR admin defines ("Customer First", "Ownership").
+// Recognitions tag one (or zero) value. Seeded with a sensible India-first default set.
+model RecognitionValue {
+  id           String             @id @default(uuid())
+  businessId   String
+  business     Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name         String // "Customer First"
+  description  String?
+  icon         String? // emoji or icon key
+  colorHex     String?
+  sortOrder    Int                @default(0)
+  isActive     Boolean            @default(true) // retire without deleting (history intact)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  recognitions Recognition[]
+  badges       RecognitionBadge[]
+
+  @@unique([businessId, name])
+  @@index([businessId, isActive, sortOrder])
+}
+
+// An optional named badge attachable to a recognition ("Above & Beyond", "Team Player").
+// May be tied to a value and may carry a DEFAULT point value (overridable per give).
+model RecognitionBadge {
+  id            String            @id @default(uuid())
+  businessId    String
+  business      Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  valueId       String? // optional link to a RecognitionValue
+  value         RecognitionValue? @relation(fields: [valueId], references: [id], onDelete: SetNull)
+  name          String
+  icon          String?
+  defaultPoints Int               @default(0) // suggested points when this badge is given
+  isActive      Boolean           @default(true)
+  sortOrder     Int               @default(0)
+  createdAt     DateTime          @default(now())
+  recognitions  Recognition[]
+
+  @@unique([businessId, name])
+  @@index([businessId, isActive])
+}
+
+// The peer-to-peer give — the heartbeat of R&R.
+model Recognition {
+  id                String                 @id @default(uuid())
+  businessId        String
+  business          Business               @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  giverEmployeeId   String // who gave it
+  giver             Employee               @relation("RecognitionGiver", fields: [giverEmployeeId], references: [id], onDelete: Cascade)
+  valueId           String?
+  value             RecognitionValue?      @relation(fields: [valueId], references: [id], onDelete: SetNull)
+  badgeId           String?
+  badge             RecognitionBadge?      @relation(fields: [badgeId], references: [id], onDelete: SetNull)
+  message           String                 @db.Text // the citation / shout-out (sanitised)
+  pointsEach        Int                    @default(0) // points awarded to EACH recipient
+  visibility        RecognitionVisibility  @default(PUBLIC) // PUBLIC=wall, PRIVATE=just recipient, TEAM
+  status            RecognitionStatus      @default(POSTED) // PENDING_APPROVAL → POSTED | REJECTED
+  // F10 link when budget approval is required (points*recipients over a threshold).
+  approvalRequestId String? // ApprovalRequest.id (RECOGNITION module)
+  // The projected feed Announcement (Option A projector, §4.1) — set when POSTED public/team.
+  announcementId    String?
+  postedAt          DateTime? // when it actually went live (post-approval)
+  createdAt         DateTime               @default(now())
+  recipients        RecognitionRecipient[]
+
+  @@index([businessId, giverEmployeeId, createdAt])
+  @@index([businessId, status, postedAt])
+}
+
+// One recognition can name MANY recipients (team kudos). Points post per recipient.
+model RecognitionRecipient {
+  id            String      @id @default(uuid())
+  businessId    String
+  recognitionId String
+  recognition   Recognition @relation(fields: [recognitionId], references: [id], onDelete: Cascade)
+  employeeId    String
+  employee      Employee    @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  pointsPosted  Int         @default(0) // actual points credited (0 until POSTED)
+  ledgerEntryId String? // the PointsLedgerEntry that credited them
+
+  @@unique([recognitionId, employeeId]) // no double-naming the same person
+  @@index([businessId, employeeId])
+}
+
+enum RecognitionVisibility {
+  PUBLIC
+  PRIVATE
+  TEAM
+}
+
+enum RecognitionStatus {
+  PENDING_APPROVAL
+  POSTED
+  REJECTED
+}
+
+// Cached running balance per employee. The LEDGER is the source of truth; this is the
+// version-locked cache (closing == Σ ledger.points), exactly like CustomerWallet.
+model PointsWallet {
+  id             String   @id @default(uuid())
+  businessId     String
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId     String
+  employee       Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  balance        Int      @default(0) // spendable points (>= 0, never negative)
+  lifetimeEarned Int      @default(0) // for "all-time" leaderboard + badges
+  version        Int      @default(0) // optimistic lock for credit/debit races
+  updatedAt      DateTime @updatedAt
+
+  @@unique([businessId, employeeId])
+  @@index([businessId, balance])
+}
+
+// Append-only signed ledger. +points = earned (recognition/award/adjustment);
+// -points = spent (redemption) or expired. NEVER updated/deleted (reverse with a new row).
+model PointsLedgerEntry {
+  id              String       @id @default(uuid())
+  businessId      String
+  business        Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId      String
+  employee        Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  points          Int // signed delta (+earn / -spend / -expire)
+  reason          PointsReason // RECOGNITION | AWARD | REDEMPTION | EXPIRY | ADJUSTMENT | REVERSAL
+  refType         String? // "Recognition" | "AwardNomination" | "Redemption"
+  refId           String?
+  note            String?
+  expiresAt       DateTime? // for FIFO points-expiry (optional program)
+  createdByUserId String? // for ADJUSTMENT (HR manual grant/clawback)
+  createdAt       DateTime     @default(now())
+
+  @@index([businessId, employeeId, createdAt])
+  @@index([businessId, refType, refId])
+  @@index([businessId, expiresAt])
+}
+
+enum PointsReason {
+  RECOGNITION
+  AWARD
+  REDEMPTION
+  EXPIRY
+  ADJUSTMENT
+  REVERSAL
+}
+
+// A points budget for a giver (or a cost-centre / department) over a period. The give
+// path checks the remaining budget; over-budget gives route to F10 (manager) approval.
+model RecognitionBudget {
+  id              String       @id @default(uuid())
+  businessId      String
+  business        Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  scope           BudgetScope  @default(GIVER) // GIVER | DEPARTMENT | ENTITY | TENANT
+  scopeRefId      String? // employeeId / departmentId / entityId (null for TENANT)
+  periodType      BudgetPeriod @default(MONTHLY) // MONTHLY | QUARTERLY | YEARLY
+  allocatedPoints Int // budget for the period
+  // consumed is DERIVED from POSTED recognitions in the window (not stored), so a
+  // mid-period budget edit re-bases cleanly. A cached `consumedPoints` may be added later.
+  isActive        Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([businessId, scope, scopeRefId, periodType])
+}
+
+enum BudgetScope {
+  GIVER
+  DEPARTMENT
+  ENTITY
+  TENANT
+}
+
+enum BudgetPeriod {
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+// An award definition + its recurring cycle ("Employee of the Month"). The cycle is the
+// open/close window for nominations; the committee approves via F10 (parallel level).
+model AwardCycle {
+  id               String            @id @default(uuid())
+  businessId       String
+  business         Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name             String // "Employee of the Month — June 2026"
+  awardType        String // "EOTM" | "STAR_PERFORMER" | "SPOT" (free label)
+  periodLabel      String? // "Jun 2026"
+  nominateOpenAt   DateTime
+  nominateCloseAt  DateTime
+  pointsToWinner   Int               @default(0) // points granted to each winner
+  maxWinners       Int               @default(1)
+  issueCertificate Boolean           @default(true) // render an F9 award certificate
+  committeeUserIds String[]          @default([]) // F10 committee approver set (parallel level)
+  status           AwardCycleStatus  @default(OPEN) // OPEN → CLOSED → DECIDED → ARCHIVED
+  createdByUserId  String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  nominations      AwardNomination[]
+
+  @@index([businessId, status, nominateCloseAt])
+}
+
+model AwardNomination {
+  id                  String           @id @default(uuid())
+  businessId          String
+  business            Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  cycleId             String
+  cycle               AwardCycle       @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  nominatorEmployeeId String
+  nominator           Employee         @relation("AwardNominator", fields: [nominatorEmployeeId], references: [id], onDelete: Cascade)
+  nomineeEmployeeId   String
+  nominee             Employee         @relation("AwardNominee", fields: [nomineeEmployeeId], references: [id], onDelete: Cascade)
+  citation            String           @db.Text // why they deserve it
+  valueId             String? // optional value tag
+  status              NominationStatus @default(SUBMITTED) // SUBMITTED → SHORTLISTED → WON | NOT_SELECTED
+  approvalRequestId   String? // F10 committee request (set when escalated)
+  certificateLetterId String? // IssuedLetter.id when WON
+  ledgerEntryId       String? // PointsLedgerEntry that granted the prize
+  decidedByUserId     String?
+  decidedAt           DateTime?
+  createdAt           DateTime         @default(now())
+
+  @@unique([cycleId, nominatorEmployeeId, nomineeEmployeeId]) // one nom per pair per cycle
+  @@index([businessId, cycleId, status])
+  @@index([businessId, nomineeEmployeeId])
+}
+
+enum AwardCycleStatus {
+  OPEN
+  CLOSED
+  DECIDED
+  ARCHIVED
+}
+
+enum NominationStatus {
+  SUBMITTED
+  SHORTLISTED
+  WON
+  NOT_SELECTED
+}
+
+model CatalogItem {
+  id             String          @id @default(uuid())
+  businessId     String
+  business       Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name           String // "₹500 Amazon Voucher", "1 Comp-Off Day"
+  description    String?
+  category       CatalogCategory @default(VOUCHER) // VOUCHER PERK SWAG COMP_OFF WFH CHARITY DONATION
+  pointsCost     Int // points required to redeem
+  inrValue       Int? // ₹ shadow (for taxable-perquisite flagging)
+  stock          Int? // null = unlimited; else decremented on fulfil
+  fulfilmentType FulfilmentType  @default(MANUAL) // MANUAL | VOUCHER_CODE | COMP_OFF_GRANT
+  isTaxablePerk  Boolean         @default(false) // crosses the ₹5k/yr perquisite line → flag Finance
+  isActive       Boolean         @default(true)
+  imageUrl       String?
+  sortOrder      Int             @default(0)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  redemptions    Redemption[]
+
+  @@index([businessId, isActive, category, sortOrder])
+}
+
+model Redemption {
+  id                String           @id @default(uuid())
+  businessId        String
+  business          Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId        String
+  employee          Employee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  catalogItemId     String
+  catalogItem       CatalogItem      @relation(fields: [catalogItemId], references: [id], onDelete: Restrict)
+  pointsSpent       Int // snapshot of cost at redeem time
+  status            RedemptionStatus @default(PENDING) // PENDING → APPROVED → FULFILLED | REJECTED | CANCELLED
+  approvalRequestId String? // F10 REDEMPTION request
+  ledgerEntryId     String? // the -points debit row (set on APPROVED)
+  fulfilmentRef     String? // voucher code / comp-off credit id / note
+  fulfilledByUserId String?
+  fulfilledAt       DateTime?
+  rejectReason      String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  @@index([businessId, employeeId, status])
+  @@index([businessId, status, createdAt])
+}
+
+enum CatalogCategory {
+  VOUCHER
+  PERK
+  SWAG
+  COMP_OFF
+  WFH
+  CHARITY
+  DONATION
+}
+
+enum FulfilmentType {
+  MANUAL
+  VOUCHER_CODE
+  COMP_OFF_GRANT
+}
+
+enum RedemptionStatus {
+  PENDING
+  APPROVED
+  FULFILLED
+  REJECTED
+  CANCELLED
 }

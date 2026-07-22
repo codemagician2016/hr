@@ -50,6 +50,8 @@ const ICONS = {
   news: 'M3 11l14-7v16l-14-7zM3 11v4a2 2 0 002 2h1l1 4',
   // Cycle 1 — Company Directory: an open address-book / contact card
   directory: 'M4 19.5A2.5 2.5 0 016.5 17H20M4 4.5A2.5 2.5 0 016.5 2H20v15H6.5A2.5 2.5 0 004 19.5zM12 7a2 2 0 110 4 2 2 0 010-4zM8.5 14a3.5 3.5 0 017 0',
+  // Feature 35 — Recognition: a medal (circle + ribbon)
+  award: 'M12 15a6 6 0 100-12 6 6 0 000 12zM8.2 13.9L7 22l5-3 5 3-1.2-8.1',
 };
 
 function Icon({ name, className }) {
@@ -72,6 +74,9 @@ const NAV = [
   // Pending / Done badge) + the anonymous fill flow. The survey invite email
   // links straight to /surveys, so this page must exist at that route.
   { type: 'item', href: '/surveys', label: 'Surveys', icon: 'approvals' },
+  // Feature 35 — Rewards & Recognition: the wall + give-kudos flow, my points
+  // wallet, the rewards catalog + my redemptions, and award nominations.
+  { type: 'item', href: '/recognition', label: 'Recognition', icon: 'award' },
   { type: 'item', href: '/profile', label: 'Personal Information', icon: 'user' },
   // Cycle 1 — Company Directory (available to every employee; a tenant-wide,
   // privacy-safe colleague directory).

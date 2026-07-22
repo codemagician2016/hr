@@ -272,6 +272,22 @@ router.use('/surveys', require('../engagement/routes/surveys.routes'));
 router.use('/me/engagement/surveys', require('../engagement/routes/meSurveys.routes'));
 router.use('/me/engagement', require('../engagement/routes/meEngagement.routes'));
 
+// FLAG (Feature 35 — NEW mounts): Rewards & Recognition.
+//   /api/hr/recognition  → operator config + consoles (protect + canManageRecognition:
+//                          values/badges/budgets/config/catalog/award-cycles/points-
+//                          adjust/reports/seed; canFulfilRedemptions: the redemption
+//                          fulfilment queue). Committee/budget/redemption approval
+//                          ACTS ride the existing F10 inbox — no new approval routes.
+//   /api/hr/me/…         → ESS (customer session, SELF_ONLY): give/view kudos
+//                          (/me/recognitions), wallet + ledger (/me/wallet),
+//                          nominate + track (/me/award-cycles, /me/award-nominations),
+//                          browse/redeem/track (/me/catalog, /me/redemptions),
+//                          leaderboard (/me/recognition/leaderboard). The wall itself
+//                          is the EXISTING /me/engagement/feed (recognitions project
+//                          into it as CELEBRATION announcements — §4.1 Option A).
+router.use('/recognition', require('../recognition/routes/recognition.routes'));
+router.use('/me', require('../recognition/routes/meRecognition.routes'));
+
 // Reports / analytics — read-only payroll register, statutory summary,
 // headcount & attrition, leave liability. RBAC: canViewPayrollReports.
 router.use('/reports', require('../reports/reports.routes'));

@@ -127,6 +127,32 @@ const BUILT_IN_DEFAULT = Object.freeze({
   OFFER: [
     step(1, 'AUTO_APPROVE', { name: 'Auto (no approval configured)' }),
   ],
+  // ── Feature 35 — Rewards & Recognition. ──
+  // RECOGNITION: the domain layer only opens a request when a give is high-value
+  // (totalPoints > the tenant threshold) or over the giver's budget — everything
+  // else posts inline WITHOUT the engine (behaviour-preserving: default threshold
+  // null = never route). When a request IS opened, the GIVER's manager approves
+  // (spec §8: route budget approval to the giver's manager, never the recipient's,
+  // so a recipient can never approve their own windfall).
+  RECOGNITION: [
+    step(1, 'REPORTING_MANAGER', { name: 'Manager (points budget)', approverRefId: '1', slaHours: 48, onTimeoutAction: 'ESCALATE' }),
+  ],
+  // AWARD: the committee is PER-CYCLE (AwardCycle.committeeUserIds), which a static
+  // built-in cannot know — awards.service pins the committee as the active parallel
+  // level (all-of, minApprovals = committee size) right after openRequest. This HR
+  // step is the FALLBACK chain for a cycle with no committee configured.
+  AWARD: [
+    step(1, 'HR', { name: 'HR (award committee fallback)', slaHours: 72, onTimeoutAction: 'ESCALATE' }),
+  ],
+  // REDEMPTION: fulfilment approval is an HR accountability (the HR-Admin preset
+  // holds BOTH canApproveLeave — the HR approver resolution key — and the new
+  // canFulfilRedemptions, so the default approver set is the fulfilment desk).
+  // Tenants can point it elsewhere by publishing a real REDEMPTION definition
+  // (e.g. SPECIFIC_ROLE → an Office-Admin role). Domain-gated: the service only
+  // opens a request when config.redemptionRequiresApproval is on.
+  REDEMPTION: [
+    step(1, 'HR', { name: 'HR (redemption fulfilment)', slaHours: 72, onTimeoutAction: 'ESCALATE' }),
+  ],
 });
 
 // Generic fallback for any module without a bespoke built-in: manager approves,

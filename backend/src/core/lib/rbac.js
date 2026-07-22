@@ -117,6 +117,15 @@ const PERMISSIONS = Object.freeze({
   // like ESS performance/leave. Seeded for Owner (all), HR-Admin (both), Manager (view).
   canManageLearning:    'Author courses/lessons/quizzes, assign training, issue/revoke certificates',
   canViewTeamLearning:  "View reports' training compliance + completions (TEAM band)",
+  // Rewards & Recognition (Feature 35) — additive; no migration. canManageRecognition
+  // is the R&R config/admin key (values, badges, budgets, catalog, award cycles,
+  // manual point adjustments, reports); canFulfilRedemptions gates ONLY the
+  // fulfilment console (voucher-code entry / perk grant on approved redemptions) so
+  // it can be handed to an "Engagement" / Office-Admin role without the config keys.
+  // Giving/receiving kudos, the wall, wallet, nominating and redeeming need NO key —
+  // the ESS customer session + SELF scope band carry them (like ESS leave/expenses).
+  canManageRecognition:  'Configure R&R: values, badges, budgets, catalog, award cycles, manual point adjustments',
+  canFulfilRedemptions:  'Fulfil approved redemptions (issue voucher codes / grant perks)',
 });
 
 const PERMISSION_KEYS = Object.freeze(Object.keys(PERMISSIONS));
@@ -164,6 +173,8 @@ const SYSTEM_ROLES = Object.freeze({
     canManageSurveys: true,
     // Feature 37 — HR-Admin owns the LMS: author courses + assign + view all compliance.
     canManageLearning: true, canViewTeamLearning: true,
+    // Feature 35 — HR-Admin owns R&R config + the redemption fulfilment console.
+    canManageRecognition: true, canFulfilRedemptions: true,
     // No canEditBilling / canEditDomain / canApprovePayroll — Owner/Finance only
   },
   // Finance — payroll + compensation + statutory + billing.
