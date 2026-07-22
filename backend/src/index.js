@@ -358,6 +358,18 @@ app.get('/version', (req, res) => {
   });
 });
 
+// Enterprise SSO (SAML 2.0 SP + OIDC RP) — the PUBLIC login surface. Tenant
+// slug rides the path (IdP-initiated SAML POSTs carry no tenant Host header).
+// The SAML ACS parses its own urlencoded body on-route; everything else is
+// GET, so mounting after express.json is safe. Session cookies are NOT set
+// here — the flow ends in a one-time code exchanged at
+// /api/customer/sso/exchange (ESS) or /api/auth/sso/exchange (operator).
+app.use('/sso', require('./core/routes/sso.routes'));
+// SCIM 2.0 provisioning (Okta / Azure AD / OneLogin) — bearer-only
+// (ScimToken; the token IS the tenant — no session, no tenant-host
+// resolution). The router carries its own application/scim+json body parser.
+app.use('/scim/v2', require('./hr/scim/scim.routes'));
+
 app.use('/api/auth', authRoutes);
 app.use('/api/business', businessRoutes);
 app.use('/api/public/pricing', publicPricingRoutes);

@@ -135,6 +135,11 @@ const PERMISSIONS = Object.freeze({
   // deliberately-granted key rather than riding the view key).
   canViewReports:       'Report builder: browse datasets, run/save/export reports (F1-scoped)',
   canScheduleReports:   'Create/manage scheduled email deliveries of saved reports',
+  // Enterprise SSO + SCIM (v1) — additive; no migration. Gates the tenant SSO
+  // connection config (SAML/OIDC secrets, JIT policy) + SCIM provisioning-token
+  // mint/revoke under /api/hr/sso. A powerful key (it controls who can sign in
+  // and auto-provision), so it is deliberately separate from canManageRoles.
+  canManageSso:         'Configure single sign-on (SAML/OIDC) + SCIM provisioning tokens',
 });
 
 const PERMISSION_KEYS = Object.freeze(Object.keys(PERMISSIONS));
@@ -186,6 +191,9 @@ const SYSTEM_ROLES = Object.freeze({
     canManageRecognition: true, canFulfilRedemptions: true,
     // Reports Platform — HR-Admin builds/runs/exports reports + schedules deliveries.
     canViewReports: true, canScheduleReports: true,
+    // SSO/SCIM v1 — HR-Admin owns the SSO connection + provisioning tokens
+    // (Owner has it via all-true).
+    canManageSso: true,
     // No canEditBilling / canEditDomain / canApprovePayroll — Owner/Finance only
   },
   // Finance — payroll + compensation + statutory + billing.

@@ -167,7 +167,7 @@ export const NAV_ITEMS = [
   // Settings groups Branding, Roles, Domain and Billing. Show it to anyone who
   // can manage ANY of those — a Finance role (canEditBilling, no canEditBranding)
   // must still reach the Billing tab. Per-tab/per-action gating happens inside.
-  { key: 'settings', label: 'Settings', href: '/settings', anyPermission: ['canEditBranding', 'canEditBilling', 'canEditDomain', 'canManageCompanyProfile', 'canManageExpensePolicy', 'canManageImports', 'canManageAttendance', 'canManageOrg', 'canManageOnboarding'], group: true, icon: 'settings' },
+  { key: 'settings', label: 'Settings', href: '/settings', anyPermission: ['canEditBranding', 'canEditBilling', 'canEditDomain', 'canManageCompanyProfile', 'canManageExpensePolicy', 'canManageImports', 'canManageAttendance', 'canManageOrg', 'canManageOnboarding', 'canManageSso'], group: true, icon: 'settings' },
   // White-label Branding (self-service) — logo/favicon/colours/display-name so a
   // tenant's OWN brand shows on the console, the ESS portal, and both login pages
   // (never the DriftHR vendor mark). Mirrors the backend OR-gate: visible to
@@ -222,6 +222,11 @@ export const NAV_ITEMS = [
   // Gated on canManageOrg (already in the settings group's anyPermission list);
   // the server is the real boundary (/api/hr/notifications/* is canManageOrg).
   { key: 'settings-notifications', label: 'Notification templates', href: '/settings/notifications', permission: 'canManageOrg', parent: 'settings', icon: 'bell' },
+  // Enterprise SSO + SCIM — the tenant's SAML/OIDC connection (IdP config, SP
+  // endpoints, test/delete) and SCIM provisioning tokens. Gated on the new
+  // canManageSso rbac key (Owner via all-true; HR-Admin via the preset). The
+  // server is the real boundary (/api/hr/sso/* is protect + canManageSso).
+  { key: 'settings-sso', label: 'Single sign-on', href: '/settings/sso', permission: 'canManageSso', parent: 'settings', icon: 'shield' },
 ];
 
 // ── Sidebar grouping ─────────────────────────────────────────────────────────
@@ -345,6 +350,8 @@ const PERMISSION_KEYS = [
   'canManageRecognition', 'canFulfilRedemptions',
   // Reports Platform — builder/saved reports + scheduled email delivery
   'canViewReports', 'canScheduleReports',
+  // Enterprise SSO (SAML/OIDC) + SCIM provisioning tokens
+  'canManageSso',
 ];
 const ALL_TRUE = Object.fromEntries(PERMISSION_KEYS.map((k) => [k, true]));
 

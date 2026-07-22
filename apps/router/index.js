@@ -532,6 +532,18 @@ async function resolveRoute(host, url, referer) {
     return { target: `http://localhost:${BACKEND_PORT}` };
   }
 
+  // Wave P3.4 — SSO (SAML ACS/metadata/OIDC callback) + SCIM live at the app
+  // root on ANY tenant/platform host (IdPs post here directly; the paths are
+  // tenant-scoped by :tenant slug / bearer token, not by Host). EXCLUDE
+  // `/sso/complete` — that is the FRONTEND return-leg page (exchanges the
+  // one-time code for a cookie), not a backend route; forwarding it would 404.
+  if (
+    (pathname.startsWith('/sso/') && pathname !== '/sso/complete') ||
+    pathname.startsWith('/scim/')
+  ) {
+    return { target: `http://localhost:${BACKEND_PORT}` };
+  }
+
   // Bound custom domain (e.g. careers.acme.com) → the white-label ESS app.
   // Resolve the tenant by Host: a routable custom-domain mapping
   // (routableCustomDomainWhere, gated by ROUTABLE_CUSTOM_DOMAIN_STATUSES) makes

@@ -4,12 +4,19 @@
 // cookie; on success we route to the dashboard. Branded via TenantProvider
 // (logo + brand color), rendered bare (no AppShell) so it's reachable
 // unauthenticated.
+//
+// Enterprise SSO: on mount we probe the public GET /sso/<slug>/status (slug
+// from the host-resolved tenant). When a connection is configured AND allows
+// the ESS target, a "Continue with <IdP>" button renders ABOVE the password
+// form as a full-page navigation to /sso/<slug>/login?target=ess on the api
+// origin. Any probe failure fails SOFT — the password form is never blocked.
 
-import { Suspense, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ErrorBanner } from '@hr/ui';
 import { useTenant } from '@/components/TenantProvider';
 import { apiPost } from '@/lib/api';
+import { probeSso, ssoLoginUrl } from '@/lib/sso';
 
 function LoginInner() {
   const router = useRouter();
@@ -29,6 +36,26 @@ function LoginInner() {
   const [showPw, setShowPw] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+
+  // Enterprise SSO — probe the tenant's public status endpoint once the slug
+  // resolves (same-origin first, api-origin fallback — see lib/sso.js).
+  // Fail-soft: any error → no button, password login unaffected.
+  const slug = business.slug || null;
+  const [sso, setSso] = useState(null); // { status, base } from the probe
+  useEffect(() => {
+    if (!slug) return undefined;
+    let alive = true;
+    probeSso(slug)
+      .then((r) => {
+        if (!alive || !r?.status?.configured) return;
+        if (r.status.loginTarget === 'OPERATOR') return; // ESS not allowed on this connection
+        setSso(r);
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [slug]);
+  const redirectParam = params.get('redirect');
+  const ssoHref = sso ? ssoLoginUrl(sso.base, slug, 'ess', redirectParam) : null;
 
   async function onSubmit(e) {
     e.preventDefault();
@@ -109,6 +136,31 @@ function LoginInner() {
               {tenantName ? `Welcome back to ${tenantName}.` : 'Welcome back.'} Sign in to your account.
             </p>
           </div>
+
+          {ssoHref && (
+            <div className="mb-6">
+              {/* Full-page navigation — the SSO round trip leaves and re-enters the app. */}
+              <a
+                href={ssoHref}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border py-3 text-sm font-semibold shadow-sm transition hover:opacity-90"
+                style={{
+                  borderColor: 'var(--theme-primary)',
+                  color: 'var(--theme-primary)',
+                  background: 'transparent',
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z" />
+                </svg>
+                Continue with {sso.status.displayName || 'Single sign-on'}
+              </a>
+              <div className="mt-6 flex items-center gap-3" aria-hidden="true">
+                <span className="h-px flex-1" style={{ background: 'var(--theme-border)' }} />
+                <span className="text-xs" style={{ color: 'var(--theme-muted)' }}>or sign in with your password</span>
+                <span className="h-px flex-1" style={{ background: 'var(--theme-border)' }} />
+              </div>
+            </div>
+          )}
 
           <form onSubmit={onSubmit} className="space-y-4">
             {error && <ErrorBanner message={error} />}

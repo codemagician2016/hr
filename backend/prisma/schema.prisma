@@ -310,6 +310,9 @@ model Business {
   businessRoles                  BusinessRole[]
   // Sprint 1.7 — Public API + webhooks (Business tier)
   apiKeys                        ApiKey[]
+  // SSO (SAML/OIDC) + SCIM provisioning (v1) — one connection per tenant.
+  ssoConnection                  SsoConnection?
+  scimTokens                     ScimToken[]
   webhookSubscriptions           WebhookSubscription[]
   webhookDeliveries              WebhookDelivery[]
   paddleWebhookEvents            PaddleWebhookEvent[]
@@ -6869,6 +6872,13 @@ model Employee {
   awardNominationsReceived AwardNomination[]                 @relation("AwardNominee")
   redemptions              Redemption[]
 
+  // SSO/SCIM (v1) — identity-provider provisioning linkage. `externalId` is the
+  // IdP's stable id for this person (Okta/Azure AD "externalId" on SCIM create);
+  // `scimManaged` marks rows the tenant's SCIM connector owns (created/updated
+  // via /scim/v2/Users) so admin UIs can badge them + audits can tell the writer.
+  externalId  String?
+  scimManaged Boolean @default(false)
+
   @@unique([businessId, code])
   // FLAG (Feature 17 — review HIGH fix): a PARTIAL unique index backs the
   // onboard-by-CTC email+DOJ idempotency. Prisma's @@unique cannot express the
@@ -6878,6 +6888,8 @@ model Employee {
   @@index([businessId, status])
   @@index([businessId, managerEmployeeId])
   @@index([businessId, workEmail])
+  // SSO/SCIM — GET /scim/v2/Users?filter=externalId eq "…" resolves via this.
+  @@index([businessId, externalId])
   // Feature 19 — scalable org chart: keep the lazy-tree API index-only at 1000+.
   @@index([businessId, managerEmployeeId, lastName, firstName]) // ordered child pages (sibling sort) without a sort step
   @@index([businessId, lastName, firstName]) // tenant-wide name sort + search prefix
@@ -14408,4 +14420,84 @@ model ReportSchedule {
 
   @@index([businessId, isActive])
   @@index([businessId, reportDefinitionId])
+}
+
+// =============================================================================
+// SSO (SAML 2.0 SP + OIDC RP) + SCIM 2.0 provisioning — v1 (2026-07)
+//
+// One SsoConnection per tenant (businessId @unique). The public endpoints live
+// at /sso/:tenant/* (tenant = Business.slug — IdP-initiated POSTs carry no
+// tenant Host, so the slug rides the path). Secrets at rest go through
+// core/lib/crypto.js AES-256-GCM (clientSecretEnc / spPrivateKeyEnc) and are
+// WRITE-ONLY through the admin API (never echoed back).
+//
+// ScimToken mirrors the ApiKey pattern: sha256(token) stored, raw shown ONCE,
+// last4 for the admin UI, bearer-authed at /scim/v2/* (no session).
+// =============================================================================
+
+enum SsoProtocol {
+  SAML
+  OIDC
+}
+
+// Which login surface the connection signs users into:
+//   ESS      → employee portal (Customer session cookie)
+//   OPERATOR → hr-admin console (User session cookie)
+//   BOTH     → the /sso/:tenant/login?target= query picks per-request (ESS default)
+enum SsoLoginTarget {
+  ESS
+  OPERATOR
+  BOTH
+}
+
+model SsoConnection {
+  id          String         @id @default(uuid())
+  businessId  String         @unique // ONE connection per tenant (v1)
+  business    Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  protocol    SsoProtocol
+  isActive    Boolean        @default(true)
+  displayName String? // login-page button label, e.g. "Sign in with Okta"
+  loginTarget SsoLoginTarget @default(ESS)
+
+  // ── OIDC (protocol = OIDC) ──
+  issuerUrl       String? // discovery base, e.g. https://login.microsoftonline.com/<tid>/v2.0
+  clientId        String?
+  clientSecretEnc String? @db.Text // AES-256-GCM (core/lib/crypto) — write-only
+  scopes          String  @default("openid email profile")
+
+  // ── SAML (protocol = SAML) ──
+  idpEntityId          String?
+  idpSsoUrl            String? // IdP HTTP-Redirect SSO endpoint (AuthnRequest target)
+  idpCertPem           String? @db.Text // IdP signing cert (PEM or bare base64)
+  spPrivateKeyEnc      String? @db.Text // optional SP key for signed AuthnRequests — encrypted
+  wantAssertionsSigned Boolean @default(true)
+
+  // ── JIT provisioning ──
+  // false → the assertion must match an EXISTING employee email (clean error otherwise);
+  // true  → auto-provision a minimal Employee (+ portal identities) on first login.
+  jitProvision           Boolean @default(false)
+  jitDefaultDepartmentId String?
+  // Optional claim/attribute overrides: { email, name, firstName, lastName }
+  // each mapping to the IdP claim/attribute name to read instead of the default.
+  attributeMapJson       Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessId, isActive])
+}
+
+model ScimToken {
+  id              String    @id @default(uuid())
+  businessId      String
+  business        Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name            String // admin label, e.g. "Okta prod"
+  tokenHash       String    @unique // sha256(raw) — raw shown once at mint
+  last4           String
+  isActive        Boolean   @default(true)
+  lastUsedAt      DateTime? // best-effort touch on accepted requests
+  createdByUserId String
+  createdAt       DateTime  @default(now())
+
+  @@index([businessId, isActive])
 }

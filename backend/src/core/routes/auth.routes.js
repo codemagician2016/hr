@@ -31,6 +31,10 @@ router.post('/send-otp',         authLimiter, sendOtp);
 router.post('/verify-otp',       authLimiter, verifyOtp);
 router.post('/generate-login-code', protect, generateLoginCode);
 router.post('/exchange-login-code', authLimiter, exchangeLoginCode);
+// Enterprise SSO (SAML/OIDC) — operator variant of the exchange leg: the
+// hr-admin console consumes the one-time code minted by /sso/:tenant/* and
+// gets the operator JWT cookie set on its host (mirrors exchange-login-code).
+router.post('/sso/exchange',        authLimiter, require('../controllers/sso.controller').operatorSsoExchange);
 
 // GDPR Article 17 — staff self-delete (BUSINESS_ADMIN owners use the
 // whole-tenant flow at /api/business/request-deletion instead).

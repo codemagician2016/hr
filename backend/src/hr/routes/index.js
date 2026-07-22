@@ -146,6 +146,11 @@ router.use('/ess/learning', talent.essLearning);
 //                        (leave/expense wire onto the engine in 10c).
 router.use('/approvals', require('./approvals.routes'));
 router.use('/rbac', require('./rbac.routes'));
+// SSO/SCIM v1 — tenant SSO connection config (SAML/OIDC, secrets write-only,
+// JIT policy) + SCIM provisioning-token mint/revoke. protect + canManageSso
+// (Owner + HR-Admin). The PUBLIC login surface lives at /sso/:tenant/* and the
+// IdP-facing SCIM surface at /scim/v2 — both mounted at app root in src/index.js.
+router.use('/sso', require('./ssoAdmin.routes'));
 // FLAG (Feature 13 — shared edit): HR-admin profile surface — the field-policy map,
 // the profile change-request approval queue (F1-scoped + SoD, drives the F10
 // PROFILE_CHANGE engine), and the rich sectioned profile for any in-scope employee.

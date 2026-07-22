@@ -47,6 +47,11 @@ router.get('/auth/:provider',    authLimiter, (req, res) => {
 // Generic, provider-agnostic social login (Google now; Apple/MS later).
 router.post('/social/:provider/start', authLimiter, socialStart); // platform → one-time code
 router.post('/social/exchange',        authLimiter, socialExchange); // tenant host → JWT
+// Enterprise SSO (SAML/OIDC) — leg 2 of the /sso/:tenant/* flow: the ESS app
+// on the tenant host consumes the one-time code minted by the ACS/callback
+// and gets the Customer JWT cookie set on ITS host (same shape as
+// /social/exchange; see core/controllers/sso.controller.js).
+router.post('/sso/exchange',           authLimiter, require('../controllers/sso.controller').customerSsoExchange);
 // Legacy aliases — delegate to the generic handlers above. Kept so older
 // already-deployed frontends keep working through the rollout.
 router.post('/google-auth',      authLimiter, googleAuth);
