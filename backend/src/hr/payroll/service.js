@@ -890,10 +890,17 @@ async function loadRunRowBundles(businessId, payRun, db = prisma) {
   });
   const attendanceByEmp = new Map(attendanceRows.map((a) => [a.employeeId, a]));
 
+  // P5d — batch-prefetch every employee's covering compensation revision in ONE query
+  // (was N per-employee findFirst calls in the loop). resolveCurrentCompensation stays
+  // the source of truth: a Map miss (no covering revision) falls back to it.
+  const compByEmp = await prefetchCurrentCompensations(businessId, employeeIds, periodEnd, db);
+
   const bundles = [];
   for (const emp of employees) {
-    // Resolve the current compensation revision effective on the period end.
-    let compensation = await resolveCurrentCompensation(businessId, emp.id, periodEnd, db);
+    // Resolve the current compensation revision effective on the period end (prefetched;
+    // fall back to the per-employee resolver for the closed-window / isCurrent case).
+    let compensation = compByEmp.get(emp.id);
+    if (compensation === undefined) compensation = await resolveCurrentCompensation(businessId, emp.id, periodEnd, db);
     if (!compensation) continue; // no pay structure -> skip (not an error)
 
     // Feature 25 — Seam A: if the employee has a SUBMITTED/LOCKED FBP allocation for
@@ -1093,6 +1100,37 @@ async function resolveCurrentCompensation(businessId, employeeId, asOf, db = pri
     orderBy: { effectiveFrom: 'desc' },
     include: { lines: { orderBy: { sortOrder: 'asc' }, include: { component: true } } },
   });
+}
+
+/**
+ * P5d — batched twin of resolveCurrentCompensation's COVERING query. Fetches the
+ * covering revision for MANY employees in ONE query instead of N findFirst calls
+ * (the payroll compute loop hot-path). Returns Map<employeeId, revision>.
+ *
+ * Provably equivalent to N per-employee covering-lookups: the predicate, orderBy
+ * (effectiveFrom desc) and include are IDENTICAL, and a global effectiveFrom-desc
+ * sort means the FIRST row seen for an employee is that employee's max-effectiveFrom
+ * covering revision — exactly what findFirst returns. Employees with NO covering
+ * revision are simply absent from the Map; the caller falls back to
+ * resolveCurrentCompensation (which runs the isCurrent path), so behaviour — incl.
+ * the closed-window fallback — is preserved. asOf is a single run-wide period end.
+ */
+async function prefetchCurrentCompensations(businessId, employeeIds, asOf, db = prisma) {
+  const map = new Map();
+  if (!employeeIds || employeeIds.length === 0) return map;
+  const asOfDate = new Date(isoDate(asOf) + 'T00:00:00Z');
+  const rows = await db.compensationRevision.findMany({
+    where: {
+      businessId,
+      employeeId: { in: employeeIds },
+      effectiveFrom: { lte: asOfDate },
+      OR: [{ effectiveTo: null }, { effectiveTo: { gte: asOfDate } }],
+    },
+    orderBy: { effectiveFrom: 'desc' },
+    include: { lines: { orderBy: { sortOrder: 'asc' }, include: { component: true } } },
+  });
+  for (const r of rows) if (!map.has(r.employeeId)) map.set(r.employeeId, r);
+  return map;
 }
 
 /**
@@ -1908,16 +1946,29 @@ async function getRun({ businessId, payRunId }) {
   };
 }
 
-/** getRunPayslips — payslips for the run. */
-async function getRunPayslips({ businessId, payRunId }) {
+/**
+ * getRunPayslips — payslips for the run.
+ * P5d — OPTIONAL pagination: pass page/pageSize to fetch one page (take/skip) and a
+ * TRUE `total` (a count, not items.length). Backward-compatible: with no params the
+ * query is unbounded exactly as before and total === the full count === items.length.
+ */
+async function getRunPayslips({ businessId, payRunId, page, pageSize } = {}) {
   const payRun = await prisma.payRun.findFirst({ where: { id: payRunId, businessId } });
   if (!payRun) throw notFound('Pay run not found');
-  const items = await prisma.payslip.findMany({
-    where: { businessId, payRunId, deletedAt: null },
-    include: { employee: { select: { id: true, code: true, firstName: true, lastName: true } } },
-    orderBy: { code: 'asc' },
-  });
-  return { items, total: items.length };
+  const where = { businessId, payRunId, deletedAt: null };
+  // Only paginate when the caller asks; otherwise take/skip stay undefined (all rows).
+  const size = pageSize != null ? Math.min(Math.max(parseInt(pageSize, 10) || 0, 1), 200) : null;
+  const pg = Math.max(parseInt(page, 10) || 1, 1);
+  const [items, total] = await Promise.all([
+    prisma.payslip.findMany({
+      where,
+      include: { employee: { select: { id: true, code: true, firstName: true, lastName: true } } },
+      orderBy: { code: 'asc' },
+      ...(size ? { take: size, skip: (pg - 1) * size } : {}),
+    }),
+    prisma.payslip.count({ where }),
+  ]);
+  return { items, total, ...(size ? { page: pg, pageSize: size } : {}) };
 }
 
 /** getPayslip — one payslip (full breakdown), operator view. */
@@ -3548,7 +3599,7 @@ module.exports = {
   // internals exposed for tests
   _internal: {
     taxYearFor, buildFilingAggregate, statutoryRollups, buildPayslipSnapshot,
-    resolveCurrentCompensation, resolveBalancingTarget, varianceLineFromRow,
+    resolveCurrentCompensation, prefetchCurrentCompensations, resolveBalancingTarget, varianceLineFromRow,
     totalsHashOf, remittanceDueDate, remittanceTaxPeriod, remittanceKind, remittanceStateCode, FILING_PLAN,
     resolveFourEyesPolicy, resolveFilingPlan,
     buildLopProvenance, // F16 — payslip LOP provenance (LOW#1 phantom-line guard)

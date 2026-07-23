@@ -322,7 +322,7 @@ async function getRun(req, res) {
 async function getRunPayslips(req, res) {
   try {
     const { businessId } = req.user;
-    const out = await service.getRunPayslips({ businessId, payRunId: req.params.id });
+    const out = await service.getRunPayslips({ businessId, payRunId: req.params.id, page: req.query.page, pageSize: req.query.pageSize });
     res.json(out);
   } catch (err) { handleError(res, err); }
 }
