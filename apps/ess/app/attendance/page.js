@@ -177,6 +177,7 @@ const SECTIONS = [
   { key: 'clock', label: 'Clock' },
   { key: 'timesheet', label: 'Timesheets' },
   { key: 'regularizations', label: 'Regularizations' },
+  { key: 'overtime', label: 'Overtime' },
   { key: 'schedule', label: 'Schedule' },
 ];
 
@@ -1525,6 +1526,209 @@ function RegularizationsSection({ canAct }) {
   );
 }
 
+// ─── Overtime pre-approval (OT requests) ──────────────────────────────────────
+// Ask a manager to authorise overtime minutes for a day. When the company's OT
+// rule has "Require pre-approval" on, attendance only pays OT up to the minutes
+// approved here — otherwise the request is just a record. The request rides the
+// approval engine (the reporting manager decides); a still-PENDING one can be
+// withdrawn.
+//   GET  /api/hr/me/attendance/overtime            → my requests { items }
+//   POST /api/hr/me/attendance/overtime            { date, requestedMinutes, reason }
+//   POST /api/hr/me/attendance/overtime/:id/cancel → withdraw while PENDING
+// Server 4xx (409 already-pending / day-locked, 400 validation) surface verbatim.
+
+// Minutes → "1h 30m" / "45m" for the requests list.
+function otMinutesLabel(mins) {
+  const n = Number(mins);
+  if (!Number.isFinite(n) || n <= 0) return `${mins} min`;
+  const h = Math.floor(n / 60);
+  const m = n % 60;
+  if (h && m) return `${h}h ${m}m`;
+  if (h) return `${h}h`;
+  return `${m}m`;
+}
+
+function OvertimeSection({ canAct }) {
+  const { data: requests, loading, error, reload } = useApi(
+    '/api/hr/me/attendance/overtime',
+    { select: (b) => (Array.isArray(b) ? b : b?.items || b?.requests || []) }
+  );
+
+  const [date, setDate] = useState(todayISO());
+  const [hours, setHours] = useState('');
+  const [minutes, setMinutes] = useState('');
+  const [reason, setReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState(null);
+  const [success, setSuccess] = useState(false);
+  const [busyId, setBusyId] = useState('');
+  const [cancelError, setCancelError] = useState('');
+
+  const totalMinutes = (parseInt(hours, 10) || 0) * 60 + (parseInt(minutes, 10) || 0);
+
+  async function submit(e) {
+    e.preventDefault();
+    setFormError(null);
+    setSuccess(false);
+    if (!date) { setFormError('Please pick the day you worked (or will work) overtime.'); return; }
+    if (!totalMinutes || totalMinutes <= 0) { setFormError('Enter how many overtime minutes to request.'); return; }
+    setSubmitting(true);
+    try {
+      await apiPost('/api/hr/me/attendance/overtime', {
+        date,
+        requestedMinutes: totalMinutes,
+        reason: reason.trim() || undefined,
+      });
+      setSuccess(true);
+      setHours('');
+      setMinutes('');
+      setReason('');
+      reload();
+    } catch (err) {
+      // 409 (already pending / locked day) / 400 (validation) — verbatim.
+      setFormError(err.message || 'Could not submit your overtime request.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function cancel(r) {
+    setBusyId(r.id);
+    setCancelError('');
+    try {
+      await apiPost(`/api/hr/me/attendance/overtime/${encodeURIComponent(r.id)}/cancel`, {});
+      reload();
+    } catch (e) {
+      setCancelError(e.message || 'Could not withdraw this overtime request.');
+    } finally {
+      setBusyId('');
+    }
+  }
+
+  const list = requests || [];
+  const inputCls = 'w-full rounded-lg border px-3 py-2 text-sm outline-none';
+  const inputStyle = { borderColor: 'var(--theme-border)' };
+
+  return (
+    <div className="space-y-6">
+      <section className="rounded-2xl border bg-white p-5 shadow-sm" style={{ borderColor: 'var(--theme-border)' }}>
+        <h2 className="mb-1 flex items-center text-sm font-semibold" style={{ color: 'var(--theme-text)' }}>
+          Request overtime
+          <InfoTip text="Ask your manager to pre-approve overtime for a day. When your company requires pre-approval, overtime is only paid up to the minutes approved here." />
+        </h2>
+        <p className="mb-3 text-xs" style={{ color: 'var(--theme-muted)' }}>
+          Pick the day and how much overtime to authorise. It goes to your manager for approval.
+        </p>
+
+        <form onSubmit={submit} className="space-y-3">
+          {formError && <ErrorBanner message={formError} />}
+          {success && (
+            <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+              Overtime request sent to your manager for approval.
+            </p>
+          )}
+
+          <div>
+            <label htmlFor="ot-date" className="mb-1 flex items-center text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>
+              Date<InfoTip text="The day the overtime is for." />
+            </label>
+            <input id="ot-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} required className={inputCls} style={inputStyle} />
+          </div>
+
+          <div>
+            <span className="mb-1 flex items-center text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>
+              Overtime requested<InfoTip text="How long you worked (or plan to work) beyond your normal hours. Enter hours and/or minutes." />
+            </span>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex items-center gap-2">
+                <input
+                  id="ot-hours" type="number" min={0} max={24} value={hours}
+                  onChange={(e) => setHours(e.target.value)} placeholder="0"
+                  className={inputCls} style={inputStyle}
+                />
+                <span className="text-xs" style={{ color: 'var(--theme-muted)' }}>hours</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  id="ot-minutes" type="number" min={0} max={59} value={minutes}
+                  onChange={(e) => setMinutes(e.target.value)} placeholder="0"
+                  className={inputCls} style={inputStyle}
+                />
+                <span className="text-xs" style={{ color: 'var(--theme-muted)' }}>minutes</span>
+              </div>
+            </div>
+            {totalMinutes > 0 && (
+              <p className="mt-1 text-[11px]" style={{ color: 'var(--theme-muted)' }}>
+                Requesting {otMinutesLabel(totalMinutes)} ({totalMinutes} min).
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label htmlFor="ot-reason" className="mb-1 flex items-center text-xs font-medium" style={{ color: 'var(--theme-muted)' }}>
+              Reason<InfoTip text="A short note for your manager on why the extra hours are needed. Optional." />
+            </label>
+            <textarea
+              id="ot-reason" value={reason} onChange={(e) => setReason(e.target.value)} rows={2}
+              className={inputCls} style={inputStyle} placeholder="Why is the overtime needed?"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={submitting || !canAct}
+            className="rounded-lg px-4 py-2 text-sm font-semibold transition disabled:opacity-50"
+            style={{ background: 'var(--theme-primary)', color: 'var(--theme-on-primary)' }}
+          >
+            {submitting ? 'Sending…' : 'Send request'}
+          </button>
+        </form>
+      </section>
+
+      <section>
+        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--theme-muted)' }}>
+          My overtime requests
+        </h2>
+        {cancelError && <div className="mb-2"><ErrorBanner message={cancelError} /></div>}
+        {loading ? (
+          <Centered><Spinner small /></Centered>
+        ) : error && error.status !== 404 ? (
+          <ErrorBanner message={error.message || 'Could not load your overtime requests.'} />
+        ) : list.length === 0 ? (
+          <Empty text="You haven't requested any overtime yet." />
+        ) : (
+          <ul className="overflow-hidden rounded-2xl border bg-white shadow-sm" style={{ borderColor: 'var(--theme-border)' }}>
+            {list.map((r, i) => (
+              <li key={r.id || i} className="border-b px-4 py-3 last:border-b-0" style={{ borderColor: 'var(--theme-border)' }}>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-medium" style={{ color: 'var(--theme-text)' }}>
+                    {formatDate(r.date || r.createdAt)} · {otMinutesLabel(r.requestedMinutes)}
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <StatusPill status={r.status} />
+                    {String(r.status || '').toUpperCase() === 'PENDING' && (
+                      <button
+                        type="button"
+                        onClick={() => cancel(r)}
+                        disabled={busyId === r.id || !canAct}
+                        className="rounded-lg border px-2.5 py-1 text-xs font-medium transition disabled:opacity-50"
+                        style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-text)' }}
+                      >
+                        {busyId === r.id ? 'Withdrawing…' : 'Withdraw'}
+                      </button>
+                    )}
+                  </span>
+                </div>
+                {r.reason && <p className="mt-0.5 text-xs" style={{ color: 'var(--theme-muted)' }}>{r.reason}</p>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+}
+
 // ─── My schedule + holidays (kept) ────────────────────────────────────────────
 
 const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -1786,6 +1990,7 @@ function AttendanceInner() {
       {section === 'clock' && <ClockSection canAct={canAct} />}
       {section === 'timesheet' && <TimesheetSection />}
       {section === 'regularizations' && <RegularizationsSection canAct={canAct} />}
+      {section === 'overtime' && <OvertimeSection canAct={canAct} />}
       {section === 'schedule' && <ScheduleSection />}
     </div>
   );

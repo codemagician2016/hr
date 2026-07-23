@@ -165,6 +165,24 @@ function exceptions(ctx, m, status) {
 }
 
 /**
+ * authorizedOt(otRawMin, { requirePreApproval, authorizedMin }) — the OT
+ * pre-approval GATE (pure, testable in isolation).
+ *   - requirePreApproval falsy → otRaw is returned UNCHANGED (the historical path;
+ *     a tenant without pre-approval sees identical OT — regression-critical).
+ *   - requirePreApproval true  → the credited minutes are capped at the day's
+ *     APPROVED minutes: min(otRaw, authorizedMin), with authorizedMin floored at 0
+ *     (0/absent/negative ⇒ NO OT credited). Applied on the FINAL raw minutes (after
+ *     rounding/dailyCap, before the multiplier) so the credited OT can NEVER exceed
+ *     what the manager authorized.
+ */
+function authorizedOt(otRawMin, opts = {}) {
+  const raw = num(otRawMin, 0);
+  if (!opts || !opts.requirePreApproval) return raw;
+  const auth = Math.max(0, num(opts.authorizedMin, 0));
+  return Math.min(raw, auth);
+}
+
+/**
  * Step D — overtime. Eligible shifts only. Multipliers collapse to an
  * equivalent-hours figure so the payroll engine's existing otHours path is
  * untouched.
@@ -188,6 +206,15 @@ function overtime(ctx, m, status) {
   const round = num(rule.roundingMin, 0);
   if (round > 0) otRaw = Math.round(otRaw / round) * round;
   if (rule.dailyCapMin != null) otRaw = Math.min(otRaw, num(rule.dailyCapMin, otRaw));
+
+  // OT pre-approval gate — no-op unless the resolved rule requires pre-approval, in
+  // which case the credited minutes are capped at the day's authorized minutes
+  // (ctx.otAuthorizedMin; 0 when none approved). Placed AFTER rounding/dailyCap so
+  // the final credited minutes can never round back above the authorization.
+  otRaw = authorizedOt(otRaw, {
+    requirePreApproval: !!rule.requirePreApproval,
+    authorizedMin: ctx.otAuthorizedMin,
+  });
 
   const otEquivalentHours = Math.round((otRaw * multiplier) / 60 * 10000) / 10000;
   return { overtimeMinutes: otRaw, otEquivalentHours };
@@ -292,5 +319,5 @@ module.exports = {
   isHoliday,
   isWeeklyOff,
   daysBetweenInclusive,
-  _internals: { foldPunches, classify, exceptions, overtime, elapsedMin },
+  _internals: { foldPunches, classify, exceptions, overtime, authorizedOt, elapsedMin },
 };

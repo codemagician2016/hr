@@ -360,7 +360,7 @@ async function recompute(businessId, employeeId, fromDate, toDate, tx) {
   const { loadOptedRestrictedDates } = require('./restrictedHolidays.controller');
   const optedRestrictedDates = await loadOptedRestrictedDates(db, { businessId, employeeId }).catch(() => new Set());
 
-  const [assignments, defaultPatterns, leaveTxns, regs, holidays, otRules, lockedRows, rosterRows] = await Promise.all([
+  const [assignments, defaultPatterns, leaveTxns, regs, holidays, otRules, otApproved, lockedRows, rosterRows] = await Promise.all([
     db.shiftAssignment.findMany({
       where: { businessId, employeeId, effectiveFrom: { lt: winEnd } },
       include: { shiftPattern: true },
@@ -393,6 +393,13 @@ async function recompute(businessId, employeeId, fromDate, toDate, tx) {
       where: { businessId, countryCode: holidayCountry, date: { gte: winStart, lt: winEnd } },
     }),
     db.overtimeRule.findMany({ where: { businessId, isActive: true } }),
+    // OT pre-approval — the APPROVED OvertimeRequests covering the recompute range.
+    // Only consumed by derive when the resolved OvertimeRule.requirePreApproval is
+    // true; for every other tenant this is loaded-but-ignored (behaviour unchanged).
+    db.overtimeRequest.findMany({
+      where: { businessId, employeeId, status: 'APPROVED', date: { gte: from, lte: to } },
+      select: { date: true, requestedMinutes: true },
+    }),
     db.attendance.findMany({
       where: { businessId, employeeId, date: { gte: from, lte: to }, isLocked: true },
       select: { date: true },
@@ -418,6 +425,10 @@ async function recompute(businessId, employeeId, fromDate, toDate, tx) {
     return rank(b) - rank(a);
   })[0] || null;
   const otRule = resolveOtRule(employee, otRules);
+  // Per-day authorized-OT map (civil-day key → approved minutes). Empty for a tenant
+  // with no OT pre-approval requests; the derive gate only reads it when the resolved
+  // rule requires pre-approval, so a no-pre-approval tenant is byte-for-byte unchanged.
+  const otAuthorizedByDate = new Map((otApproved || []).map((r) => [dayKey(r.date), Number(r.requestedMinutes) || 0]));
 
   let written = 0;
   let skippedLocked = 0;
@@ -514,6 +525,9 @@ async function recompute(businessId, employeeId, fromDate, toDate, tx) {
       holiday: !!holiday,
       weeklyOff,
       otRule,
+      // OT pre-approval — the day's authorized minutes (0 when none approved). Only
+      // consumed by derive when otRule.requirePreApproval is true.
+      otAuthorizedMin: otAuthorizedByDate.has(key) ? otAuthorizedByDate.get(key) : 0,
       // Geofence flag → derive.js Step C surfaces OUT_OF_GEOFENCE when set. WARN vs
       // ENFORCE does NOT change whether we flag (we always flag); enforce is carried
       // for a future hard-block path and recorded on the day for the board.

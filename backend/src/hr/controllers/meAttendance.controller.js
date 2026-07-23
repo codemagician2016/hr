@@ -904,6 +904,111 @@ async function withdrawMySwap(req, res, next) {
   } catch (e) { next(e); }
 }
 
+// ── OT PRE-APPROVAL (ESS) ─────────────────────────────────────────────────────
+// An employee asks to be authorized for N overtime minutes on a day; the request
+// rides the F10 OVERTIME engine (the reporting manager authorizes). Attendance
+// derivation then credits OT up to the approved minutes WHEN the resolved
+// OvertimeRule.requirePreApproval is on (otherwise OT is unchanged). SELF_ONLY —
+// the employeeId is the session's; the body carries only date/minutes/reason.
+
+// GET /me/attendance/overtime — my OT requests (optional ?status filter).
+async function listOvertimeRequests(req, res, next) {
+  try {
+    const emp = await resolveActiveSelf(req);
+    if (!emp) return res.json({ items: [] });
+    const { businessId } = req.customer;
+    const where = { businessId, employeeId: emp.id };
+    if (req.query.status) where.status = req.query.status;
+    const items = await prisma.overtimeRequest.findMany({ where, orderBy: { date: 'desc' }, take: 200 });
+    res.json({ items });
+  } catch (e) { next(e); }
+}
+
+// POST /me/attendance/overtime — raise an OT pre-approval request for a day.
+async function createOvertimeRequest(req, res, next) {
+  try {
+    const emp = await resolveActiveSelf(req);
+    if (!emp) return noEmployee(res);
+    const { businessId } = req.customer;
+    const { date, requestedMinutes, reason } = req.body || {};
+    if (!date) return res.status(400).json({ message: 'date is required' });
+    const mins = Number(requestedMinutes);
+    if (!Number.isInteger(mins) || mins <= 0 || mins > 1440) {
+      return res.status(400).json({ message: 'requestedMinutes must be an integer 1–1440' });
+    }
+    const d = utcDay(date);
+    if (Number.isNaN(d.getTime())) return res.status(400).json({ message: 'date is not a valid YYYY-MM-DD' });
+    if (await isDayLocked(businessId, emp.id, d)) {
+      return res.status(409).json({ message: 'Attendance for this day is locked (period closed)' });
+    }
+    // One LIVE request per employee-day. A still-PENDING request blocks a duplicate;
+    // a previously-decided row is re-opened (flipped back to PENDING) in the tx below.
+    const existing = await prisma.overtimeRequest.findFirst({ where: { businessId, employeeId: emp.id, date: d } });
+    if (existing && existing.status === 'PENDING') {
+      return res.status(409).json({ message: 'An overtime request for this day is already pending' });
+    }
+
+    const engine = require('../approvals/engine');
+    require('../approvals/consumers.overtime');
+    const reqRow = await prisma.$transaction(async (tx) => {
+      const row = existing
+        ? await tx.overtimeRequest.update({
+            where: { id: existing.id },
+            data: { requestedMinutes: mins, reason: reason || null, status: 'PENDING', approvalRequestId: null, decidedByUserId: null, decidedAt: null },
+          })
+        : await tx.overtimeRequest.create({
+            data: { businessId, employeeId: emp.id, date: d, requestedMinutes: mins, reason: reason || null, status: 'PENDING' },
+          });
+      const rec = await tx.employmentRecord.findFirst({
+        where: { businessId, employeeId: emp.id, isCurrent: true },
+        orderBy: { effectiveFrom: 'desc' },
+        select: { departmentId: true, gradeId: true, locationId: true },
+      });
+      const opened = await engine.openRequest({
+        businessId,
+        module: 'OVERTIME',
+        entityType: 'OvertimeRequest',
+        entityId: row.id,
+        requesterEmployeeId: emp.id,
+        payload: { date: d.toISOString().slice(0, 10), requestedMinutes: mins, reason: reason || null },
+        ctx: {
+          entityId: row.id,
+          departmentId: rec ? rec.departmentId : null,
+          employeeLevel: rec ? rec.gradeId : null,
+          locationId: rec ? rec.locationId : null,
+        },
+      }, tx);
+      await tx.overtimeRequest.update({ where: { id: row.id }, data: { approvalRequestId: opened.approvalRequest.id } });
+      return tx.overtimeRequest.findUnique({ where: { id: row.id } });
+    });
+    res.status(201).json(reqRow);
+  } catch (e) { next(e); }
+}
+
+// POST /me/attendance/overtime/:id/cancel — requester withdraws (drives engine.cancel).
+async function cancelOvertimeRequest(req, res, next) {
+  try {
+    const emp = await resolveActiveSelf(req);
+    if (!emp) return noEmployee(res);
+    const { businessId } = req.customer;
+    const row = await prisma.overtimeRequest.findFirst({ where: { id: req.params.id, businessId } });
+    if (!row || row.employeeId !== emp.id) return res.status(404).json({ message: 'Overtime request not found' });
+    if (row.status !== 'PENDING') return res.status(409).json({ message: `Overtime request is already ${row.status}` });
+    // If an approval chain is open, cancel it (fires onCancel → CANCELLED). Otherwise
+    // close the request directly (defensive — a PENDING row always has an open chain).
+    const open = await prisma.approvalRequest.findFirst({
+      where: { businessId, module: 'OVERTIME', entityType: 'OvertimeRequest', entityId: row.id, status: { in: ['PENDING', 'ESCALATED'] } },
+    });
+    if (open) {
+      await engine.cancel({ approvalRequestId: open.id, actorUserId: emp.id, comment: (req.body && req.body.reason) || 'Withdrawn by requester' });
+    } else {
+      await prisma.overtimeRequest.updateMany({ where: { id: row.id, status: 'PENDING' }, data: { status: 'CANCELLED', decidedAt: new Date(), decidedByUserId: null } });
+    }
+    const fresh = await prisma.overtimeRequest.findUnique({ where: { id: row.id } });
+    res.json(fresh);
+  } catch (e) { next(e); }
+}
+
 module.exports = {
   createPunch,
   // Feature 2 — multi-mode capture (policy preview + face enrolment)
@@ -918,6 +1023,10 @@ module.exports = {
   submitTimesheet,
   listRegularizations,
   createRegularization,
+  // OT pre-approval (ESS)
+  listOvertimeRequests,
+  createOvertimeRequest,
+  cancelOvertimeRequest,
   getSchedule,
   listHolidays,
   // Feature 29 — ESS shift swaps

@@ -65,6 +65,10 @@ const { registerOfferConsumer } = require('./consumers.offer');
 const { registerRecognitionConsumer } = require('./consumers.recognition');
 const { registerAwardConsumer } = require('./consumers.award');
 const { registerRedemptionConsumer } = require('./consumers.redemption');
+// OT pre-approval — the OVERTIME consumer (manager authorizes overtime minutes →
+// flips OvertimeRequest.status). Self-registers on load like the others; wired here
+// too so the explicit boot path stays the single source of truth.
+const { registerOvertimeConsumer } = require('./consumers.overtime');
 
 let done = false;
 
@@ -90,6 +94,7 @@ function registerConsumers() {
   registerRecognitionConsumer();
   registerAwardConsumer();
   registerRedemptionConsumer();
+  registerOvertimeConsumer();
   done = true;
 }
 

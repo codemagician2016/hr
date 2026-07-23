@@ -53,10 +53,12 @@ function maskCompPayload(payload, viewer, requesterEmployeeId) {
   return { ...out, _comp: masked };
 }
 
-const MODULES = new Set([
-  'LEAVE', 'EXPENSE', 'TRAVEL', 'LOAN', 'COMPENSATION', 'OFFER', 'PROFILE_CHANGE',
-  'TIMESHEET', 'ATTENDANCE_REGULARIZATION', 'SEPARATION', 'ASSET', 'DOCUMENT_SIGN', 'PAYRUN',
-]);
+// The inbox module filter accepts every WorkflowModule the engine knows. Derive
+// it from the Prisma enum so it can NEVER go stale as new modules are onboarded
+// (it previously omitted COMP_OFF/SHIFT_SWAP/…/OVERTIME — added since — so
+// filtering the inbox by a newer module 400'd "Unknown module").
+const { WorkflowModule } = require('@prisma/client');
+const MODULES = new Set(Object.keys(WorkflowModule));
 const APPROVER_TYPES = new Set([
   'REPORTING_MANAGER', 'DEPARTMENT_HEAD', 'HR', 'PAYROLL_MANAGER',
   'SPECIFIC_ROLE', 'SPECIFIC_EMPLOYEE', 'AUTO_APPROVE',

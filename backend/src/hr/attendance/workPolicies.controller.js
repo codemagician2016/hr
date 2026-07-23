@@ -46,7 +46,25 @@ function pickOtData(b) {
     }
   }
   if (b.isActive !== undefined) data.isActive = b.isActive === true;
+  // OT pre-approval gate toggle. When true, attendance derivation credits OT only up
+  // to the employee's APPROVED OvertimeRequest minutes for the day (0 when none).
+  if (b.requirePreApproval !== undefined) data.requirePreApproval = b.requirePreApproval === true;
   return { data };
+}
+
+// GET /attendance/overtime-requests — tenant OT pre-approval queue for the admin
+// (optional ?status / ?employeeId filters). The DECIDE rides the existing approvals
+// inbox (engine.recordDecision → the OVERTIME consumer), so there is no decide route
+// here. canManageAttendance-gated at the router.
+async function listOtRequests(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const where = { businessId };
+    if (req.query.status) where.status = req.query.status;
+    if (req.query.employeeId) where.employeeId = req.query.employeeId;
+    const items = await prisma.overtimeRequest.findMany({ where, orderBy: { date: 'desc' }, take: 500 });
+    res.json({ items });
+  } catch (e) { next(e); }
 }
 
 async function listOtRules(req, res, next) {
@@ -168,5 +186,6 @@ async function deleteLateRule(req, res, next) {
 
 module.exports = {
   listOtRules, createOtRule, updateOtRule, deleteOtRule,
+  listOtRequests,
   listLateRules, createLateRule, updateLateRule, deleteLateRule,
 };

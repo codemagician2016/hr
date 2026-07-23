@@ -518,6 +518,7 @@ model Business {
   attendancePunches            AttendancePunch[]
   attendances                  Attendance[]
   overtimeRules                OvertimeRule[]
+  overtimeRequests             OvertimeRequest[] // OT pre-approval requests
   timesheets                   Timesheet[]
   // Expense / loan
   expenseCategories            ExpenseCategory[]
@@ -6851,6 +6852,7 @@ model Employee {
   profileChangeRequests    ProfileChangeRequest[]
   documentRequests         DocumentRequest[]
   regularizationRequests   AttendanceRegularizationRequest[]
+  overtimeRequests         OvertimeRequest[] // OT pre-approval requests
   bonusAwards              BonusAward[]
   arrearCycles             ArrearCycle[]
   // Letters & Communication (Feature 9) — letters issued to this employee
@@ -11579,10 +11581,43 @@ model OvertimeRule {
   dailyCapMin         Int?
   roundingMin         Int      @default(15)
   isActive            Boolean  @default(true)
+  // OT pre-approval gate. When true for the resolved rule, attendance derivation
+  // credits computed OT ONLY up to the employee's APPROVED OvertimeRequest minutes
+  // for that day (0 when none approved). Default false = the historical behaviour
+  // (OT credited straight off worked-minutes, no authorization) — regression-safe.
+  requirePreApproval  Boolean  @default(false)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
   @@index([businessId, entityId, locationId])
+}
+
+/// OT pre-approval request. An employee (ESS) asks to be authorized for N overtime
+/// minutes on a given day; the request rides the F10 approval engine
+/// (WorkflowModule.OVERTIME — the reporting manager authorizes). The attendance
+/// derivation GATES computed OT on the APPROVED minutes ONLY WHEN the resolved
+/// OvertimeRule.requirePreApproval is true (otherwise OT is credited exactly as
+/// before). One LIVE request per employee-day — the unique key lets a decided row be
+/// re-opened (flipped back to PENDING) rather than accumulating duplicates.
+model OvertimeRequest {
+  id                String        @id @default(uuid())
+  businessId        String
+  business          Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employeeId        String
+  employee          Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  date              DateTime      @db.Date
+  requestedMinutes  Int
+  reason            String?
+  status            RequestStatus @default(PENDING)
+  approvalRequestId String?
+  decidedByUserId   String?
+  decidedAt         DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@unique([businessId, employeeId, date])
+  @@index([businessId, employeeId, status])
+  @@index([businessId, status])
 }
 
 enum RequestStatus {
@@ -12989,6 +13024,7 @@ enum WorkflowModule {
   RECOGNITION // Feature 35 — over-budget / high-value peer recognition → manager approval
   AWARD // Feature 35 — nomination committee review/approve
   REDEMPTION // Feature 35 — catalog redemption fulfilment approval
+  OVERTIME // OT pre-approval — the reporting manager authorizes overtime minutes
 }
 
 model WorkflowStep {

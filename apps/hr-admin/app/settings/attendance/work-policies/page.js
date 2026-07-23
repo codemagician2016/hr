@@ -20,7 +20,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ErrorBanner, Modal, ModalActions, PrimaryButton, TextInput } from '@hr/ui';
 import { get, post, patch, del } from '@/lib/api';
-import { DataTable, PageHeader, ActionButton } from '@/lib/ui';
+import { DataTable, PageHeader, ActionButton, StatusBadge, employeeLabel, asList } from '@/lib/ui';
 import { InfoTip, SectionTitle } from '@/lib/widgets';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
 import ModuleGuide from '@/components/ModuleGuide';
@@ -38,6 +38,19 @@ function fractionLabel(v) {
   if (n === 1) return 'a full (1)';
   return String(n);
 }
+
+// Minutes → "1h 30m" / "45m" for the OT-requests queue.
+function minutesLabel(mins) {
+  const n = Number(mins);
+  if (!Number.isFinite(n) || n <= 0) return `${mins} min`;
+  const h = Math.floor(n / 60);
+  const m = n % 60;
+  if (h && m) return `${h}h ${m}m`;
+  if (h) return `${h}h`;
+  return `${m}m`;
+}
+
+const OT_REQUEST_STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'];
 
 function scopeLabel(row, entities, locations) {
   const ent = row.entityId ? entities.find((e) => e.id === row.entityId) : null;
@@ -104,6 +117,7 @@ function OtRuleModal({ entities, locations, rule, onClose, onSaved }) {
   const [holiday, setHoliday] = useState(rule ? Number(rule.holidayMultiplier) : 2);
   const [dailyCap, setDailyCap] = useState(rule?.dailyCapMin ?? '');
   const [rounding, setRounding] = useState(rule?.roundingMin ?? 15);
+  const [requirePreApproval, setRequirePreApproval] = useState(rule?.requirePreApproval === true);
   const [isActive, setIsActive] = useState(rule?.isActive !== false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -119,6 +133,7 @@ function OtRuleModal({ entities, locations, rule, onClose, onSaved }) {
       holidayMultiplier: Number(holiday),
       dailyCapMin: dailyCap === '' || dailyCap == null ? null : Number(dailyCap),
       roundingMin: Number(rounding),
+      requirePreApproval,
     };
     try {
       if (editing) {
@@ -166,6 +181,20 @@ function OtRuleModal({ entities, locations, rule, onClose, onSaved }) {
           label="Daily cap (minutes, optional)" type="number" min={0} max={1440} value={dailyCap} onChange={setDailyCap}
           hint="At most this many OT minutes count per day. Blank = no cap."
         />
+        <label className="flex items-start gap-2 rounded-xl border border-gray-200 bg-gray-50/60 px-3 py-2.5 text-sm text-gray-700">
+          <input
+            type="checkbox"
+            checked={requirePreApproval}
+            onChange={(e) => setRequirePreApproval(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            <span className="font-medium">Require pre-approval</span>
+            <span className="mt-0.5 block text-xs text-gray-500">
+              When on, overtime is only paid up to minutes an employee got pre-approved by their manager.
+            </span>
+          </span>
+        </label>
         {editing && (
           <label className="flex items-center gap-2 text-sm text-gray-700">
             <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
@@ -217,6 +246,12 @@ function OvertimeRulesSection({ entities, locations, canManage, flash }) {
     { key: 'holiday', header: 'Holiday', render: (r) => `× ${Number(r.holidayMultiplier)}` },
     { key: 'cap', header: 'Daily cap', render: (r) => (r.dailyCapMin == null ? 'No cap' : `${r.dailyCapMin} min`) },
     { key: 'rounding', header: 'Rounding', render: (r) => `${r.roundingMin} min` },
+    {
+      key: 'preapproval', header: 'Pre-approval',
+      render: (r) => (r.requirePreApproval
+        ? <span className="inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">Required</span>
+        : <span className="text-xs text-gray-400">Not required</span>),
+    },
     { key: 'active', header: 'Status', render: (r) => <ActiveChip isActive={r.isActive} /> },
     ...(canManage ? [{
       key: 'actions', header: '',
@@ -257,6 +292,98 @@ function OvertimeRulesSection({ entities, locations, canManage, flash }) {
           onSaved={() => { setEditing(null); flash('Overtime rule saved.'); load(); }}
         />
       )}
+    </div>
+  );
+}
+
+/* ── Overtime pre-approval queue (read-only) ──────────────────────────────── */
+// GET /api/hr/attendance/overtime-requests?status=&employeeId= → { items:[{ id,
+// employeeId, date, requestedMinutes, reason, status, createdAt, ... }] }. The
+// controller returns raw OvertimeRequest rows (no embedded employee), so names
+// are resolved client-side from a lightweight employee directory. This is a
+// READ-ONLY view — decisions ride the existing Approvals inbox (the OVERTIME
+// approval consumer), not a decide button here. canManageAttendance-gated
+// server-side, so the section is only mounted for managing operators.
+
+function OvertimeRequestsSection() {
+  const [items, setItems] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [status, setStatus] = useState('');
+  const [empById, setEmpById] = useState({});
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setError('');
+    get('/api/hr/attendance/overtime-requests', status ? { status } : undefined)
+      .then((res) => setItems(res?.items || []))
+      .catch((e) => setError(e.data?.message || e.message || 'Failed to load overtime requests.'))
+      .finally(() => setLoading(false));
+  }, [status]);
+  useEffect(() => { load(); }, [load]);
+
+  // Best-effort id→employee map for name resolution (the queue still renders the
+  // bare id if this lookup is unavailable).
+  useEffect(() => {
+    get('/api/hr/employees', { pageSize: 500 })
+      .then((res) => {
+        const map = {};
+        for (const e of asList(res)) map[e.id] = e;
+        setEmpById(map);
+      })
+      .catch(() => {});
+  }, []);
+
+  const columns = [
+    {
+      key: 'employee', header: 'Employee',
+      render: (r) => (
+        <span className="font-medium text-gray-900">
+          {employeeLabel({ ...r, employee: r.employee || empById[r.employeeId] || null })}
+        </span>
+      ),
+    },
+    { key: 'date', header: 'Date', render: (r) => (r.date ? String(r.date).slice(0, 10) : '—') },
+    { key: 'minutes', header: 'Requested', render: (r) => minutesLabel(r.requestedMinutes) },
+    {
+      key: 'reason', header: 'Reason',
+      render: (r) => (r.reason ? <span className="text-gray-600">{r.reason}</span> : <span className="text-gray-400">—</span>),
+    },
+    { key: 'status', header: 'Status', render: (r) => <StatusBadge status={r.status} /> },
+    { key: 'createdAt', header: 'Raised', render: (r) => (r.createdAt ? new Date(r.createdAt).toLocaleDateString() : '—') },
+  ];
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <SectionTitle tip="Overtime pre-approval requests employees raise from their Attendance page. This is a read-only queue — approve or reject each one from the Approvals inbox (the request rides the OVERTIME approval chain to the reporting manager).">
+            Overtime requests
+          </SectionTitle>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Pre-approval requests raised by employees. Decide them from the{' '}
+            <a href="/approvals" className="font-medium text-indigo-600 hover:underline">Approvals inbox</a>.
+          </p>
+        </div>
+        <label className="block text-sm">
+          <span className="sr-only">Filter by status</span>
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            className="mt-1 block rounded-lg border border-gray-300 px-3 py-2 text-sm"
+          >
+            <option value="">All statuses</option>
+            {OT_REQUEST_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </label>
+      </div>
+      {error && <ErrorBanner message={error} />}
+      <DataTable
+        columns={columns}
+        rows={items || []}
+        loading={loading}
+        emptyText={status ? `No ${status.toLowerCase()} overtime requests.` : 'No overtime requests yet — employees raise these from their Attendance page.'}
+      />
     </div>
   );
 }
@@ -568,6 +695,7 @@ export default function WorkPoliciesPage() {
         tips={[
           'Blank scope = whole company; the most specific active rule wins (location beats entity beats company).',
           "Late deductions are applied on the offending day at attendance recompute and show up in the muster's LOP column.",
+          'Turn on "Require pre-approval" on an overtime rule to pay OT only up to the minutes a manager authorised. Employees raise those requests from their Attendance page; you decide them in the Approvals inbox, and they appear in the Overtime requests queue below.',
         ]}
       />
 
@@ -579,6 +707,9 @@ export default function WorkPoliciesPage() {
       )}
 
       <OvertimeRulesSection entities={entities} locations={locations} canManage={canManage} flash={flash} />
+      {/* OT pre-approval queue — read-only; reads require canManageAttendance, so
+          only mount it for managing operators (a viewer would 403). */}
+      {canManage && <OvertimeRequestsSection />}
       <LateRulesSection entities={entities} locations={locations} canManage={canManage} flash={flash} />
       {/* P1.7 — the yearly restricted/optional-holiday election allowance. */}
       <RestrictedHolidaySettingsSection canManage={canManage} flash={flash} />

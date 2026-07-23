@@ -153,6 +153,13 @@ const BUILT_IN_DEFAULT = Object.freeze({
   REDEMPTION: [
     step(1, 'HR', { name: 'HR (redemption fulfilment)', slaHours: 72, onTimeoutAction: 'ESCALATE' }),
   ],
+  // OT pre-approval — the reporting manager authorizes the requested overtime
+  // minutes (mirrors TIMESHEET / ATTENDANCE_REGULARIZATION — attendance acts are
+  // manager-owned). Escalates after 48h. A tenant can override by publishing a real
+  // OVERTIME WorkflowDefinition (e.g. add an HR/ops step).
+  OVERTIME: [
+    step(1, 'REPORTING_MANAGER', { name: 'Manager', approverRefId: '1', slaHours: 48, onTimeoutAction: 'ESCALATE' }),
+  ],
 });
 
 // Generic fallback for any module without a bespoke built-in: manager approves,

@@ -43,6 +43,12 @@ router.post('/timesheets/:id/submit', c.submitTimesheet);
 router.get('/regularizations', c.listRegularizations);
 router.post('/regularizations', c.createRegularization);
 
+// OT pre-approval — request authorization for overtime minutes on a day (rides the
+// F10 OVERTIME engine; manager authorizes). SELF_ONLY (session subject).
+router.get('/overtime', c.listOvertimeRequests);
+router.post('/overtime', c.createOvertimeRequest);
+router.post('/overtime/:id/cancel', c.cancelOvertimeRequest);
+
 // Schedule + holidays
 router.get('/schedule', c.getSchedule);
 router.get('/holidays', c.listHolidays);

@@ -38,6 +38,8 @@ router.use('/capture', require('./captureAdmin.routes'));
   router.post('/overtime-rules', requirePermission('canManageAttendance'), wp.createOtRule);
   router.patch('/overtime-rules/:id', requirePermission('canManageAttendance'), wp.updateOtRule);
   router.delete('/overtime-rules/:id', requirePermission('canManageAttendance'), wp.deleteOtRule);
+  // OT pre-approval queue (read). The decide rides the /approvals inbox.
+  router.get('/overtime-requests', requirePermission('canManageAttendance'), wp.listOtRequests);
   router.get('/late-rules', requirePermission('canViewEmployees'), wp.listLateRules);
   router.post('/late-rules', requirePermission('canManageAttendance'), wp.createLateRule);
   router.patch('/late-rules/:id', requirePermission('canManageAttendance'), wp.updateLateRule);
