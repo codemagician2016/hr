@@ -29,6 +29,8 @@ import '../features/pay/pay_screen.dart';
 import '../features/pay/payslip_detail_screen.dart';
 import '../features/pay/compensation_screen.dart';
 import '../features/profile/profile_screen.dart';
+import '../features/recognition/give_recognition_screen.dart';
+import '../features/recognition/recognition_screen.dart';
 import '../features/surveys/survey_fill_screen.dart';
 import '../features/surveys/surveys_screen.dart';
 import '../features/tax/tax_projection_screen.dart';
@@ -167,6 +169,18 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/surveys/:occurrenceId',
         parentNavigatorKey: _rootKey,
         builder: (_, state) => SurveyFillScreen(occurrenceId: state.pathParameters['occurrenceId']!),
+      ),
+
+      // Rewards & Recognition (Feature 35) — the tabbed wall + the pushed give flow.
+      GoRoute(
+        path: '/recognition',
+        parentNavigatorKey: _rootKey,
+        builder: (_, __) => const RecognitionScreen(),
+      ),
+      GoRoute(
+        path: '/recognition/give',
+        parentNavigatorKey: _rootKey,
+        builder: (_, __) => const GiveRecognitionScreen(),
       ),
     ],
   );

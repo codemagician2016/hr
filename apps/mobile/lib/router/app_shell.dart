@@ -99,6 +99,12 @@ class AppShell extends ConsumerWidget {
                 onTap: () => _go(sheetContext, '/surveys'),
               ),
               _MoreTile(
+                icon: Icons.emoji_events_outlined,
+                title: 'Recognition',
+                subtitle: 'Kudos, points, rewards & awards',
+                onTap: () => _go(sheetContext, '/recognition'),
+              ),
+              _MoreTile(
                 icon: Icons.fact_check_outlined,
                 title: 'Approvals',
                 subtitle: 'Decisions waiting for you',

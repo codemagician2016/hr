@@ -340,6 +340,7 @@ class _QuickLinks extends ConsumerWidget {
     final isIndia = ref.watch(countryContextProvider).valueOrNull?.isIndia ?? false;
     final tiles = <(IconData, String, String)>[
       (Icons.dynamic_feed_outlined, 'Feed', '/feed'),
+      (Icons.emoji_events_outlined, 'Recognition', '/recognition'),
       (Icons.payments_outlined, 'Payslips', '/pay'),
       (Icons.account_balance_wallet_outlined, 'My CTC', '/compensation'),
       (Icons.access_time, 'Attendance', '/attendance'),

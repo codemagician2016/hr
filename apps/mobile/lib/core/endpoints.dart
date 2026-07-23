@@ -97,4 +97,18 @@ class Api {
       '/api/hr/me/engagement/surveys/$occurrenceId/submit'; // POST {answers} → { receiptToken }
   static String surveyDismiss(String occurrenceId) =>
       '/api/hr/me/engagement/surveys/$occurrenceId/dismiss'; // POST → { ok, dismissed }
+
+  // Rewards & Recognition (Feature 35) — SELF-scope /api/hr/me/*. Peer kudos wall,
+  // points wallet + ledger, rewards catalog + redemptions, nomination awards, and
+  // the wall leaderboard. The subject employee is resolved server-side (SELF_ONLY).
+  static const recognitions = '/api/hr/me/recognitions'; // GET ?direction=given|received|all + POST give
+  static const recognitionValues = '/api/hr/me/recognition/values'; // { values:[…], badges:[…] } — the Give picker
+  static const recognitionLeaderboard = '/api/hr/me/recognition/leaderboard'; // ?period=month|quarter|allTime&board=earners|givers
+  static const wallet = '/api/hr/me/wallet'; // { pointsEnabled, balance, lifetimeEarned, inrPerPoint, inrValue }
+  static const walletLedger = '/api/hr/me/wallet/ledger'; // ?page=&pageSize= → { items:[{points(signed),reason,note?,expiresAt?,createdAt}] }
+  static const catalog = '/api/hr/me/catalog'; // { pointsEnabled, balance, items:[{id,name,pointsCost,affordable,inStock,…}] }
+  static const redemptions = '/api/hr/me/redemptions'; // GET my redemptions + POST { catalogItemId }
+  static String redemptionCancel(String id) => '/api/hr/me/redemptions/$id/cancel'; // POST (own + PENDING only)
+  static const awardCycles = '/api/hr/me/award-cycles'; // { items:[{id,name,awardType,nominateCloseAt,…}] } open cycles
+  static const awardNominations = '/api/hr/me/award-nominations'; // GET { made, won } + POST { cycleId, nomineeEmployeeId, citation }
 }
