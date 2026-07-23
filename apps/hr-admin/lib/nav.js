@@ -228,6 +228,12 @@ export const NAV_ITEMS = [
   // only shows to recruiters/HR on a tenant that owns hiring. The server is the
   // real boundary (/api/hr/recruitment/comms-* is canManage).
   { key: 'settings-candidate-messages', label: 'Candidate messages', href: '/settings/candidate-messages', feature: 'talent_acquisition', anyPermission: ['canManageHiring', 'canManageEmployees'], parent: 'settings', icon: 'letter' },
+  // Phase 4 — Pipeline templates: reusable, named hiring-stage sets applied onto a
+  // job in one shot (one can be the tenant default, auto-applied to new jobs).
+  // Same gate as Candidate messages: the recruitment write keys + the
+  // talent_acquisition add-on. Server is the real boundary
+  // (/api/hr/recruitment/pipeline-templates is canManage).
+  { key: 'settings-pipeline-templates', label: 'Pipeline templates', href: '/settings/pipeline-templates', feature: 'talent_acquisition', anyPermission: ['canManageHiring', 'canManageEmployees'], parent: 'settings', icon: 'onboarding' },
   // Enterprise SSO + SCIM — the tenant's SAML/OIDC connection (IdP config, SP
   // endpoints, test/delete) and SCIM provisioning tokens. Gated on the new
   // canManageSso rbac key (Owner via all-true; HR-Admin via the preset). The

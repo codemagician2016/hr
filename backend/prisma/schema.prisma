@@ -578,6 +578,8 @@ model Business {
   // Recruitment
   jobs                         Job[]
   jobStages                    JobStage[]
+  pipelineTemplates            PipelineTemplate[]
+  pipelineTemplateStages       PipelineTemplateStage[]
   candidates                   Candidate[]
   applications                 Application[]
   interviews                   Interview[]
@@ -10566,20 +10568,24 @@ model TravelRequest {
 // driven through payroll via the LOAN_REPAYMENT / ADVANCE_RECOVERY deduction kinds.
 
 model LoanScheme {
-  id              String    @id @default(uuid())
+  id              String             @id @default(uuid())
   businessId      String
-  business        Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business        Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
   code            String
   name            String
-  loanType        LoanType  @default(LOAN)
-  interestRate    Decimal?  @db.Decimal(5, 2) // annual %, null = interest-free
-  maxPrincipal    Decimal?  @db.Decimal(15, 2)
+  loanType        LoanType           @default(LOAN)
+  interestRate    Decimal?           @db.Decimal(5, 2) // annual %, null = interest-free
+  // How interest is amortised across the EMI schedule (Phase 4). FLAT is the
+  // historical default (simple interest split evenly) so existing schemes are
+  // behaviour-preserving; REDUCING_BALANCE amortises on the outstanding balance.
+  interestMethod  LoanInterestMethod @default(FLAT)
+  maxPrincipal    Decimal?           @db.Decimal(15, 2)
   maxTenureMonths Int?
-  isActive        Boolean   @default(true)
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  isActive        Boolean            @default(true)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
   deletedAt       DateTime?
-  version         Int       @default(0)
+  version         Int                @default(0)
   loans           Loan[]
 
   @@unique([businessId, code])
@@ -10587,27 +10593,31 @@ model LoanScheme {
 }
 
 model Loan {
-  id              String            @id @default(uuid())
+  id              String             @id @default(uuid())
   businessId      String
-  business        Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business        Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
   employeeId      String
-  employee        Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee        Employee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   schemeId        String?
-  scheme          LoanScheme?       @relation(fields: [schemeId], references: [id], onDelete: SetNull)
+  scheme          LoanScheme?        @relation(fields: [schemeId], references: [id], onDelete: SetNull)
   loanNumber      String? // human-friendly reference
-  loanType        LoanType          @default(LOAN)
-  principal       Decimal           @db.Decimal(15, 2)
-  interestRate    Decimal?          @db.Decimal(5, 2) // annual %, snapshot from scheme
-  currencyCode    String            @default("INR")
+  loanType        LoanType           @default(LOAN)
+  principal       Decimal            @db.Decimal(15, 2)
+  interestRate    Decimal?           @db.Decimal(5, 2) // annual %, snapshot from scheme
+  // Snapshot of the scheme's interest method at create time (Phase 4). Drives the
+  // EMI schedule builder: FLAT/SIMPLE = flat simple interest, REDUCING_BALANCE =
+  // amortised on outstanding, ZERO = interest-free regardless of interestRate.
+  interestMethod  LoanInterestMethod @default(FLAT)
+  currencyCode    String             @default("INR")
   tenureMonths    Int // number of installments
-  emiAmount       Decimal?          @db.Decimal(15, 2) // per-installment; null = auto-computed
-  startDate       DateTime          @db.Date
+  emiAmount       Decimal?           @db.Decimal(15, 2) // per-installment; null = auto-computed
+  startDate       DateTime           @db.Date
   reason          String?
-  status          LoanStatus        @default(DRAFT)
+  status          LoanStatus         @default(DRAFT)
   // Repayment running totals (denormalised; source of truth is the schedule)
-  totalPayable    Decimal?          @db.Decimal(15, 2)
-  amountRepaid    Decimal           @default(0) @db.Decimal(15, 2)
-  outstanding     Decimal?          @db.Decimal(15, 2)
+  totalPayable    Decimal?           @db.Decimal(15, 2)
+  amountRepaid    Decimal            @default(0) @db.Decimal(15, 2)
+  outstanding     Decimal?           @db.Decimal(15, 2)
   // Workflow stamps
   submittedAt     DateTime?
   approvedAt      DateTime?
@@ -10618,10 +10628,10 @@ model Loan {
   disbursedBy     String?
   disbursementRef String? // bank/payout reference once disbursed
   closedAt        DateTime?
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
   deletedAt       DateTime?
-  version         Int               @default(0)
+  version         Int                @default(0)
   installments    LoanInstallment[]
 
   @@index([businessId, employeeId])
@@ -10663,6 +10673,18 @@ model LoanInstallment {
 enum LoanType {
   LOAN
   ADVANCE
+}
+
+// How a loan's interest is amortised across its EMI schedule (Phase 4).
+//   FLAT             — simple interest (principal × rate% × tenure/12) split evenly.
+//   SIMPLE           — alias of FLAT (identical math; explicit name for clarity).
+//   REDUCING_BALANCE — standard amortised EMI; interest each period on the balance.
+//   ZERO             — no interest regardless of interestRate (equal-principal).
+enum LoanInterestMethod {
+  FLAT
+  REDUCING_BALANCE
+  SIMPLE
+  ZERO
 }
 
 enum LoanStatus {
@@ -12377,6 +12399,41 @@ enum StageKind {
   HIRED
   REJECTED
   WITHDRAWN
+}
+
+// ── Recruitment pipeline templates (Phase 4) ─────────────────────────────────
+// A reusable, named set of pipeline stages that can be materialised onto a Job's
+// JobStage rows in one shot (instead of adding stages one-by-one). At most one
+// template per tenant may be the default; createJob can auto-apply the default.
+model PipelineTemplate {
+  id          String                  @id @default(uuid())
+  businessId  String
+  business    Business                @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  isDefault   Boolean                 @default(false)
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+  deletedAt   DateTime?
+  stages      PipelineTemplateStage[]
+
+  @@unique([businessId, name])
+  @@index([businessId, isDefault])
+}
+
+model PipelineTemplateStage {
+  id         String           @id @default(uuid())
+  businessId String
+  business   Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  templateId String
+  template   PipelineTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  name       String
+  kind       StageKind
+  sortOrder  Int
+  createdAt  DateTime         @default(now())
+
+  @@unique([templateId, sortOrder])
+  @@index([businessId, templateId])
 }
 
 model Candidate {

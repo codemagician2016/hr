@@ -208,6 +208,7 @@ function PipelineTab({ jobId }) {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [showBulkMessage, setShowBulkMessage] = useState(false);
+  const [showApply, setShowApply] = useState(false);
   const pageSize = 50;
 
   const queryParams = useMemo(() => {
@@ -280,6 +281,32 @@ function PipelineTab({ jobId }) {
     <div>
       {error && <ErrorBanner message={error} />}
       {notice && <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{notice}</div>}
+
+      {/* Pipeline stages — the ordered stages this job's candidates flow through,
+          with a one-click "Apply template" to materialise a reusable pipeline. */}
+      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm mb-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center text-sm font-semibold text-gray-900">
+              Pipeline stages
+              <Info text="The ordered stages candidates move through on this job. Apply a saved pipeline template to set them all up in one click." />
+            </div>
+            {sortedStages.length === 0 ? (
+              <p className="text-xs text-gray-500 mt-1">No stages yet — apply a template to build this job&apos;s pipeline.</p>
+            ) : (
+              <div className="mt-2 flex flex-wrap items-center gap-1">
+                {sortedStages.map((s, i) => (
+                  <span key={s.id} className="inline-flex items-center gap-1">
+                    {i > 0 && <span className="text-gray-300">→</span>}
+                    <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] font-medium text-gray-600">{s.name}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+          <ActionButton onClick={() => setShowApply(true)}>Apply template</ActionButton>
+        </div>
+      </div>
 
       {/* Filter bar */}
       <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm mb-4">
@@ -417,7 +444,127 @@ function PipelineTab({ jobId }) {
           }}
         />
       )}
+
+      {showApply && (
+        <ApplyTemplateModal
+          jobId={jobId}
+          hasStages={stages.length > 0}
+          onClose={() => setShowApply(false)}
+          onApplied={(res) => {
+            setShowApply(false);
+            setNotice(`Applied ${res.stages?.length ?? 0} stage${(res.stages?.length ?? 0) === 1 ? '' : 's'}${res.replaced ? ' (replaced the previous pipeline)' : ''}.`);
+            loadStages();
+            load();
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+// Apply a saved pipeline template's stages onto this job. Append-if-empty; a job
+// that already has stages needs ?replace=true, allowed ONLY while it has no
+// candidates (else the server returns 409 STAGES_IN_USE — surfaced verbatim).
+function ApplyTemplateModal({ jobId, hasStages, onClose, onApplied }) {
+  const [templates, setTemplates] = useState(null);
+  const [selectedId, setSelectedId] = useState('');
+  const [appCount, setAppCount] = useState(null); // candidate count → replace safety
+  const [needsReplace, setNeedsReplace] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    get('/api/hr/recruitment/pipeline-templates')
+      .then((r) => setTemplates(asList(r)))
+      .catch((e) => setError(e.data?.message || e.message || 'Failed to load templates.'));
+    // Candidate count decides whether replacing an existing pipeline is possible.
+    get('/api/hr/recruitment/applications', { jobId, page: 1, pageSize: 1 })
+      .then((r) => setAppCount(r?.pagination?.total ?? 0))
+      .catch(() => setAppCount(null));
+  }, [jobId]);
+
+  const replaceSafe = appCount === 0; // no candidates → replacing is allowed
+
+  async function apply(replace) {
+    if (!selectedId) { setError('Pick a template to apply.'); return; }
+    setBusy(true); setError('');
+    try {
+      const res = await post(`/api/hr/recruitment/pipeline-templates/${selectedId}/apply${replace ? '?replace=true' : ''}`, { jobId });
+      onApplied(res);
+    } catch (e) {
+      if (e.data?.code === 'STAGES_EXIST') {
+        // Job already has a pipeline — offer a replace only when it is safe.
+        setNeedsReplace(true);
+        if (!replaceSafe) setError(e.data?.message || 'This job already has pipeline stages.');
+      } else {
+        // STAGES_IN_USE and any other 4xx — surface verbatim.
+        setError(e.data?.message || e.message || 'Failed to apply the template.');
+      }
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <Modal title="Apply pipeline template" size="lg" onClose={onClose}>
+      <div className="space-y-4">
+        {error && <ErrorBanner message={error} />}
+
+        {hasStages && (
+          <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+            This job already has pipeline stages. Applying a template will {replaceSafe
+              ? 'replace them — allowed because there are no candidates yet.'
+              : 'be refused: replacing is only possible while the job has no candidates.'}
+          </p>
+        )}
+
+        {templates === null ? (
+          <div className="py-8 flex justify-center"><Spinner /></div>
+        ) : templates.length === 0 ? (
+          <p className="text-sm text-gray-500">No pipeline templates yet. Create some under Settings → Pipeline templates.</p>
+        ) : (
+          <div className="space-y-2 max-h-72 overflow-y-auto">
+            {templates.map((t) => {
+              const ordered = (t.stages || []).slice().sort((a, b) => a.sortOrder - b.sortOrder);
+              const on = selectedId === t.id;
+              return (
+                <label key={t.id} className={`flex items-start gap-2 rounded-lg border px-3 py-2 cursor-pointer ${on ? 'bg-gray-50' : 'border-gray-200'}`} style={on ? { borderColor: 'var(--theme-primary)' } : undefined}>
+                  <input type="radio" name="applyTemplate" value={t.id} checked={on} onChange={() => { setSelectedId(t.id); setNeedsReplace(false); setError(''); }} className="mt-1" />
+                  <span className="min-w-0">
+                    <span className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-gray-900">{t.name}</span>
+                      {t.isDefault && <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">Default</span>}
+                    </span>
+                    {t.description && <span className="block text-xs text-gray-500">{t.description}</span>}
+                    <span className="mt-1 flex flex-wrap items-center gap-1">
+                      {ordered.map((s, i) => (
+                        <span key={s.id || i} className="inline-flex items-center gap-1">
+                          {i > 0 && <span className="text-gray-300">→</span>}
+                          <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] font-medium text-gray-600">{s.name}</span>
+                        </span>
+                      ))}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        )}
+
+        <ModalActions>
+          <button type="button" onClick={onClose} className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50">Cancel</button>
+          {needsReplace && replaceSafe ? (
+            <PrimaryButton loading={busy} onClick={() => apply(true)}>Replace existing stages</PrimaryButton>
+          ) : (
+            <PrimaryButton
+              loading={busy}
+              disabled={!selectedId || (hasStages && !replaceSafe)}
+              onClick={() => apply(hasStages && replaceSafe)}
+            >
+              {hasStages && replaceSafe ? 'Replace with template' : 'Apply template'}
+            </PrimaryButton>
+          )}
+        </ModalActions>
+      </div>
+    </Modal>
   );
 }
 

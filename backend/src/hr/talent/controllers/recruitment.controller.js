@@ -233,6 +233,15 @@ async function createJob(req, res, next) {
     // auto-derive a public careers slug when made public without one
     if (data.isPublic && !data.publicSlug) data.publicSlug = slugify(`${data.title}-${data.code}`);
     const item = await prisma.job.create({ data });
+    // Phase 4 (behaviour-additive) — if the tenant has a default pipeline template
+    // and the caller didn't pass explicit stages, materialise the default onto the
+    // fresh job. Best-effort: a failure here never blocks job creation.
+    if (!Array.isArray(req.body.stages)) {
+      try {
+        const pt = require('./pipelineTemplates.controller');
+        await pt.autoApplyDefaultTemplate(prisma, businessId, item.id);
+      } catch { /* default-template seeding is best-effort */ }
+    }
     res.status(201).json(item);
   } catch (e) { if (e.code === 'P2002') return res.status(409).json({ message: DUP_MSG }); next(e); }
 }

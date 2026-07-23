@@ -54,7 +54,8 @@ async function findOpenLoanRequest(businessId, loanId, tx = prisma) {
 
 const LIST_SELECT = {
   id: true, loanNumber: true, employeeId: true, schemeId: true, loanType: true,
-  principal: true, currencyCode: true, tenureMonths: true, emiAmount: true,
+  principal: true, interestRate: true, interestMethod: true,
+  currencyCode: true, tenureMonths: true, emiAmount: true,
   startDate: true, status: true, amountRepaid: true, outstanding: true,
   createdAt: true,
   // Embed the person so the admin list shows a real name, not a raw UUID.
@@ -69,7 +70,7 @@ const LOAN_TYPES = ['LOAN', 'ADVANCE'];
 // Allow-list of directly-assignable Loan fields (never trust the body wholesale).
 const WRITABLE = [
   'employeeId', 'schemeId', 'loanNumber', 'loanType', 'principal', 'interestRate',
-  'currencyCode', 'tenureMonths', 'emiAmount', 'startDate', 'reason',
+  'interestMethod', 'currencyCode', 'tenureMonths', 'emiAmount', 'startDate', 'reason',
 ];
 const DATE_FIELDS = ['startDate'];
 const INT_FIELDS = ['tenureMonths'];
@@ -88,39 +89,120 @@ function pickWritable(body) {
 function toCents(v) { return Math.round(Number(v) * 100); }
 function fromCents(c) { return (c / 100).toFixed(2); }
 
-// Build a level (equal-principal + flat-interest) repayment schedule. Interest is
-// simple: rate% per annum over the full tenure, split evenly. The last row absorbs
-// any rounding remainder so principal/interest/total reconcile to the cent.
-function buildSchedule(loan) {
-  const n = loan.tenureMonths;
-  const principalC = toCents(loan.principal);
-  const rate = loan.interestRate != null ? Number(loan.interestRate) : 0;
-  const totalInterestC = rate > 0
-    ? Math.round((principalC * rate / 100) * (n / 12))
-    : 0;
+// Accepted interest methods (mirrors prisma enum LoanInterestMethod).
+const LOAN_INTEREST_METHODS = ['FLAT', 'REDUCING_BALANCE', 'SIMPLE', 'ZERO'];
+
+// ── REDUCING_BALANCE: standard amortised EMI ─────────────────────────────────
+// Monthly rate r = annualRate/12/100; level EMI = P·r·(1+r)^n / ((1+r)^n − 1).
+// Interest each period = round(outstanding × r), principal = EMI − interest,
+// outstanding -= principal. The FINAL row pays off the entire remaining balance
+// so Σprincipal == P exactly and the outstanding ends at 0 (the last amount
+// absorbs all accumulated rounding). All arithmetic is in integer paise, matching
+// the flat path's minor-unit convention. Returns { rows (no dueDate), totalPayableC }.
+function reducingSchedule(principalC, annualRatePct, n) {
+  const r = annualRatePct / 12 / 100; // monthly fraction
+  const pow = Math.pow(1 + r, n);
+  const emiC = Math.round((principalC * r * pow) / (pow - 1));
+  const rows = [];
+  let outstanding = principalC;
+  let totalInterestC = 0;
+  for (let seq = 1; seq <= n; seq++) {
+    const interestC = Math.round(outstanding * r);
+    let principalC2;
+    if (seq === n) {
+      // Final row clears the balance — absorbs any cumulative rounding drift.
+      principalC2 = outstanding;
+    } else {
+      principalC2 = emiC - interestC;
+      if (principalC2 > outstanding) principalC2 = outstanding; // defensive clamp
+      if (principalC2 < 0) principalC2 = 0;
+    }
+    outstanding -= principalC2;
+    totalInterestC += interestC;
+    rows.push({
+      seq,
+      principalComponent: fromCents(principalC2),
+      interestComponent: fromCents(interestC),
+      amount: fromCents(principalC2 + interestC),
+    });
+  }
+  return { rows, totalPayableC: principalC + totalInterestC };
+}
+
+// ── Pure schedule builder ────────────────────────────────────────────────────
+// computeSchedule({ principalMinor, annualRatePct, tenureMonths, method }) → the
+// per-installment split, branched by interest method. NO dates, NO DB — the
+// controller/consumer stamp dueDates from startDate. Rows carry the same
+// principalComponent / interestComponent / amount (2dp strings) the DB stores.
+//
+//   FLAT / SIMPLE      — simple interest (P·rate%·tenure/12) split evenly, remainder
+//                        into the final row. IDENTICAL to the historical math
+//                        (regression-critical — do not alter).
+//   ZERO               — no interest regardless of rate (equal-principal).
+//   REDUCING_BALANCE   — amortised on the outstanding balance (see above).
+function computeSchedule({ principalMinor, annualRatePct, tenureMonths, method }) {
+  const n = tenureMonths;
+  const principalC = Math.round(Number(principalMinor));
+  const m = String(method || 'FLAT').toUpperCase();
+  const rate = annualRatePct != null ? Number(annualRatePct) : 0;
+
+  // REDUCING_BALANCE with a positive rate amortises; a zero/negative rate
+  // degenerates to equal-principal, which the flat path below handles.
+  if (m === 'REDUCING_BALANCE' && rate > 0) {
+    return reducingSchedule(principalC, rate, n);
+  }
+
+  // FLAT / SIMPLE / ZERO (and REDUCING with no rate). ZERO forces interest to 0;
+  // FLAT/SIMPLE keep EXACTLY the historical simple-interest formula.
+  const totalInterestC = (m === 'ZERO' || rate <= 0)
+    ? 0
+    : Math.round((principalC * rate / 100) * (n / 12));
 
   const basePrinC = Math.floor(principalC / n);
   const baseIntC = Math.floor(totalInterestC / n);
-  let prinRem = principalC - basePrinC * n;
-  let intRem = totalInterestC - baseIntC * n;
+  const prinRem = principalC - basePrinC * n;
+  const intRem = totalInterestC - baseIntC * n;
 
-  const start = new Date(loan.startDate);
   const rows = [];
   for (let seq = 1; seq <= n; seq++) {
     let p = basePrinC;
     let i = baseIntC;
     if (seq === n) { p += prinRem; i += intRem; } // remainder into final row
-    const due = new Date(start);
-    due.setMonth(due.getMonth() + (seq - 1));
     rows.push({
       seq,
-      dueDate: due,
       principalComponent: fromCents(p),
       interestComponent: fromCents(i),
       amount: fromCents(p + i),
     });
   }
   return { rows, totalPayableC: principalC + totalInterestC };
+}
+
+// Build a repayment schedule for a loan, branching by loan.interestMethod. Thin
+// wrapper over the pure computeSchedule: it stamps each row's dueDate from
+// startDate (monthly). The return shape is unchanged from the original
+// buildSchedule ({ rows: [{ seq, dueDate, principalComponent, interestComponent,
+// amount }], totalPayableC }) so approvals/consumers.loan.js is untouched.
+function buildSchedule(loan) {
+  const { rows, totalPayableC } = computeSchedule({
+    principalMinor: toCents(loan.principal),
+    annualRatePct: loan.interestRate != null ? Number(loan.interestRate) : null,
+    tenureMonths: loan.tenureMonths,
+    method: loan.interestMethod || 'FLAT',
+  });
+  const start = new Date(loan.startDate);
+  const dated = rows.map((row) => {
+    const due = new Date(start);
+    due.setMonth(due.getMonth() + (row.seq - 1));
+    return {
+      seq: row.seq,
+      dueDate: due,
+      principalComponent: row.principalComponent,
+      interestComponent: row.interestComponent,
+      amount: row.amount,
+    };
+  });
+  return { rows: dated, totalPayableC };
 }
 
 // Generate a human-friendly, per-tenant sequential loan reference (LOAN-0001).
@@ -235,22 +317,29 @@ async function create(req, res, next) {
     if (req.body.loanType !== undefined && !LOAN_TYPES.includes(req.body.loanType)) {
       return res.status(422).json({ message: 'Invalid loanType', allowed: LOAN_TYPES });
     }
+    if (req.body.interestMethod !== undefined && !LOAN_INTEREST_METHODS.includes(req.body.interestMethod)) {
+      return res.status(422).json({ message: 'Invalid interestMethod', allowed: LOAN_INTEREST_METHODS });
+    }
     if (!(await employeeInTenant(businessId, employeeId))) {
       return res.status(400).json({ message: 'employeeId does not reference an employee in this business' });
     }
-    // If a scheme is supplied, validate tenant ownership and snapshot its rate.
+    // If a scheme is supplied, validate tenant ownership and snapshot its rate +
+    // interest method (a body value always wins; the scheme fills the gap).
     let interestRate = req.body.interestRate;
+    let interestMethod = req.body.interestMethod;
     if (req.body.schemeId) {
       const scheme = await prisma.loanScheme.findFirst({
         where: { id: req.body.schemeId, businessId, deletedAt: null },
-        select: { id: true, interestRate: true, loanType: true },
+        select: { id: true, interestRate: true, interestMethod: true, loanType: true },
       });
       if (!scheme) return res.status(400).json({ message: 'schemeId does not reference a scheme in this business' });
       if (interestRate == null) interestRate = scheme.interestRate;
+      if (interestMethod == null) interestMethod = scheme.interestMethod;
     }
 
     const data = { ...pickWritable(req.body), businessId, status: 'DRAFT' };
     if (interestRate != null) data.interestRate = interestRate;
+    if (interestMethod != null) data.interestMethod = interestMethod;
 
     // Auto-assign a sequential reference (LOAN-####) unless one was supplied.
     // Retry a couple of times in case two loans race onto the same ordinal.
@@ -288,6 +377,9 @@ async function update(req, res, next) {
     const data = pickWritable(req.body);
     if (req.body.loanType !== undefined && !LOAN_TYPES.includes(req.body.loanType)) {
       return res.status(422).json({ message: 'Invalid loanType', allowed: LOAN_TYPES });
+    }
+    if (req.body.interestMethod !== undefined && !LOAN_INTEREST_METHODS.includes(req.body.interestMethod)) {
+      return res.status(422).json({ message: 'Invalid interestMethod', allowed: LOAN_INTEREST_METHODS });
     }
     if (data.employeeId && !(await employeeInTenant(businessId, data.employeeId))) {
       return res.status(400).json({ message: 'employeeId does not reference an employee in this business' });
@@ -501,4 +593,8 @@ module.exports = {
   create, update, submit, approve, reject, disburse, close, cancel, remove,
   // Phase 2 — schedule math shared with approvals/consumers.loan.js.
   _buildSchedule: buildSchedule, _fromCents: fromCents,
+  // Phase 4 — pure, DB-free schedule math (FLAT/SIMPLE/ZERO/REDUCING_BALANCE) for
+  // unit tests + reuse. computeSchedule({ principalMinor, annualRatePct,
+  // tenureMonths, method }) → { rows, totalPayableC }.
+  _computeSchedule: computeSchedule, _toCents: toCents, LOAN_INTEREST_METHODS,
 };

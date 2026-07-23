@@ -17,6 +17,8 @@ const { attachSelfEmployee } = require('../../middleware/scope.middleware');
 const { attachRecruitmentScope } = require('../recruitment/recruitmentScope');
 const c = require('../controllers/recruitment.controller');
 const s = require('../recruitment/recruitment.scoring.controller');
+// Phase 4 — reusable pipeline templates (named stage sets applied onto a job).
+const pt = require('../controllers/pipelineTemplates.controller');
 // Feature 36 — candidate communication (scheduling handshake, bulk message,
 // template library + comms config).
 const cc = require('../recruitment/candidateComms.controller');
@@ -75,6 +77,20 @@ router.post('/jobs/:id/close', writeScoped, c.closeJob);
 // ── Job pipeline stages ──────────────────────────────────────────────────────
 router.get('/jobs/:jobId/stages', canView, c.listStages);
 router.post('/jobs/:jobId/stages', canManage, c.createStage);
+
+// ── Pipeline templates (reusable named stage sets) ───────────────────────────
+// Static sub-paths (seed-defaults) are registered BEFORE the parametric /:id
+// routes so they can never be shadowed. Apply materialises a template's stages
+// onto a job (append-if-empty; ?replace=true replaces only when the job has no
+// applications — see the controller header for the full apply semantics).
+router.get('/pipeline-templates', canView, pt.listTemplates);
+router.post('/pipeline-templates/seed-defaults', canManage, pt.seedDefaults);
+router.post('/pipeline-templates', canManage, pt.createTemplate);
+router.get('/pipeline-templates/:id', canView, pt.getTemplate);
+router.patch('/pipeline-templates/:id', canManage, pt.updateTemplate);
+router.delete('/pipeline-templates/:id', canManage, pt.removeTemplate);
+router.post('/pipeline-templates/:id/apply', canManage, pt.applyTemplate);
+router.post('/jobs/:id/apply-template', canManage, pt.applyTemplateToJob);
 
 // ── Screening questions (config) + answers ──────────────────────────────────
 router.get('/jobs/:jobId/screening-questions', canView, s.listScreeningQuestions);
