@@ -21,11 +21,14 @@ const prisma = require('../../../core/lib/prisma');
 const { feedWhereForEmployee, resolveEmployeeSegment } = require('../audience');
 const { buildCelebrations } = require('../celebrations');
 const { isEssVisibleStatus, essOrgPolicy } = require('../../lib/orgVisibility');
+const feedSocialService = require('../feedSocial.service');
 
 // Resolve the session customer's own Employee (mirror of essPerformance.resolveSelf).
+// userId is selected so the social layer can address the caller's Notification inbox
+// and identify them as the actor in the comment/mention fan-out.
 async function resolveSelf(businessId, customer) {
   if (!customer || !customer.email) return null;
-  const select = { id: true, code: true, firstName: true, lastName: true, status: true, isActive: true };
+  const select = { id: true, code: true, firstName: true, lastName: true, preferredName: true, userId: true, status: true, isActive: true };
   const byEmail = await prisma.employee.findFirst({
     where: { businessId, deletedAt: null, OR: [{ workEmail: customer.email }, { personalEmail: customer.email }] },
     select,
@@ -51,7 +54,8 @@ async function withSelf(req, res) {
   return { businessId, employee };
 }
 
-function publicFeedItem(a, readSet) {
+function publicFeedItem(a, readSet, socialMap) {
+  const social = (socialMap && socialMap.get(a.id)) || null;
   return {
     id: a.id,
     title: a.title,
@@ -62,6 +66,10 @@ function publicFeedItem(a, readSet) {
     expiresAt: a.expiresAt,
     authorName: a.authorName,
     read: readSet.has(a.id),
+    // Feed social layer — per-post reaction rollup (+ the caller's own reaction) and
+    // the live comment count. Absent map → zeroed defaults (never undefined).
+    reactionSummary: social ? social.reactionSummary : { counts: {}, total: 0, myReaction: null },
+    commentCount: social ? social.commentCount : 0,
   };
 }
 
@@ -97,8 +105,11 @@ async function feed(req, res, next) {
       : [];
     const readSet = new Set(reads.map((r) => r.announcementId));
 
+    // Feed social layer — one reaction query + one comment-count groupBy for the page.
+    const socialMap = await feedSocialService.socialByPosts(businessId, ids, employee.id);
+
     return res.json({
-      items: rows.map((a) => publicFeedItem(a, readSet)),
+      items: rows.map((a) => publicFeedItem(a, readSet, socialMap)),
       total, page, pageSize,
     });
   } catch (e) { return next(e); }
@@ -282,4 +293,7 @@ module.exports = {
   feed, unreadCount, markRead, markAllRead, celebrations,
   getCelebrationPreferences, updateCelebrationPreferences,
   getNotificationPrefs, updateNotificationPrefs,
+  // Shared self-resolution + active-status lockout, reused by the feed social
+  // controller (reactions/comments) so the SELF-ONLY gate lives in one place.
+  resolveSelf, withSelf, publicFeedItem,
 };

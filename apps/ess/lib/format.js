@@ -43,6 +43,28 @@ export function formatDate(value, opts) {
   return d.toLocaleDateString(undefined, opts || { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+// Compact relative time ("just now", "5m ago", "3h ago", "2d ago", "4w ago") for
+// social timestamps (comments, notifications). Falls back to an absolute date once
+// the gap is large, and degrades to '' for an unparseable/absent value. Future
+// timestamps (clock skew) read as "just now" rather than a negative age.
+export function relativeTime(value) {
+  if (!value) return '';
+  const d = new Date(value);
+  const t = d.getTime();
+  if (Number.isNaN(t)) return '';
+  const sec = Math.round((Date.now() - t) / 1000);
+  if (sec < 45) return 'just now';
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.round(hr / 24);
+  if (day < 7) return `${day}d ago`;
+  const wk = Math.round(day / 7);
+  if (wk < 5) return `${wk}w ago`;
+  return formatDate(value, { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
 export function formatTime(value) {
   if (!value) return '';
   const d = new Date(value);

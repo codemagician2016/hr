@@ -197,6 +197,46 @@ export function updateMyDirectoryPreferences(body) {
   return apiPatch('/api/hr/me/directory/preferences', body);
 }
 
+// ── Feed social layer (reactions + threaded comments + @mentions) ─────────────
+// All SELF-scope + audience-gated server-side (a caller can only react/comment on a
+// post in their own feed). Single-reaction model: PUT upserts/replaces the caller's
+// one reaction; DELETE removes it. Both return { ok, reactionSummary }.
+export function setFeedReaction(announcementId, kind) {
+  return apiSend(`/api/hr/me/engagement/feed/${announcementId}/reaction`, 'PUT', { kind });
+}
+export function removeFeedReaction(announcementId) {
+  return apiSend(`/api/hr/me/engagement/feed/${announcementId}/reaction`, 'DELETE');
+}
+// Threaded comments: { items:[{ …, replies:[] }], total, page, pageSize }.
+export function fetchFeedComments(announcementId, query = '') {
+  return apiGet(`/api/hr/me/engagement/feed/${announcementId}/comments${query}`);
+}
+export function postFeedComment(announcementId, body) {
+  return apiPost(`/api/hr/me/engagement/feed/${announcementId}/comments`, body);
+}
+export function editFeedComment(announcementId, commentId, body) {
+  return apiPatch(`/api/hr/me/engagement/feed/${announcementId}/comments/${commentId}`, body);
+}
+export function deleteFeedComment(announcementId, commentId) {
+  return apiSend(`/api/hr/me/engagement/feed/${announcementId}/comments/${commentId}`, 'DELETE');
+}
+
+// ── ESS notification inbox (the top-bar bell) ─────────────────────────────────
+// SELF-ONLY; the recipient is resolved from the session. `unlinked:true` in the list
+// means the employee has no operator User → render an empty bell gracefully.
+export function fetchNotifications(query = '') {
+  return apiGet(`/api/hr/me/notifications${query}`);
+}
+export function fetchNotificationsUnreadCount() {
+  return apiGet('/api/hr/me/notifications/unread-count');
+}
+export function markNotificationRead(id) {
+  return apiPost(`/api/hr/me/notifications/${id}/read`);
+}
+export function markAllNotificationsRead() {
+  return apiPost('/api/hr/me/notifications/read-all');
+}
+
 // ── Cycle 1 (ESS) — Celebration opt-out (privacy control) ─────────────────────
 // The signed-in employee's OWN celebration opt-out state. When opted out, their
 // birthday/anniversary is hidden from the company celebration feed for everyone.

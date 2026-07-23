@@ -276,6 +276,11 @@ router.use('/announcements', require('../engagement/routes/announcements.routes'
 router.use('/surveys', require('../engagement/routes/surveys.routes'));
 router.use('/me/engagement/surveys', require('../engagement/routes/meSurveys.routes'));
 router.use('/me/engagement', require('../engagement/routes/meEngagement.routes'));
+// FLAG (Feed social layer — NEW mount): ESS notification INBOX. Customer session,
+// SELF_ONLY (the recipient User is resolved from the session employee). This is the
+// surface that makes @mentions + feed comment notifications visible — the fan-outs
+// write Notification rows keyed by recipientUserId and nothing on ESS read them before.
+router.use('/me/notifications', require('../engagement/routes/meNotifications.routes'));
 
 // FLAG (Feature 35 — NEW mounts): Rewards & Recognition.
 //   /api/hr/recognition  → operator config + consoles (protect + canManageRecognition:

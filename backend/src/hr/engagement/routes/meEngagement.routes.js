@@ -10,6 +10,7 @@ const express = require('express');
 const router = express.Router();
 const { requireCustomer } = require('../../../core/middleware/auth.middleware');
 const c = require('../controllers/meEngagement.controller');
+const social = require('../controllers/feedSocial.controller');
 
 router.use(requireCustomer);
 
@@ -18,6 +19,15 @@ router.get('/feed', c.feed);
 router.get('/feed/unread-count', c.unreadCount);
 router.post('/feed/read-all', c.markAllRead);
 router.post('/feed/:id/read', c.markRead);
+
+// Feed social layer — reactions + threaded comments (SELF-scope, audience-gated).
+// The single-reaction model: PUT upserts/replaces the caller's one reaction.
+router.put('/feed/:id/reaction', social.setReaction);
+router.delete('/feed/:id/reaction', social.removeReaction);
+router.get('/feed/:id/comments', social.listComments);
+router.post('/feed/:id/comments', social.createComment);
+router.patch('/feed/:id/comments/:commentId', social.editComment);
+router.delete('/feed/:id/comments/:commentId', social.deleteComment);
 
 // Celebration feed (birthdays + work anniversaries)
 router.get('/celebrations', c.celebrations);

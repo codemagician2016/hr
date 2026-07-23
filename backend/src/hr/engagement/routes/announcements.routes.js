@@ -30,4 +30,8 @@ router.post('/:id/archive', gate, c.archive);
 router.post('/:id/pin', gate, c.pin);
 router.post('/:id/unpin', gate, c.unpin);
 
+// Moderation — operator soft-delete of any feed comment (feed social layer). The
+// three-segment /feed/comments/:commentId path never collides with /:id (one segment).
+router.delete('/feed/comments/:commentId', gate, c.removeFeedComment);
+
 module.exports = router;

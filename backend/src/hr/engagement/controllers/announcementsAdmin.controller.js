@@ -118,7 +118,24 @@ async function remove(req, res, next) {
   } catch (e) { return next(e); }
 }
 
+// DELETE /announcements/feed/comments/:commentId — MODERATION: soft-delete ANY feed
+// comment in the tenant (operator override, canManageAnnouncements). Reuses the feed
+// social service's soft-delete in 'operator' mode so a moderated thread keeps its shape
+// (a deleted parent with live replies renders as a "[deleted]" placeholder).
+async function removeFeedComment(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const feedSocial = require('../feedSocial.service');
+    const out = await feedSocial.deleteComment(businessId, { mode: 'operator' }, req.params.commentId);
+    return res.json(out);
+  } catch (e) {
+    if (e && e.code === 'NOT_FOUND') return res.status(404).json({ message: 'Comment not found' });
+    return next(e);
+  }
+}
+
 module.exports = {
   list, get, create, update, publish, archive, remove,
   pin: setPinned(true), unpin: setPinned(false),
+  removeFeedComment,
 };

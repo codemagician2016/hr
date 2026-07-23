@@ -626,6 +626,9 @@ model Business {
   // Engagement (Cycle 1) — company announcements / news feed + read receipts.
   announcements                Announcement[]
   announcementReads            AnnouncementRead[]
+  // Feed social layer — reactions + comments across the tenant's feed.
+  feedReactions                FeedReaction[]
+  feedComments                 FeedComment[]
   // Feature 33 — Pulse Surveys + eNPS (employee listening).
   surveys                      Survey[]
   surveyResponses              SurveyResponse[]
@@ -6855,6 +6858,9 @@ model Employee {
   // are keyed by employee (the ESS session resolves the subject employee), so the
   // unread badge + per-row read state survive a userId remap.
   announcementReads        AnnouncementRead[]
+  // Feed social layer — this employee's reactions + authored comments.
+  feedReactions            FeedReaction[]
+  feedComments             FeedComment[]                     @relation("FeedCommentAuthor")
   // Feature 33 — survey participation ledger ONLY (never SurveyResponse: an anonymous
   // ballot has no employee relation by design — the anonymity firewall).
   surveyParticipations     SurveyParticipation[]
@@ -13096,6 +13102,10 @@ enum NotificationType {
   ONBOARDING_TASK
   OFFBOARDING_TASK
   ASSET_RETURN_DUE
+  // Feed social layer (additive) — @mention, comment-on-your-post, reaction.
+  FEED_MENTION
+  FEED_COMMENT
+  FEED_REACTION
 }
 
 enum NotificationChannel {
@@ -13376,7 +13386,10 @@ model Announcement {
   // so the fan-out is guarded on this being null. (NULL = never fanned out.)
   notifiedAt          DateTime?
 
-  reads AnnouncementRead[]
+  reads         AnnouncementRead[]
+  // Feed social layer — reactions + threaded comments on this post.
+  feedReactions FeedReaction[]
+  feedComments  FeedComment[]
 
   // Feed hot-path: tenant + status + publishedAt window, pinned-first.
   @@index([businessId, status, publishedAt])
@@ -13420,6 +13433,71 @@ model AnnouncementRead {
 
   @@unique([announcementId, employeeId])
   @@index([businessId, employeeId])
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Feed social layer — reactions + comments (+ @mentions) on the ESS news feed.
+// The feed IS the Announcement table, so the social layer hangs off Announcement:
+// a recognition projected as a CELEBRATION announcement (feedProjector.js) gets
+// reactions/comments for free. Tenant-isolated by businessId on every row + index.
+// ════════════════════════════════════════════════════════════════════════════
+
+// One employee's reaction to one feed post. DESIGN DECISION — SINGLE reaction per
+// person per post (@@unique([announcementId, employeeId])). Reacting again REPLACES
+// the stored `kind` (an upsert), matching how most social feeds behave (LinkedIn/
+// Teams "one reaction, switchable") and keeping the summary a simple per-kind tally.
+// A multi-reaction model (one row per kind) was rejected: it complicates "myReaction"
+// (becomes a set), the toggle UX, and the aggregate. `kind` is a free-form String
+// (LIKE/CELEBRATE/SUPPORT/INSIGHTFUL/LOVE today) so new reactions need no migration.
+model FeedReaction {
+  id             String       @id @default(uuid())
+  businessId     String
+  business       Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  announcementId String
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  employeeId     String
+  employee       Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  kind           String // reaction key: LIKE | CELEBRATE | SUPPORT | INSIGHTFUL | LOVE (extensible)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  // ONE reaction per person per post (react-again replaces the kind, never stacks).
+  @@unique([announcementId, employeeId])
+  @@index([businessId, announcementId])
+  @@index([businessId, employeeId])
+}
+
+// A threaded comment on a feed post. One level of replies (parentId self-relation;
+// parent.parent is always null — enforced in the service). Soft-deletable for
+// moderation (deletedAt): a deleted comment is filtered out unless it still has live
+// replies, in which case it renders as a "[deleted]" placeholder so the thread keeps
+// its shape. @mentions parsed from the body are resolved to employee ids at write
+// time and denormalised into mentionedEmployeeIds (drives the FEED_MENTION fan-out).
+model FeedComment {
+  id                   String        @id @default(uuid())
+  businessId           String
+  business             Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  announcementId       String
+  announcement         Announcement  @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  authorEmployeeId     String
+  author               Employee      @relation("FeedCommentAuthor", fields: [authorEmployeeId], references: [id], onDelete: Cascade)
+  body                 String        @db.Text
+  // Threading — one level deep. parentId null = top-level; a reply points at a
+  // top-level comment. onDelete: NoAction avoids a multi-cascade-path conflict on
+  // Announcement delete (the announcement cascade already removes every row).
+  parentId             String?
+  parent               FeedComment?  @relation("FeedCommentReplies", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  replies              FeedComment[] @relation("FeedCommentReplies")
+  // Resolved @mention targets (employee ids), denormalised for the notification fan-out.
+  mentionedEmployeeIds String[]      @default([])
+  editedAt             DateTime? // set on an author edit (renders an "edited" hint)
+  deletedAt            DateTime? // soft-delete (author or operator moderation)
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  @@index([businessId, announcementId, createdAt])
+  @@index([businessId, authorEmployeeId])
+  @@index([parentId])
 }
 
 // ════════════════════════════════════════════════════════════════════════════

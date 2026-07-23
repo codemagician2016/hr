@@ -9,13 +9,16 @@
 //   GET  /api/hr/me/engagement/celebrations           → { birthdays, anniversaries }
 // Customer/cookie session; self-only (the subject is resolved server-side).
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { ErrorBanner, Empty, Spinner, Centered } from '@hr/ui';
 import InfoTip from '@/components/InfoTip';
 import NotificationPrefsCard from '@/components/NotificationPrefsCard';
+import FeedReactions from '@/components/FeedReactions';
+import FeedComments from '@/components/FeedComments';
 import { apiPost } from '@/lib/api';
 import { useApi } from '@/lib/useApi';
+import { useProfile } from '@/lib/useProfile';
 import { formatDate } from '@/lib/format';
 import { ServerPagination } from '@/lib/pagination';
 import CelebrationsWidget from '@/components/CelebrationsWidget';
@@ -40,11 +43,21 @@ function CategoryPill({ category }) {
   );
 }
 
-function AnnouncementCard({ a, onMarkRead, busy }) {
+function AnnouncementCard({ a, onMarkRead, busy, myEmployeeId, highlight }) {
+  const ref = useRef(null);
+  // Deep-linked from a notification (?post=<id>) — scroll into view + soft-highlight.
+  useEffect(() => {
+    if (highlight && ref.current) {
+      ref.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [highlight]);
+
   return (
     <article
+      ref={ref}
+      id={`post-${a.id}`}
       className="rounded-2xl border bg-white p-4 shadow-sm"
-      style={{ borderColor: a.read ? 'var(--theme-border)' : 'var(--theme-primary)' }}
+      style={{ borderColor: highlight ? 'var(--theme-primary)' : (a.read ? 'var(--theme-border)' : 'var(--theme-primary)'), boxShadow: highlight ? '0 0 0 2px var(--theme-primary-soft)' : undefined }}
     >
       <div className="mb-2 flex items-center gap-2">
         {a.pinned && <span title="Pinned" aria-label="Pinned">📌</span>}
@@ -76,6 +89,12 @@ function AnnouncementCard({ a, onMarkRead, busy }) {
           </button>
         )}
       </div>
+
+      {/* Social layer — reactions + threaded comments (self-scope, audience-gated). */}
+      <div className="mt-3">
+        <FeedReactions announcementId={a.id} initial={a.reactionSummary} />
+      </div>
+      <FeedComments announcementId={a.id} commentCount={a.commentCount || 0} myEmployeeId={myEmployeeId} />
     </article>
   );
 }
@@ -85,6 +104,16 @@ function FeedInner() {
   const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState('');
+  // The caller's OWN employee id — used to infer comment ownership (edit/delete).
+  const { employeeId: myEmployeeId } = useProfile();
+  // Deep link from a notification: /feed?post=<announcementId> → scroll + highlight.
+  const [highlightId, setHighlightId] = useState(null);
+  useEffect(() => {
+    try {
+      const p = new URLSearchParams(window.location.search).get('post');
+      if (p) setHighlightId(p);
+    } catch { /* no-op */ }
+  }, []);
 
   const { data, loading, error, reload } = useApi(
     `/api/hr/me/engagement/feed?page=${page}&pageSize=${pageSize}`,
@@ -165,7 +194,14 @@ function FeedInner() {
       ) : (
         <div className="space-y-3">
           {items.map((a) => (
-            <AnnouncementCard key={a.id} a={a} onMarkRead={markRead} busy={busy} />
+            <AnnouncementCard
+              key={a.id}
+              a={a}
+              onMarkRead={markRead}
+              busy={busy}
+              myEmployeeId={myEmployeeId}
+              highlight={highlightId === a.id}
+            />
           ))}
         </div>
       )}
