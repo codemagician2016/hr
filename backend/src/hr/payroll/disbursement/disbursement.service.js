@@ -135,7 +135,7 @@ async function createBatch({ businessId, actorId, payRunId, bank, debitAccount, 
   // Country dispatch: NZ runs on the direct-credit rail (no IFSC / PayoutBank enum),
   // so they NEVER enter the India bank-format path below. IN falls through unchanged.
   if (resolveDisbursementRoute(run.entity.countryCode) === 'NZ_DIRECT_CREDIT') {
-    return createNzDirectCreditBatch({ businessId, actorId, run, valueDate, narration });
+    return createNzDirectCreditBatch({ businessId, actorId, run, valueDate, narration, force });
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -320,22 +320,35 @@ function defaultNarration(run) {
  * structured 422 (offenders list) — the same UX as the IN path — instead of the
  * pure generator throwing a bare RangeError mid-loop.
  *
- * SCOPE WIRED: dispatch + validation + direct-credit FILE production (the pure,
- * compliance-relevant part), returned in-line in a PayoutBatch-shaped payload.
- * DEFERRED (flagged): NZ does NOT persist a PayoutBatch/PayoutLine row, because
- * that schema is India-shaped — `bank` is the IN-only PayoutBank enum (no NZ /
- * DIRECT_CREDIT member) and `ifsc` is a required Char(11). Persisting NZ (and thus
- * the download/reconcile/double-pay lifecycle) needs a schema follow-up: an NZ rail
- * on the PayoutBank enum (or a nullable rail) + a nullable `ifsc` + a migration.
- * That is out of scope for this task (comment-only schema change, no migration).
+ * PERSISTED (P5e): NZ now persists a PayoutBatch + PayoutLines exactly like IN —
+ * `PayoutBank.NZ_DIRECT_CREDIT` is the rail and `PayoutLine.ifsc` is nullable (null on
+ * this rail; `accountNumber` snapshots the NZ account). The batch opens in PROCESSING
+ * with fileGeneratedAt stamped (the file is generated inline), so the double-pay guard
+ * and the UTR-reconcile lifecycle apply to NZ unchanged. The response still carries the
+ * inline direct-credit file alongside the persisted batch (persisted:true, real id).
  */
-async function createNzDirectCreditBatch({ businessId, actorId, run, valueDate, narration }) {
+async function createNzDirectCreditBatch({ businessId, actorId, run, valueDate, narration, force = false, db = prisma }) {
   if (!DISBURSABLE_STATUSES.has(run.status)) {
     throw badRequest('BAD_STATE', `Disbursement requires a frozen or approved run (current: ${run.status}).`);
   }
 
+  // Same DOUBLE-PAY guard as the IN rail: refuse a new batch while ANY non-terminal
+  // batch exists for the run (the NZ file is money-in-flight once generated). An
+  // explicit, audited `force` re-issues after a confirmed full bank rejection.
+  const blocking = await db.payoutBatch.findFirst({
+    where: { businessId, payRunId: run.id, status: { in: ['QUEUED', 'PROCESSING', 'PARTIAL', 'CREDITED'] } },
+    select: { id: true, status: true },
+    orderBy: { createdAt: 'desc' },
+  });
+  if (blocking && !force) {
+    const e = badRequest('BAD_STATE', `A non-terminal payout batch (${blocking.status}) already exists for this run — treating its file as money-in-flight. Reconcile or fully fail it first, or pass force=true (audited) to re-issue.`);
+    e.blockingBatchId = blocking.id;
+    e.blockingStatus = blocking.status;
+    throw e;
+  }
+
   // Net pay per employee from the committed run lines (exclude EXCLUDED lines).
-  const lines = await prisma.payRunLine.findMany({
+  const lines = await db.payRunLine.findMany({
     where: { businessId, payRunId: run.id, status: { notIn: ['EXCLUDED'] } },
     select: {
       employeeId: true,
@@ -350,7 +363,7 @@ async function createNzDirectCreditBatch({ businessId, actorId, run, valueDate, 
   // order, first match wins.
   const employeeIds = lines.map((l) => l.employeeId).filter(Boolean);
   const accounts = employeeIds.length
-    ? await prisma.bankAccount.findMany({
+    ? await db.bankAccount.findMany({
         where: { businessId, employeeId: { in: employeeIds }, isActive: true, deletedAt: null },
         orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
         select: { employeeId: true, nzBankAccount: true, accountNumber: true },
@@ -406,41 +419,71 @@ async function createNzDirectCreditBatch({ businessId, actorId, run, valueDate, 
   const totalMinor = control.totalMinor != null ? control.totalMinor : 0;
   const count = rendered.meta ? rendered.meta.itemCount : lines.length;
 
+  // P5e — persist the NZ batch + per-employee lines exactly like the IN rail. On this
+  // rail `ifsc` is null and `accountNumber` snapshots the NZ bank account
+  // (BB-bbbb-AAAAAAA-SSS). The file is generated inline, so the batch opens in
+  // PROCESSING (money-in-flight) with fileGeneratedAt stamped — the double-pay guard
+  // and the existing UTR-reconcile path then apply to NZ unchanged.
+  const payable = lines.map((l) => ({
+    employeeId: l.employeeId,
+    amountMinor: decimalToMinor(l.netPay),
+    beneficiaryName: empName(l.employee || {}) || (l.employee && l.employee.code) || 'EMPLOYEE',
+    accountNumber: acctByEmployee.get(l.employeeId) || '',
+    narration: narration ? String(narration).trim() : defaultNarration(run),
+  }));
+
+  const batch = await db.$transaction(async (tx) => tx.payoutBatch.create({
+    data: {
+      businessId,
+      payRunId: run.id,
+      bank: 'NZ_DIRECT_CREDIT',
+      status: 'PROCESSING',
+      totalMinor: toBig(totalMinor),
+      count,
+      currencyCode: run.entity.payCurrency || run.currencyCode || 'NZD',
+      valueDate: valueDate ? new Date(`${isoDate(valueDate)}T00:00:00.000Z`) : (run.payDate || null),
+      gatewayProvider: null,
+      fileGeneratedAt: new Date(),
+      createdBy: actorId,
+      lines: {
+        create: payable.map((p) => ({
+          businessId,
+          employeeId: p.employeeId,
+          amountMinor: toBig(p.amountMinor),
+          beneficiaryName: p.beneficiaryName,
+          accountNumber: p.accountNumber,
+          ifsc: null, // NZ direct-credit has no IFSC
+          narration: p.narration,
+          status: 'PENDING',
+        })),
+      },
+    },
+    include: { lines: true },
+  }));
+
   await writeAudit({
     businessId,
     actorId,
     action: 'payout.batch.create',
     entityType: 'PayoutBatch',
-    entityId: null,
-    meta: { payRunId: run.id, rail: 'NZ_DIRECT_CREDIT', count, totalMinor, persisted: false },
+    entityId: batch.id,
+    meta: { payRunId: run.id, rail: 'NZ_DIRECT_CREDIT', count, totalMinor, persisted: true, force: !!force },
   }).catch(() => {});
 
-  // PayoutBatch-shaped payload (adapted). `bank` is a descriptive rail label, NOT a
-  // PayoutBank enum member; `id` is null because NZ is not persisted (see header).
-  return {
-    id: null,
-    payRunId: run.id,
-    rail: 'NZ_DIRECT_CREDIT',
-    bank: 'NZ_DIRECT_CREDIT',
-    bankLabel: 'NZ Direct Credit (bank-native CSV + control record)',
-    status: 'GENERATED',
-    totalMinor,
-    totalDollars: control.totalDollars,
-    count,
-    currencyCode: run.entity.payCurrency || run.currencyCode || 'NZD',
-    valueDate: isoDate(valueDate) || isoDate(run.payDate),
-    persisted: false,
-    skipped: [],
-    file: {
-      fileName: rendered.fileName,
-      contentType: rendered.contentType,
-      content: rendered.content,
-      meta: rendered.meta,
-    },
-    note:
-      'NZ direct-credit batch generated in-line. Batch/line persistence + UTR ' +
-      'reconciliation are not yet wired (needs an NZ PayoutBank rail + nullable ifsc — a schema follow-up).',
+  // The persisted, serialized batch + the inline bank file (NZ generates it at create).
+  const out = serializeBatch(batch);
+  out.rail = 'NZ_DIRECT_CREDIT';
+  out.bankLabel = 'NZ Direct Credit (bank-native CSV + control record)';
+  out.totalDollars = control.totalDollars;
+  out.persisted = true;
+  out.skipped = [];
+  out.file = {
+    fileName: rendered.fileName,
+    contentType: rendered.contentType,
+    content: rendered.content,
+    meta: rendered.meta,
   };
+  return out;
 }
 
 /**
@@ -778,5 +821,5 @@ module.exports = {
   getBatch,
   listBatches,
   // exposed for tests
-  _internals: { serializeBatch, serializeLine, decimalToMinor, defaultNarration, maskAccount, DISBURSABLE_STATUSES, resolveDisbursementRoute, DISBURSEMENT_ROUTES },
+  _internals: { serializeBatch, serializeLine, decimalToMinor, defaultNarration, maskAccount, DISBURSABLE_STATUSES, resolveDisbursementRoute, DISBURSEMENT_ROUTES, createNzDirectCreditBatch },
 };

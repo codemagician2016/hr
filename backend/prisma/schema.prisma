@@ -14533,8 +14533,8 @@ model PayoutLine {
   employee        Employee         @relation(fields: [employeeId], references: [id], onDelete: Restrict)
   amountMinor     BigInt // net pay to credit (paise) — snapshot of PayRunLine.netPay
   beneficiaryName String // snapshot of the bank account holder name
-  accountNumber   String // snapshot of BankAccount.accountNumber
-  ifsc            String           @db.Char(11) // snapshot of BankAccount.ifsc (IN)
+  accountNumber   String // snapshot of BankAccount.accountNumber (IN) or NZ bank account (BB-bbbb-AAAAAAA-SSS)
+  ifsc            String?          @db.Char(11) // snapshot of BankAccount.ifsc (IN only; null on the NZ direct-credit rail)
   narration       String? // statement narration (e.g. "SAL JUN2026")
   status          PayoutLineStatus @default(PENDING)
   utr             String? // bank Unique Transaction Reference once credited
@@ -14557,6 +14557,7 @@ enum PayoutBank {
   KOTAK // Kotak (FYI/Net) bulk upload
   SBI // SBI Corporate (CINB) salary package
   NEFT_RTGS // generic NEFT/RTGS CSV (any bank)
+  NZ_DIRECT_CREDIT // New Zealand direct-credit rail (bank-native CSV + control record; no IFSC)
 }
 
 /// Batch-level rollup. QUEUED → PROCESSING once the file is generated / sent;
