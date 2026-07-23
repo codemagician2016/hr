@@ -11,6 +11,8 @@
 
 const prisma = require('../../core/lib/prisma');
 const { POLICY } = require('./profileFieldPolicy');
+// Phase 5b — attach the employee's custom-field values onto the rich admin profile.
+const customFields = require('../customfields/customFields.service');
 
 // GET /api/hr/profile/policy — the field-policy map (display/config view).
 function getPolicy(req, res) {
@@ -60,6 +62,12 @@ async function getEmployeeFull(req, res, next) {
       }),
     ]);
 
+    // Phase 5b — tenant-defined custom fields (additive; degrades to [] on failure so a
+    // custom-fields hiccup never breaks the rich profile read).
+    const custom = await customFields
+      .getEmployeeCustomFields(prisma, businessId, employeeId, {})
+      .catch(() => []);
+
     res.json({
       employee: {
         id: emp.id, code: emp.code,
@@ -80,6 +88,7 @@ async function getEmployeeFull(req, res, next) {
       education: education.map((e) => ({ id: e.id, level: e.level, institution: e.institution, fieldOfStudy: e.fieldOfStudy, startYear: e.startYear, endYear: e.endYear, grade: e.grade, isHighest: e.isHighest })),
       addresses: addresses.map((a) => ({ id: a.id, type: a.type, sameAsType: a.sameAsType, line1: a.line1, line2: a.line2, city: a.city, stateCode: a.stateCode, postalCode: a.postalCode, countryCode: a.countryCode })),
       statutory: statutory ? { countryCode: statutory.countryCode, pan: statutory.pan, uan: statutory.uan, irdNumber: statutory.irdNumber, aadhaarVerified: statutory.aadhaarVerified || false } : null,
+      customFields: custom,
     });
   } catch (e) { next(e); }
 }

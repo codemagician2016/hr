@@ -4,6 +4,9 @@ const router = express.Router();
 const { protect, requirePermission } = require('../../core/middleware/auth.middleware');
 const { attachSelfEmployee, withEmployeeScope } = require('../middleware/scope.middleware');
 const c = require('../controllers/employee.controller');
+// Phase 5b — per-employee custom-field values. Reuses the employee router's
+// protect + withEmployeeScope(idParam) so a manager only touches their sub-tree.
+const cf = require('../customfields/customFields.controller');
 // FLAG (Feature 14 — shared edit): when a countryCode IS supplied on employee
 // create it must match the tenant (off-country → 422). Employee.countryCode is
 // nullable, so absent is allowed (no stamp) and reads fall through to tenantCountry.
@@ -25,5 +28,9 @@ router.post('/:id/terminate', requirePermission('canManageEmployees'), withEmplo
 // Feature 4 — single portal invite / resend (resend re-mints, invalidating the
 // prior token). Row-scoped: a manager can only invite within their sub-tree.
 router.post('/:id/invite', requirePermission('canManageEmployees'), withEmployeeScope('canManageEmployees', { idParam: 'id' }), c.invite);
+
+// Phase 5b — per-employee custom-field values (admin). Row-scoped: out-of-tree :id 404s.
+router.get('/:id/custom-fields', requirePermission('canManageEmployees'), withEmployeeScope('canManageEmployees', { idParam: 'id' }), cf.getEmployeeValues);
+router.patch('/:id/custom-fields', requirePermission('canManageEmployees'), withEmployeeScope('canManageEmployees', { idParam: 'id' }), cf.patchEmployeeValues);
 
 module.exports = router;

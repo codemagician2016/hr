@@ -629,6 +629,165 @@ function PortalAccessSection({ employee }) {
   );
 }
 
+// ── Phase 5b — Custom fields (tenant-defined typed fields on the employee). ───
+// Reads GET /api/hr/employees/:id/custom-fields → { fields:[{ definition, value }] }
+// and edits via PATCH /api/hr/employees/:id/custom-fields { values:{ key:raw } }.
+// Renders NOTHING when the tenant has defined no fields (no empty card).
+
+// Convert a form value to the raw scalar the API expects for a field's type.
+function customFieldRaw(def, v) {
+  if (def.fieldType === 'BOOLEAN') return !!v;
+  if (def.fieldType === 'NUMBER') return v === '' || v == null ? null : Number(v);
+  return v === '' || v == null ? null : v; // TEXT / SELECT / DATE
+}
+
+// The display string for a stored custom-field value (null → em-dash upstream).
+function customFieldDisplay(def, value) {
+  if (value == null || value === '') return def.fieldType === 'BOOLEAN' && value === false ? 'No' : null;
+  switch (def.fieldType) {
+    case 'BOOLEAN': return value ? 'Yes' : 'No';
+    case 'DATE': return formatAdminDate(value);
+    case 'SELECT': return (def.options || []).find((o) => o.value === value)?.label || String(value);
+    default: return String(value);
+  }
+}
+
+function CustomFieldsModal({ employeeId, fields, onClose, onSaved }) {
+  const [form, setForm] = useState(() => {
+    const init = {};
+    for (const f of fields) {
+      const def = f.definition;
+      init[def.key] = f.value ?? (def.fieldType === 'BOOLEAN' ? false : '');
+    }
+    return init;
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const set = (k, v) => setForm((s) => ({ ...s, [k]: v }));
+
+  async function save(e) {
+    e.preventDefault();
+    setSaving(true);
+    setError('');
+    const values = {};
+    for (const f of fields) {
+      const def = f.definition;
+      values[def.key] = customFieldRaw(def, form[def.key]);
+    }
+    try {
+      const res = await patch(`/api/hr/employees/${employeeId}/custom-fields`, { values });
+      onSaved(res?.customFields || res?.fields || (Array.isArray(res) ? res : []));
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Failed to save custom fields.');
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal title="Edit custom fields" size="lg" onClose={onClose}>
+      <form onSubmit={save} className="space-y-4">
+        {fields.map((f) => {
+          const def = f.definition;
+          const val = form[def.key];
+          if (def.fieldType === 'BOOLEAN') {
+            return (
+              <div key={def.id}>
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                  <input type="checkbox" checked={!!val} onChange={(e) => set(def.key, e.target.checked)} />
+                  {def.label}
+                </label>
+                {def.description && <p className="mt-1 text-xs text-gray-500">{def.description}</p>}
+              </div>
+            );
+          }
+          if (def.fieldType === 'SELECT') {
+            return (
+              <SelectField
+                key={def.id}
+                label={def.label}
+                value={val ?? ''}
+                onChange={(v) => set(def.key, v)}
+                options={(def.options || []).map((o) => ({ id: o.value, name: o.label }))}
+                placeholder="—"
+              />
+            );
+          }
+          const type = def.fieldType === 'NUMBER' ? 'number' : def.fieldType === 'DATE' ? 'date' : 'text';
+          return (
+            <TextInput
+              key={def.id}
+              label={def.label}
+              type={type}
+              value={val ?? ''}
+              onChange={(v) => set(def.key, v)}
+              required={def.required}
+              hint={def.description || undefined}
+            />
+          );
+        })}
+        {error && <ErrorBanner message={error} />}
+        <ModalActions>
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50">
+            Cancel
+          </button>
+          <PrimaryButton type="submit" loading={saving}>Save changes</PrimaryButton>
+        </ModalActions>
+      </form>
+    </Modal>
+  );
+}
+
+function CustomFieldsSection({ employeeId }) {
+  const [fields, setFields] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+
+  const load = useCallback(() => {
+    let alive = true;
+    setLoading(true);
+    get(`/api/hr/employees/${employeeId}/custom-fields`)
+      .then((res) => { if (alive) setFields(res?.customFields || res?.fields || (Array.isArray(res) ? res : [])); })
+      .catch(() => { if (alive) setFields([]); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [employeeId]);
+
+  useEffect(() => load(), [load]);
+
+  // Don't flash an empty card: nothing while loading, and nothing when the
+  // tenant has defined no custom fields.
+  if (loading || !fields || fields.length === 0) return null;
+
+  return (
+    <>
+      <Section
+        title="Custom fields"
+        action={(
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="text-sm font-medium text-[color:var(--theme-primary)] hover:underline"
+          >
+            Edit
+          </button>
+        )}
+      >
+        {fields.map((f) => (
+          <Field key={f.definition.id} label={f.definition.label} value={customFieldDisplay(f.definition, f.value)} />
+        ))}
+      </Section>
+      {editing && (
+        <CustomFieldsModal
+          employeeId={employeeId}
+          fields={fields}
+          onClose={() => setEditing(false)}
+          onSaved={(updated) => { setFields(updated); setEditing(false); }}
+        />
+      )}
+    </>
+  );
+}
+
 export default function EmployeeDetailPage() {
   const { id } = useParams();
   const router = useRouter();
@@ -772,6 +931,9 @@ export default function EmployeeDetailPage() {
 
       {/* Feature 13 — the rich, sectioned profile (lazy + scoped). */}
       <RichProfileSection employeeId={emp.id} />
+
+      {/* Phase 5b — tenant-defined custom fields (renders only when any exist). */}
+      <CustomFieldsSection employeeId={emp.id} />
 
       {modal === 'profile' && (
         <EditProfileModal employee={emp} onClose={() => setModal(null)} onSaved={(u) => applyUpdate(u)} />

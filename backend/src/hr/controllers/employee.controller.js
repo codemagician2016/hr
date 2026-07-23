@@ -8,6 +8,8 @@ const { writeAudit } = require('../../core/lib/audit');
 const { scopeWhere, scopeAllows } = require('../lib/scopeResolver');
 const { allocateCode, SCOPE_DEFAULTS } = require('../lifecycle/lib/codes');
 const portalInvite = require('../lifecycle/portalInvite');
+// Phase 5b — hang the employee's custom-field values onto the detail read (additive).
+const customFields = require('../customfields/customFields.service');
 
 const EMP_SCOPE = 'EMPLOYEE';
 const EMP_DEFAULTS = SCOPE_DEFAULTS[EMP_SCOPE] || { prefix: 'EMP-', padding: 6 };
@@ -193,7 +195,13 @@ async function get(req, res, next) {
       .portalStatusForEmployee(businessId, { id: emp.id, workEmail: emp.workEmail })
       .catch(() => ({ state: 'NOT_INVITED', invite: null, loginEmail: emp.workEmail || null }));
 
-    res.json({ ...emp, employment, portalStatus: portal.state, portal });
+    // Phase 5b — attach tenant-defined custom fields (additive; a failure here must
+    // never break the core employee GET, so it degrades to an empty list).
+    const custom = await customFields
+      .getEmployeeCustomFields(prisma, businessId, emp.id, {})
+      .catch(() => []);
+
+    res.json({ ...emp, employment, portalStatus: portal.state, portal, customFields: custom });
   } catch (e) { next(e); }
 }
 

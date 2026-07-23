@@ -25,6 +25,16 @@ require('../attendance/capture/face/register').registerFaceMatcher();
 router.use('/', require('./countryContext.routes'));
 
 router.use('/employees', require('./employee.routes'));
+// Phase 5b — Custom Fields (tenant-defined typed fields on Employee).
+//   /api/hr/custom-fields     → operator definition CRUD (protect + canManageEmployees).
+//   /api/hr/me/custom-fields  → ESS (customer session, SELF_ONLY): my visible fields +
+//                               self-edit of the SELF_EDIT-policy ones.
+// The per-employee ADMIN value routes (GET/PATCH /employees/:id/custom-fields) ride the
+// employee router (withEmployeeScope). The convenience read-attach hangs custom fields
+// onto the employee GET + the rich admin profile.
+const customFields = require('../customfields/customFields.routes');
+router.use('/custom-fields', customFields.definitions);
+router.use('/me/custom-fields', customFields.me);
 // Company Profile settings — business legal/registration profile, the OPTIONAL
 // company-document vault (licences/tax reports/financials/registration+GST
 // certificates), and the auto employee-number scheme. Gated on

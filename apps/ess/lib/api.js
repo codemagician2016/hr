@@ -76,6 +76,18 @@ export function fetchMyProfile() {
   return apiGet('/api/hr/me/profile');
 }
 
+// Phase 5b — the employee's tenant-defined custom fields on their own profile.
+// GET returns only definitions the employee may see (essPolicy !== 'HIDDEN'); each
+// carries essPolicy READ_ONLY or SELF_EDIT. Returns { fields:[{ definition, value }] }.
+export function fetchMyCustomFields() {
+  return apiGet('/api/hr/me/custom-fields');
+}
+// PATCH { values:{ <key>: <raw> } } → refreshed { fields:[...] }. The server rejects
+// non-SELF_EDIT keys with 403, so only submit SELF_EDIT ones.
+export function saveMyCustomFields(values) {
+  return apiPatch('/api/hr/me/custom-fields', { values });
+}
+
 // Feature 14 — the AUTHORITATIVE tenant country/capability matrix for the ESS
 // app. Returns { country, currency, capabilities } sourced from Business.hrCountry
 // (the single source of truth). The ESS app gates its onboarding statutory step /

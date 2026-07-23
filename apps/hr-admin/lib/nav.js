@@ -227,6 +227,11 @@ export const NAV_ITEMS = [
   // Gated on canManageOrg (already in the settings group's anyPermission list);
   // the server is the real boundary (/api/hr/notifications/* is canManageOrg).
   { key: 'settings-notifications', label: 'Notification templates', href: '/settings/notifications', permission: 'canManageOrg', parent: 'settings', icon: 'bell' },
+  // Phase 5b — Custom fields: tenant-defined typed fields on employees (text /
+  // number / date / dropdown / yes-no) that render + edit on the employee record
+  // and, per policy, on the ESS profile. Country-agnostic. Gated on
+  // canManageEmployees (the server is the real boundary on /api/hr/custom-fields/*).
+  { key: 'settings-custom-fields', label: 'Custom fields', href: '/settings/custom-fields', permission: 'canManageEmployees', parent: 'settings', icon: 'people' },
   // Feature 36 — Candidate messages: the auto-send toggles + editable copy for
   // every candidate-facing hiring message. Gated on the recruitment write keys
   // (canManageHiring / canManageEmployees) + the talent_acquisition add-on, so it

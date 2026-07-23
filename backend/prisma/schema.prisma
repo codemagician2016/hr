@@ -643,6 +643,9 @@ model Business {
   // Feature 33 — Pulse Surveys + eNPS (employee listening).
   surveys                      Survey[]
   surveyResponses              SurveyResponse[]
+  // Phase 5b — tenant-defined custom fields on the Employee entity (typed defs + values).
+  customFieldDefinitions       CustomFieldDefinition[]
+  customFieldValues            CustomFieldValue[]
   // Investment-proof workflow (Feature 20) — year-end §192(2D)/Rule 26C/Form 12BB.
   investmentDeclarationWindows InvestmentDeclarationWindow[]
   investmentProofs             InvestmentProof[]
@@ -6899,6 +6902,8 @@ model Employee {
   awardNominationsMade     AwardNomination[]                 @relation("AwardNominator")
   awardNominationsReceived AwardNomination[]                 @relation("AwardNominee")
   redemptions              Redemption[]
+  // Phase 5b — tenant-defined custom-field values stored against this employee.
+  customFieldValues        CustomFieldValue[]
 
   // SSO/SCIM (v1) — identity-provider provisioning linkage. `externalId` is the
   // IdP's stable id for this person (Okta/Azure AD "externalId" on SCIM create);
@@ -13835,6 +13840,77 @@ model FeedComment {
 // ════════════════════════════════════════════════════════════════════════════
 
 // The survey template + audience + schedule (mirrors Announcement).
+// ── Phase 5b — Custom Fields (tenant-defined, typed fields on Employee) ──────────
+// Tenant admins define their own typed fields on the Employee entity; values are
+// stored per-employee (one typed column per kind, the other three NULL) and surfaced
+// to admin + ESS. Modelled on the Survey/SurveyQuestion/SurveyAnswer definition+value
+// precedent: a pure validator/normaliser lives in hr/customfields/customFields.service.js.
+// Definitions are soft-archived (isActive=false + deletedAt) so historical values keep
+// their def; key + fieldType are IMMUTABLE after create (the value columns depend on them).
+model CustomFieldDefinition {
+  id          String               @id @default(cuid())
+  businessId  String
+  entityType  CustomFieldEntity    @default(EMPLOYEE)
+  fieldType   CustomFieldType
+  key         String // slug, lowercase, unique per (businessId, entityType)
+  label       String
+  description String?
+  options     Json? // SELECT only: [{ value, label }]
+  required    Boolean              @default(false)
+  essVisible  Boolean              @default(false)
+  essPolicy   CustomFieldEssPolicy @default(READ_ONLY)
+  section     String?
+  orderIndex  Int                  @default(0)
+  isActive    Boolean              @default(true)
+  version     Int                  @default(1)
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  deletedAt   DateTime?
+  business    Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  values      CustomFieldValue[]
+
+  @@unique([businessId, entityType, key])
+  @@index([businessId, entityType, isActive])
+}
+
+model CustomFieldValue {
+  id           String                @id @default(cuid())
+  businessId   String
+  definitionId String
+  employeeId   String
+  textValue    String? // TEXT + SELECT (stores chosen option value)
+  numberValue  Float?
+  dateValue    DateTime?
+  boolValue    Boolean?
+  updatedById  String?
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+  definition   CustomFieldDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
+  business     Business              @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employee     Employee              @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([definitionId, employeeId])
+  @@index([businessId, employeeId])
+}
+
+enum CustomFieldEntity {
+  EMPLOYEE
+}
+
+enum CustomFieldType {
+  TEXT
+  NUMBER
+  DATE
+  SELECT
+  BOOLEAN
+}
+
+enum CustomFieldEssPolicy {
+  HIDDEN
+  READ_ONLY
+  SELF_EDIT
+}
+
 model Survey {
   id           String   @id @default(uuid())
   businessId   String

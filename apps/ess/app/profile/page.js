@@ -20,11 +20,11 @@
 // (/letters) and Raise Separation Request (/separation).
 
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import NotificationPrefsCard from '@/components/NotificationPrefsCard';
 import { Spinner, Centered, ErrorBanner, Empty } from '@hr/ui';
-import { apiPost, apiSend } from '@/lib/api';
+import { apiPost, apiSend, fetchMyCustomFields, saveMyCustomFields } from '@/lib/api';
 import { useApi } from '@/lib/useApi';
 import { useMeta, labelize } from '@/lib/useMeta';
 import { formatDate } from '@/lib/format';
@@ -128,6 +128,137 @@ function Section({ title, hint, children, action }) {
       </div>
       {children}
     </section>
+  );
+}
+
+// ── Phase 5b — Custom fields (tenant-defined typed fields on my profile). ─────
+// GET /api/hr/me/custom-fields returns only fields I may see (READ_ONLY / SELF_EDIT).
+// SELF_EDIT rows commit one at a time via PATCH { values:{ key:raw } } (only the one
+// changed key), reusing the FieldRow / POLICY_BADGE look. The card renders NOTHING
+// when the tenant has defined no fields I can see.
+
+// Map the field's essPolicy → the FieldRow policy vocabulary + a display string.
+function customPolicy(def) {
+  return def.essPolicy === 'SELF_EDIT' ? 'self-edit' : 'read-only';
+}
+function customRaw(def, v) {
+  if (def.fieldType === 'BOOLEAN') return !!v;
+  if (def.fieldType === 'NUMBER') return v === '' || v == null ? null : Number(v);
+  return v === '' || v == null ? null : v; // TEXT / SELECT / DATE
+}
+function customDisplay(def, value) {
+  if (value == null || value === '') return def.fieldType === 'BOOLEAN' && value === false ? 'No' : '—';
+  switch (def.fieldType) {
+    case 'BOOLEAN': return value ? 'Yes' : 'No';
+    case 'DATE': return formatDate(value);
+    case 'SELECT': return (def.options || []).find((o) => o.value === value)?.label || String(value);
+    default: return String(value);
+  }
+}
+
+// One custom-field row — mirrors FieldRow's markup + badges. READ_ONLY shows the
+// value with a grey badge; SELF_EDIT reveals a typed editor + inline Save.
+function CustomFieldRow({ field, readOnly, onSaved, flash }) {
+  const def = field.definition;
+  const policy = customPolicy(def);
+  const badge = POLICY_BADGE[policy];
+  const canEdit = policy === 'self-edit' && !readOnly;
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(field.value ?? (def.fieldType === 'BOOLEAN' ? false : ''));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  async function save() {
+    setBusy(true); setErr(null);
+    try {
+      await saveMyCustomFields({ [def.key]: customRaw(def, val) }); // only the changed SELF_EDIT key
+      setEditing(false);
+      if (flash) flash('Saved');
+      await onSaved();
+    } catch (e) { setErr(e.message || 'Could not save'); }
+    finally { setBusy(false); }
+  }
+
+  function editor() {
+    if (def.fieldType === 'BOOLEAN') {
+      return (
+        <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--theme-text)' }}>
+          <input type="checkbox" checked={!!val} onChange={(e) => setVal(e.target.checked)} /> Yes
+        </label>
+      );
+    }
+    if (def.fieldType === 'SELECT') {
+      return (
+        <select value={val ?? ''} onChange={(e) => setVal(e.target.value)} className="w-full rounded border px-2 py-1" style={{ borderColor: 'var(--theme-border)' }}>
+          <option value="">—</option>
+          {(def.options || []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      );
+    }
+    const type = def.fieldType === 'NUMBER' ? 'number' : def.fieldType === 'DATE' ? 'date' : 'text';
+    return <input type={type} value={val ?? ''} onChange={(e) => setVal(e.target.value)} className="w-full rounded border px-2 py-1" style={{ borderColor: 'var(--theme-border)' }} />;
+  }
+
+  return (
+    <div className="flex items-start justify-between gap-3 border-b py-3 text-sm last:border-b-0" style={{ borderColor: 'var(--theme-border)' }}>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center" style={{ color: 'var(--theme-muted)' }}>
+          <span>{def.label}</span>
+          <Info text={def.description} />
+        </div>
+        {!editing && (
+          <div className="mt-0.5 font-medium" style={{ color: (field.value == null || field.value === '') ? 'var(--theme-muted)' : 'var(--theme-text)' }}>
+            {customDisplay(def, field.value)}
+          </div>
+        )}
+        {editing && (
+          <div className="mt-1 space-y-1">
+            {editor()}
+            {err && <p className="text-xs text-red-600">{err}</p>}
+            <div className="flex gap-2">
+              <button onClick={save} disabled={busy} className="rounded px-3 py-1 text-xs font-semibold text-white" style={{ background: 'var(--theme-primary)' }}>{busy ? 'Saving…' : 'Save'}</button>
+              <button onClick={() => { setEditing(false); setVal(field.value ?? (def.fieldType === 'BOOLEAN' ? false : '')); setErr(null); }} className="rounded border px-3 py-1 text-xs" style={{ borderColor: 'var(--theme-border)' }}>Cancel</button>
+            </div>
+          </div>
+        )}
+      </div>
+      <div className="flex shrink-0 items-center gap-2 pt-0.5">
+        <span className="hidden text-[11px] sm:inline" style={{ color: badge.color }} title={badge.label}>{badge.label}</span>
+        {canEdit && !editing && (
+          <button onClick={() => setEditing(true)} className="rounded p-1 text-xs" title="Edit" style={{ color: badge.color }} aria-label={`Edit ${def.label}`}>{badge.icon}</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Self-fetching card — renders nothing until it knows there is ≥1 field to show.
+function CustomFieldsCard({ readOnly, flash }) {
+  const [fields, setFields] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetchMyCustomFields();
+      setFields(res?.customFields || res?.fields || (Array.isArray(res) ? res : []));
+    } catch {
+      setFields([]); // fail quiet — never break the profile page
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading || !fields || fields.length === 0) return null;
+
+  return (
+    <Section title="Custom fields" hint="Extra details your organisation collects. Some you can edit; others are managed by HR.">
+      {fields.map((f) => (
+        <CustomFieldRow key={f.definition.id} field={f} readOnly={readOnly} flash={flash} onSaved={load} />
+      ))}
+    </Section>
   );
 }
 
@@ -341,6 +472,9 @@ function ProfileInner() {
           {active === 'photo' && <PhotoSection url={sections.photo?.photoUrl} reload={reload} flash={flash} readOnly={readOnly} />}
         </div>
       </div>
+
+      {/* Phase 5b — tenant-defined custom fields (renders only when any exist). */}
+      <CustomFieldsCard readOnly={readOnly} flash={flash} />
     </div>
   );
 }
