@@ -234,6 +234,12 @@ export const NAV_ITEMS = [
   // talent_acquisition add-on. Server is the real boundary
   // (/api/hr/recruitment/pipeline-templates is canManage).
   { key: 'settings-pipeline-templates', label: 'Pipeline templates', href: '/settings/pipeline-templates', feature: 'talent_acquisition', anyPermission: ['canManageHiring', 'canManageEmployees'], parent: 'settings', icon: 'onboarding' },
+  // Careers CMS — the public careers-page editor (headline/about/culture/custom
+  // sections/perks/social links) + publish toggle. Same gate as Candidate
+  // messages / Pipeline templates: the recruitment write keys + the
+  // talent_acquisition add-on. The server is the real boundary
+  // (/api/hr/recruitment/careers-page GET=canView, PUT/publish=canManage).
+  { key: 'settings-careers-page', label: 'Careers page', href: '/settings/careers-page', feature: 'talent_acquisition', anyPermission: ['canManageHiring', 'canManageEmployees'], parent: 'settings', icon: 'globe' },
   // Enterprise SSO + SCIM — the tenant's SAML/OIDC connection (IdP config, SP
   // endpoints, test/delete) and SCIM provisioning tokens. Gated on the new
   // canManageSso rbac key (Owner via all-true; HR-Admin via the preset). The

@@ -612,6 +612,8 @@ model Business {
   // Tenant brand + HR RBAC
   tenantBrands                 TenantBrand[]
   hrRolePermissionGrants       HrRolePermissionGrant[]
+  // Careers CMS — one editable public careers page per tenant (Feature 36 polish).
+  careersPage                  CareersPage?
   // Letters & Communication (Feature 9)
   letterheads                  CompanyLetterhead[]
   letterTemplates              LetterTemplate[]
@@ -13259,6 +13261,37 @@ model TenantBrand {
 
   @@unique([businessId, code])
   @@index([businessId, entityId, isActive])
+}
+
+// ── Careers CMS — editable public careers page (one row per tenant) ──
+// Backs the operator-authored content shown on the UNAUTH public careers board
+// (headline/about/culture/perks/social + a hero image). Draft-safe: only rows
+// with isPublished=true are ever surfaced on the public endpoint (the frontend
+// falls back to today's hard-coded copy when the page is absent/unpublished).
+// Rich-text fields (aboutHtml/cultureHtml/customSectionsJson[].bodyHtml) are
+// SANITISED on write (script/iframe/on*/javascript: stripped) so the public
+// render is safe. brandId is an OPTIONAL soft reference to a TenantBrand row
+// (logo/colors/footer are re-read live from the active brand at read time — no
+// hard FK, so deleting a brand never orphans the page).
+model CareersPage {
+  id                 String   @id @default(uuid())
+  businessId         String   @unique
+  business           Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  headline           String?
+  subheadline        String?
+  aboutHtml          String?  @db.Text
+  cultureHtml        String?  @db.Text
+  heroImageUrl       String?  @db.Text
+  brandId            String? // soft ref to TenantBrand.id (no hard FK)
+  customSectionsJson Json? // [{ title, bodyHtml, order }]
+  socialLinksJson    Json? // { linkedin?, twitter?, website?, ... }
+  perksJson          Json? // [{ icon?, label }]
+  isPublished        Boolean  @default(false)
+  updatedByUserId    String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([businessId, isPublished])
 }
 
 // ── HR relational RBAC grant (HR analog of EcomRolePermissionGrant) ──

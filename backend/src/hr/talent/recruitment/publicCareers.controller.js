@@ -16,6 +16,9 @@
 
 const prisma = require('../../../core/lib/prisma');
 const s3 = require('../../../core/lib/s3');
+// Careers CMS — public projections (draft → null; only isPublished exposes content)
+// + the leak-safe brand block (logo/colors/footer).
+const { projectPublicPage, projectPublicBrand } = require('./careersPage.lib');
 const { _internals: scoringInternals } = require('./scoring');
 const scoringCtl = require('./recruitment.scoring.controller');
 // Feature 36 — candidate fan-out + access-token minting (status link on apply),
@@ -116,16 +119,28 @@ async function publicBoard(req, res, next) {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const pageSize = Math.min(50, Math.max(1, parseInt(req.query.pageSize, 10) || 20));
     const where = { businessId: biz.id, deletedAt: null, isPublic: true, status: 'OPEN' };
-    const [total, jobs] = await Promise.all([
+    // Fetch the CMS page + the tenant's active brand alongside the jobs. Both are
+    // OPTIONAL and best-effort — a missing/unpublished page or absent brand simply
+    // yields null (the frontend falls back to today's hard-coded copy).
+    const [total, jobs, pageRow, brand] = await Promise.all([
       prisma.job.count({ where }),
       prisma.job.findMany({
         where, orderBy: { publishedAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize,
         select: { id: true, title: true, publicSlug: true, countryCode: true, employmentType: true, openings: true, departmentId: true, locationId: true, publishedAt: true },
       }),
+      prisma.careersPage.findUnique({ where: { businessId: biz.id } }).catch(() => null),
+      prisma.tenantBrand.findFirst({
+        where: { businessId: biz.id, entityId: null, isActive: true, deletedAt: null },
+        orderBy: { isDefault: 'desc' },
+      }).catch(() => null),
     ]);
     res.json({
       business: { name: biz.name, slug: biz.slug },
+      // NEVER leak draft content — projectPublicPage returns null unless isPublished.
+      page: projectPublicPage(pageRow),
+      brand: projectPublicBrand(brand),
       items: jobs,
+      jobs,
       pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
     });
   } catch (e) { next(e); }

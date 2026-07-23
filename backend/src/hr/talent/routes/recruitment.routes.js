@@ -22,6 +22,8 @@ const pt = require('../controllers/pipelineTemplates.controller');
 // Feature 36 — candidate communication (scheduling handshake, bulk message,
 // template library + comms config).
 const cc = require('../recruitment/candidateComms.controller');
+// Careers CMS — operator-authored public careers page content (one per tenant).
+const cp = require('../recruitment/careersPage.controller');
 
 router.use(protect);
 // Talent Acquisition is a paid ADD-ON — gate the WHOLE recruitment surface behind
@@ -159,6 +161,15 @@ router.put('/comms-templates/:key', canManage, cc.updateCommsTemplate);
 router.delete('/comms-templates/:key', canManage, cc.resetCommsTemplate);
 router.get('/comms-config', canManage, cc.getCommsConfig);
 router.put('/comms-config', canManage, cc.updateCommsConfig);
+
+// ── Careers CMS (public careers page content — one editable row per tenant) ────
+// Read = canView; write/publish = canManage. Rich-text is sanitised on write; a
+// page only becomes public via /publish (isPublished=true). See publicCareers
+// controller for the read-side projection onto the UNAUTH board.
+router.get('/careers-page', canView, cp.getCareersPage);
+router.put('/careers-page', canManage, cp.upsertCareersPage);
+router.post('/careers-page/publish', canManage, cp.publishCareersPage);
+router.post('/careers-page/unpublish', canManage, cp.unpublishCareersPage);
 
 // ── Offers (50% wage pre-flight runs in createOffer) ─────────────────────────
 // Offer create/send/accept/decline/render/sign are F1 read-scoped: a scoped
