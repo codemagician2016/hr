@@ -11,11 +11,23 @@ import { ErrorBanner } from '@hr/ui';
 import { get } from '@/lib/api';
 import { PageHeader, DataTable, StatusBadge } from '@/lib/ui';
 import ModuleGuide from '@/components/ModuleGuide';
+import CountryGate from '@/components/CountryGate';
 
 const FY_DEFAULT = '2026-27';
 const inr = (v) => (v == null ? '—' : `₹${Number(v).toLocaleString('en-IN')}`);
 
+// India-only (Feature 14): the FBP allocation roster is the counterpart to the
+// India-only FBP plan builder. Guard the deep link; IN tenants render exactly as
+// before (CountryGate fails open while the tenant country is unresolved).
 export default function FbpAllocationsPage() {
+  return (
+    <CountryGate label="FBP allocations">
+      <FbpAllocationsPageInner />
+    </CountryGate>
+  );
+}
+
+function FbpAllocationsPageInner() {
   const [fy, setFy] = useState(FY_DEFAULT);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);

@@ -22,13 +22,14 @@
 const prisma = require('../../core/lib/prisma');
 const { currencyForCountry } = require('../../core/lib/currency');
 
-// The ONLY countries a tenant may register HR for. v1 = IN. Add 'NZ' for §12.
-// This single constant is the hard backstop behind the UI gating: with NZ absent,
-// NZ cannot be selected at setup or written server-side regardless of the request.
-const REGISTRABLE_HR_COUNTRIES = Object.freeze(['IN']);
+// The ONLY countries a tenant may register HR for. IN + NZ (§12 unlocked): the NZ
+// payroll/tax/leave/statutory stack is fully built + golden-tested, so NZ is now a
+// registrable market. This single constant is the hard backstop behind the UI
+// gating and the sole server-side allow-list POST /api/hr/setup/country checks.
+const REGISTRABLE_HR_COUNTRIES = Object.freeze(['IN', 'NZ']);
 
-// Capability matrix the front-ends consume so neither app hard-codes IN/NZ. The
-// NZ row is present for §12 but UNREACHABLE while NZ ∉ REGISTRABLE_HR_COUNTRIES.
+// Capability matrix the front-ends consume so neither app hard-codes IN/NZ. Both
+// rows are reachable now that NZ ∈ REGISTRABLE_HR_COUNTRIES (§12 unlocked).
 const CAPABILITIES = Object.freeze({
   IN: Object.freeze({
     country: 'IN',
@@ -51,7 +52,7 @@ const CAPABILITIES = Object.freeze({
     letterLocale: 'en-IN',
     holidays: Object.freeze({ mondayisation: false }),
   }),
-  // NZ present for §12; UNREACHABLE while NZ ∉ REGISTRABLE_HR_COUNTRIES.
+  // NZ — reachable now (§12 unlocked; NZ ∈ REGISTRABLE_HR_COUNTRIES).
   NZ: Object.freeze({
     country: 'NZ',
     currency: 'NZD',

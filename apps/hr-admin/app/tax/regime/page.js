@@ -16,6 +16,7 @@ import { PageHeader, DataTable, StatusBadge, ActionButton, ServerPagination } fr
 import { Spinner, ErrorBanner, PrimaryButton, DateField, formatAdminDate } from '@hr/ui';
 import EmployeeSearchSelect from '@/components/EmployeeSearchSelect';
 import ModuleGuide from '@/components/ModuleGuide';
+import CountryGate from '@/components/CountryGate';
 
 // Default FY = the current India financial year (FY starts 1 April).
 function currentFy() {
@@ -43,7 +44,17 @@ function dateInput(v) {
   try { return new Date(v).toISOString().slice(0, 10); } catch { return ''; }
 }
 
+// India-only (Feature 14): the OLD/NEW regime election is an India construct; the
+// server gates it to IN. Guard the deep link; IN tenants render exactly as before.
 export default function RegimePage() {
+  return (
+    <CountryGate label="Tax regime">
+      <RegimePageInner />
+    </CountryGate>
+  );
+}
+
+function RegimePageInner() {
   const [fy] = useState(currentFy());
   const [policy, setPolicy] = useState(null);
   const [rows, setRows] = useState([]);

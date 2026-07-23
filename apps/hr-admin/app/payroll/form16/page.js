@@ -18,6 +18,7 @@ import { get, post } from '@/lib/api';
 import { DataTable, PageHeader, StatusBadge, ActionButton, Tabs } from '@/lib/ui';
 import { InfoTip } from '@/lib/widgets';
 import ModuleGuide from '@/components/ModuleGuide';
+import CountryGate from '@/components/CountryGate';
 
 const PAGE_SIZE = 25;
 const inr = (minor) => `₹${(Number(minor || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -29,7 +30,17 @@ function openFile(path) {
   window.open(url, '_blank', 'noopener');
 }
 
+// India-only (Feature 14): the server 404s a non-IN tenant, so guard the page for
+// a deep link too. IN tenants render exactly as before (CountryGate fails open).
 export default function Form16Page() {
+  return (
+    <CountryGate label="Form 16 / 24Q">
+      <Form16PageInner />
+    </CountryGate>
+  );
+}
+
+function Form16PageInner() {
   const [tab, setTab] = useState('form16');
   return (
     <div>

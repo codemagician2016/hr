@@ -14,6 +14,7 @@ import { get, post, patch, del } from '@/lib/api';
 import { PageHeader } from '@/lib/ui';
 import { InfoTip } from '@/lib/widgets';
 import ModuleGuide from '@/components/ModuleGuide';
+import CountryGate from '@/components/CountryGate';
 
 const FY_DEFAULT = '2026-27';
 
@@ -22,7 +23,18 @@ function fmtCap(rupees) {
   return `₹${Number(rupees).toLocaleString('en-IN')}`;
 }
 
+// India-only (Feature 14): FBP / Flexi Basket is an India tax-optimisation
+// construct (save is country-stamped server-side). Guard the deep link; IN tenants
+// render exactly as before (CountryGate fails open while the country is unresolved).
 export default function FbpPlansPage() {
+  return (
+    <CountryGate label="FBP plans">
+      <FbpPlansPageInner />
+    </CountryGate>
+  );
+}
+
+function FbpPlansPageInner() {
   const [plans, setPlans] = useState([]);
   const [components, setComponents] = useState([]);
   const [loading, setLoading] = useState(true);

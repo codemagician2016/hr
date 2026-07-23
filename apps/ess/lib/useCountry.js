@@ -19,11 +19,14 @@ import { fetchMyCountryContext } from '@/lib/api';
 
 // Normalize whatever the backend returns to exactly 'IN' | null. India is the only
 // supported HR country; anything else fails closed to null (never another market).
+// Registrable HR countries (mirror of the backend REGISTRABLE_HR_COUNTRIES).
+// Multi-country unlock: NZ is now a real country, so ESS reflects it instead of
+// collapsing every non-IN country to null (which hid NZ-positive gating).
+const KNOWN_COUNTRIES = new Set(['IN', 'NZ']);
 function normalize(cc) {
   if (typeof cc !== 'string') return null;
   const s = cc.trim().toUpperCase();
-  if (s === 'IN') return s;
-  return null;
+  return KNOWN_COUNTRIES.has(s) ? s : null;
 }
 
 export function useCountry() {

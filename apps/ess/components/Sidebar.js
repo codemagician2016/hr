@@ -220,6 +220,14 @@ export default function Sidebar({ onNavigate }) {
         return { ...n, children };
       });
     }
+    // Multi-country: the base "/tax" item is the India income-tax regime/80C
+    // page. Hide it for a resolved non-IN country (NZ has no equivalent); when
+    // country is unresolved, leave it (no flash, IN unchanged).
+    if (country && country !== 'IN') {
+      items = items.map((n) => (n.type === 'group' && Array.isArray(n.children)
+        ? { ...n, children: n.children.filter((c) => c.href !== '/tax') }
+        : n));
+    }
     if (hasOnboarding) {
       items = [NAV[0], { type: 'item', href: '/onboarding', label: 'Onboarding', icon: 'onboarding' }, ...NAV.slice(1)];
     }

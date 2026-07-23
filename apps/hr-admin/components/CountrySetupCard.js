@@ -3,7 +3,7 @@
 // CountrySetupCard — Feature 14 (strict single-country mode). Settings → Company
 // profile → Country tab. Two states:
 //   1. NOT set up (hrCountry NULL → GET /api/hr/country-context 409s): a one-time
-//      "Which country do you run payroll in?" picker. India is the ONLY choice.
+//      "Which country do you run payroll in?" picker (India or New Zealand).
 //      Submitting POSTs /setup/country.
 //   2. ALREADY set: a READ-ONLY badge — "Payroll country: India 🇮🇳 · Currency:
 //      INR" — with a tooltip explaining a country change means a new workspace.
@@ -17,10 +17,12 @@ import { ErrorBanner, PrimaryButton, Spinner } from '@hr/ui';
 import { get, post } from '@/lib/api';
 import { InfoTip } from '@/lib/widgets';
 
-// The only registrable HR country is India. This mirrors the backend
-// REGISTRABLE_HR_COUNTRIES constant — the server is the authority.
+// The registrable HR countries. This mirrors the backend REGISTRABLE_HR_COUNTRIES
+// constant — the server is the authority (the submit still POSTs to a locked-once,
+// allow-listed endpoint). Enabled entries are selectable at first setup.
 const HR_COUNTRY_CHOICES = [
   { code: 'IN', label: 'India', flag: '🇮🇳', enabled: true },
+  { code: 'NZ', label: 'New Zealand', flag: '🇳🇿', enabled: true },
 ];
 
 export default function CountrySetupCard({ canEdit = false }) {
@@ -119,7 +121,7 @@ export default function CountrySetupCard({ canEdit = false }) {
       </div>
       {error ? <div className="mt-3"><ErrorBanner message={error} /></div> : null}
       <div className="mt-4">
-        <PrimaryButton onClick={submit} disabled={!canEdit || saving || picked !== 'IN'}>
+        <PrimaryButton onClick={submit} disabled={!canEdit || saving || !HR_COUNTRY_CHOICES.find((c) => c.code === picked)?.enabled}>
           {saving ? 'Saving…' : 'Set business country'}
         </PrimaryButton>
       </div>

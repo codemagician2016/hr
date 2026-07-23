@@ -18,6 +18,7 @@ import { get, post, downloadFile } from '@/lib/api';
 import { PageHeader, Tabs } from '@/lib/ui';
 import { InfoTip } from '@/lib/widgets';
 import ModuleGuide from '@/components/ModuleGuide';
+import CountryGate from '@/components/CountryGate';
 
 const GROUP_ORDER = ['Attendance', 'Wages', 'Leave', 'Annual', 'Employees', 'Other'];
 
@@ -41,7 +42,18 @@ function defaultPeriodFor(cadence) {
   return `${y}-${m}`; // PERIOD
 }
 
+// India-only (Feature 14): the register catalog follows the entity's India
+// StatutoryRegistrations and the server 404s a non-IN tenant. Guard the deep link;
+// IN tenants render exactly as before (CountryGate fails open while unresolved).
 export default function RegistersPage() {
+  return (
+    <CountryGate label="Statutory Registers">
+      <RegistersPageInner />
+    </CountryGate>
+  );
+}
+
+function RegistersPageInner() {
   const [tab, setTab] = useState('registers');
   return (
     <div>

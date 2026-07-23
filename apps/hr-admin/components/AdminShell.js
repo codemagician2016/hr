@@ -25,6 +25,7 @@ import { Spinner, Centered } from '@hr/ui';
 import { resolveTenantTheme } from '@hr/theme-engine';
 import { get, post } from '@/lib/api';
 import { visibleNavItems, buildNavTree } from '@/lib/nav';
+import { useTenantCountries } from '@/lib/useTenantCountries';
 import { themeVarsFromResolved } from '@/lib/themeVars';
 import Sidebar from '@/components/Sidebar';
 import TopBar from '@/components/TopBar';
@@ -46,6 +47,11 @@ export default function AdminShell({ children }) {
   const [session, setSession] = useState(null);
   const [brand, setBrand] = useState(null);
   const [status, setStatus] = useState('loading'); // loading | ready | unauth
+  // Feature 14 — the tenant's authoritative HR country (country-context). Gates
+  // the India-only statutory nav items (Form 16/24Q, Statutory Registers, tax
+  // windows/proofs/regime, FBP) so a non-IN (e.g. NZ) tenant isn't shown dead
+  // links. Fail-open while unresolved so an IN tenant sees no nav flash.
+  const { country: hrCountry } = useTenantCountries();
 
   // Desktop: collapse the rail. Mobile (<1024px): the rail is a drawer behind the
   // hamburger; `drawerOpen` controls the overlay. The same toggle drives both —
@@ -158,9 +164,11 @@ export default function AdminShell({ children }) {
       // Raw session so nav.js resolves the operator's effective permissions from
       // their assigned BusinessRole (or legacy-role fallback). Server still enforces.
       session,
+      // Tenant HR country — hides India-only statutory surfaces for a non-IN tenant.
+      country: hrCountry,
     });
     return buildNavTree(items);
-  }, [session, brand]);
+  }, [session, brand, hrCountry]);
 
   // ── nav badges: pending letter-request count (Letters ②) ────────────────────
   // Fetch the open ESS letter-request count once the session is ready AND the

@@ -212,3 +212,33 @@ describe('review fixes — CSV formula injection neutralized (LOW 4)', () => {
     expect(out).not.toMatch(/(^|,)=cmd/); // no raw formula at a cell boundary
   });
 });
+
+// ── Country dispatch (IN vs NZ vs unsupported) — PURE, no DB ───────────────────
+// The gate that used to hard-throw "India-only" now routes by the run entity's
+// country: IN → the IFSC bank-format rail (bankFormats.js), NZ → the direct-credit
+// rail (filing/newzealand.generateBankBatch), any OTHER country → COUNTRY_UNSUPPORTED.
+describe('disbursement country dispatch (resolveDisbursementRoute)', () => {
+  const svc = require('../src/hr/payroll/disbursement/disbursement.service');
+  const { resolveDisbursementRoute } = svc._internals;
+
+  test('IN → the IFSC bank-format rail (case-insensitive)', () => {
+    expect(resolveDisbursementRoute('IN')).toBe('IN_BANK_FORMAT');
+    expect(resolveDisbursementRoute('in')).toBe('IN_BANK_FORMAT');
+  });
+
+  test('NZ → the direct-credit rail (case-insensitive)', () => {
+    expect(resolveDisbursementRoute('NZ')).toBe('NZ_DIRECT_CREDIT');
+    expect(resolveDisbursementRoute('nz')).toBe('NZ_DIRECT_CREDIT');
+  });
+
+  test('any other / missing country → COUNTRY_UNSUPPORTED (422, no payout rail)', () => {
+    for (const cc of ['US', 'AU', 'GB', '', null, undefined]) {
+      try {
+        resolveDisbursementRoute(cc);
+        throw new Error(`should have thrown for ${JSON.stringify(cc)}`);
+      } catch (e) {
+        expect(e.code).toBe('COUNTRY_UNSUPPORTED');
+      }
+    }
+  });
+});

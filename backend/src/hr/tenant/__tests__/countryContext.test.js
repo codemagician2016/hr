@@ -31,12 +31,13 @@ async function expectThrow(fn, code) {
 function partA() {
   log('=== PART A — DB-FREE (caps matrix + currency + fail-closed asserts) ===\n');
 
-  log('A1) REGISTRABLE_HR_COUNTRIES is frozen to India in v1 (NZ behind the flip):');
-  check('REGISTRABLE_HR_COUNTRIES === [IN]', JSON.stringify(C.REGISTRABLE_HR_COUNTRIES) === '["IN"]');
+  log('A1) REGISTRABLE_HR_COUNTRIES admits IN + NZ (§12 unlocked), still frozen:');
+  check('REGISTRABLE_HR_COUNTRIES === [IN,NZ]', JSON.stringify(C.REGISTRABLE_HR_COUNTRIES) === '["IN","NZ"]');
   check('REGISTRABLE_HR_COUNTRIES is frozen', Object.isFrozen(C.REGISTRABLE_HR_COUNTRIES));
   check('isRegistrableHrCountry(IN) true', C.isRegistrableHrCountry('IN') === true);
   check('isRegistrableHrCountry(in) true (case-insensitive)', C.isRegistrableHrCountry('in') === true);
-  check('isRegistrableHrCountry(NZ) false (deferred)', C.isRegistrableHrCountry('NZ') === false);
+  check('isRegistrableHrCountry(NZ) true (unlocked)', C.isRegistrableHrCountry('NZ') === true);
+  check('isRegistrableHrCountry(nz) true (case-insensitive)', C.isRegistrableHrCountry('nz') === true);
   check('isRegistrableHrCountry(US) false', C.isRegistrableHrCountry('US') === false);
 
   log('\nA2) currency mapping flows through the shared currency lib:');

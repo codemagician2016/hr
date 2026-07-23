@@ -12,10 +12,22 @@ import { get, post } from '@/lib/api';
 import { PageHeader, DataTable, StatusBadge, ActionButton, ServerPagination } from '@/lib/ui';
 import { Spinner, ErrorBanner, PrimaryButton, TextInput, TextArea, Modal, ModalActions } from '@hr/ui';
 import ModuleGuide from '@/components/ModuleGuide';
+import CountryGate from '@/components/CountryGate';
 
 const API = '/api/hr/proofs';
 
+// India-only (Feature 14): investment-proof verification (§192(2D)/Form 12BB) is an
+// India construct; the server gates it to IN. Guard the deep link; IN tenants
+// render exactly as before (CountryGate fails open while the country is unresolved).
 export default function ProofVerificationPage() {
+  return (
+    <CountryGate label="Tax proof verification">
+      <ProofVerificationPageInner />
+    </CountryGate>
+  );
+}
+
+function ProofVerificationPageInner() {
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);

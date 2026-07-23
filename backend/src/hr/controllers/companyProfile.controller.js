@@ -50,6 +50,9 @@ const PROFILE_FIELDS = [
   // only applies to a sole proprietorship. See apps/*/lib/businessTypes.js.
   'businessType', 'proprietorName',
   'legalName', 'tradeName', 'registrationNo', 'gstin', 'pan', 'tan',
+  // NZ registration identifiers (multi-country unlock) — persist alongside the
+  // IN ids; the UI shows one set or the other by tenant hrCountry.
+  'nzbn', 'irdEntityNumber',
   'registeredAddressLine1', 'registeredAddressLine2', 'registeredCity',
   'registeredState', 'registeredPostalCode', 'registeredCountry',
   'contactName', 'contactEmail', 'contactPhone', 'incorporationDate',

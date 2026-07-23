@@ -130,9 +130,10 @@ model Business {
   // HR fork — founder decision #6. The deployment region / market this
   // tenant root belongs to. Drives statutory-module loading defaults,
   // data-residency, and which compliance rule sets seed by default.
-  // Distinct from per-Entity `countryCode` (a tenant may hold IN + NZ
-  // entities). Values: "IN" | "NZ" (extensible). NULL = inherit from
-  // `country` / first Entity. See docs/03-data-model.md.
+  // A tenant is SINGLE-COUNTRY: every Entity's `countryCode` must equal the
+  // tenant's `hrCountry` (enforced by tenant/countryContext.assertCountry) — a
+  // tenant is not IN+NZ mixed. Values: "IN" | "NZ" (extensible). NULL = inherit
+  // from `country` / first Entity. See docs/03-data-model.md.
   region                    String?
   timezone                  String? // IANA zone (e.g. "Pacific/Auckland")
   phone                     String?
@@ -6502,8 +6503,9 @@ model QaIssueComment {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Legal payroll entity — the unit of statutory registration and the
-/// pay-currency boundary. Founder #4: one tenant → many entities/pay-groups.
-/// `countryCode` selects the compliance module (IN vs NZ).
+/// pay-currency boundary. Founder #4: one tenant → many entities/pay-groups,
+/// ALL in the tenant's single `hrCountry` (a tenant is not IN+NZ mixed).
+/// `countryCode` selects the compliance module and MUST equal the tenant country.
 model Entity {
   id                          String                     @id @default(uuid())
   businessId                  String

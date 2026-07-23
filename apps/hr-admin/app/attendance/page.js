@@ -743,10 +743,11 @@ function ShiftsTab({ canManage }) {
 
 // ─── Holidays ────────────────────────────────────────────────────────────────
 
-const COUNTRY_OPTIONS = [
-  ['', 'All countries'],
-  ['IN', 'India'],
-];
+// Human labels for the countries a tenant may operate HR in (Feature 14). The
+// holiday surfaces offer ONLY the tenant's own country (IN or NZ) — never a
+// cross-country leak — driven by useTenantCountries, so this maps the code → label.
+const COUNTRY_LABELS = { IN: 'India', NZ: 'New Zealand' };
+const countryLabel = (cc) => COUNTRY_LABELS[cc] || cc;
 
 function HolidayForm({ defaults, canManage, countries = [], onClose, onSaved }) {
   // Default the country to the tenant's own when single-country. The tenant operates
@@ -805,10 +806,10 @@ function HolidayForm({ defaults, canManage, countries = [], onClose, onSaved }) 
               className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm bg-white"
             >
               {/* Offer only the tenant's operating country (no cross-country leak).
-                  Falls back to India alone — the product is single-country India. */}
+                  Falls back to India alone when the country set is not yet known. */}
               {(single ? [] : [['', 'Select…']]).map(([v, l]) => <option key="blank" value={v}>{l}</option>)}
               {(Array.isArray(countries) && countries.length ? countries : ['IN']).map((cc) => (
-                <option key={cc} value={cc}>{cc === 'IN' ? 'India' : cc}</option>
+                <option key={cc} value={cc}>{countryLabel(cc)}</option>
               ))}
             </select>
           </div>
@@ -903,7 +904,7 @@ function ImportHolidaysModal({ year, countries = [], onClose, onDone }) {
       ) : (
         <div className="space-y-4">
           <p className="text-sm text-gray-600">
-            Seeds the official India public-holiday set (national + restricted/optional) for the chosen year.
+            Seeds the official {countryLabel(countryCode)} public-holiday set (national + restricted/optional) for the chosen year.
           </p>
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
@@ -915,7 +916,7 @@ function ImportHolidaysModal({ year, countries = [], onClose, onDone }) {
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm bg-white"
               >
                 {importCountries.map((cc) => (
-                  <option key={cc} value={cc}>{cc === 'IN' ? 'India' : cc}</option>
+                  <option key={cc} value={cc}>{countryLabel(cc)}</option>
                 ))}
               </select>
             </div>
@@ -1045,10 +1046,9 @@ function HolidaysTab({ canManage }) {
             onChange={(e) => setCountryCode(e.target.value)}
             className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
           >
-            {COUNTRY_OPTIONS
-              .filter(([v]) => v === '' || !Array.isArray(countries) || countries.length === 0 || countries.includes(v))
+            {[['', 'All countries'], ...((Array.isArray(countries) ? countries : []).map((cc) => [cc, countryLabel(cc)]))]
               .map(([v, l]) => (
-                <option key={v} value={v}>{l}</option>
+                <option key={v || 'all'} value={v}>{l}</option>
               ))}
           </select>
         </div>

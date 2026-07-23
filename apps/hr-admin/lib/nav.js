@@ -44,8 +44,8 @@ export const NAV_ITEMS = [
   // allocation console. Plan authoring shapes pay structure (like CTC policies) →
   // gated on canViewCompensation (writes server-gated on canManageCompensation). The
   // allocation roster surfaces who has declared + the per-employee drill-down/verify.
-  { key: 'fbp-plans', label: 'FBP plans', href: '/compensation/fbp', feature: 'hr', permission: 'canViewCompensation', icon: 'coin' },
-  { key: 'fbp-allocations', label: 'FBP allocations', href: '/compensation/fbp/allocations', feature: 'hr', permission: 'canViewEmployees', icon: 'coin' },
+  { key: 'fbp-plans', label: 'FBP plans', href: '/compensation/fbp', feature: 'hr', permission: 'canViewCompensation', country: 'IN', icon: 'coin' },
+  { key: 'fbp-allocations', label: 'FBP allocations', href: '/compensation/fbp/allocations', feature: 'hr', permission: 'canViewEmployees', country: 'IN', icon: 'coin' },
   { key: 'expenses', label: 'Reimbursements', href: '/expenses', feature: 'hr', permission: 'canViewEmployees', icon: 'receipt' },
   // Feature 11 — travel / outdoor-duty queue (pre-trip approvals). Same view perm.
   { key: 'travel', label: 'Travel', href: '/travel', feature: 'hr', permission: 'canViewEmployees', icon: 'wallet' },
@@ -109,7 +109,7 @@ export const NAV_ITEMS = [
   // Feature 24 — Year-end Form 16 (Part A + Part B) + Form 24Q. India-only. Read =
   // canViewPayrollReports; the server enforces maker-checker on approve + canManageLetters
   // on issue (the issue path is the letters engine). Mounted under /payroll/form16.
-  { key: 'form16', label: 'Form 16 / 24Q', href: '/payroll/form16', feature: 'payroll', permission: 'canViewPayrollReports', icon: 'doc' },
+  { key: 'form16', label: 'Form 16 / 24Q', href: '/payroll/form16', feature: 'payroll', permission: 'canViewPayrollReports', country: 'IN', icon: 'doc' },
   // Feature 23 — Statutory Compliance Calendar (PF/ESI/PT/TDS/24Q/Form16/LWF due
   // dates + reminders + mark-filed). Read = canViewPayrollReports (finance/HR can
   // see); mutations require canManageStatutory (server is the real boundary).
@@ -118,7 +118,7 @@ export const NAV_ITEMS = [
   // employee + PF-3A/ESI registers). READ-ONLY projection over the frozen
   // attendance + payroll + leave data. Read/export = canViewPayrollReports;
   // definition management = canManageStatutory (server is the real boundary).
-  { key: 'registers', label: 'Statutory Registers', href: '/payroll/registers', feature: 'payroll', permission: 'canViewPayrollReports', icon: 'register' },
+  { key: 'registers', label: 'Statutory Registers', href: '/payroll/registers', feature: 'payroll', permission: 'canViewPayrollReports', country: 'IN', icon: 'register' },
   // FLAG (India salary disbursement — NEW nav item): convert a FROZEN/APPROVED run
   // into a bank salary-advice file (+ UTR reconciliation). Visible to anyone who can
   // run payroll OR view reports (the create/file/reconcile actions are server-gated on
@@ -134,12 +134,12 @@ export const NAV_ITEMS = [
   // Rule 26C/Form 12BB). Two flat items in the Pay group. The window admin actions are
   // server-gated on canManageStatutory; the verify console on canManageEmployees (the
   // server is the real boundary). The proofDeadline is when TDS flips DECLARED→VERIFIED.
-  { key: 'tax-declaration-window', label: 'Tax declaration window', href: '/tax/declaration-window', feature: 'payroll', anyPermission: ['canManageStatutory', 'canViewPayrollReports'], icon: 'doc' },
-  { key: 'tax-proof-verification', label: 'Tax proof verification', href: '/tax/proof-verification', feature: 'payroll', permission: 'canViewEmployees', icon: 'shield' },
+  { key: 'tax-declaration-window', label: 'Tax declaration window', href: '/tax/declaration-window', feature: 'payroll', anyPermission: ['canManageStatutory', 'canViewPayrollReports'], country: 'IN', icon: 'doc' },
+  { key: 'tax-proof-verification', label: 'Tax proof verification', href: '/tax/proof-verification', feature: 'payroll', permission: 'canViewEmployees', country: 'IN', icon: 'shield' },
   // Feature 15/25 — income-tax REGIME election console: employer default + window + lock
   // + the per-employee elected/effective regime view. Read = canViewPayrollReports (the
   // server enforces canManageStatutory on policy/lock writes). FLAG: nav.js shared edit.
-  { key: 'tax-regime', label: 'Tax regime', href: '/tax/regime', feature: 'payroll', anyPermission: ['canManageStatutory', 'canViewPayrollReports'], icon: 'coin' },
+  { key: 'tax-regime', label: 'Tax regime', href: '/tax/regime', feature: 'payroll', anyPermission: ['canManageStatutory', 'canViewPayrollReports'], country: 'IN', icon: 'coin' },
   // Letters & Communication (Feature 9). The group header is gated on EITHER key:
   // canGenerateLetters (the maker/issue key) OR canManageLetters (the config/
   // checker/revoke key), so both a maker-only HR-Admin and a config-only checker
@@ -420,12 +420,27 @@ export function hasAnyPermission(permissions, keys) {
   return keys.some((k) => hasPermission(permissions, k));
 }
 
-export function visibleNavItems({ features, permissions, session } = {}) {
+// Country gate (Feature 14 — country-context). A nav item MAY declare
+// `country: 'IN'` to mark it an India-only statutory surface (Form 16/24Q,
+// Statutory Registers, the tax-declaration/proof/regime consoles, FBP) whose
+// backend correctly 404/422s for a non-IN tenant — so we hide it for e.g. an NZ
+// tenant rather than leave a dead-nav link. FAIL-OPEN while the tenant country is
+// still unresolved (null/undefined) so an IN tenant — the common case — sees NO
+// load-time flash and renders exactly as before; the item only disappears once we
+// KNOW the tenant country differs. Unmarked (country-agnostic) items are always shown.
+export function hasCountry(country, itemCountry) {
+  if (!itemCountry) return true; // country-agnostic item → always visible
+  if (country == null) return true; // unresolved → allow (no flash for IN)
+  return String(country).toUpperCase() === String(itemCountry).toUpperCase();
+}
+
+export function visibleNavItems({ features, permissions, session, country } = {}) {
   const perms = permissions !== undefined ? permissions : permissionsFromSession(session);
   return NAV_ITEMS.filter(
     (item) =>
       hasFeature(features, item.feature)
       && hasPermission(perms, item.permission)
       && hasAnyPermission(perms, item.anyPermission)
+      && hasCountry(country, item.country)
   );
 }

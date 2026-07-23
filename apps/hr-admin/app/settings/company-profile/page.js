@@ -22,6 +22,9 @@ import { permissionsFromSession, hasPermission } from '@/lib/nav';
 import CountrySetupCard from '@/components/CountrySetupCard';
 import ModuleGuide from '@/components/ModuleGuide';
 import { BUSINESS_TYPES, specForBusinessType } from '@/lib/businessTypes';
+// Feature 14 — the tenant's authoritative HR country drives which registration
+// identifiers we show (India CIN/GSTIN/PAN/TAN vs New Zealand NZBN/IRD).
+import { useTenantCountries } from '@/lib/useTenantCountries';
 
 // India-first document categories (mirrors the backend BusinessDocumentCategory enum).
 const DOC_CATEGORIES = [
@@ -71,6 +74,10 @@ function ProfileField({ label, tip, value, onChange, placeholder, disabled, type
 }
 
 function ProfileTab({ canEdit }) {
+  // Tenant HR country (Feature 14). Drives which legal-identifier fields show.
+  // Null/unresolved (or IN) → the India view, so an IN tenant sees no change.
+  const { country } = useTenantCountries();
+  const isNZ = String(country || '').toUpperCase() === 'NZ';
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -128,10 +135,19 @@ function ProfileTab({ canEdit }) {
         const spec = specForBusinessType(profile?.businessType);
         return (
           <section className="space-y-4">
-            <SectionTitle tip="Your organisation's legal identity. Pick your business type first — the right registration fields then appear. Everything is optional; fill in what you have.">
+            <SectionTitle tip={isNZ ? "Your organisation's legal identity — its registered name and New Zealand identifiers (NZBN, IRD). Everything is optional; fill in what you have." : "Your organisation's legal identity. Pick your business type first — the right registration fields then appear. Everything is optional; fill in what you have."}>
               Legal &amp; registration
             </SectionTitle>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {isNZ ? (
+                <>
+                  <ProfileField label="Legal name" tip="The registered legal name as it appears on the New Zealand Companies Register." value={profile?.legalName} onChange={(v) => set('legalName', v)} disabled={ro} placeholder="Acme NZ Limited" />
+                  <ProfileField label="Trade name" tip="The brand / trading name you operate under, if different from the legal name." value={profile?.tradeName} onChange={(v) => set('tradeName', v)} disabled={ro} placeholder="Acme" />
+                  <ProfileField label="NZBN" tip="Your 13-digit New Zealand Business Number." value={profile?.nzbn} onChange={(v) => set('nzbn', v)} disabled={ro} placeholder="9429000000000" />
+                  <ProfileField label="IRD number" tip="Your employer IRD (Inland Revenue) number — required to run PAYE payroll." value={profile?.irdEntityNumber} onChange={(v) => set('irdEntityNumber', v)} disabled={ro} placeholder="012-345-678" />
+                </>
+              ) : (
+                <>
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
                   <span className="inline-flex items-center">Business type<InfoTip text="The legal structure of your organisation. This decides which registration numbers apply — e.g. a sole proprietorship has no CIN, an LLP has an LLPIN, a partnership firm has a Registrar-of-Firms number." /></span>
@@ -165,8 +181,10 @@ function ProfileTab({ canEdit }) {
               {spec.incorporation.show && (
                 <ProfileField label={spec.incorporation.label} tip="When the organisation was registered / formed." type="date" value={profile?.incorporationDate} onChange={(v) => set('incorporationDate', v)} disabled={ro} />
               )}
+                </>
+              )}
             </div>
-            {!profile?.businessType && (
+            {!isNZ && !profile?.businessType && (
               <p className="text-xs text-gray-400">Tip: choose your business type above to see the exact registration fields for your structure.</p>
             )}
           </section>
@@ -187,7 +205,7 @@ function ProfileTab({ canEdit }) {
           <ProfileField label="City" tip="City / town of the registered office." value={profile?.registeredCity} onChange={(v) => set('registeredCity', v)} disabled={ro} />
           <ProfileField label="State" tip="State / union territory." value={profile?.registeredState} onChange={(v) => set('registeredState', v)} disabled={ro} />
           <ProfileField label="PIN code" tip="6-digit postal index number." value={profile?.registeredPostalCode} onChange={(v) => set('registeredPostalCode', v)} disabled={ro} placeholder="560001" />
-          <ProfileField label="Country" tip="ISO country code (e.g. IN for India)." value={profile?.registeredCountry} onChange={(v) => set('registeredCountry', v)} disabled={ro} placeholder="IN" />
+          <ProfileField label="Country" tip={`ISO country code (e.g. ${country || 'IN'}).`} value={profile?.registeredCountry} onChange={(v) => set('registeredCountry', v)} disabled={ro} placeholder={country || 'IN'} />
         </div>
       </section>
 

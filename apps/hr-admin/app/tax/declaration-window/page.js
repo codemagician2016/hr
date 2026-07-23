@@ -12,6 +12,7 @@ import { get, post } from '@/lib/api';
 import { PageHeader, DataTable, StatusBadge, ActionButton } from '@/lib/ui';
 import { Spinner, ErrorBanner, PrimaryButton, TextInput, DateField, Modal, ModalActions, formatAdminDate } from '@hr/ui';
 import ModuleGuide from '@/components/ModuleGuide';
+import CountryGate from '@/components/CountryGate';
 
 // Default FY suggestion = the current India financial year.
 function currentFy() {
@@ -22,7 +23,18 @@ function currentFy() {
   return `${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`;
 }
 
+// India-only (Feature 14): the investment-proof / Form 12BB declaration window is
+// an India §192(2D) construct; the server gates it to IN. Guard the deep link;
+// IN tenants render exactly as before (CountryGate fails open while unresolved).
 export default function DeclarationWindowPage() {
+  return (
+    <CountryGate label="Tax declaration window">
+      <DeclarationWindowPageInner />
+    </CountryGate>
+  );
+}
+
+function DeclarationWindowPageInner() {
   const [windows, setWindows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
