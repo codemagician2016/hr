@@ -232,6 +232,7 @@ export const NAV_ITEMS = [
   // and, per policy, on the ESS profile. Country-agnostic. Gated on
   // canManageEmployees (the server is the real boundary on /api/hr/custom-fields/*).
   { key: 'settings-custom-fields', label: 'Custom fields', href: '/settings/custom-fields', permission: 'canManageEmployees', parent: 'settings', icon: 'people' },
+  { key: 'settings-field-access', label: 'Field access', href: '/settings/field-access', permission: 'canManageEmployees', parent: 'settings', icon: 'shield' },
   // Feature 36 — Candidate messages: the auto-send toggles + editable copy for
   // every candidate-facing hiring message. Gated on the recruitment write keys
   // (canManageHiring / canManageEmployees) + the talent_acquisition add-on, so it

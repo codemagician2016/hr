@@ -30,7 +30,7 @@ const USER_SELECT = {
   isServiceProvider: true,
   businessRoleId: true,
   passwordChangedAt: true,
-  businessRole: { select: { id: true, name: true, permissions: true, isSystem: true, defaultScope: true, compVisibility: true } },
+  businessRole: { select: { id: true, name: true, permissions: true, isSystem: true, defaultScope: true, compVisibility: true, fieldAccess: true } },
 };
 
 const CUSTOMER_SELECT = {
@@ -174,7 +174,7 @@ async function ensureDefaultHrRole({ businessId }) {
         defaultScope,
         compVisibility,
       },
-      select: { id: true, name: true, permissions: true, isSystem: true, defaultScope: true, compVisibility: true },
+      select: { id: true, name: true, permissions: true, isSystem: true, defaultScope: true, compVisibility: true, fieldAccess: true },
     });
     roles.push(role);
   }

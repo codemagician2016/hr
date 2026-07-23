@@ -19,6 +19,7 @@ const prisma = require('../../core/lib/prisma');
 const { writeAudit } = require('../../core/lib/audit');
 const { resolveSelfEmployee, isSeparatedEmployee } = require('../lib/resolveSelfEmployee');
 const svc = require('./customFields.service');
+const fieldAccess = require('../rbac/fieldAccess');
 
 // Map a service error (status/code on the Error) → a JSON response; else re-throw to next.
 function sendErr(res, next, e) {
@@ -106,6 +107,9 @@ async function getEmployeeValues(req, res, next) {
     const { businessId } = req.user;
     const emp = await loadScopedEmployee(businessId, req.params.id);
     if (!emp) return res.status(404).json({ message: 'Employee not found' });
+    // P5c — the custom-field group may be HIDDEN for this operator's role → return
+    // an empty set (server-side omission), matching the employee GET redaction.
+    if (fieldAccess.customAccess(req.user) === 'HIDDEN') return res.json({ employeeId: emp.id, customFields: [] });
     const items = await svc.getEmployeeCustomFields(prisma, businessId, emp.id, {});
     res.json({ employeeId: emp.id, customFields: items });
   } catch (e) { sendErr(res, next, e); }
@@ -117,6 +121,11 @@ async function patchEmployeeValues(req, res, next) {
     const { businessId, id: actorUserId } = req.user;
     const emp = await loadScopedEmployee(businessId, req.params.id);
     if (!emp) return res.status(404).json({ message: 'Employee not found' });
+    // P5c — refuse custom-field writes when the operator's role has READ/HIDDEN on
+    // the custom group (fail-open when the role has no field-access map).
+    if (fieldAccess.customAccess(req.user) !== 'WRITE') {
+      return res.status(403).json({ code: 'FIELD_WRITE_FORBIDDEN', message: 'Your role cannot edit custom fields', group: 'custom' });
+    }
     const items = await svc.setEmployeeCustomFields(prisma, businessId, emp.id, valuesFromBody(req), {
       actorUserId: actorUserId || null,
       essSelfEditOnly: false,

@@ -10,6 +10,7 @@ const { allocateCode, SCOPE_DEFAULTS } = require('../lifecycle/lib/codes');
 const portalInvite = require('../lifecycle/portalInvite');
 // Phase 5b — hang the employee's custom-field values onto the detail read (additive).
 const customFields = require('../customfields/customFields.service');
+const fieldAccess = require('../rbac/fieldAccess');
 
 const EMP_SCOPE = 'EMPLOYEE';
 const EMP_DEFAULTS = SCOPE_DEFAULTS[EMP_SCOPE] || { prefix: 'EMP-', padding: 6 };
@@ -201,7 +202,11 @@ async function get(req, res, next) {
       .getEmployeeCustomFields(prisma, businessId, emp.id, {})
       .catch(() => []);
 
-    res.json({ ...emp, employment, portalStatus: portal.state, portal, customFields: custom });
+    // P5c — apply the viewer role's field-level permissions (HIDDEN groups omitted,
+    // a _fieldAccess hint attached). Fail-open: a role with no map is unchanged.
+    res.json(fieldAccess.applyFieldAccess(
+      { ...emp, employment, portalStatus: portal.state, portal, customFields: custom }, req.user,
+    ));
   } catch (e) { next(e); }
 }
 
@@ -409,6 +414,17 @@ async function update(req, res, next) {
     if (body.dateOfJoining !== undefined && body.hireDate === undefined) body.hireDate = body.dateOfJoining;
 
     const data = pickWritable(body);
+
+    // P5c — field-level write gate: refuse edits to a field-group the viewer's role
+    // may only READ (or has HIDDEN). Fail-open when the role has no field-access map.
+    const denied = fieldAccess.firstDeniedWrite(req.user, Object.keys(data));
+    if (denied) {
+      return res.status(403).json({
+        code: 'FIELD_WRITE_FORBIDDEN',
+        message: `Your role cannot edit ${denied.group} fields`,
+        field: denied.field, group: denied.group, access: denied.access,
+      });
+    }
 
     // ── Reporting-cycle guard (M5). Only when managerEmployeeId actually changes. ──
     if ('managerEmployeeId' in data) {

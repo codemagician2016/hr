@@ -156,6 +156,10 @@ router.use('/ess/learning', talent.essLearning);
 //                        (leave/expense wire onto the engine in 10c).
 router.use('/approvals', require('./approvals.routes'));
 router.use('/rbac', require('./rbac.routes'));
+// P5c — field-level permissions: per-role field-GROUP access map (HIDDEN/READ/WRITE)
+// enforced on the employee read/write + custom-field paths. Dedicated mount so it
+// never collides with the two /api/rbac role routers. Guard: canManageEmployees.
+router.use('/field-access', require('../rbac/fieldAccess.routes'));
 // SSO/SCIM v1 — tenant SSO connection config (SAML/OIDC, secrets write-only,
 // JIT policy) + SCIM provisioning-token mint/revoke. protect + canManageSso
 // (Owner + HR-Admin). The PUBLIC login surface lives at /sso/:tenant/* and the

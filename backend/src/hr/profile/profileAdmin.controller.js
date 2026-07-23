@@ -68,7 +68,7 @@ async function getEmployeeFull(req, res, next) {
       .getEmployeeCustomFields(prisma, businessId, employeeId, {})
       .catch(() => []);
 
-    res.json({
+    const full = {
       employee: {
         id: emp.id, code: emp.code,
         name: [emp.firstName, emp.middleName, emp.lastName].filter(Boolean).join(' '),
@@ -89,7 +89,10 @@ async function getEmployeeFull(req, res, next) {
       addresses: addresses.map((a) => ({ id: a.id, type: a.type, sameAsType: a.sameAsType, line1: a.line1, line2: a.line2, city: a.city, stateCode: a.stateCode, postalCode: a.postalCode, countryCode: a.countryCode })),
       statutory: statutory ? { countryCode: statutory.countryCode, pan: statutory.pan, uan: statutory.uan, irdNumber: statutory.irdNumber, aadhaarVerified: statutory.aadhaarVerified || false } : null,
       customFields: custom,
-    });
+    };
+    // P5c — honour the viewer role's field-level permissions on the rich read too
+    // (scalars nest under `employee`; bank/statutory/customFields/addresses sections).
+    res.json(fieldAccess.applyFieldAccess(full, req.user, { scalarHost: 'employee' }));
   } catch (e) { next(e); }
 }
 

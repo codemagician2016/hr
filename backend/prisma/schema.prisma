@@ -3824,6 +3824,11 @@ model BusinessRole {
   // SELF_ONLY=own pay only, NONE=no team comp. Manager-with-grant→RANGE_ONLY,
   // HR/Finance/Owner→ABSOLUTE, Employee→SELF_ONLY.
   compVisibility CompVisibility @default(NONE)
+  // Feature P5c — field-level permissions. Map of governable employee field-GROUP ->
+  // access ('HIDDEN' | 'READ' | 'WRITE'), e.g. { bank:'HIDDEN', identity:'READ' }.
+  // Absent/empty = WRITE on every group (fail-open; every existing role is unchanged).
+  // Only ever RESTRICTS (never escalates), so it may be set on system roles too.
+  fieldAccess    Json?          @default("{}")
   isSystem       Boolean        @default(false) // pre-seeded "Owner / Manager / Front Desk"
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
