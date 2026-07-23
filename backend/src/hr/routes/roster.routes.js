@@ -35,4 +35,12 @@ router.get('/swaps', requirePermission('canViewEmployees'), withEmployeeScope('c
 router.post('/swaps/:id/approve', requirePermission('canManageAttendance'), withEmployeeScope('canApproveRegularization'), c.approveSwap);
 router.post('/swaps/:id/reject', requirePermission('canManageAttendance'), withEmployeeScope('canApproveRegularization'), c.rejectSwap);
 
+/* Open shifts — publish an unassigned shift to a claim pool; employees claim via ESS
+   (/me/shifts/open) and the roster manager confirms through the F10 OPEN_SHIFT_CLAIM
+   inbox. Reads = canViewEmployees; publish/cancel = canManageAttendance. */
+router.get('/open-shifts', requirePermission('canViewEmployees'), c.listOpenShifts);
+router.get('/open-shifts/:id', requirePermission('canViewEmployees'), c.getOpenShift);
+router.post('/open-shifts', requirePermission('canManageAttendance'), c.createOpenShift);
+router.post('/open-shifts/:id/cancel', requirePermission('canManageAttendance'), c.cancelOpenShift);
+
 module.exports = router;

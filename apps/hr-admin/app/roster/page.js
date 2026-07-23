@@ -15,7 +15,7 @@
 // hidden from derive/pay until Publish (the muster "exhibit").
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Spinner, ErrorBanner, PrimaryButton, Modal, ModalActions, TextInput, DateField } from '@hr/ui';
+import { Spinner, ErrorBanner, PrimaryButton, Modal, ModalActions, TextInput, DateField, TextArea } from '@hr/ui';
 import { get, post, put, patch, del } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton, employeeLabel } from '@/lib/ui';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
@@ -25,6 +25,7 @@ const TABS = [
   { key: 'grid', label: 'Roster grid' },
   { key: 'rotations', label: 'Rotations' },
   { key: 'swaps', label: 'Swaps' },
+  { key: 'openshifts', label: 'Open shifts' },
 ];
 
 function todayISO() { return new Date().toISOString().slice(0, 10); }
@@ -273,6 +274,115 @@ export default function RosterPage() {
     },
   ], [canManage]);
 
+  // ── Open shifts ──
+  // Publish an unassigned shift to a claim pool. Employees claim it from ESS
+  // (/me/shifts/open); each claim then rides the F10 OPEN_SHIFT_CLAIM chain and is
+  // confirmed from the Approvals inbox — decisions do NOT happen here.
+  //   GET  /api/hr/attendance/open-shifts?status → { items:[{ ...shift, date, headcount,
+  //        filledCount, status(OPEN|FILLED|CANCELLED), shiftPattern,
+  //        claimCounts:{ total,pending,approved,rejected,cancelled } }] }
+  //   GET  /api/hr/attendance/open-shifts/:id     → one shift + its claims (employee+status)
+  //   POST /api/hr/attendance/open-shifts         publish (canManageAttendance)
+  //   POST /api/hr/attendance/open-shifts/:id/cancel  retire + withdraw pending claims
+  const [openShifts, setOpenShifts] = useState([]);
+  const [osLoading, setOsLoading] = useState(false);
+  const [osStatus, setOsStatus] = useState('OPEN');
+  const [osEditor, setOsEditor] = useState(null); // publish-modal draft
+  const [osEditorErr, setOsEditorErr] = useState('');
+  const [osSaving, setOsSaving] = useState(false);
+  const [osDetail, setOsDetail] = useState(null); // drill-in { ...shift, claims }
+  const [osDetailLoading, setOsDetailLoading] = useState(false);
+  // Scope option sources for the publish modal (optional narrowing).
+  const [entities, setEntities] = useState([]);
+  const [locations, setLocations] = useState([]);
+  const [departments, setDepartments] = useState([]);
+
+  const loadOpenShifts = useCallback(() => {
+    setOsLoading(true); setError('');
+    get('/api/hr/attendance/open-shifts', osStatus ? { status: osStatus } : {})
+      .then((res) => setOpenShifts(asList(res) || []))
+      .catch((e) => setError(e.message))
+      .finally(() => setOsLoading(false));
+  }, [osStatus]);
+  const loadScopeOptions = useCallback(() => {
+    get('/api/hr/org/entities').then((r) => setEntities(asList(r))).catch(() => {});
+    get('/api/hr/org/locations').then((r) => setLocations(asList(r))).catch(() => {});
+    get('/api/hr/org/departments').then((r) => setDepartments(asList(r))).catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (tab === 'openshifts') { loadOpenShifts(); loadShifts(); loadScopeOptions(); }
+  }, [tab, loadOpenShifts, loadShifts, loadScopeOptions]);
+
+  function openPublish() {
+    setOsEditorErr('');
+    setOsEditor({ date: todayISO(), shiftPatternId: '', headcount: '1', entityId: '', locationId: '', departmentId: '', note: '' });
+  }
+  async function publishOpenShift() {
+    if (!osEditor) return;
+    setOsEditorErr('');
+    if (!osEditor.date) { setOsEditorErr('Date is required.'); return; }
+    if (!osEditor.shiftPatternId) { setOsEditorErr('Pick a shift pattern.'); return; }
+    const hc = Number(osEditor.headcount);
+    if (!Number.isInteger(hc) || hc < 1 || hc > 1000) { setOsEditorErr('Headcount must be a whole number 1–1000.'); return; }
+    setOsSaving(true);
+    try {
+      await post('/api/hr/attendance/open-shifts', {
+        date: osEditor.date,
+        shiftPatternId: osEditor.shiftPatternId,
+        headcount: hc,
+        entityId: osEditor.entityId || null,
+        locationId: osEditor.locationId || null,
+        departmentId: osEditor.departmentId || null,
+        note: osEditor.note.trim() || null,
+      });
+      setOsEditor(null);
+      setNotice('Open shift published — employees can now claim it from ESS.');
+      loadOpenShifts();
+    } catch (e) { setOsEditorErr(e.message); } finally { setOsSaving(false); }
+  }
+  async function viewOpenShift(id) {
+    setError(''); setOsDetail(null); setOsDetailLoading(true);
+    try {
+      const res = await get(`/api/hr/attendance/open-shifts/${id}`);
+      setOsDetail(res);
+    } catch (e) { setError(e.message); } finally { setOsDetailLoading(false); }
+  }
+  async function cancelOpenShift(row) {
+    setError(''); setNotice('');
+    if (typeof window !== 'undefined' && !window.confirm(`Cancel the open shift for ${fmtDate(row.date)}? Any pending claims are withdrawn.`)) return;
+    try {
+      await post(`/api/hr/attendance/open-shifts/${row.id}/cancel`, {});
+      setNotice('Open shift cancelled.');
+      loadOpenShifts();
+      if (osDetail && osDetail.id === row.id) setOsDetail(null);
+    } catch (e) { setError(e.message); }
+  }
+
+  const openShiftCols = useMemo(() => [
+    { key: 'date', header: 'Date', render: (r) => fmtDate(r.date) },
+    { key: 'pattern', header: 'Shift', render: (r) => (r.shiftPattern ? (r.shiftPattern.name || r.shiftPattern.code) : '—') },
+    { key: 'headcount', header: 'Headcount', render: (r) => r.headcount },
+    {
+      key: 'filled', header: 'Filled / claims', render: (r) => {
+        const cc = r.claimCounts || {};
+        return (
+          <span>{r.filledCount || 0}/{r.headcount}
+            {cc.total ? <span className="text-xs text-gray-500"> · {cc.total} claim{cc.total === 1 ? '' : 's'}{cc.pending ? ` (${cc.pending} pending)` : ''}</span> : null}
+          </span>
+        );
+      },
+    },
+    { key: 'status', header: 'Status', render: (r) => <StatusBadge status={r.status} /> },
+    {
+      key: 'actions', header: '', render: (r) => (
+        <div className="flex gap-2">
+          <ActionButton onClick={() => viewOpenShift(r.id)}>View claims</ActionButton>
+          {canManage && r.status !== 'CANCELLED' ? <ActionButton tone="danger" onClick={() => cancelOpenShift(r)}>Cancel</ActionButton> : null}
+        </div>
+      ),
+    },
+  ], [canManage, osDetail]);
+
   return (
     <div className="space-y-4">
       <PageHeader title="Roster" subtitle="Shift rosters, rotation patterns & swaps. Published rosters drive attendance; drafts do not." />
@@ -452,6 +562,134 @@ export default function RosterPage() {
           <DataTable columns={swapCols} rows={swaps} loading={swapLoading} emptyText="No swap requests." rowKey={(r) => r.id} />
         </div>
       )}
+
+      {tab === 'openshifts' && (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div className="flex items-end gap-3">
+              <label className="text-sm">Status
+                <select className="block border rounded px-2 py-1" value={osStatus} onChange={(e) => setOsStatus(e.target.value)}>
+                  <option value="">All</option>
+                  <option value="OPEN">Open</option>
+                  <option value="FILLED">Filled</option>
+                  <option value="CANCELLED">Cancelled</option>
+                </select>
+              </label>
+              <PrimaryButton onClick={loadOpenShifts}>Refresh</PrimaryButton>
+            </div>
+            {canManage ? <PrimaryButton onClick={openPublish}>Publish open shift</PrimaryButton> : null}
+          </div>
+          <div className="text-xs text-gray-500">
+            Publish an unassigned shift to a claim pool. Employees claim it from ESS (My Shifts → Open shifts); each claim then lands in the Approvals inbox for you to confirm (OPEN_SHIFT_CLAIM). Cancelling withdraws any pending claims.
+          </div>
+          <DataTable columns={openShiftCols} rows={openShifts} loading={osLoading} emptyText="No open shifts." rowKey={(r) => r.id} />
+        </div>
+      )}
+
+      {canManage && osEditor ? (
+        <Modal title="Publish open shift" onClose={() => setOsEditor(null)} size="lg">
+          <div className="space-y-3">
+            <DateField label="Date" value={osEditor.date} onChange={(v) => setOsEditor({ ...osEditor, date: v })} required minToday hint="The day the shift needs to be filled." />
+            <label className="block text-sm">
+              <span className="text-gray-700 font-medium">Shift pattern</span>
+              <select
+                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                value={osEditor.shiftPatternId}
+                onChange={(e) => setOsEditor({ ...osEditor, shiftPatternId: e.target.value })}
+              >
+                <option value="">Select shift…</option>
+                {shifts.filter((s) => s.isActive !== false).map((s) => (
+                  <option key={s.id} value={s.id}>{s.code}{s.name ? ` — ${s.name}` : ''}{s.startTime ? ` (${s.startTime}–${s.endTime})` : ''}</option>
+                ))}
+              </select>
+            </label>
+            <TextInput label="Headcount" value={osEditor.headcount} onChange={(v) => setOsEditor({ ...osEditor, headcount: v })} type="number" min={1} max={1000} required hint="How many people can fill this shift (1–1000)." />
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block text-sm">
+                <span className="text-gray-700 font-medium">Entity (optional)</span>
+                <select
+                  className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  value={osEditor.entityId}
+                  onChange={(e) => setOsEditor({ ...osEditor, entityId: e.target.value, locationId: '' })}
+                >
+                  <option value="">Whole company</option>
+                  {entities.map((en) => <option key={en.id} value={en.id}>{en.code || en.legalName}{en.code && en.legalName ? ` — ${en.legalName}` : ''}</option>)}
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="text-gray-700 font-medium">Location (optional)</span>
+                <select
+                  className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  value={osEditor.locationId}
+                  onChange={(e) => setOsEditor({ ...osEditor, locationId: e.target.value })}
+                >
+                  <option value="">All locations</option>
+                  {(osEditor.entityId ? locations.filter((l) => l.entityId === osEditor.entityId) : locations).map((l) => <option key={l.id} value={l.id}>{l.name || l.code}</option>)}
+                </select>
+              </label>
+            </div>
+            <label className="block text-sm">
+              <span className="text-gray-700 font-medium">Department (optional)</span>
+              <select
+                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                value={osEditor.departmentId}
+                onChange={(e) => setOsEditor({ ...osEditor, departmentId: e.target.value })}
+              >
+                <option value="">All departments</option>
+                {departments.map((d) => <option key={d.id} value={d.id}>{d.name || d.code}</option>)}
+              </select>
+            </label>
+            <TextArea label="Note (optional)" value={osEditor.note} onChange={(v) => setOsEditor({ ...osEditor, note: v })} rows={2} hint="A short note shown to employees browsing open shifts." />
+            {osEditorErr ? <ErrorBanner message={osEditorErr} onDismiss={() => setOsEditorErr('')} /> : null}
+          </div>
+          <ModalActions>
+            <button className="rounded-md px-3 py-1.5 text-sm text-gray-600" onClick={() => setOsEditor(null)}>Cancel</button>
+            <PrimaryButton onClick={publishOpenShift} loading={osSaving}>Publish</PrimaryButton>
+          </ModalActions>
+        </Modal>
+      ) : null}
+
+      {(osDetail || osDetailLoading) ? (
+        <Modal title="Open shift claims" onClose={() => setOsDetail(null)} size="lg">
+          {osDetailLoading || !osDetail ? <Spinner /> : (
+            <div className="space-y-3">
+              <div className="text-sm text-gray-700">
+                <div className="font-semibold">{osDetail.shiftPattern ? (osDetail.shiftPattern.name || osDetail.shiftPattern.code) : 'Shift'} · {fmtDate(osDetail.date)}</div>
+                <div className="text-xs text-gray-500 flex items-center gap-2 mt-1">
+                  <span>Headcount {osDetail.headcount} · Filled {osDetail.filledCount || 0}</span>
+                  <StatusBadge status={osDetail.status} />
+                </div>
+                {osDetail.note ? <div className="text-xs text-gray-500 mt-1">{osDetail.note}</div> : null}
+              </div>
+              <div className="text-xs text-gray-500">Claim decisions happen in the Approvals inbox (OPEN_SHIFT_CLAIM) — this view is read-only.</div>
+              {(osDetail.claims || []).length === 0 ? (
+                <div className="text-sm text-gray-400">No claims yet.</div>
+              ) : (
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="text-left text-gray-500 border-b">
+                      <th className="py-1 font-medium">Employee</th>
+                      <th className="py-1 font-medium">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {osDetail.claims.map((cl) => (
+                      <tr key={cl.id} className="border-b last:border-b-0">
+                        <td className="py-1.5">{employeeLabel(cl.employee)}</td>
+                        <td className="py-1.5"><StatusBadge status={cl.status} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+          <ModalActions>
+            {canManage && osDetail && osDetail.status !== 'CANCELLED' ? <ActionButton tone="danger" onClick={() => cancelOpenShift(osDetail)}>Cancel shift</ActionButton> : null}
+            <button className="rounded-md px-3 py-1.5 text-sm text-gray-600" onClick={() => setOsDetail(null)}>Close</button>
+          </ModalActions>
+        </Modal>
+      ) : null}
     </div>
   );
 }

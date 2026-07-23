@@ -444,10 +444,138 @@ async function decideSwap(req, res, next, decision) {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* Open shifts (publish an unassigned shift → employees claim → confirm)*/
+/* ------------------------------------------------------------------ */
+
+const OPEN_SHIFT_PATTERN_SELECT = { id: true, code: true, name: true, startTime: true, endTime: true, breakMinutes: true, isNightShift: true };
+
+// Roll a shift's claims into a { total, pending, approved, rejected, cancelled } tally.
+function claimCounts(claims) {
+  const c = { total: 0, pending: 0, approved: 0, rejected: 0, cancelled: 0 };
+  for (const cl of claims || []) {
+    c.total += 1;
+    if (cl.status === 'PENDING') c.pending += 1;
+    else if (cl.status === 'APPROVED') c.approved += 1;
+    else if (cl.status === 'REJECTED') c.rejected += 1;
+    else if (cl.status === 'CANCELLED') c.cancelled += 1;
+  }
+  return c;
+}
+
+// POST /open-shifts { date, shiftPatternId, headcount?, entityId?, locationId?, departmentId?, note? }
+// Publish an unassigned shift to the claim pool. canManageAttendance.
+async function createOpenShift(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const { date, shiftPatternId, headcount, entityId, locationId, departmentId, note } = req.body || {};
+    if (!date || !shiftPatternId) return res.status(400).json({ message: 'date and shiftPatternId are required' });
+    const d = utcDay(date);
+    if (Number.isNaN(d.getTime())) return res.status(400).json({ message: 'date is not a valid YYYY-MM-DD' });
+    const hc = headcount == null ? 1 : Number(headcount);
+    if (!Number.isInteger(hc) || hc < 1 || hc > 1000) return res.status(400).json({ message: 'headcount must be an integer 1–1000' });
+    const pat = await prisma.shiftPattern.findFirst({ where: { id: shiftPatternId, businessId, deletedAt: null, isActive: true }, select: { id: true } });
+    if (!pat) return res.status(400).json({ message: 'shiftPattern not found or inactive' });
+    const created = await prisma.openShift.create({
+      data: {
+        businessId, date: d, shiftPatternId: pat.id, headcount: hc,
+        entityId: entityId || null, locationId: locationId || null, departmentId: departmentId || null,
+        note: note || null, publishedByUserId: req.user.id || null,
+      },
+      include: { shiftPattern: { select: OPEN_SHIFT_PATTERN_SELECT } },
+    });
+    res.status(201).json({ ...created, date: dayKey(created.date), claimCounts: claimCounts([]) });
+  } catch (e) { next(e); }
+}
+
+// GET /open-shifts?status&from&to&entityId&locationId&departmentId — list + claim tallies.
+async function listOpenShifts(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const { status, from, to, entityId, locationId, departmentId } = req.query;
+    const where = { businessId };
+    if (status) where.status = status;
+    if (entityId) where.entityId = entityId;
+    if (locationId) where.locationId = locationId;
+    if (departmentId) where.departmentId = departmentId;
+    if (from || to) {
+      where.date = {};
+      if (from) where.date.gte = utcDay(from);
+      if (to) where.date.lte = utcDay(to);
+    }
+    const items = await prisma.openShift.findMany({
+      where,
+      orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
+      take: clampLimit(req.query, 100, 500),
+      include: {
+        shiftPattern: { select: OPEN_SHIFT_PATTERN_SELECT },
+        claims: { select: { id: true, status: true, employeeId: true } },
+      },
+    });
+    res.json({
+      items: items.map((s) => ({
+        ...s, date: dayKey(s.date), claimCounts: claimCounts(s.claims), claims: undefined,
+      })),
+    });
+  } catch (e) { next(e); }
+}
+
+// GET /open-shifts/:id — one open shift with its claims (claimant identity resolved).
+async function getOpenShift(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const shift = await prisma.openShift.findFirst({
+      where: { id: req.params.id, businessId },
+      include: {
+        shiftPattern: { select: OPEN_SHIFT_PATTERN_SELECT },
+        claims: {
+          orderBy: { createdAt: 'asc' },
+          include: { employee: { select: { id: true, code: true, firstName: true, lastName: true } } },
+        },
+      },
+    });
+    if (!shift) return res.status(404).json({ message: 'Open shift not found' });
+    res.json({ ...shift, date: dayKey(shift.date), claimCounts: claimCounts(shift.claims) });
+  } catch (e) { next(e); }
+}
+
+// POST /open-shifts/:id/cancel — retire an open shift (→ CANCELLED). Cancels every
+// PENDING claim's F10 chain (fires onCancel → claim CANCELLED). canManageAttendance.
+async function cancelOpenShift(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const shift = await prisma.openShift.findFirst({ where: { id: req.params.id, businessId } });
+    if (!shift) return res.status(404).json({ message: 'Open shift not found' });
+    if (shift.status === 'CANCELLED') return res.json({ ...shift, date: dayKey(shift.date) });
+    const updated = await prisma.$transaction(async (tx) => {
+      const pending = await tx.openShiftClaim.findMany({ where: { businessId, openShiftId: shift.id, status: 'PENDING' }, select: { id: true } });
+      for (const cl of pending) {
+        const open = await tx.approvalRequest.findFirst({
+          where: { businessId, module: 'OPEN_SHIFT_CLAIM', entityType: 'OpenShiftClaim', entityId: cl.id, status: { in: ['PENDING', 'ESCALATED'] } },
+        });
+        if (open) {
+          await engine.cancel({ approvalRequestId: open.id, actorUserId: req.user.id || 'SYSTEM', comment: req.body.reason || 'Open shift cancelled' }, tx);
+        } else {
+          await tx.openShiftClaim.updateMany({ where: { id: cl.id, status: 'PENDING' }, data: { status: 'CANCELLED', decidedAt: new Date() } });
+        }
+      }
+      return tx.openShift.update({ where: { id: shift.id }, data: { status: 'CANCELLED' } });
+    });
+    res.json({ ...updated, date: dayKey(updated.date) });
+  } catch (e) {
+    if (e && (e.code === 'DECISION_RACE' || e.code === 'P2025')) {
+      return res.status(409).json({ message: 'Open shift changed concurrently; please retry', reason: 'DECISION_RACE' });
+    }
+    next(e);
+  }
+}
+
 module.exports = {
   rosterGrid, rosterDays, upsertCell, bulkUpsert, publish,
   listRotations, createRotation, updateRotation, removeRotation, applyRotation,
   listSwaps, approveSwap, rejectSwap,
+  // Open shifts (admin)
+  createOpenShift, listOpenShifts, getOpenShift, cancelOpenShift,
   // exported for tests
-  _internals: { resolvePopulation, validateSlots, isDayLocked },
+  _internals: { resolvePopulation, validateSlots, isDayLocked, claimCounts },
 };

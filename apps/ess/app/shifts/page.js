@@ -224,6 +224,147 @@ function SwapForm({ roster, onCreated }) {
   );
 }
 
+// ─── Open shifts (claim an unassigned shift) ──────────────────────────────────
+// A roster manager publishes unassigned shifts to a claim pool; any employee can
+// claim one, which opens an OPEN_SHIFT_CLAIM manager-confirm approval. Mirrors the
+// ESS overtime idiom (a claimable list + a "my claims" list with withdraw-while-pending).
+//   GET  /api/hr/me/shifts/open                     → claimable open shifts { items }
+//        each item: { ...shift, date, headcount, filledCount, remaining, note,
+//        shiftPattern, myClaim:{ id, status }|null }
+//   POST /api/hr/me/shifts/open/:id/claim           claim (409 already-claimed / not-OPEN / locked)
+//   GET  /api/hr/me/shifts/open/claims              → my claims { items:[{ id, status,
+//        openShift:{ ...shiftPattern, date } }] }
+//   POST /api/hr/me/shifts/open/claims/:id/withdraw withdraw while PENDING
+// Server 4xx (409 / 400) messages surface verbatim.
+function patternLabel(sp) {
+  if (!sp) return 'Shift';
+  const t = sp.startTime ? ` · ${sp.startTime}–${sp.endTime}${sp.isNightShift ? ' · Night' : ''}` : '';
+  return `${sp.name || sp.code || 'Shift'}${t}`;
+}
+
+function OpenShiftsSection() {
+  const [shifts, setShifts] = useState([]);
+  const [shiftsLoading, setShiftsLoading] = useState(true);
+  const [claims, setClaims] = useState([]);
+  const [claimsLoading, setClaimsLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [busyId, setBusyId] = useState('');
+
+  const loadShifts = useCallback(() => {
+    setShiftsLoading(true);
+    apiGet('/api/hr/me/shifts/open')
+      .then((res) => setShifts((res && res.items) || []))
+      .catch((e) => { if (e.status !== 404) setError(e.message); })
+      .finally(() => setShiftsLoading(false));
+  }, []);
+  const loadClaims = useCallback(() => {
+    setClaimsLoading(true);
+    apiGet('/api/hr/me/shifts/open/claims')
+      .then((res) => setClaims((res && res.items) || []))
+      .catch((e) => { if (e.status !== 404) setError(e.message); })
+      .finally(() => setClaimsLoading(false));
+  }, []);
+  useEffect(() => { loadShifts(); loadClaims(); }, [loadShifts, loadClaims]);
+
+  async function claim(s) {
+    setBusyId(s.id); setError(''); setNotice('');
+    try {
+      await apiPost(`/api/hr/me/shifts/open/${encodeURIComponent(s.id)}/claim`, {});
+      setNotice('Claim sent — your manager will confirm it.');
+      loadShifts(); loadClaims();
+    } catch (e) {
+      // 409 (already claimed / not OPEN / day locked) surfaces verbatim.
+      setError(e.message || 'Could not claim this shift.');
+    } finally { setBusyId(''); }
+  }
+  async function withdraw(c) {
+    setBusyId(c.id); setError(''); setNotice('');
+    try {
+      await apiPost(`/api/hr/me/shifts/open/claims/${encodeURIComponent(c.id)}/withdraw`, {});
+      setNotice('Claim withdrawn.');
+      loadShifts(); loadClaims();
+    } catch (e) {
+      setError(e.message || 'Could not withdraw this claim.');
+    } finally { setBusyId(''); }
+  }
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-base font-semibold flex items-center gap-1">
+          Open shifts
+          <InfoTip text="Unassigned shifts your company has opened for claiming. Claim one and your manager confirms it; you can withdraw a claim while it is still pending." />
+        </h2>
+        <PrimaryButton onClick={() => { loadShifts(); loadClaims(); }}>Refresh</PrimaryButton>
+      </div>
+      {error ? <div className="mb-2"><ErrorBanner message={error} onDismiss={() => setError('')} /></div> : null}
+      {notice ? <div className="mb-2 rounded px-3 py-2 text-sm" style={{ background: '#DCFCE7', color: '#166534' }}>{notice}</div> : null}
+
+      {shiftsLoading ? <Centered><Spinner /></Centered> : (
+        shifts.length === 0 ? <Empty text="No open shifts to claim right now." /> : (
+          <div className="space-y-2">
+            {shifts.map((s) => {
+              const claimed = s.myClaim && (s.myClaim.status === 'PENDING' || s.myClaim.status === 'APPROVED');
+              const slotsLeft = typeof s.remaining === 'number' ? s.remaining : Math.max(0, (s.headcount || 0) - (s.filledCount || 0));
+              return (
+                <div key={s.id} className="rounded-lg border px-3 py-2 flex items-center justify-between gap-3 flex-wrap" style={{ borderColor: 'var(--theme-border)' }}>
+                  <div className="text-sm">
+                    <div className="font-medium">{fmtDate(s.date)} · {patternLabel(s.shiftPattern)}</div>
+                    <div className="text-xs text-gray-500">
+                      {slotsLeft} slot{slotsLeft === 1 ? '' : 's'} left of {s.headcount}
+                      {s.note ? ` · ${s.note}` : ''}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {s.myClaim ? <StatusChip status={s.myClaim.status} /> : null}
+                    {claimed ? (
+                      <span className="text-xs text-gray-500">Claimed</span>
+                    ) : (
+                      <button type="button" onClick={() => claim(s)} disabled={busyId === s.id || slotsLeft <= 0}
+                              className="px-3 py-1 text-xs rounded border font-medium disabled:opacity-50"
+                              style={{ borderColor: 'var(--theme-primary)', color: 'var(--theme-primary)' }}>
+                        {busyId === s.id ? 'Claiming…' : 'Claim'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )
+      )}
+
+      <h3 className="text-xs font-semibold uppercase tracking-wide mt-4 mb-2" style={{ color: 'var(--theme-muted)' }}>My open-shift claims</h3>
+      {claimsLoading ? <Centered><Spinner small /></Centered> : (
+        claims.length === 0 ? <Empty text="You haven't claimed any open shifts yet." /> : (
+          <div className="space-y-2">
+            {claims.map((c) => {
+              const sp = c.openShift ? c.openShift.shiftPattern : null;
+              return (
+                <div key={c.id} className="rounded-lg border px-3 py-2 flex items-center justify-between gap-3 flex-wrap" style={{ borderColor: 'var(--theme-border)' }}>
+                  <div className="text-sm font-medium">
+                    {c.openShift ? fmtDate(c.openShift.date) : '—'} · {patternLabel(sp)}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <StatusChip status={c.status} />
+                    {c.status === 'PENDING' ? (
+                      <button type="button" onClick={() => withdraw(c)} disabled={busyId === c.id}
+                              className="px-3 py-1 text-xs rounded border border-gray-300 text-gray-700 disabled:opacity-50">
+                        {busyId === c.id ? 'Withdrawing…' : 'Withdraw'}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )
+      )}
+    </section>
+  );
+}
+
 export default function MyShiftsPage() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -349,6 +490,8 @@ export default function MyShiftsPage() {
             )
           )}
         </section>
+
+        <OpenShiftsSection />
       </div>
     </AppShell>
   );

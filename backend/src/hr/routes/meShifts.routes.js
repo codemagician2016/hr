@@ -21,4 +21,12 @@ router.post('/swaps', c.createMySwap);
 router.post('/swaps/:id/consent', c.consentMySwap);
 router.post('/swaps/:id/withdraw', c.withdrawMySwap);
 
+// Open shifts (claim an unassigned shift → F10 OPEN_SHIFT_CLAIM manager confirm).
+// The literal /open/claims paths are declared BEFORE /open/:id/claim so the router
+// never treats "claims" as an :id.
+router.get('/open', c.listOpenShifts);
+router.get('/open/claims', c.listMyOpenClaims);
+router.post('/open/claims/:id/withdraw', c.withdrawOpenClaim);
+router.post('/open/:id/claim', c.claimOpenShift);
+
 module.exports = router;

@@ -904,6 +904,159 @@ async function withdrawMySwap(req, res, next) {
   } catch (e) { next(e); }
 }
 
+/* ------------------------------------------------------------------ */
+/* Open shifts (ESS — claim an unassigned shift; SELF_ONLY)            */
+/* ------------------------------------------------------------------ */
+
+const OPEN_SHIFT_PATTERN_SELECT = { id: true, code: true, name: true, startTime: true, endTime: true, breakMinutes: true, isNightShift: true };
+const dayKey = (value) => utcDay(value).toISOString().slice(0, 10);
+
+// GET /me/shifts/open?from&to — OPEN shifts in my business I can claim. Simple scope:
+// every OPEN shift in the tenant (an optional from/to window); my own claim (if any) is
+// surfaced inline so the app can render "Claimed / Pending".
+async function listOpenShifts(req, res, next) {
+  try {
+    const emp = await resolveActiveSelf(req);
+    if (!emp) return noEmployee(res);
+    const { businessId } = req.customer;
+    const where = { businessId, status: 'OPEN' };
+    if (req.query.from || req.query.to) {
+      where.date = {};
+      if (req.query.from) where.date.gte = utcDay(req.query.from);
+      if (req.query.to) where.date.lte = utcDay(req.query.to);
+    }
+    const shifts = await prisma.openShift.findMany({
+      where,
+      orderBy: { date: 'asc' },
+      take: 200,
+      include: {
+        shiftPattern: { select: OPEN_SHIFT_PATTERN_SELECT },
+        claims: { where: { employeeId: emp.id }, select: { id: true, status: true } },
+      },
+    });
+    res.json({
+      items: shifts.map((s) => ({
+        ...s, date: dayKey(s.date), remaining: Math.max(0, s.headcount - s.filledCount),
+        myClaim: s.claims[0] || null, claims: undefined,
+      })),
+    });
+  } catch (e) { next(e); }
+}
+
+// POST /me/shifts/open/:id/claim — claim an open shift → opens the F10 OPEN_SHIFT_CLAIM
+// manager-confirm chain. 409 if the shift is not OPEN or I already have a live claim.
+async function claimOpenShift(req, res, next) {
+  try {
+    const emp = await resolveActiveSelf(req);
+    if (!emp) return noEmployee(res);
+    const { businessId } = req.customer;
+    const shift = await prisma.openShift.findFirst({ where: { id: req.params.id, businessId } });
+    if (!shift) return res.status(404).json({ message: 'Open shift not found' });
+    if (shift.status !== 'OPEN') return res.status(409).json({ message: `Open shift is ${shift.status}` });
+    // At most one LIVE claim per person per shift. A prior REJECTED/CANCELLED claim is
+    // re-opened (flipped back to PENDING) in the tx; a PENDING/APPROVED one blocks.
+    const existing = await prisma.openShiftClaim.findUnique({
+      where: { openShiftId_employeeId: { openShiftId: shift.id, employeeId: emp.id } },
+    });
+    if (existing && (existing.status === 'PENDING' || existing.status === 'APPROVED')) {
+      return res.status(409).json({ message: 'You have already claimed this shift' });
+    }
+    if (await isDayLocked(businessId, emp.id, shift.date)) {
+      return res.status(409).json({ message: 'Attendance for this day is locked (period closed)' });
+    }
+
+    require('../approvals/consumers.openShiftClaim');
+    const created = await prisma.$transaction(async (tx) => {
+      const fresh = await tx.openShift.findFirst({ where: { id: shift.id, businessId } });
+      if (!fresh || fresh.status !== 'OPEN') {
+        const e = new Error('Open shift is no longer open'); e.code = 'OPEN_SHIFT_NOT_OPEN'; throw e;
+      }
+      const claim = existing
+        ? await tx.openShiftClaim.update({
+            where: { id: existing.id },
+            data: { status: 'PENDING', approvalRequestId: null, decidedByUserId: null, decidedAt: null },
+          })
+        : await tx.openShiftClaim.create({
+            data: { businessId, openShiftId: shift.id, employeeId: emp.id, status: 'PENDING' },
+          });
+      const rec = await tx.employmentRecord.findFirst({
+        where: { businessId, employeeId: emp.id, isCurrent: true },
+        orderBy: { effectiveFrom: 'desc' },
+        select: { departmentId: true, gradeId: true, locationId: true },
+      });
+      const opened = await engine.openRequest({
+        businessId,
+        module: 'OPEN_SHIFT_CLAIM',
+        entityType: 'OpenShiftClaim',
+        entityId: claim.id,
+        requesterEmployeeId: emp.id,
+        payload: { openShiftId: shift.id, date: dayKey(shift.date), shiftPatternId: shift.shiftPatternId },
+        ctx: {
+          entityId: claim.id,
+          departmentId: rec ? rec.departmentId : null,
+          employeeLevel: rec ? rec.gradeId : null,
+          locationId: rec ? rec.locationId : null,
+        },
+      }, tx);
+      const reqId = opened && opened.approvalRequest ? opened.approvalRequest.id : null;
+      if (reqId) await tx.openShiftClaim.update({ where: { id: claim.id }, data: { approvalRequestId: reqId } });
+      return tx.openShiftClaim.findUnique({ where: { id: claim.id } });
+    });
+    res.status(201).json(created);
+  } catch (e) {
+    if (e && e.code === 'P2002') return res.status(409).json({ message: 'You have already claimed this shift' });
+    if (e && e.code && String(e.code).startsWith('OPEN_SHIFT_')) {
+      return res.status(409).json({ message: e.message, reason: e.code });
+    }
+    next(e);
+  }
+}
+
+// POST /me/shifts/open/claims/:id/withdraw — withdraw my PENDING claim (engine.cancel).
+async function withdrawOpenClaim(req, res, next) {
+  try {
+    const emp = await resolveActiveSelf(req);
+    if (!emp) return noEmployee(res);
+    const { businessId } = req.customer;
+    const claim = await prisma.openShiftClaim.findFirst({ where: { id: req.params.id, businessId } });
+    if (!claim || claim.employeeId !== emp.id) return res.status(404).json({ message: 'Claim not found' });
+    if (claim.status !== 'PENDING') return res.status(409).json({ message: `Claim is already ${claim.status}` });
+    const open = await prisma.approvalRequest.findFirst({
+      where: { businessId, module: 'OPEN_SHIFT_CLAIM', entityType: 'OpenShiftClaim', entityId: claim.id, status: { in: ['PENDING', 'ESCALATED'] } },
+    });
+    if (open) {
+      await engine.cancel({ approvalRequestId: open.id, actorUserId: emp.id, comment: (req.body && req.body.reason) || 'Withdrawn by claimant' });
+    } else {
+      await prisma.openShiftClaim.updateMany({ where: { id: claim.id, status: 'PENDING' }, data: { status: 'CANCELLED', decidedAt: new Date() } });
+    }
+    const fresh = await prisma.openShiftClaim.findUnique({ where: { id: claim.id } });
+    res.json(fresh);
+  } catch (e) { next(e); }
+}
+
+// GET /me/shifts/open/claims?status — my claims (with the open shift they target).
+async function listMyOpenClaims(req, res, next) {
+  try {
+    const emp = await resolveActiveSelf(req);
+    if (!emp) return res.json({ items: [] });
+    const { businessId } = req.customer;
+    const where = { businessId, employeeId: emp.id };
+    if (req.query.status) where.status = req.query.status;
+    const items = await prisma.openShiftClaim.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+      include: { openShift: { include: { shiftPattern: { select: OPEN_SHIFT_PATTERN_SELECT } } } },
+    });
+    res.json({
+      items: items.map((c) => ({
+        ...c,
+        openShift: c.openShift ? { ...c.openShift, date: dayKey(c.openShift.date) } : null,
+      })),
+    });
+  } catch (e) { next(e); }
+}
+
 // ── OT PRE-APPROVAL (ESS) ─────────────────────────────────────────────────────
 // An employee asks to be authorized for N overtime minutes on a day; the request
 // rides the F10 OVERTIME engine (the reporting manager authorizes). Attendance
@@ -1034,4 +1187,9 @@ module.exports = {
   createMySwap,
   consentMySwap,
   withdrawMySwap,
+  // Open shifts (ESS)
+  listOpenShifts,
+  claimOpenShift,
+  withdrawOpenClaim,
+  listMyOpenClaims,
 };

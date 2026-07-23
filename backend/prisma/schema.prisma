@@ -514,6 +514,8 @@ model Business {
   rosterDays                   RosterDay[] // Feature 29 — roster cells
   rotationTemplates            RotationTemplate[] // Feature 29 — rotation rings
   shiftSwapRequests            ShiftSwapRequest[] // Feature 29 — shift swaps
+  openShifts                   OpenShift[] // Open shifts — unassigned shifts published to a claim pool
+  openShiftClaims              OpenShiftClaim[] // Open-shift claims (ride the F10 OPEN_SHIFT_CLAIM engine)
   hrHolidays                   Holiday[]
   attendancePunches            AttendancePunch[]
   attendances                  Attendance[]
@@ -6825,6 +6827,7 @@ model Employee {
   rosterDays               RosterDay[] // Feature 29 — per-day roster cells
   swapsRequested           ShiftSwapRequest[]                @relation("SwapRequester") // Feature 29
   swapsCounterparty        ShiftSwapRequest[]                @relation("SwapCounterparty") // Feature 29
+  openShiftClaims          OpenShiftClaim[] // Open-shift claims (this employee claimed an open shift)
   timesheets               Timesheet[]
   attendances              Attendance[]                      @relation("EmployeeAttendances")
   attendancePayInputs      AttendancePayInput[]
@@ -9522,6 +9525,7 @@ model ShiftPattern {
   version                 Int               @default(0)
   assignments             ShiftAssignment[]
   rosterDays              RosterDay[] // Feature 29 — per-day roster cells referencing this pattern
+  openShifts              OpenShift[] // Open shifts published against this pattern
 
   @@unique([businessId, code])
   @@index([businessId, isActive])
@@ -9590,6 +9594,7 @@ enum RosterSource {
   ROTATION
   MANUAL
   SWAP
+  OPEN_CLAIM // an open shift that was claimed + manager-confirmed materialised this cell
 }
 
 /// A reusable rotation ring. slotsJson = ordered array; each slot is a shiftPatternId
@@ -9648,6 +9653,62 @@ enum ConsentStatus {
   PENDING
   ACCEPTED
   DECLINED
+}
+
+/// Open shifts — an UNASSIGNED shift the roster manager publishes to a pool. Eligible
+/// employees CLAIM it (OpenShiftClaim) and the manager confirms via the F10
+/// OPEN_SHIFT_CLAIM approval. On a claim's APPROVE the consumer materialises the
+/// claimant's RosterDay (source=OPEN_CLAIM, PUBLISHED) and increments filledCount;
+/// the shift flips to FILLED when filledCount >= headcount (auto-rejecting the losers).
+model OpenShift {
+  id                String           @id @default(uuid())
+  businessId        String
+  business          Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entityId          String? // optional scope (mirrors ShiftPattern.entityId — plain scalar, no relation)
+  locationId        String?
+  departmentId      String?
+  date              DateTime         @db.Date // the civil day the shift is worked
+  shiftPatternId    String
+  shiftPattern      ShiftPattern     @relation(fields: [shiftPatternId], references: [id], onDelete: Restrict)
+  headcount         Int              @default(1) // slots to fill
+  filledCount       Int              @default(0) // approved claims so far
+  status            OpenShiftStatus  @default(OPEN)
+  note              String?
+  publishedByUserId String? // the operator who published it
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  claims            OpenShiftClaim[]
+
+  @@index([businessId, status, date])
+}
+
+enum OpenShiftStatus {
+  OPEN
+  FILLED
+  CANCELLED
+}
+
+/// One employee's claim on an OpenShift. Rides an F10 OPEN_SHIFT_CLAIM approval (the
+/// roster manager confirms). At most one claim per person per shift. Reuses
+/// RequestStatus (PENDING|APPROVED|REJECTED|CANCELLED) — CANCELLED == withdrawn.
+model OpenShiftClaim {
+  id                String        @id @default(uuid())
+  businessId        String
+  business          Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  openShiftId       String
+  openShift         OpenShift     @relation(fields: [openShiftId], references: [id], onDelete: Cascade)
+  employeeId        String
+  employee          Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  status            RequestStatus @default(PENDING) // PENDING|APPROVED|REJECTED|CANCELLED (CANCELLED = withdrawn)
+  approvalRequestId String? // the F10 ApprovalRequest (manager confirm chain)
+  decidedByUserId   String?
+  decidedAt         DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@unique([openShiftId, employeeId]) // one claim per person per shift
+  @@index([businessId, status])
+  @@index([businessId, employeeId, status])
 }
 
 /// Public/company holiday calendar. NZ regional anniversary days + mondayisation
@@ -13025,6 +13086,7 @@ enum WorkflowModule {
   AWARD // Feature 35 — nomination committee review/approve
   REDEMPTION // Feature 35 — catalog redemption fulfilment approval
   OVERTIME // OT pre-approval — the reporting manager authorizes overtime minutes
+  OPEN_SHIFT_CLAIM // Open shifts — the roster manager confirms an employee's claim on an unassigned shift
 }
 
 model WorkflowStep {

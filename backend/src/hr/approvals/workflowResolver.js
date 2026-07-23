@@ -160,6 +160,13 @@ const BUILT_IN_DEFAULT = Object.freeze({
   OVERTIME: [
     step(1, 'REPORTING_MANAGER', { name: 'Manager', approverRefId: '1', slaHours: 48, onTimeoutAction: 'ESCALATE' }),
   ],
+  // Open shifts — the claimant's reporting manager (the roster manager) confirms the
+  // claim on an unassigned shift (mirrors SHIFT_SWAP / attendance acts — manager-owned).
+  // Escalates after 48h. A tenant can override by publishing a real OPEN_SHIFT_CLAIM
+  // WorkflowDefinition (e.g. route to a shift-lead role or add an ops step).
+  OPEN_SHIFT_CLAIM: [
+    step(1, 'REPORTING_MANAGER', { name: 'Manager', approverRefId: '1', slaHours: 48, onTimeoutAction: 'ESCALATE' }),
+  ],
 });
 
 // Generic fallback for any module without a bespoke built-in: manager approves,

@@ -69,6 +69,11 @@ const { registerRedemptionConsumer } = require('./consumers.redemption');
 // flips OvertimeRequest.status). Self-registers on load like the others; wired here
 // too so the explicit boot path stays the single source of truth.
 const { registerOvertimeConsumer } = require('./consumers.overtime');
+// Open shifts — the OPEN_SHIFT_CLAIM consumer (roster manager confirms a claim on an
+// unassigned shift → materialise the claimant's RosterDay + fill the slot). Self-
+// registers on load like the others; wired here too so the explicit boot path stays
+// the single source of truth.
+const { registerOpenShiftClaimConsumer } = require('./consumers.openShiftClaim');
 
 let done = false;
 
@@ -95,6 +100,7 @@ function registerConsumers() {
   registerAwardConsumer();
   registerRedemptionConsumer();
   registerOvertimeConsumer();
+  registerOpenShiftClaimConsumer();
   done = true;
 }
 
