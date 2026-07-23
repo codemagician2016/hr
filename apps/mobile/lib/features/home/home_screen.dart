@@ -14,6 +14,7 @@ import '../../widgets/common.dart';
 import '../attendance/attendance_providers.dart';
 import '../attendance/punch_logic.dart';
 import '../leave/leave_providers.dart';
+import '../notifications/notifications_providers.dart';
 import '../pay/pay_providers.dart';
 import 'country_provider.dart';
 import 'home_providers.dart';
@@ -45,6 +46,7 @@ class HomeScreen extends ConsumerWidget {
     ref.invalidate(tasksProvider);
     ref.invalidate(pendingApprovalsCountProvider);
     ref.invalidate(upcomingHolidaysProvider);
+    ref.invalidate(notificationsUnreadProvider);
     await ref.read(payslipsProvider((page: 1, pageSize: 1)).future);
   }
 
@@ -57,6 +59,7 @@ class HomeScreen extends ConsumerWidget {
     final tasks = ref.watch(tasksProvider).valueOrNull ?? const [];
     final approvalCount = ref.watch(pendingApprovalsCountProvider).valueOrNull ?? 0;
     final holidays = ref.watch(upcomingHolidaysProvider).valueOrNull ?? const [];
+    final notifUnread = ref.watch(notificationsUnreadProvider).valueOrNull ?? 0;
 
     final clockedIn = isClockedIn(punches);
     final totalLeave = balances == null
@@ -71,6 +74,10 @@ class HomeScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('DriftHR'),
         actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: _NotificationsBell(count: notifUnread, onTap: () => context.push('/notifications')),
+          ),
           if (approvalCount > 0)
             Padding(
               padding: const EdgeInsets.only(right: 8),
@@ -256,6 +263,24 @@ class _AttendanceStatusCard extends StatelessWidget {
   }
 }
 
+class _NotificationsBell extends StatelessWidget {
+  const _NotificationsBell({required this.count, required this.onTap});
+
+  final int count;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final bell = IconButton(
+      onPressed: onTap,
+      icon: const Icon(Icons.notifications_outlined, color: BrandColors.text),
+      tooltip: 'Notifications',
+    );
+    if (count <= 0) return bell;
+    return Badge.count(count: count, child: bell);
+  }
+}
+
 class _ApprovalsBadge extends StatelessWidget {
   const _ApprovalsBadge({required this.count, required this.onTap});
 
@@ -314,6 +339,7 @@ class _QuickLinks extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final isIndia = ref.watch(countryContextProvider).valueOrNull?.isIndia ?? false;
     final tiles = <(IconData, String, String)>[
+      (Icons.dynamic_feed_outlined, 'Feed', '/feed'),
       (Icons.payments_outlined, 'Payslips', '/pay'),
       (Icons.account_balance_wallet_outlined, 'My CTC', '/compensation'),
       (Icons.access_time, 'Attendance', '/attendance'),

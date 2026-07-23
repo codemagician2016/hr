@@ -69,4 +69,32 @@ class Api {
   static String expenseClaimLine(String id, String lineId) => '/api/hr/me/expenses/claims/$id/lines/$lineId'; // DELETE
   static String expenseClaimSubmit(String id) => '/api/hr/me/expenses/claims/$id/submit';
   static String expenseClaimCancel(String id) => '/api/hr/me/expenses/claims/$id/cancel';
+
+  // Company directory (READ-only colleague list) — used by the feed @mention picker.
+  static const directory = '/api/hr/me/directory'; // ?q=&page=&pageSize= → { items:[{id,name,designation,…}], total }
+
+  // Engagement — the news feed / engagement wall (SELF-scope, audience-gated).
+  static const feed = '/api/hr/me/engagement/feed'; // ?page=&pageSize= → { items, total }
+  static const feedUnreadCount = '/api/hr/me/engagement/feed/unread-count'; // { unread, visible }
+  static const feedReadAll = '/api/hr/me/engagement/feed/read-all'; // POST → { ok, marked }
+  static String feedRead(String id) => '/api/hr/me/engagement/feed/$id/read'; // POST (mark read)
+  static String feedReaction(String id) => '/api/hr/me/engagement/feed/$id/reaction'; // PUT {kind} / DELETE
+  static String feedComments(String id) => '/api/hr/me/engagement/feed/$id/comments'; // GET + POST {body,parentId?}
+  static String feedComment(String id, String commentId) =>
+      '/api/hr/me/engagement/feed/$id/comments/$commentId'; // PATCH {body} / DELETE
+  static const celebrations = '/api/hr/me/engagement/celebrations'; // { birthdays, anniversaries, windowDays }
+
+  // Notifications inbox (the feed social layer + fan-outs land here).
+  static const notifications = '/api/hr/me/notifications'; // ?page=&pageSize= → { items, total, unlinked? }
+  static const notificationsUnreadCount = '/api/hr/me/notifications/unread-count'; // { unread }
+  static const notificationsReadAll = '/api/hr/me/notifications/read-all'; // POST → { ok, marked }
+  static String notificationRead(String id) => '/api/hr/me/notifications/$id/read'; // POST (mark read)
+
+  // Surveys — open pulses to fill (SELF-scope, audience-gated, anonymity firewall).
+  static const surveys = '/api/hr/me/engagement/surveys'; // { items:[{occurrenceId,state,survey,…}] }
+  static String survey(String occurrenceId) => '/api/hr/me/engagement/surveys/$occurrenceId'; // GET fill view
+  static String surveySubmit(String occurrenceId) =>
+      '/api/hr/me/engagement/surveys/$occurrenceId/submit'; // POST {answers} → { receiptToken }
+  static String surveyDismiss(String occurrenceId) =>
+      '/api/hr/me/engagement/surveys/$occurrenceId/dismiss'; // POST → { ok, dismissed }
 }

@@ -81,6 +81,24 @@ class AppShell extends ConsumerWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               _MoreTile(
+                icon: Icons.dynamic_feed_outlined,
+                title: 'Feed',
+                subtitle: 'Company news & celebrations',
+                onTap: () => _go(sheetContext, '/feed'),
+              ),
+              _MoreTile(
+                icon: Icons.notifications_outlined,
+                title: 'Notifications',
+                subtitle: 'Mentions, comments & updates',
+                onTap: () => _go(sheetContext, '/notifications'),
+              ),
+              _MoreTile(
+                icon: Icons.poll_outlined,
+                title: 'Surveys',
+                subtitle: 'Open pulses to fill',
+                onTap: () => _go(sheetContext, '/surveys'),
+              ),
+              _MoreTile(
                 icon: Icons.fact_check_outlined,
                 title: 'Approvals',
                 subtitle: 'Decisions waiting for you',

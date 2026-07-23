@@ -19,13 +19,18 @@ import '../features/attendance/face_enrollment_screen.dart';
 import '../features/auth/login_screen.dart';
 import '../features/auth/splash_screen.dart';
 import '../features/expenses/expenses_screen.dart';
+import '../features/feed/feed_detail_screen.dart';
+import '../features/feed/feed_screen.dart';
 import '../features/home/home_screen.dart';
 import '../features/leave/leave_screen.dart';
 import '../features/letters/letters_screen.dart';
+import '../features/notifications/notifications_screen.dart';
 import '../features/pay/pay_screen.dart';
 import '../features/pay/payslip_detail_screen.dart';
 import '../features/pay/compensation_screen.dart';
 import '../features/profile/profile_screen.dart';
+import '../features/surveys/survey_fill_screen.dart';
+import '../features/surveys/surveys_screen.dart';
 import '../features/tax/tax_projection_screen.dart';
 import 'app_shell.dart';
 
@@ -135,6 +140,33 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/face-enrollment',
         parentNavigatorKey: _rootKey,
         builder: (_, __) => const FaceEnrollmentScreen(),
+      ),
+
+      // Engagement parity wave — feed wall + post detail, notifications inbox, surveys.
+      GoRoute(
+        path: '/feed',
+        parentNavigatorKey: _rootKey,
+        builder: (_, __) => const FeedScreen(),
+      ),
+      GoRoute(
+        path: '/feed/:id',
+        parentNavigatorKey: _rootKey,
+        builder: (_, state) => FeedDetailScreen(announcementId: state.pathParameters['id']!),
+      ),
+      GoRoute(
+        path: '/notifications',
+        parentNavigatorKey: _rootKey,
+        builder: (_, __) => const NotificationsScreen(),
+      ),
+      GoRoute(
+        path: '/surveys',
+        parentNavigatorKey: _rootKey,
+        builder: (_, __) => const SurveysScreen(),
+      ),
+      GoRoute(
+        path: '/surveys/:occurrenceId',
+        parentNavigatorKey: _rootKey,
+        builder: (_, state) => SurveyFillScreen(occurrenceId: state.pathParameters['occurrenceId']!),
       ),
     ],
   );
