@@ -486,6 +486,9 @@ model Business {
   bonusCycles                  BonusCycle[]
   bonusAwards                  BonusAward[]
   arrearCycles                 ArrearCycle[]
+  variablePaySchemes           VariablePayScheme[]
+  variablePayCycles            VariablePayCycle[]
+  variablePayAwards            VariablePayAward[]
   attendancePayInputs          AttendancePayInput[]
   payslips                     Payslip[]
   statutoryRemittances         StatutoryRemittance[]
@@ -6858,6 +6861,7 @@ model Employee {
   overtimeRequests         OvertimeRequest[] // OT pre-approval requests
   bonusAwards              BonusAward[]
   arrearCycles             ArrearCycle[]
+  variablePayAwards        VariablePayAward[]
   // Letters & Communication (Feature 9) — letters issued to this employee
   issuedLetters            IssuedLetter[]
   // Feature 13 — rich profile sub-models (Education + typed Addresses)
@@ -8526,6 +8530,136 @@ model BonusAward {
 
   @@unique([businessId, bonusCycleId, employeeId])
   @@index([businessId, bonusCycleId, eligible])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §46  VARIABLE PAY / INCENTIVE SCHEMES — Feature 46 (Phase 4). Country-agnostic.
+//   The FIRST non-fixed, non-statutory earning: performance-linked incentives /
+//   commission / discretionary variable pay. Mirrors BonusCycle/BonusAward 1:1:
+//   VariablePayScheme (the reusable rule) → VariablePayCycle (one payout period,
+//   DRAFT → COMPUTED → APPROVED (SoD maker-checker) → PAID) → per-employee
+//   VariablePayAward (the immutable frozen snapshot ≈ PayRunLine). The approved
+//   cycle pays each award by INJECTing a PayRunInputItem(kind=OTE) onto the
+//   employee's entity's OPEN pay run (queued when none is open). Money lives in
+//   integer paise through the pure core (variablePay.js); Decimal only at this edge.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A reusable variable-pay RULE: what to pay, on what basis, how often, to whom.
+/// One scheme spawns many VariablePayCycles (one per payout period).
+model VariablePayScheme {
+  id               String               @id @default(uuid())
+  businessId       String
+  business         Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name             String
+  code             String? // optional short code, unique per business when set
+  kind             VariablePayKind      @default(INCENTIVE)
+  basis            VariablePayBasis     @default(GROSS)
+  // Target as a % of the resolved basis (GROSS/BASIC/CTC). NULL when basis=FIXED_AMOUNT.
+  targetPct        Decimal?             @db.Decimal(7, 4)
+  // Flat target payout. Set ONLY when basis=FIXED_AMOUNT; NULL otherwise.
+  targetAmount     Decimal?             @db.Decimal(15, 2)
+  payoutFrequency  VariablePayFrequency @default(QUARTERLY)
+  prorationMethod  VariablePayProration @default(NONE)
+  // Eligibility filter, shaped like the recognition budget scope:
+  // { entityIds?: [], departmentIds?: [], gradeIds?: [] }. NULL/empty ⇒ all active employees.
+  eligibilityScope Json?
+  isActive         Boolean              @default(true)
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  deletedAt        DateTime?
+  cycles           VariablePayCycle[]
+
+  @@unique([businessId, code])
+  @@index([businessId, isActive])
+}
+
+enum VariablePayKind {
+  INCENTIVE
+  COMMISSION
+  BONUS
+}
+
+enum VariablePayBasis {
+  GROSS // monthly gross from the current comp
+  BASIC // monthly Basic (+DA) from the current comp
+  CTC // annual CTC from the current comp
+  FIXED_AMOUNT // a flat targetAmount (basis-independent)
+}
+
+enum VariablePayFrequency {
+  MONTHLY
+  QUARTERLY
+  ANNUAL
+}
+
+enum VariablePayProration {
+  NONE // everyone gets the full target (factor 1)
+  BY_ATTENDANCE // reserved; v1 falls back to the active/period day-fraction
+  BY_TENURE // active days / period days (mid-period joiners/leavers scaled)
+}
+
+/// One payout period for a scheme. The header the per-employee awards hang off and
+/// that drives the OTE injections at approve. Mirrors BonusCycle's lifecycle.
+model VariablePayCycle {
+  id               String             @id @default(uuid())
+  businessId       String
+  business         Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  schemeId         String
+  scheme           VariablePayScheme  @relation(fields: [schemeId], references: [id], onDelete: Restrict)
+  periodLabel      String // e.g. "2026-Q1"
+  periodStart      DateTime           @db.Date
+  periodEnd        DateTime           @db.Date
+  status           VariablePayStatus  @default(DRAFT)
+  computedAt       DateTime?
+  computedBy       String? // SoD maker — the approver must differ (four-eyes)
+  approvedByUserId String?
+  approvedAt       DateTime?
+  payRunId         String? // set when all injections landed on a single run
+  totalsJson       Json? // { headcount, totalTargetMinor, totalComputedMinor, injected, queued, payRunIds }
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  version          Int                @default(0)
+  awards           VariablePayAward[]
+
+  @@unique([businessId, schemeId, periodLabel]) // exactly-once per (scheme, period)
+  @@index([businessId, status])
+}
+
+enum VariablePayStatus {
+  DRAFT // seeded; achievement% editable
+  COMPUTED // computedAmount frozen per award
+  APPROVED // maker-checker passed; OTE items injected / queued
+  PAID // mirrors the paying run
+  CANCELLED
+}
+
+/// One employee's variable-pay award for the cycle — the immutable per-employee
+/// snapshot (≈ PayRunLine). computedAmount = targetAmount × achievement% × proration.
+model VariablePayAward {
+  id                String            @id @default(uuid())
+  businessId        String
+  business          Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  cycleId           String
+  cycle             VariablePayCycle  @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  employeeId        String
+  employee          Employee          @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  // Frozen inputs.
+  basisAmount       Decimal           @default(0) @db.Decimal(15, 2) // resolved gross/basic/ctc for the period
+  targetAmount      Decimal           @default(0) @db.Decimal(15, 2) // target payout before achievement/proration
+  achievementPct    Decimal           @default(100) @db.Decimal(7, 4) // per-employee performance %, editable pre-compute
+  prorationFactor   Decimal           @default(1) @db.Decimal(9, 6) // active/total days (or 1)
+  computedAmount    Decimal           @default(0) @db.Decimal(15, 2) // frozen at compute
+  status            VariablePayStatus @default(DRAFT)
+  // Payout provenance (INJECT path).
+  queued            Boolean           @default(false) // true when no open run existed at approve
+  payRunInputItemId String? // the injected PayRunInputItem(kind=OTE), when injected
+  note              String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  version           Int               @default(0)
+
+  @@unique([cycleId, employeeId])
+  @@index([businessId, cycleId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -98,6 +98,11 @@ export const NAV_ITEMS = [
   // Labour Welfare Fund read panel (tab inside the page). Gated on canRunPayroll; the
   // server is the real boundary (India-only, RBAC per route).
   { key: 'bonus', label: 'Statutory Bonus', href: '/payroll/bonus', feature: 'payroll', permission: 'canRunPayroll', icon: 'coin' },
+  // Feature 46 — Variable Pay / Incentive schemes (cycles → awards → maker-checker
+  // OTE-inject). OR-gated: canManageCompensation (scheme/cycle authoring + compute +
+  // award edits) OR canViewPayrollReports (read-only list/view). Approve is server-
+  // gated on canApprovePayroll with four-eyes SoD. The server is the real boundary.
+  { key: 'variable-pay', label: 'Variable Pay', href: '/payroll/variable-pay', feature: 'payroll', anyPermission: ['canManageCompensation', 'canViewPayrollReports'], icon: 'coin' },
   // Feature 27 — Auto-Arrear engine (retro salary revision). India-only. Gated on
   // canRunPayroll; the server enforces maker-checker on approve + India-gate per route.
   { key: 'arrears', label: 'Arrears', href: '/payroll/arrears', feature: 'payroll', permission: 'canRunPayroll', icon: 'coin' },
@@ -262,7 +267,7 @@ export const NAV_GROUPS = [
   { key: 'people-org', label: 'People & Org', icon: 'people', items: ['people', 'org', 'profile-changes', 'profile-policy', 'helpdesk', 'announcements', 'surveys', 'recognition'] },
   { key: 'talent', label: 'Talent', icon: 'onboarding', items: ['recruitment', 'onboarding', 'separations', 'performance'] },
   { key: 'time', label: 'Time', icon: 'calendar', items: ['leave', 'comp-off', 'leave-encashment', 'attendance'] },
-  { key: 'pay', label: 'Pay', icon: 'wallet', items: ['compensation', 'ctc-policies', 'fbp-plans', 'fbp-allocations', 'payroll', 'bonus', 'arrears', 'form16', 'compliance', 'registers', 'tax-declaration-window', 'tax-proof-verification', 'tax-regime', 'expenses', 'travel', 'loans', 'reports'] },
+  { key: 'pay', label: 'Pay', icon: 'wallet', items: ['compensation', 'ctc-policies', 'fbp-plans', 'fbp-allocations', 'payroll', 'bonus', 'variable-pay', 'arrears', 'form16', 'compliance', 'registers', 'tax-declaration-window', 'tax-proof-verification', 'tax-regime', 'expenses', 'travel', 'loans', 'reports'] },
   // FLAG FOR MERGE: new Feature 10 group — approval chains + RBAC + reporting tree.
   { key: 'approvals-access', label: 'Approvals & Access', icon: 'approvals', items: ['approvals', 'access-roles', 'access-hierarchy'] },
 ];

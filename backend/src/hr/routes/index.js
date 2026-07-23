@@ -169,6 +169,11 @@ router.use('/me/bonus', require('../payroll/meBonus.routes'));
 // canApprovePayroll / canViewPayrollReports); SoD + idempotency live in the service.
 router.use('/arrears', require('../payroll/arrears.routes'));
 router.use('/me/arrears', require('../payroll/meArrears.routes'));
+// Feature 46 (Phase 4 — NEW mount): Variable-Pay / Incentive schemes (operator).
+// Country-agnostic. Authoring = canManageCompensation; approve = canApprovePayroll;
+// reads = canViewPayrollReports. Maker-checker SoD lives in the service; approved
+// awards pay via a PayRunInputItem(kind=OTE) injected onto the entity's open run.
+router.use('/variable-pay', require('../payroll/variablePay.routes'));
 // FLAG (Feature 23 — NEW mount): Statutory Compliance Calendar + reminder cron.
 // Read = canViewPayrollReports; mark-filed/proof/waive/obligations/seed/sweep =
 // canManageStatutory. Reuses the StatutoryRemittance instance row (extended) +
