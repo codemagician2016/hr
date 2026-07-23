@@ -14,7 +14,7 @@ import { useParams } from 'next/navigation';
 import { ErrorBanner, PrimaryButton, TextInput, Modal, ModalActions, Spinner } from '@hr/ui';
 import { get, post } from '@/lib/api';
 import { asList, StatusBadge, ActionButton, PageHeader } from '@/lib/ui';
-import { Info, FieldLabel, ScoreBadge, NumberInput } from '../../_components';
+import { Info, FieldLabel, ScoreBadge, NumberInput, ChannelChips, renderMergePreview } from '../../_components';
 
 export default function ApplicationPage() {
   const { id } = useParams();
@@ -24,6 +24,7 @@ export default function ApplicationPage() {
   const [error, setError] = useState('');
   const [showSchedule, setShowSchedule] = useState(false);
   const [showOffer, setShowOffer] = useState(false);
+  const [showMessage, setShowMessage] = useState(false);
 
   const load = useCallback(async () => {
     setError('');
@@ -124,6 +125,7 @@ export default function ApplicationPage() {
             <div className="space-y-2">
               {shortlistStage && <button onClick={() => move(shortlistStage.id)} className="w-full text-sm px-3 py-2 rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50">Shortlist → {shortlistStage.name}</button>}
               {rejectStage && <button onClick={() => move(rejectStage.id)} className="w-full text-sm px-3 py-2 rounded-lg border border-red-300 text-red-700 hover:bg-red-50">Reject</button>}
+              <button onClick={() => setShowMessage(true)} className="w-full text-sm px-3 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50">Message candidate</button>
               <button onClick={() => setShowOffer(true)} className="w-full text-sm px-3 py-2 rounded-lg border" style={{ borderColor: 'var(--theme-primary)', color: 'var(--theme-primary)' }}>Make offer</button>
             </div>
           </section>
@@ -168,6 +170,14 @@ export default function ApplicationPage() {
 
       {showSchedule && <ScheduleModal applicationId={id} jobId={app.jobId} onClose={() => setShowSchedule(false)} onScheduled={() => { setShowSchedule(false); load(); }} />}
       {showOffer && <OfferModal applicationId={id} countryCode={(snap && snap.countryCode)} onClose={() => setShowOffer(false)} onDone={() => { setShowOffer(false); load(); }} />}
+      {showMessage && (
+        <MessageDrawer
+          applicationId={id} jobId={app.jobId}
+          candidateName={cand.firstName ? `${cand.firstName} ${cand.lastName}` : (cand.email || 'the candidate')}
+          role={app.jobTitle}
+          onClose={() => setShowMessage(false)}
+        />
+      )}
     </div>
   );
 }
@@ -239,12 +249,26 @@ function OfferRow({ offer, onChanged }) {
 function InterviewRow({ iv, onChanged }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [showPropose, setShowPropose] = useState(false);
+  // The interview list endpoint does not return slot proposals, so "Awaiting
+  // candidate" is tracked in-session after a successful propose (the candidate
+  // confirms on their public link, which stamps scheduledAt → the row reflects it
+  // on the next reload).
+  const [proposal, setProposal] = useState(null);
   const submitted = (iv.scorecards || []).filter((c) => c.status === 'SUBMITTED').length;
   const total = (iv.scorecards || []).length;
   async function invite() {
     setBusy(true); setError('');
     try { await post(`/api/hr/recruitment/interviews/${iv.id}/invite`, {}); onChanged(); }
-    catch (e) { setError(e.message); }
+    catch (e) { setError(e.data?.message || e.message); }
+    finally { setBusy(false); }
+  }
+  async function withdraw() {
+    setBusy(true); setError('');
+    try {
+      await post(`/api/hr/recruitment/interviews/${iv.id}/withdraw-slots`, proposal ? { proposalId: proposal.id } : {});
+      setProposal(null);
+    } catch (e) { setError(e.data?.message || e.message); }
     finally { setBusy(false); }
   }
   return (
@@ -255,13 +279,201 @@ function InterviewRow({ iv, onChanged }) {
       </div>
       <div className="flex items-center justify-between mt-1">
         <span className="text-xs text-gray-500">{submitted} of {total || '—'} scorecards in</span>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {!iv.candidateInviteSentAt && <ActionButton onClick={invite} disabled={busy}>Send invitation</ActionButton>}
           {iv.candidateInviteSentAt && <span className="text-[11px] text-emerald-600">Invited</span>}
+          {!proposal && !iv.scheduledAt && <ActionButton onClick={() => setShowPropose(true)} disabled={busy}>Propose slots</ActionButton>}
         </div>
       </div>
+      {proposal && (
+        <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 flex items-center justify-between gap-2">
+          <span className="text-[11px] text-amber-700">
+            <b>Awaiting candidate</b> — {proposal.slots.length} time option{proposal.slots.length === 1 ? '' : 's'} sent. They pick one on their link.
+          </span>
+          <button type="button" onClick={withdraw} disabled={busy} className="text-[11px] font-medium text-amber-800 underline hover:no-underline disabled:opacity-50">
+            Withdraw / re-propose
+          </button>
+        </div>
+      )}
       {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
+      {showPropose && (
+        <ProposeSlotsModal
+          interview={iv}
+          onClose={() => setShowPropose(false)}
+          onProposed={(p) => { setShowPropose(false); setProposal(p); }}
+        />
+      )}
     </div>
+  );
+}
+
+// Propose 1..N interview time options → the candidate picks one on their public
+// link (POST /interviews/:id/propose-slots fires candidate.slot_request). The
+// backend takes { slots:[{startAt,endAt}], expiresAt? }; mode/location/video are
+// already set on the interview at schedule time and shown here for context.
+function ProposeSlotsModal({ interview, onClose, onProposed }) {
+  const [options, setOptions] = useState(['']); // datetime-local strings
+  const [durationMins, setDurationMins] = useState(interview.durationMins || 45);
+  const [expiresAt, setExpiresAt] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const setOption = (i, v) => setOptions((arr) => arr.map((o, j) => (j === i ? v : o)));
+  const addOption = () => setOptions((arr) => (arr.length >= 20 ? arr : [...arr, '']));
+  const removeOption = (i) => setOptions((arr) => arr.filter((_, j) => j !== i));
+
+  async function save(e) {
+    e.preventDefault();
+    const picked = options.map((s) => s.trim()).filter(Boolean);
+    if (!picked.length) { setError('Add at least one date & time option.'); return; }
+    const dur = Number(durationMins) > 0 ? Number(durationMins) : 45;
+    const slots = picked.map((s) => {
+      const start = new Date(s);
+      const end = new Date(start.getTime() + dur * 60000);
+      return { startAt: start.toISOString(), endAt: end.toISOString() };
+    });
+    setSaving(true); setError('');
+    try {
+      const p = await post(`/api/hr/recruitment/interviews/${interview.id}/propose-slots`, {
+        slots, expiresAt: expiresAt ? new Date(expiresAt).toISOString() : undefined,
+      });
+      onProposed(p);
+    } catch (err) { setError(err.data?.message || err.message || 'Could not send the slot options.'); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <Modal title="Propose interview times" onClose={onClose}>
+      {error && <ErrorBanner message={error} />}
+      <form onSubmit={save} className="space-y-4">
+        <p className="text-xs text-gray-500">
+          Round {interview.round} · {interview.mode}{interview.locationText ? ` · ${interview.locationText}` : ''}{interview.videoUrl ? ' · video link set' : ''}.
+          The candidate picks one of these on a no-login link; confirming sends the calendar invite to them and the panel.
+        </p>
+        <div>
+          <FieldLabel hint="Offer 1–20 date & time options. The candidate confirms exactly one.">Time options</FieldLabel>
+          <div className="space-y-2">
+            {options.map((o, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <input type="datetime-local" value={o} onChange={(e) => setOption(i, e.target.value)} className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+                <button type="button" onClick={() => removeOption(i)} disabled={options.length === 1} className="text-xs text-red-600 hover:underline disabled:opacity-40">Remove</button>
+              </div>
+            ))}
+          </div>
+          <button type="button" onClick={addOption} disabled={options.length >= 20} className="text-sm mt-2 hover:underline disabled:opacity-40" style={{ color: 'var(--theme-primary)' }}>+ Add another time</button>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <FieldLabel hint="Length of each slot in minutes — sets the calendar-invite end time.">Duration (mins)</FieldLabel>
+            <NumberInput value={durationMins} onChange={setDurationMins} min={15} step={15} />
+          </div>
+          <div>
+            <FieldLabel hint="Optional — after this the options expire and the candidate can no longer confirm. Defaults to 7 days.">Expires (optional)</FieldLabel>
+            <input type="datetime-local" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+          </div>
+        </div>
+        <ModalActions>
+          <button type="button" onClick={onClose} className="px-3 py-2 text-sm text-gray-600">Cancel</button>
+          <PrimaryButton type="submit" disabled={saving}>{saving ? 'Sending…' : 'Send to candidate'}</PrimaryButton>
+        </ModalActions>
+      </form>
+    </Modal>
+  );
+}
+
+// Candidate message drawer — pick a candidate-facing template, preview the merged
+// copy, and send it to this one candidate. There is no single-send endpoint, so
+// we reuse POST /applications/bulk-message with ids:[applicationId] (the server
+// resolves + scopes it exactly like a bulk send). The template's channels are
+// fixed by the platform (the router decides delivery per country/budget/STOP).
+const CAND_MESSAGE_KEYS = new Set([
+  'HR_CAND_APPLIED', 'HR_CAND_SHORTLISTED', 'HR_CAND_INTERVIEW_INVITE',
+  'HR_CAND_SLOT_REQUEST', 'HR_CAND_REJECTED', 'HR_CAND_OFFER',
+]);
+
+function MessageDrawer({ applicationId, jobId, candidateName, role, onClose }) {
+  const [templates, setTemplates] = useState([]);
+  const [bizName, setBizName] = useState('');
+  const [selKey, setSelKey] = useState('');
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState(null);
+
+  useEffect(() => {
+    get('/api/hr/recruitment/comms-templates')
+      .then((r) => {
+        const items = (r?.items || []).filter((t) => CAND_MESSAGE_KEYS.has(t.key));
+        setTemplates(items);
+        if (items[0]) setSelKey(items[0].key);
+      })
+      .catch((e) => setError(e.data?.message || e.message || 'Could not load message templates.'));
+    // BIZ for the preview — best-effort; the real value is merged server-side.
+    get('/api/tenant/resolve').then((r) => setBizName(r?.business?.name || '')).catch(() => {});
+  }, []);
+
+  const tpl = templates.find((t) => t.key === selKey) || null;
+  const body = tpl ? (tpl.overrideBody || tpl.defaultBody || '') : '';
+  const preview = renderMergePreview(body, {
+    NAME: candidateName, ROLE: role || 'the role', BIZ: bizName || 'your company',
+  });
+
+  async function send() {
+    if (!tpl) return;
+    setSending(true); setError(''); setResult(null);
+    try {
+      const res = await post('/api/hr/recruitment/applications/bulk-message', {
+        filter: { jobId }, ids: [applicationId], templateKey: tpl.key,
+      });
+      setResult(res);
+    } catch (e) { setError(e.data?.message || e.message || 'Could not send the message.'); }
+    finally { setSending(false); }
+  }
+
+  return (
+    <Modal title={`Message ${candidateName}`} onClose={onClose}>
+      {error && <ErrorBanner message={error} />}
+      {result ? (
+        <div className="space-y-4">
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-800">
+            {result.sent ? 'Message sent.' : 'Nothing was sent.'} {result.sent} sent · {result.skipped} skipped · {result.total} targeted.
+            {result.sent === 0 && result.skipped > 0 && (
+              <p className="text-xs text-emerald-700 mt-1">Skipped usually means no contact on file, an already-sent duplicate, or the candidate opted out.</p>
+            )}
+          </div>
+          <ModalActions>
+            <PrimaryButton type="button" onClick={onClose}>Done</PrimaryButton>
+          </ModalActions>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div>
+            <FieldLabel hint="The candidate-facing message to send. Edit the copy under Settings → Candidate messages.">Template</FieldLabel>
+            <select value={selKey} onChange={(e) => setSelKey(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+              {templates.length === 0 && <option value="">Loading…</option>}
+              {templates.map((t) => <option key={t.key} value={t.key}>{t.displayName}{t.overridden ? ' (customised)' : ''}</option>)}
+            </select>
+          </div>
+
+          {tpl && (
+            <>
+              <div className="flex items-center gap-2 text-xs text-gray-500">
+                <span>Sends via:</span><ChannelChips channels={tpl.channels} />
+              </div>
+              <div className="rounded-xl border border-gray-200 bg-gradient-to-br from-indigo-50/60 to-white p-3 text-sm text-gray-700">
+                <p className="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500">Preview <span className="normal-case font-normal">— [TOKENS] are filled in at send time</span></p>
+                <p className="whitespace-pre-wrap">{preview}</p>
+              </div>
+              <p className="text-[11px] text-gray-400">A personal “track your application” link is added automatically for this candidate.</p>
+            </>
+          )}
+
+          <ModalActions>
+            <button type="button" onClick={onClose} className="px-3 py-2 text-sm text-gray-600">Cancel</button>
+            <PrimaryButton type="button" onClick={send} disabled={sending || !tpl}>{sending ? 'Sending…' : 'Send message'}</PrimaryButton>
+          </ModalActions>
+        </div>
+      )}
+    </Modal>
   );
 }
 

@@ -23,8 +23,21 @@ const {
   jobScopeWhere, scopeAllowsJob, accessibleJobIds, assignedInterviewIds,
 } = require('../recruitment/recruitmentScope');
 const { resolveAccessibleEmployeeIds, scopeAllows } = require('../../lib/scopeResolver');
+// Feature 36 — candidate stage messaging (best-effort, fire-and-forget). A move /
+// bulk-move / offer-send fires the mapped candidate event through the gated fan-out.
+const candidateNotify = require('../recruitment/candidateNotify');
 
 const DUP_MSG = 'A record with that code already exists';
+
+// Map the application's NEW status → the candidate stage event to fan out.
+// SCREENING/INTERVIEWING → shortlisted; REJECTED → rejected (gated OFF by default).
+// Everything else (APPLIED/ASSESSMENT/OFFERED/HIRED/WITHDRAWN/ON_HOLD) is silent
+// here — offer messaging fires from sendOffer, and the rest have no candidate copy.
+const STATUS_TO_CANDIDATE_EVENT = Object.freeze({
+  SCREENING: 'candidate.shortlisted',
+  INTERVIEWING: 'candidate.shortlisted',
+  REJECTED: 'candidate.rejected',
+});
 
 function picker(fields, dates = []) {
   return (body) => {
@@ -54,6 +67,8 @@ const JOB_FIELDS = [
   // Feature 12 — public posting + merit-blend + scoring config.
   'publicSlug', 'isPublic', 'applicationWeightPct', 'interviewWeightPct',
   'scorecardTemplateId', 'hideCandidatePiiUntilStage',
+  // Feature 36 — per-requisition candidate-comms overrides (auto-send + template keys).
+  'commsConfig',
 ];
 const JOB_REQUIRED = ['code', 'title', 'countryCode', 'employmentType'];
 const pickJob = picker(JOB_FIELDS);
@@ -661,7 +676,7 @@ async function bulkApplicationAction(req, res, next) {
     }
 
     // load the candidate rows in-scope; we only ever touch THESE ids.
-    const targets = await prisma.application.findMany({ where, select: { id: true, status: true, jobId: true } });
+    const targets = await prisma.application.findMany({ where, select: { id: true, status: true, jobId: true, candidateId: true } });
     if (!targets.length) return res.json({ changed: 0, skipped: 0, total: 0, ids: [] });
 
     // a bulk reject/shortlist/status move is a pipeline move; terminal apps are
@@ -723,6 +738,21 @@ async function bulkApplicationAction(req, res, next) {
         meta: { action, targetStatus, changed: changedIds.length, skipped, jobIds, filter },
       } });
     } catch { /* audit is best-effort */ }
+
+    // Feature 36 — fan out the mapped candidate stage message per changed id
+    // (best-effort, fire-and-forget). A bulk reject → candidate.rejected, which is
+    // auto-send OFF by default, so it sends NOTHING unless the tenant opted in
+    // (§7.1). Each send is deduped on CAND_<stage>:<appId>:<status>.
+    const bulkCandEvent = STATUS_TO_CANDIDATE_EVENT[targetStatus];
+    if (bulkCandEvent) {
+      for (const a of actionable) {
+        candidateNotify.fanOutCandidateStage({
+          businessId,
+          application: { id: a.id, status: targetStatus, candidateId: a.candidateId, jobId: a.jobId },
+          event: bulkCandEvent,
+        }).catch(() => { /* never breaks the bulk action */ });
+      }
+    }
 
     res.json({ changed: changedIds.length, skipped, total: targets.length, ids: changedIds });
   } catch (e) { next(e); }
@@ -816,6 +846,17 @@ async function moveApplication(req, res, next) {
     };
     if (stage.kind === 'REJECTED' && req.body.rejectReason) data.rejectReason = req.body.rejectReason;
     const item = await prisma.application.update({ where: { id: app.id }, data });
+    // Feature 36 — fan out the mapped candidate stage message (best-effort,
+    // fire-and-forget; auto-send config governs whether it actually leaves — reject
+    // defaults OFF). The dedupe token makes a re-fired identical transition a no-op.
+    const candEvent = STATUS_TO_CANDIDATE_EVENT[item.status];
+    if (candEvent) {
+      candidateNotify.fanOutCandidateStage({
+        businessId,
+        application: { id: item.id, status: item.status, candidateId: item.candidateId, jobId: item.jobId },
+        event: candEvent,
+      }).catch(() => { /* never breaks the move */ });
+    }
     res.json(item);
   } catch (e) { next(e); }
 }
@@ -1134,6 +1175,23 @@ async function sendOffer(req, res, next) {
       where: { id: offer.id },
       data: { status: 'SENT', sentAt: new Date() },
     });
+    // Feature 36 — fire the candidate.offer message (fixes HR_OFFER_SENT never
+    // firing). Best-effort, fire-and-forget; auto-send default ON for offers. Carries
+    // the offer EXPIRY + the status {LINK}. Never awaits into the response.
+    (async () => {
+      const appRow = await prisma.application.findFirst({
+        where: { id: offer.applicationId, businessId },
+        select: { id: true, status: true, candidateId: true, jobId: true },
+      });
+      if (!appRow) return;
+      const expiry = offer.expiresAt ? new Date(offer.expiresAt).toISOString().slice(0, 10) : 'the stated date';
+      await candidateNotify.fanOutCandidateStage({
+        businessId,
+        application: appRow,
+        event: 'candidate.offer',
+        extraVars: { EXPIRY: expiry },
+      });
+    })().catch(() => { /* never breaks the offer send */ });
     res.json(item);
   } catch (e) { next(e); }
 }

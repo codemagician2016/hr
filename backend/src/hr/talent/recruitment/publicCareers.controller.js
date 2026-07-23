@@ -18,6 +18,14 @@ const prisma = require('../../../core/lib/prisma');
 const s3 = require('../../../core/lib/s3');
 const { _internals: scoringInternals } = require('./scoring');
 const scoringCtl = require('./recruitment.scoring.controller');
+// Feature 36 — candidate fan-out + access-token minting (status link on apply),
+// the friendly status/timeline projection, and the pure slot-proposal logic.
+const candidateNotify = require('./candidateNotify');
+const { serializeTimelineApplication } = require('./candidateTimeline');
+const slotsLib = require('./slots');
+const { notifyHrEvent } = require('../../integrations/notifications');
+const { appBaseUrl } = require('../../approvals/notify')._internals;
+const { buildIcs, careersOrganizer, parseInterviewerIds } = scoringCtl._internals;
 
 // ── resume upload guards (reuse F4 pre-join caps) ─────────────────────────────
 const MAX_RESUME_BYTES = 10 * 1024 * 1024; // 10 MB decoded
@@ -221,15 +229,262 @@ async function publicApply(req, res, next) {
       await scoringCtl._internals.recordAnswersAndScore(biz.id, appRow, ansList);
     } catch { /* scoring failures never block the candidate's apply */ }
 
+    // Feature 36 — mint the candidate's public access token (idempotent) so the
+    // thank-you can carry a "track your application" status link, and fire the
+    // "we received it" acknowledgement (candidate.applied, default auto-send ON).
+    // Both are best-effort: a notify/token failure never breaks the apply.
+    let trackUrl = null;
+    try {
+      const token = await candidateNotify.ensureCandidateToken(biz.id, application.candidateId);
+      trackUrl = candidateNotify.candidateStatusLink(biz.slug, token);
+    } catch { /* best-effort */ }
+    candidateNotify.fanOutCandidateStage({
+      businessId: biz.id,
+      application: { id: application.id, status: application.status, candidateId: application.candidateId, jobId: application.jobId },
+      event: 'candidate.applied',
+    }).catch(() => { /* fire-and-forget */ });
+
     // thank-you only — no score, no knockout status leaked.
-    return res.status(201).json({ ok: true, message: 'Thank you for applying. Our team will be in touch.' });
+    return res.status(201).json({ ok: true, message: 'Thank you for applying. Our team will be in touch.', trackUrl });
   } catch (e) {
     if (e.code === 'P2002') return res.status(409).json({ message: 'You have already applied to this role.' });
     next(e);
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Feature 36 — PUBLIC candidate status/timeline + slot confirm (tokenised, UNAUTH)
+// Same disclosure + rate-limit posture as the apply endpoints: the tenant is
+// resolved from :businessSlug, the candidate from :token (NEVER a client id), and
+// no score / internal note / other candidate is ever serialised (§4.6, §6).
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Rate-limit the candidate endpoints on the trusted IP + the token (reuses the
+// apply limiter's window + per-IP / per-subject dimensions).
+function candidateRateLimited({ ip, token }) {
+  const now = Date.now();
+  const overIp = hit(`ci:${coarseIpBucket(ip)}`, RL_PER_IP, now);
+  const overTok = hit(`ct:${String(token || '')}`, RL_PER_APPLICANT, now);
+  return overIp || overTok;
+}
+
+// Resolve a candidate from an access token, hard-scoped to the tenant. A token
+// from another tenant, an unknown token, or an expired token all resolve to null
+// (→ 404). Never accepts a client-supplied candidateId.
+async function resolveCandidateToken(businessId, token) {
+  if (!token) return null;
+  const row = await prisma.candidateAccessToken.findFirst({
+    where: { token: String(token), businessId },
+    include: { candidate: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } } },
+  }).catch(() => null);
+  if (!row) return null;
+  if (row.expiresAt && new Date(row.expiresAt).getTime() < Date.now()) return null;
+  return row;
+}
+
+// GET /careers/:businessSlug/c/:token — the candidate's own friendly timeline
+// across their applications. Zero scores / internal notes / other candidates.
+async function candidateTimeline(req, res, next) {
+  try {
+    const biz = await resolveBusiness(req.params.businessSlug);
+    if (!biz) return res.status(404).json({ message: 'Careers page not found' });
+    if (candidateRateLimited({ ip: req.ip, token: req.params.token })) {
+      return res.status(429).json({ message: 'Too many requests. Please try again in a minute.' });
+    }
+    const tok = await resolveCandidateToken(biz.id, req.params.token);
+    if (!tok) return res.status(404).json({ message: 'Not found' });
+
+    const apps = await prisma.application.findMany({
+      where: { businessId: biz.id, candidateId: tok.candidateId },
+      // SELECT ONLY the leak-safe columns — never the score/reason/snapshot fields.
+      select: { id: true, status: true, createdAt: true, updatedAt: true, job: { select: { title: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+    // Surface any ACTIVE interview slot proposal so the candidate can reach the
+    // picker straight from the status link (the slot_request message points at
+    // the bare timeline). Leak-safe: only proposalId + slot {id,startAt,endAt},
+    // never panel identities. Newest PROPOSED proposal per application wins.
+    const appIds = apps.map((a) => a.id);
+    const proposalByApp = new Map();
+    if (appIds.length) {
+      const proposals = await prisma.interviewSlotProposal.findMany({
+        where: { businessId: biz.id, status: 'PROPOSED', interview: { applicationId: { in: appIds } } },
+        select: { id: true, slots: true, expiresAt: true, createdAt: true, interview: { select: { applicationId: true } } },
+        orderBy: { createdAt: 'desc' },
+      });
+      for (const p of proposals) {
+        const aid = p.interview && p.interview.applicationId;
+        if (aid && !proposalByApp.has(aid)) {
+          const slots = Array.isArray(p.slots) ? p.slots.map((s) => ({ id: s.id, startAt: s.startAt, endAt: s.endAt })) : [];
+          proposalByApp.set(aid, { proposalId: p.id, expiresAt: p.expiresAt, slots });
+        }
+      }
+    }
+    const applications = apps.map((a) => {
+      const base = serializeTimelineApplication(a, { role: a.job && a.job.title });
+      const active = proposalByApp.get(a.id) || null;
+      return active ? { ...base, activeSlotProposal: active } : base;
+    });
+    res.json({ business: { name: biz.name, slug: biz.slug }, applications });
+  } catch (e) { next(e); }
+}
+
+// GET /careers/:businessSlug/c/:token/slots/:proposalId — the proposed slots for
+// the candidate to choose from (no panel identities, no other applications).
+async function candidateSlotProposal(req, res, next) {
+  try {
+    const biz = await resolveBusiness(req.params.businessSlug);
+    if (!biz) return res.status(404).json({ message: 'Careers page not found' });
+    if (candidateRateLimited({ ip: req.ip, token: req.params.token })) {
+      return res.status(429).json({ message: 'Too many requests. Please try again in a minute.' });
+    }
+    const tok = await resolveCandidateToken(biz.id, req.params.token);
+    if (!tok) return res.status(404).json({ message: 'Not found' });
+
+    const proposal = await prisma.interviewSlotProposal.findFirst({
+      where: { id: req.params.proposalId, businessId: biz.id },
+      include: { interview: { select: { application: { select: { candidateId: true, job: { select: { title: true } } } } } } },
+    });
+    // The proposal must belong to THIS candidate's application in THIS tenant.
+    const app = proposal && proposal.interview && proposal.interview.application;
+    if (!proposal || !app || app.candidateId !== tok.candidateId) {
+      return res.status(404).json({ message: 'Not found' });
+    }
+    const view = slotsLib.publicSlotView(proposal);
+    view.role = app.job ? app.job.title : 'the role';
+    res.json(view);
+  } catch (e) { next(e); }
+}
+
+// POST /careers/:businessSlug/c/:token/slots/:proposalId/confirm — the candidate
+// picks a { slotId }. Conditional PROPOSED→CONFIRMED update wins the double-confirm
+// race; the second confirm 409s. On success: stamp Interview.scheduledAt + fan the
+// ICS to the panel + candidate (reuses buildIcs + the candidate fan-out).
+async function candidateConfirmSlot(req, res, next) {
+  try {
+    const biz = await resolveBusiness(req.params.businessSlug);
+    if (!biz) return res.status(404).json({ message: 'Careers page not found' });
+    if (candidateRateLimited({ ip: req.ip, token: req.params.token })) {
+      return res.status(429).json({ message: 'Too many requests. Please try again in a minute.' });
+    }
+    const tok = await resolveCandidateToken(biz.id, req.params.token);
+    if (!tok) return res.status(404).json({ message: 'Not found' });
+
+    const proposal = await prisma.interviewSlotProposal.findFirst({
+      where: { id: req.params.proposalId, businessId: biz.id },
+      include: { interview: { include: { application: { include: { candidate: true, job: true } } } } },
+    });
+    const iv = proposal && proposal.interview;
+    const app = iv && iv.application;
+    if (!proposal || !app || app.candidateId !== tok.candidateId) {
+      return res.status(404).json({ message: 'Not found' });
+    }
+
+    const slotId = req.body && req.body.slotId;
+    const decision = slotsLib.confirmDecision(proposal, slotId);
+    if (!decision.ok) {
+      if (decision.code === 'BAD_SLOT') {
+        return res.status(422).json({ message: 'That time is not one of the proposed slots.' });
+      }
+      // NOT_CONFIRMABLE (already confirmed/withdrawn) or EXPIRED → 409 + current state.
+      return res.status(409).json({
+        message: proposal.status === 'CONFIRMED' ? 'This interview time is already confirmed.' : 'This slot request is no longer open.',
+        status: proposal.status,
+        confirmedSlot: proposal.confirmedSlot || null,
+      });
+    }
+
+    const chosen = decision.slot;
+    // Conditional update = the double-confirm race authority: only a still-PROPOSED
+    // row flips. The loser gets count 0 → 409 with the winning slot.
+    const upd = await prisma.interviewSlotProposal.updateMany({
+      where: { id: proposal.id, status: 'PROPOSED' },
+      data: { status: 'CONFIRMED', confirmedSlot: chosen },
+    });
+    if (upd.count === 0) {
+      const fresh = await prisma.interviewSlotProposal.findUnique({ where: { id: proposal.id } }).catch(() => null);
+      return res.status(409).json({
+        message: 'This interview time was just confirmed.',
+        status: fresh ? fresh.status : 'CONFIRMED',
+        confirmedSlot: fresh ? fresh.confirmedSlot : null,
+      });
+    }
+
+    // Stamp the interview's scheduledAt (+ derive duration from the slot when given).
+    const startAt = new Date(chosen.startAt);
+    const data = { scheduledAt: startAt, status: 'SCHEDULED' };
+    if (chosen.endAt) {
+      const mins = Math.round((new Date(chosen.endAt).getTime() - startAt.getTime()) / 60000);
+      if (mins > 0) data.durationMins = mins;
+    }
+    const updatedIv = await prisma.interview.update({ where: { id: iv.id }, data });
+
+    // Fan the calendar invite to the panel + candidate (best-effort).
+    const ics = await fanConfirmedInvite(biz.id, updatedIv, app);
+    res.json({ ok: true, status: 'CONFIRMED', confirmedSlot: chosen, ics });
+  } catch (e) { next(e); }
+}
+
+// Build the ICS + fire the confirmed-interview invite to the candidate + panel.
+// Returns the ICS string (best-effort; a notify failure never throws).
+async function fanConfirmedInvite(businessId, interview, application) {
+  const job = application && application.job;
+  const cand = application && application.candidate;
+  let ics = null;
+  try {
+    const biz = await prisma.business.findUnique({
+      where: { id: businessId }, select: { name: true, slug: true, candidateCommsConfig: true },
+    }).catch(() => null);
+    ics = buildIcs(interview, job, cand, { organizer: careersOrganizer(biz) });
+
+    // candidate — the confirmed interview invite (explicit flow → bypass the gate).
+    const slotline = interview.scheduledAt
+      ? `Confirmed time: ${new Date(interview.scheduledAt).toISOString()}.`
+      : '';
+    candidateNotify.fanOutCandidateStage({
+      businessId,
+      application: { id: application.id, status: application.status, candidateId: application.candidateId, jobId: application.jobId },
+      event: 'candidate.interview_invite',
+      force: true,
+      candidate: cand,
+      job,
+      biz,
+      extraVars: { MODE: interview.mode, SLOTLINE: slotline },
+    }).catch(() => {});
+
+    // panel — one HR_INTERVIEW_PANEL per interviewer who resolves to an Employee.
+    const panel = parseInterviewerIds(interview.interviewerIds);
+    if (panel.length) {
+      const emps = await prisma.employee.findMany({
+        where: { id: { in: panel }, businessId },
+        select: { id: true, firstName: true, lastName: true, workEmail: true, personalEmail: true, phone: true, countryCode: true },
+      });
+      const scorecardLink = `${appBaseUrl()}/me/scorecards/${interview.id}`;
+      const when = interview.scheduledAt ? new Date(interview.scheduledAt).toISOString() : 'TBD';
+      for (const e of emps) {
+        const email = e.workEmail || e.personalEmail || null;
+        if (!email && !e.phone) continue;
+        notifyHrEvent({
+          businessId, event: 'interview.panel_notice',
+          recipientEmail: email, recipientPhone: e.phone || null, recipientCountry: e.countryCode || undefined,
+          variables: {
+            NAME: `${e.firstName || ''} ${e.lastName || ''}`.trim() || 'there',
+            ROLE: job ? job.title : 'the role', WHEN: when, LINK: scorecardLink,
+          },
+          triggeredBy: `HR_INTERVIEW_PANEL:${interview.id}:${e.id}`,
+        }).catch(() => {});
+      }
+    }
+  } catch { /* best-effort */ }
+  return ics;
+}
+
 module.exports = {
   publicBoard, publicJobDetail, publicApply,
-  _internals: { validateResumeDataUrl, publicQuestion, applyRateLimited, coarseIpBucket },
+  // Feature 36 — public candidate status/timeline + slot confirm.
+  candidateTimeline, candidateSlotProposal, candidateConfirmSlot,
+  _internals: {
+    validateResumeDataUrl, publicQuestion, applyRateLimited, coarseIpBucket,
+    candidateRateLimited, resolveCandidateToken,
+  },
 };

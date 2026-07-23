@@ -1482,6 +1482,48 @@ function initScheduler() {
       reportSchedulesRunning = false;
     }
   });
+
+  // Feature 36 — interview slot-proposal expiry sweep (every 30 min). Flips
+  // PROPOSED proposals past their expiresAt → EXPIRED (conditional/idempotent) and
+  // notifies the proposer in-app so a stale "awaiting candidate" card doesn't sit
+  // forever. Tenant-safe, per-row fail-soft, in-process overlap guard.
+  let slotExpiryRunning = false;
+  cron.schedule('*/30 * * * *', async () => {
+    if (slotExpiryRunning) { console.log('[Scheduler] slot expiry still running — skipping tick'); return; }
+    slotExpiryRunning = true;
+    try {
+      const { sweepExpiredSlotProposals } = require('../../hr/talent/recruitment/recruitmentCommsRunner');
+      const r = await sweepExpiredSlotProposals({ asOf: new Date() });
+      if (r.expired > 0 || r.errors > 0) {
+        console.log(`[Scheduler] slot expiry: ${JSON.stringify(r)}`);
+      }
+    } catch (err) {
+      console.error('[Scheduler] slot expiry failed:', err.message);
+    } finally {
+      slotExpiryRunning = false;
+    }
+  });
+
+  // Feature 36 — interview-feedback nudge (daily 09:10). Reminds panellists with an
+  // un-submitted DRAFT scorecard past the grace window after a COMPLETED interview,
+  // deep-linked to their scorecard, deduped one per (interview, panellist, day).
+  // Tenant-safe, per-row fail-soft, in-process overlap guard.
+  let feedbackNudgeRunning = false;
+  cron.schedule('10 9 * * *', async () => {
+    if (feedbackNudgeRunning) { console.log('[Scheduler] feedback nudge still running — skipping tick'); return; }
+    feedbackNudgeRunning = true;
+    try {
+      const { runInterviewFeedbackNudge } = require('../../hr/talent/recruitment/recruitmentCommsRunner');
+      const r = await runInterviewFeedbackNudge({ asOf: new Date() });
+      if (r.nudged > 0 || r.errors > 0) {
+        console.log(`[Scheduler] interview feedback nudge: ${JSON.stringify(r)}`);
+      }
+    } catch (err) {
+      console.error('[Scheduler] interview feedback nudge failed:', err.message);
+    } finally {
+      feedbackNudgeRunning = false;
+    }
+  });
 }
 
 // Find PENDING orders older than `maxAgeMinutes` (default 30) and cancel

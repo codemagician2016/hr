@@ -92,15 +92,45 @@ export default function RecruitmentPage() {
 // ══════════════════════════════════════════════════════════════════════════
 // My interviews tab — an interviewer's own assigned panels (scope-bound /me/*)
 // ══════════════════════════════════════════════════════════════════════════
+// A completed (or past-due) interview whose scorecard the interviewer hasn't
+// submitted yet still needs feedback. Terminal states never do.
+function interviewHappened(iv) {
+  if (iv.status === 'COMPLETED') return true;
+  if (['CANCELLED', 'RESCHEDULED', 'NO_SHOW'].includes(iv.status)) return false;
+  return !!(iv.scheduledAt && new Date(iv.scheduledAt).getTime() < Date.now());
+}
+
 function MyInterviewsTab() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // interviewId → true when this interview happened but MY scorecard isn't in yet.
+  const [pending, setPending] = useState({});
+
   useEffect(() => {
     setLoading(true);
     get('/api/hr/recruitment/me/interviews')
-      .then((r) => setRows(asList(r)))
-      .catch((e) => setError(e.message))
+      .then((r) => {
+        const list = asList(r);
+        setRows(list);
+        // Derive "Feedback pending" by checking my scorecard status on the
+        // interviews that have already happened (no new endpoint — reuses the
+        // existing me/scorecards read the Score page already uses). A card that
+        // isn't SUBMITTED = feedback still owed.
+        const toCheck = list.filter(interviewHappened);
+        Promise.allSettled(
+          toCheck.map((iv) => get(`/api/hr/recruitment/me/scorecards/${iv.id}`).then((c) => ({ id: iv.id, status: c?.card?.status })))
+        ).then((results) => {
+          const map = {};
+          for (const res of results) {
+            if (res.status === 'fulfilled' && res.value && res.value.status && res.value.status !== 'SUBMITTED') {
+              map[res.value.id] = true;
+            }
+          }
+          setPending(map);
+        });
+      })
+      .catch((e) => setError(e.data?.message || e.message))
       .finally(() => setLoading(false));
   }, []);
 
@@ -109,13 +139,32 @@ function MyInterviewsTab() {
     { key: 'candidate', header: 'Candidate', render: (r) => r.candidate ? `${r.candidate.firstName} ${r.candidate.lastName}` : '—' },
     { key: 'scheduledAt', header: 'When', render: (r) => r.scheduledAt ? new Date(r.scheduledAt).toLocaleString() : 'TBD' },
     { key: 'mode', header: 'Mode' },
-    { key: 'status', header: 'Status', render: (r) => <StatusBadge status={r.status} /> },
-    { key: 'actions', header: '', render: (r) => <Link href={`/recruitment/interviews/${r.id}/score`} className="text-xs font-medium hover:underline" style={{ color: 'var(--theme-primary)' }}>Score →</Link> },
+    {
+      key: 'status', header: 'Status',
+      render: (r) => (
+        <span className="inline-flex flex-wrap items-center gap-1.5">
+          <StatusBadge status={r.status} />
+          {pending[r.id] && (
+            <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700" title="This interview is done but your scorecard isn't submitted yet.">
+              Feedback pending
+            </span>
+          )}
+        </span>
+      ),
+    },
+    {
+      key: 'actions', header: '',
+      render: (r) => (
+        <Link href={`/recruitment/interviews/${r.id}/score`} className="text-xs font-medium hover:underline" style={{ color: pending[r.id] ? '#b45309' : 'var(--theme-primary)' }}>
+          {pending[r.id] ? 'Submit feedback →' : 'Score →'}
+        </Link>
+      ),
+    },
   ];
   return (
     <div>
       {error && <ErrorBanner message={error} />}
-      <p className="text-sm text-gray-500 mb-3">Interviews you're on the panel for. Open one to fill <b>your</b> scorecard (you only ever see your own card).</p>
+      <p className="text-sm text-gray-500 mb-3">Interviews you're on the panel for. Open one to fill <b>your</b> scorecard (you only ever see your own card). A <b>Feedback pending</b> badge means the interview is done but your scorecard isn't submitted yet.</p>
       <DataTable columns={columns} rows={rows} loading={loading} rowKey={(r) => r.id} emptyText="You have no assigned interviews." />
     </div>
   );

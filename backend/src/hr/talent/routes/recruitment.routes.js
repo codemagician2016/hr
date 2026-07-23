@@ -17,6 +17,9 @@ const { attachSelfEmployee } = require('../../middleware/scope.middleware');
 const { attachRecruitmentScope } = require('../recruitment/recruitmentScope');
 const c = require('../controllers/recruitment.controller');
 const s = require('../recruitment/recruitment.scoring.controller');
+// Feature 36 — candidate communication (scheduling handshake, bulk message,
+// template library + comms config).
+const cc = require('../recruitment/candidateComms.controller');
 
 router.use(protect);
 // Talent Acquisition is a paid ADD-ON — gate the WHOLE recruitment surface behind
@@ -104,6 +107,9 @@ router.post('/applications/:id/recompute-score', canManage, s.recomputeScore);
 // Needs the F1 read-scope resolved so the server can intersect the target set with
 // the caller's reachable requisitions — a client can never act out of scope.
 router.post('/applications/bulk-action', [canManage, ...attachRecruitmentScope('canViewHiring')], c.bulkApplicationAction);
+// Feature 36 — bulk candidate MESSAGE over the same scoped/filtered set (reuses
+// bulkApplicationAction's accessibleJobIds + filter + scope resolution verbatim).
+router.post('/applications/bulk-message', [canManage, ...attachRecruitmentScope('canViewHiring')], cc.bulkMessage);
 
 // ── Merit list ───────────────────────────────────────────────────────────────
 router.get('/jobs/:jobId/merit-list', canView, s.meritList);
@@ -116,6 +122,11 @@ router.post('/interviews/:id/invite', canManage, s.inviteInterview);
 router.post('/interviews/:id/reschedule', canManage, s.rescheduleInterview);
 router.post('/interviews/:id/cancel', canManage, s.cancelInterview);
 router.post('/scorecards/:id/reopen', canManage, s.reopenScorecard);
+// Feature 36 — interview scheduling handshake (propose N slots → candidate confirms
+// one on the public link). Scope-resolved so a recruiter can only propose on a
+// requisition they own (out-of-scope → 404).
+router.post('/interviews/:id/propose-slots', writeScoped, cc.proposeSlots);
+router.post('/interviews/:id/withdraw-slots', writeScoped, cc.withdrawSlots);
 
 // ── Interviewer self-service (scope-bound to the caller's own Employee) ───────
 const canScore = requireAny('canScoreInterview', 'canManageHiring', 'canManageEmployees');
@@ -123,6 +134,15 @@ router.get('/me/interviews', canScore, attachSelfEmployee, s.myInterviews);
 router.get('/me/scorecards/:interviewId', canScore, attachSelfEmployee, s.myScorecard);
 router.patch('/me/scorecards/:id', canScore, attachSelfEmployee, s.saveMyScorecard);
 router.post('/me/scorecards/:id/submit', canScore, attachSelfEmployee, s.submitMyScorecard);
+
+// ── Candidate-message template library + per-tenant comms config (Feature 36) ──
+// The library edits the per-tenant BODY override for the 8 HR_CAND_*/interview
+// keys (token-validated; system templates are editable-but-not-deletable).
+router.get('/comms-templates', canView, cc.listCommsTemplates);
+router.put('/comms-templates/:key', canManage, cc.updateCommsTemplate);
+router.delete('/comms-templates/:key', canManage, cc.resetCommsTemplate);
+router.get('/comms-config', canManage, cc.getCommsConfig);
+router.put('/comms-config', canManage, cc.updateCommsConfig);
 
 // ── Offers (50% wage pre-flight runs in createOffer) ─────────────────────────
 // Offer create/send/accept/decline/render/sign are F1 read-scoped: a scoped

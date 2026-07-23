@@ -16,6 +16,7 @@ export default function PublicJobApplyPage() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const [trackUrl, setTrackUrl] = useState(null);
 
   const load = useCallback(async () => {
     setError('');
@@ -45,7 +46,14 @@ export default function PublicJobApplyPage() {
           <div className="mx-auto mb-4 h-12 w-12 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 text-2xl">✓</div>
           <h1 className="text-xl font-semibold text-gray-900">Application received</h1>
           <p className="text-sm text-gray-500 mt-2">Thank you for applying to <b>{job.title}</b> at {business?.name}. Our team will be in touch if there's a match.</p>
-          <Link href={`/careers/${businessSlug}`} className="mt-5 inline-block text-sm font-medium" style={{ color: 'var(--theme-primary, #4f46e5)' }}>← See other open roles</Link>
+          {trackUrl && (
+            <a href={trackUrl} className="mt-5 inline-flex items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold text-white shadow-sm" style={{ background: 'var(--theme-primary, #4f46e5)' }}>
+              Track your application →
+            </a>
+          )}
+          <div className="mt-4">
+            <Link href={`/careers/${businessSlug}`} className="inline-block text-sm font-medium" style={{ color: 'var(--theme-primary, #4f46e5)' }}>← See other open roles</Link>
+          </div>
         </div>
       </Centered>
     );
@@ -74,7 +82,8 @@ export default function PublicJobApplyPage() {
 
         <ApplyForm
           businessSlug={businessSlug} publicSlug={publicSlug}
-          questions={screeningQuestions || []} onSubmitted={() => setSubmitted(true)}
+          questions={screeningQuestions || []}
+          onSubmitted={(url) => { setTrackUrl(url || null); setSubmitted(true); }}
         />
 
         <footer className="mt-10 text-center text-[11px] text-gray-400">Powered by DriftHR</footer>
@@ -116,13 +125,13 @@ function ApplyForm({ businessSlug, publicSlug, questions, onSubmitted }) {
       .map((q) => ({ questionId: q.id, answerValue: answers[q.id] }))
       .filter((a) => a.answerValue !== undefined && a.answerValue !== '');
     try {
-      await post(`/api/public/careers/${businessSlug}/jobs/${publicSlug}/apply`, {
+      const res = await post(`/api/public/careers/${businessSlug}/jobs/${publicSlug}/apply`, {
         firstName: d.firstName.trim(), lastName: d.lastName.trim(), email: d.email.trim(),
         phone: d.phone.trim() || undefined,
         resumeDataUrl: resume ? resume.dataUrl : undefined,
         answers: answerList, consent: true,
       });
-      onSubmitted();
+      onSubmitted(res?.trackUrl || null);
     } catch (err) {
       setError(err.status === 409 ? 'You have already applied to this role.' : (err.message || 'Something went wrong. Please try again.'));
     } finally { setSaving(false); }

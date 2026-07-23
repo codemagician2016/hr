@@ -544,6 +544,9 @@ model Business {
   //     registeredState, registeredPostalCode, registeredCountry,
   //     contactName, contactEmail, contactPhone, incorporationDate }
   companyProfile               Json?
+  // Feature 36 — tenant-default candidate-comms config (auto-send toggles per
+  // stage, careers reply-to, sender name). Per-job overrides live on Job.commsConfig.
+  candidateCommsConfig         Json?
   // Documents / assets
   employeeDocuments            EmployeeDocument[]
   documentTemplates            DocumentTemplate[]
@@ -582,6 +585,10 @@ model Business {
   // Recruitment / ATS — Feature 12 (configurable scoring + merit list)
   screeningQuestions           ScreeningQuestion[]
   scorecardTemplates           ScorecardTemplate[]
+  // Feature 36 — Candidate Communication (ATS polish): per-candidate public
+  // status/slot-confirm tokens + interview slot-proposal handshakes.
+  candidateAccessTokens        CandidateAccessToken[]
+  interviewSlotProposals       InterviewSlotProposal[]
   // Helpdesk
   helpdeskCategories           HelpdeskCategory[]
   helpdeskTickets              HelpdeskTicket[]
@@ -12313,6 +12320,11 @@ model Job {
   interviewWeightPct         Decimal             @default(60) @db.Decimal(5, 2) // app% + interview% must sum to 100 (validated)
   scorecardTemplateId        String? // default interview scorecard for this job
   hideCandidatePiiUntilStage StageKind? // optional blind-screening mask point
+  // Feature 36 — per-requisition candidate-comms overrides. JSON keeps it
+  // migration-free + inheritable: job overrides ?? Business.candidateCommsConfig.
+  //   { autoSend: { applied, shortlisted, interview_invite, offer, rejected }: bool,
+  //     templateKeys: { <stage>: '<MessageTemplate.key>' } }
+  commsConfig                Json?
   createdAt                  DateTime            @default(now())
   updatedAt                  DateTime            @updatedAt
   deletedAt                  DateTime?
@@ -12387,6 +12399,8 @@ model Candidate {
   educations            CandidateEducation[]
   experiences           CandidateExperience[]
   skills                CandidateSkill[]
+  // Feature 36 — one live public access token (status page + slot confirm).
+  accessToken           CandidateAccessToken?
 
   @@unique([businessId, email])
   @@index([businessId, email])
@@ -12520,6 +12534,8 @@ model Interview {
   createdAt             DateTime                 @default(now())
   updatedAt             DateTime                 @updatedAt
   scorecards            Scorecard[]
+  // Feature 36 — interview slot-proposal handshake (propose → candidate confirms).
+  slotProposals         InterviewSlotProposal[]
 
   @@index([businessId, applicationId])
 }
@@ -12581,6 +12597,50 @@ enum OfferStatus {
   DECLINED
   EXPIRED
   REVOKED
+}
+
+// ── §36 Candidate Communication (ATS polish) — Feature 36 ────────────────────
+// Two additive models: a per-candidate public access token (status page +
+// slot-confirm, since a Candidate is NOT an Employee/User and cannot use a
+// session) and an interview slot-proposal handshake (HR proposes N slots → the
+// candidate confirms ONE on the tokenised public link). Both tenant-scoped.
+
+model CandidateAccessToken {
+  id          String    @id @default(uuid())
+  businessId  String
+  business    Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  candidateId String    @unique // one live token per candidate
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  token       String    @unique // crypto.randomBytes(24).hex — the URL secret
+  expiresAt   DateTime? // null = lives with the candidate; rotated on purge
+  createdAt   DateTime  @default(now())
+
+  @@index([businessId, candidateId])
+}
+
+model InterviewSlotProposal {
+  id            String             @id @default(uuid())
+  businessId    String
+  business      Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  interviewId   String
+  interview     Interview          @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  slots         Json // [{ id, startAt, endAt }] — proposed options
+  status        SlotProposalStatus @default(PROPOSED) // PROPOSED|CONFIRMED|EXPIRED|WITHDRAWN
+  confirmedSlot Json? // the chosen { id, startAt, endAt }
+  proposedById  String? // actor Employee/User id (audit)
+  expiresAt     DateTime? // auto-EXPIRE sweep (scheduler)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@index([businessId, interviewId])
+  @@index([businessId, status])
+}
+
+enum SlotProposalStatus {
+  PROPOSED
+  CONFIRMED
+  EXPIRED
+  WITHDRAWN
 }
 
 // ── §15.1 Recruitment / ATS — Feature 12 (configurable scoring + merit list) ──

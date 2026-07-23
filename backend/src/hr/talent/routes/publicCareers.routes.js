@@ -12,4 +12,12 @@ router.get('/:businessSlug', pc.publicBoard);
 router.get('/:businessSlug/jobs/:publicSlug', pc.publicJobDetail);
 router.post('/:businessSlug/jobs/:publicSlug/apply', express.json({ limit: '15mb' }), pc.publicApply);
 
+// Feature 36 — tokenised candidate status/timeline + interview slot confirm.
+// UNAUTH, rate-limited; the tenant resolves from :businessSlug and the candidate
+// from :token (never a client id). No score / internal note / other candidate is
+// ever serialised (§4.6, §6).
+router.get('/:businessSlug/c/:token', pc.candidateTimeline);
+router.get('/:businessSlug/c/:token/slots/:proposalId', pc.candidateSlotProposal);
+router.post('/:businessSlug/c/:token/slots/:proposalId/confirm', express.json(), pc.candidateConfirmSlot);
+
 module.exports = router;

@@ -167,7 +167,7 @@ export const NAV_ITEMS = [
   // Settings groups Branding, Roles, Domain and Billing. Show it to anyone who
   // can manage ANY of those — a Finance role (canEditBilling, no canEditBranding)
   // must still reach the Billing tab. Per-tab/per-action gating happens inside.
-  { key: 'settings', label: 'Settings', href: '/settings', anyPermission: ['canEditBranding', 'canEditBilling', 'canEditDomain', 'canManageCompanyProfile', 'canManageExpensePolicy', 'canManageImports', 'canManageAttendance', 'canManageOrg', 'canManageOnboarding', 'canManageSso'], group: true, icon: 'settings' },
+  { key: 'settings', label: 'Settings', href: '/settings', anyPermission: ['canEditBranding', 'canEditBilling', 'canEditDomain', 'canManageCompanyProfile', 'canManageExpensePolicy', 'canManageImports', 'canManageAttendance', 'canManageOrg', 'canManageOnboarding', 'canManageSso', 'canManageHiring'], group: true, icon: 'settings' },
   // White-label Branding (self-service) — logo/favicon/colours/display-name so a
   // tenant's OWN brand shows on the console, the ESS portal, and both login pages
   // (never the DriftHR vendor mark). Mirrors the backend OR-gate: visible to
@@ -222,6 +222,12 @@ export const NAV_ITEMS = [
   // Gated on canManageOrg (already in the settings group's anyPermission list);
   // the server is the real boundary (/api/hr/notifications/* is canManageOrg).
   { key: 'settings-notifications', label: 'Notification templates', href: '/settings/notifications', permission: 'canManageOrg', parent: 'settings', icon: 'bell' },
+  // Feature 36 — Candidate messages: the auto-send toggles + editable copy for
+  // every candidate-facing hiring message. Gated on the recruitment write keys
+  // (canManageHiring / canManageEmployees) + the talent_acquisition add-on, so it
+  // only shows to recruiters/HR on a tenant that owns hiring. The server is the
+  // real boundary (/api/hr/recruitment/comms-* is canManage).
+  { key: 'settings-candidate-messages', label: 'Candidate messages', href: '/settings/candidate-messages', feature: 'talent_acquisition', anyPermission: ['canManageHiring', 'canManageEmployees'], parent: 'settings', icon: 'letter' },
   // Enterprise SSO + SCIM — the tenant's SAML/OIDC connection (IdP config, SP
   // endpoints, test/delete) and SCIM provisioning tokens. Gated on the new
   // canManageSso rbac key (Owner via all-true; HR-Admin via the preset). The

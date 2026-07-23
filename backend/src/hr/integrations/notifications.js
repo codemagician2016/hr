@@ -98,33 +98,25 @@ const HR_EVENT_TEMPLATES = Object.freeze({
   'award.won':                   'HR_AWARD_WON',                   // → the winner (with certificate note)
   'redemption.approved':         'HR_REDEMPTION_APPROVED',         // → employee when points are debited (approved)
   'redemption.fulfilled':        'HR_REDEMPTION_FULFILLED',        // → employee when the reward is fulfilled (voucher/perk)
+  // Feature 36 — Candidate Communication (ATS polish). Candidate-facing stage
+  // messages (fan out via candidateNotify.js) + the interview panel/feedback keys.
+  'candidate.applied':          'HR_CAND_APPLIED',            // → candidate acknowledgement on public apply
+  'candidate.shortlisted':      'HR_CAND_SHORTLISTED',        // → candidate on a shortlist/interview move
+  'candidate.interview_invite': 'HR_CAND_INTERVIEW_INVITE',   // → candidate when invited to interview (replaces interview_invitation)
+  'candidate.slot_request':     'HR_CAND_SLOT_REQUEST',       // → candidate to pick a proposed interview slot
+  'candidate.rejected':         'HR_CAND_REJECTED',           // → candidate on rejection (auto-send OFF by default)
+  'candidate.offer':            'HR_CAND_OFFER',              // → candidate when an offer is sent (fires from sendOffer)
+  'interview.panel_notice':     'HR_INTERVIEW_PANEL',         // → each panellist Employee (replaces interview_panel_notice)
+  'interview.feedback_nudge':   'HR_INTERVIEW_FEEDBACK_NUDGE', // → panellist with an un-submitted scorecard past the grace window
 });
 
 // HR template registry. vertical: 'HR' so listTemplates({vertical:'HR'}) scopes
 // them. All keep a sender tag so the recipient can identify the business.
 const HR_TEMPLATES = Object.freeze([
-  // Feature 12/36/38 — interview emails. These keys were referenced by
-  // inviteInterview() but never registered, so every invite silently failed
-  // UNKNOWN_TEMPLATE. Registered here (lowercase keys + the exact variables the
-  // caller passes) so candidate + panel invitations actually send.
-  {
-    key: 'interview_invitation',
-    displayName: 'Interview invitation (candidate)',
-    category: 'TRANSACTIONAL',
-    vertical: 'HR',
-    body: 'Hi {candidateName}, you are invited to interview for {jobTitle} on {scheduledAt} ({mode}). {location} {videoUrl}',
-    variables: ['candidateName', 'jobTitle', 'scheduledAt', 'mode', 'location', 'videoUrl'],
-    channels: { sms: false, whatsapp: false, email: true },
-  },
-  {
-    key: 'interview_panel_notice',
-    displayName: 'Interview panel notice (interviewer)',
-    category: 'TRANSACTIONAL',
-    vertical: 'HR',
-    body: 'You are on the interview panel for {jobTitle} on {scheduledAt}. Open your scorecard in the recruitment console.',
-    variables: ['jobTitle', 'scheduledAt'],
-    channels: { sms: false, whatsapp: false, email: true },
-  },
+  // Feature 36 — the interview invite/panel keys are now the proper HR_* templates
+  // (HR_CAND_INTERVIEW_INVITE + HR_INTERVIEW_PANEL, defined below). The former
+  // lowercase 'interview_invitation'/'interview_panel_notice' stubs are retired:
+  // inviteInterview() has been repointed at the new event keys (§4.1/§5).
   {
     key: 'HR_PAYSLIP_PUBLISHED',
     displayName: 'Payslip published',
@@ -630,6 +622,85 @@ const HR_TEMPLATES = Object.freeze([
     vertical: 'HR',
     body: 'Hi {NAME}, your reward "{ITEM}" is ready{REF}. Enjoy! - {BIZ}',
     variables: ['NAME', 'ITEM', 'REF', 'BIZ'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  // ─── Feature 36 — Candidate Communication (ATS polish) ───
+  // Candidate-facing stage messages + interview panel/feedback nudges. Copy is
+  // market-agnostic; {LINK} is the tokenised public status page (…/careers/:slug
+  // /c/:token). These 8 keys are the candidate-template library (HR-editable copy;
+  // system templates, editable but not deletable). HR_CAND_INTERVIEW_INVITE +
+  // HR_INTERVIEW_PANEL REPLACE the unregistered interview_invitation /
+  // interview_panel_notice keys that were silently failing UNKNOWN_TEMPLATE.
+  {
+    key: 'HR_CAND_APPLIED',
+    displayName: 'Candidate — application received',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: "Hi {NAME}, thanks for applying to {ROLE} at {BIZ}. We've received your application — track it here: {LINK}",
+    variables: ['NAME', 'ROLE', 'BIZ', 'LINK'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_CAND_SHORTLISTED',
+    displayName: 'Candidate — shortlisted',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: "Hi {NAME}, good news — you've been shortlisted for {ROLE} at {BIZ}. We'll be in touch about next steps. {LINK}",
+    variables: ['NAME', 'ROLE', 'BIZ', 'LINK'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_CAND_INTERVIEW_INVITE',
+    displayName: 'Candidate — interview invitation',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: "Hi {NAME}, you're invited to interview for {ROLE} at {BIZ} ({MODE}). {SLOTLINE} Details + calendar: {LINK}",
+    variables: ['NAME', 'ROLE', 'BIZ', 'MODE', 'SLOTLINE', 'LINK'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_CAND_SLOT_REQUEST',
+    displayName: 'Candidate — pick an interview slot',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {NAME}, please pick an interview slot for {ROLE} at {BIZ}: {LINK}',
+    variables: ['NAME', 'ROLE', 'BIZ', 'LINK'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_CAND_REJECTED',
+    displayName: 'Candidate — not selected',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: "Hi {NAME}, thank you for your interest in {ROLE} at {BIZ}. We won't be moving forward this time. We wish you the best.",
+    variables: ['NAME', 'ROLE', 'BIZ'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_CAND_OFFER',
+    displayName: 'Candidate — offer sent',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: 'Hi {NAME}, {BIZ} has sent you an offer for {ROLE}. Review + respond by {EXPIRY}: {LINK}',
+    variables: ['NAME', 'BIZ', 'ROLE', 'EXPIRY', 'LINK'],
+    channels: { sms: true, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_INTERVIEW_PANEL',
+    displayName: 'Interview panel notice (interviewer)',
+    category: 'TRANSACTIONAL',
+    vertical: 'HR',
+    body: "Hi {NAME}, you're on the panel for {ROLE} on {WHEN}. Open scorecard: {LINK}",
+    variables: ['NAME', 'ROLE', 'WHEN', 'LINK'],
+    channels: { sms: false, whatsapp: true, email: true },
+  },
+  {
+    key: 'HR_INTERVIEW_FEEDBACK_NUDGE',
+    displayName: 'Interview feedback nudge (interviewer)',
+    category: 'SERVICE',
+    vertical: 'HR',
+    body: 'Reminder: your scorecard for {CANDIDATE} ({ROLE}, interviewed {WHEN}) is still pending. Submit: {LINK}',
+    variables: ['CANDIDATE', 'ROLE', 'WHEN', 'LINK'],
     channels: { sms: false, whatsapp: true, email: true },
   },
 ]);

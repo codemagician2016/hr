@@ -17,7 +17,7 @@ import { useParams } from 'next/navigation';
 import { ErrorBanner, PrimaryButton, TextInput, TextArea, Modal, ModalActions, Spinner } from '@hr/ui';
 import { get, post, patch, del } from '@/lib/api';
 import { asList, PageHeader, Tabs, ActionButton } from '@/lib/ui';
-import { Info, FieldLabel, ScoreBadge, Pager, NumberInput, StatusPill, CopyField, Check, StatCard, FunnelChart } from '../../_components';
+import { Info, FieldLabel, ScoreBadge, Pager, NumberInput, StatusPill, CopyField, Check, StatCard, FunnelChart, ChannelChips, renderMergePreview } from '../../_components';
 
 const TABS = [
   { key: 'summary', label: 'Summary' },
@@ -207,6 +207,7 @@ function PipelineTab({ jobId }) {
   const [selectAllMatching, setSelectAllMatching] = useState(false); // "all within the filter"
   const [bulkBusy, setBulkBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  const [showBulkMessage, setShowBulkMessage] = useState(false);
   const pageSize = 50;
 
   const queryParams = useMemo(() => {
@@ -352,6 +353,7 @@ function PipelineTab({ jobId }) {
             <button type="button" onClick={() => { setSelectAllMatching(false); setSelected(new Set()); }} className="text-xs text-gray-500 hover:underline">Clear selection</button>
           )}
           <div className="flex-1" />
+          <button disabled={bulkBusy} onClick={() => setShowBulkMessage(true)} className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50">Message {selectionCount}</button>
           <button disabled={bulkBusy} onClick={() => runBulk('shortlist')} className="text-sm px-3 py-1.5 rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">Shortlist</button>
           <BulkStatusButton disabled={bulkBusy} onPick={(status) => runBulk('set-status', { status })} />
           <button disabled={bulkBusy} onClick={() => { if (confirm(`Reject ${selectionCount} candidate${selectionCount === 1 ? '' : 's'}?`)) runBulk('reject', { reason: 'Bulk reject' }); }} className="text-sm px-3 py-1.5 rounded-lg border border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-50">Reject</button>
@@ -397,7 +399,99 @@ function PipelineTab({ jobId }) {
         </div>
       )}
       <Pager page={page} totalPages={totalPages} total={total} onPage={setPage} />
+
+      {showBulkMessage && (
+        <BulkMessageModal
+          jobId={jobId}
+          count={selectionCount}
+          // Resolve the SAME server-side target set as the bulk actions: "all
+          // matching" sends the whole filtered set; otherwise the explicit ids.
+          payload={selectAllMatching
+            ? { filter: (() => { const f = { jobId }; for (const [k, v] of Object.entries(filters)) if (v !== '' && v != null) f[k] = v; return f; })() }
+            : { filter: { jobId }, ids: [...selected] }}
+          onClose={() => setShowBulkMessage(false)}
+          onSent={(res) => {
+            setShowBulkMessage(false);
+            setNotice(`Message: ${res.sent} sent · ${res.skipped} skipped · ${res.total} targeted.`);
+            setSelected(new Set()); setSelectAllMatching(false);
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+// Bulk candidate-message modal — pick a candidate-facing template, confirm the
+// count, and send to the current filtered/scoped set (POST /applications/
+// bulk-message; the server re-resolves the target set so we can never message
+// out of scope). Reject copy is opt-in — HR sees the count before confirming.
+const BULK_CAND_KEYS = new Set([
+  'HR_CAND_APPLIED', 'HR_CAND_SHORTLISTED', 'HR_CAND_INTERVIEW_INVITE',
+  'HR_CAND_SLOT_REQUEST', 'HR_CAND_REJECTED', 'HR_CAND_OFFER',
+]);
+
+function BulkMessageModal({ jobId, count, payload, onClose, onSent }) {
+  const [templates, setTemplates] = useState([]);
+  const [selKey, setSelKey] = useState('');
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    get('/api/hr/recruitment/comms-templates')
+      .then((r) => {
+        const items = (r?.items || []).filter((t) => BULK_CAND_KEYS.has(t.key));
+        setTemplates(items);
+        if (items[0]) setSelKey(items[0].key);
+      })
+      .catch((e) => setError(e.data?.message || e.message || 'Could not load message templates.'));
+  }, []);
+
+  const tpl = templates.find((t) => t.key === selKey) || null;
+  const body = tpl ? (tpl.overrideBody || tpl.defaultBody || '') : '';
+  const preview = renderMergePreview(body, { NAME: 'Alex Candidate', ROLE: 'this role', BIZ: 'your company' });
+  const isReject = selKey === 'HR_CAND_REJECTED';
+
+  async function send() {
+    if (!tpl) return;
+    setSending(true); setError('');
+    try {
+      const res = await post('/api/hr/recruitment/applications/bulk-message', { ...payload, templateKey: tpl.key });
+      onSent(res);
+    } catch (e) { setError(e.data?.message || e.message || 'Could not send the messages.'); }
+    finally { setSending(false); }
+  }
+
+  return (
+    <Modal title={`Message ${count} candidate${count === 1 ? '' : 's'}`} onClose={onClose}>
+      {error && <ErrorBanner message={error} />}
+      <div className="space-y-4">
+        <div>
+          <FieldLabel hint="The candidate-facing message. Edit the copy under Settings → Candidate messages.">Template</FieldLabel>
+          <select value={selKey} onChange={(e) => setSelKey(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+            {templates.length === 0 && <option value="">Loading…</option>}
+            {templates.map((t) => <option key={t.key} value={t.key}>{t.displayName}{t.overridden ? ' (customised)' : ''}</option>)}
+          </select>
+        </div>
+        {tpl && (
+          <>
+            <div className="flex items-center gap-2 text-xs text-gray-500"><span>Sends via:</span><ChannelChips channels={tpl.channels} /></div>
+            <div className="rounded-xl border border-gray-200 bg-gradient-to-br from-indigo-50/60 to-white p-3 text-sm text-gray-700">
+              <p className="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500">Preview <span className="normal-case font-normal">— sample values shown</span></p>
+              <p className="whitespace-pre-wrap">{preview}</p>
+            </div>
+          </>
+        )}
+        {isReject && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+            This tells {count} candidate{count === 1 ? '' : 's'} they weren’t selected. Please confirm the count before sending.
+          </div>
+        )}
+        <ModalActions>
+          <button type="button" onClick={onClose} className="px-3 py-2 text-sm text-gray-600">Cancel</button>
+          <PrimaryButton type="button" onClick={send} disabled={sending || !tpl}>{sending ? 'Sending…' : `Send to ${count}`}</PrimaryButton>
+        </ModalActions>
+      </div>
+    </Modal>
   );
 }
 

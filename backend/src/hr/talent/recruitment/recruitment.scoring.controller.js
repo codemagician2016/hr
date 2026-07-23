@@ -19,6 +19,11 @@
 const prisma = require('../../../core/lib/prisma');
 const scoring = require('./scoring');
 const { notifyHrEvent } = require('../../integrations/notifications');
+// Feature 36 — candidate-side fan-out (mirrors approvals/notify.js) for the
+// interview-invite repoint (slice-1 UNKNOWN_TEMPLATE bug fix).
+const { fanOutCandidateStage } = require('./candidateNotify');
+// Reuse the approvals deep-link base-URL helper for the panel scorecard link.
+const { appBaseUrl } = require('../../approvals/notify')._internals;
 // Feature 12 — F1 recruitment read-scope (requisition-scoped merit list).
 const { scopeAllowsJob } = require('./recruitmentScope');
 
@@ -388,52 +393,106 @@ async function inviteInterview(req, res, next) {
     if (!iv) return res.status(404).json({ message: 'Not found' });
     const cand = iv.application && iv.application.candidate;
     const job = iv.application && iv.application.job;
+    // Careers reply-to (ICS organizer) — tenant override else a per-domain default.
+    const biz = await prisma.business.findUnique({
+      where: { id: businessId }, select: { name: true, slug: true, candidateCommsConfig: true },
+    }).catch(() => null);
+    const organizer = careersOrganizer(biz);
 
-    // candidate email invite (slot + mode + link). Notification is best-effort.
-    if (cand && cand.email) {
-      await notifyHrEvent({
-        businessId, templateKey: 'interview_invitation', recipientEmail: cand.email,
-        recipientCountry: job ? job.countryCode : undefined,
-        variables: {
-          candidateName: `${cand.firstName || ''} ${cand.lastName || ''}`.trim(),
-          jobTitle: job ? job.title : 'the role',
-          scheduledAt: iv.scheduledAt ? new Date(iv.scheduledAt).toISOString() : 'TBD',
-          mode: iv.mode, location: iv.locationText || '', videoUrl: iv.videoUrl || '',
-        },
-        triggeredBy: 'HR_INTERVIEW_INVITE',
+    // ── candidate invite — SLICE-1 BUG FIX ──
+    // Previously fired templateKey 'interview_invitation', which was NEVER
+    // registered → every invite silently failed UNKNOWN_TEMPLATE. Repoint to the
+    // real HR_CAND_INTERVIEW_INVITE via the candidate fan-out (adds the status
+    // {LINK} + rides the dedupe/STOP-list). Explicit action → force past the gate.
+    const slotline = iv.scheduledAt
+      ? `Proposed time: ${new Date(iv.scheduledAt).toISOString()}.`
+      : 'We will confirm a time shortly.';
+    if (iv.application) {
+      await fanOutCandidateStage({
+        businessId,
+        application: iv.application,
+        event: 'candidate.interview_invite',
+        force: true,
+        candidate: cand,
+        job,
+        biz,
+        extraVars: { MODE: iv.mode, SLOTLINE: slotline },
       });
     }
-    // panel notification (best-effort, one per interviewer who is an employee)
+
+    // ── panel notification — SLICE-1 BUG FIX ──
+    // Previously fired templateKey 'interview_panel_notice' (also unregistered).
+    // Repoint to the real HR_INTERVIEW_PANEL. Best-effort, one per interviewer who
+    // resolves to an Employee with contact (a CSV id with no Employee is skipped).
     const panel = parseInterviewerIds(iv.interviewerIds);
     if (panel.length) {
-      const emps = await prisma.employee.findMany({ where: { id: { in: panel }, businessId }, select: { id: true, email: true } });
+      const emps = await prisma.employee.findMany({
+        where: { id: { in: panel }, businessId },
+        select: { id: true, firstName: true, lastName: true, workEmail: true, personalEmail: true, phone: true, countryCode: true },
+      });
+      const scorecardLink = `${appBaseUrl()}/me/scorecards/${iv.id}`;
+      const when = iv.scheduledAt ? new Date(iv.scheduledAt).toISOString() : 'TBD';
       for (const e of emps) {
-        if (e.email) {
-          await notifyHrEvent({ businessId, templateKey: 'interview_panel_notice', recipientEmail: e.email, variables: { jobTitle: job ? job.title : '', scheduledAt: iv.scheduledAt ? new Date(iv.scheduledAt).toISOString() : 'TBD' }, triggeredBy: 'HR_INTERVIEW_PANEL' });
-        }
+        const email = e.workEmail || e.personalEmail || null;
+        if (!email && !e.phone) continue;
+        await notifyHrEvent({
+          businessId,
+          event: 'interview.panel_notice',
+          recipientEmail: email,
+          recipientPhone: e.phone || null,
+          recipientCountry: e.countryCode || undefined,
+          variables: {
+            NAME: `${e.firstName || ''} ${e.lastName || ''}`.trim() || 'there',
+            ROLE: job ? job.title : 'the role',
+            WHEN: when,
+            LINK: scorecardLink,
+          },
+          triggeredBy: `HR_INTERVIEW_PANEL:${iv.id}:${e.id}`,
+        });
       }
     }
     const updated = await prisma.interview.update({ where: { id: iv.id }, data: { candidateInviteSentAt: new Date(), panelInviteSentAt: new Date() } });
     await audit(businessId, req.user.id, 'recruitment.interview.invite', 'Interview', iv.id, { panel: panel.length });
-    res.json({ ...updated, ics: buildIcs(iv, job, cand) });
+    res.json({ ...updated, ics: buildIcs(iv, job, cand, { organizer }) });
   } catch (e) { next(e); }
 }
 
-// Minimal RFC-5545 VEVENT so a candidate can add the slot to a calendar.
-function buildIcs(iv, job, cand) {
+// Resolve the ICS organizer (careers reply-to) for a tenant: an explicit
+// candidateCommsConfig.replyTo/senderName, else a per-domain careers@ default.
+function careersOrganizer(biz) {
+  const cfg = (biz && biz.candidateCommsConfig) || {};
+  const domain = process.env.PLATFORM_DOMAIN || 'drifthr.com';
+  return {
+    email: cfg.replyTo || process.env.CAREERS_REPLY_TO || `careers@${domain}`,
+    name: cfg.senderName || (biz && biz.name) || 'Recruitment',
+  };
+}
+
+// Minimal RFC-5545 VEVENT so a candidate can add the slot to a calendar. Now a
+// REAL invite (METHOD:REQUEST) with an ORGANIZER (careers reply-to) + the
+// candidate as an ATTENDEE, so calendars render Accept/Decline (Feature 36 §5).
+function buildIcs(iv, job, cand, opts = {}) {
   if (!iv.scheduledAt) return null;
   const start = new Date(iv.scheduledAt);
   const end = new Date(start.getTime() + (iv.durationMins || 45) * 60000);
   const fmt = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
   const loc = iv.mode === 'VIDEO' ? (iv.videoUrl || '') : (iv.locationText || '');
-  return [
-    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//DriftHR//Recruitment//EN', 'BEGIN:VEVENT',
+  const org = opts.organizer || {};
+  const lines = [
+    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//DriftHR//Recruitment//EN', 'METHOD:REQUEST',
+    'BEGIN:VEVENT',
     `UID:interview-${iv.id}@drifthr`, `DTSTAMP:${fmt(new Date())}`, `DTSTART:${fmt(start)}`, `DTEND:${fmt(end)}`,
     `SUMMARY:Interview — ${(job && job.title) || 'Role'}`,
     `LOCATION:${loc}`,
     `DESCRIPTION:Interview for ${(job && job.title) || 'the role'} (${iv.mode})`,
-    'END:VEVENT', 'END:VCALENDAR',
-  ].join('\r\n');
+  ];
+  if (org.email) lines.push(`ORGANIZER;CN=${org.name || 'Recruitment'}:mailto:${org.email}`);
+  if (cand && cand.email) {
+    const cn = `${cand.firstName || ''} ${cand.lastName || ''}`.trim() || cand.email;
+    lines.push(`ATTENDEE;CN=${cn};RSVP=TRUE:mailto:${cand.email}`);
+  }
+  lines.push('END:VEVENT', 'END:VCALENDAR');
+  return lines.join('\r\n');
 }
 
 async function rescheduleInterview(req, res, next) {
@@ -779,6 +838,7 @@ module.exports = {
   myInterviews, myScorecard, saveMyScorecard, submitMyScorecard, reopenScorecard,
   // merit + recompute + e-sign
   meritList, recomputeScore, requestOfferSignature,
-  // shared helpers (reused by the public careers router + spine controller)
-  _internals: { recomputeAndPersist, recordAnswersAndScore, parseInterviewerIds, buildIcs },
+  // shared helpers (reused by the public careers router + spine controller +
+  // the Feature 36 scheduling confirm)
+  _internals: { recomputeAndPersist, recordAnswersAndScore, parseInterviewerIds, buildIcs, careersOrganizer },
 };

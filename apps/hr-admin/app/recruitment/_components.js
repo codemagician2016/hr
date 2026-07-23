@@ -228,6 +228,39 @@ export function FunnelChart({ steps }) {
   );
 }
 
+// ── Candidate-message channel chips (Feature 36) ──────────────────────────────
+// Shows which channels a candidate-message template attempts (email/WhatsApp/SMS).
+// The router decides actual delivery per country/budget/STOP-list; these are the
+// channels the template is enabled for, not a per-send override.
+const CAND_CHANNEL_META = [
+  ['email', 'Email', 'bg-sky-50 text-sky-700 border-sky-200'],
+  ['whatsapp', 'WhatsApp', 'bg-emerald-50 text-emerald-700 border-emerald-200'],
+  ['sms', 'SMS', 'bg-violet-50 text-violet-700 border-violet-200'],
+];
+export function ChannelChips({ channels }) {
+  const active = CAND_CHANNEL_META.filter(([k]) => channels?.[k]);
+  if (!active.length) return <span className="text-xs text-gray-400">—</span>;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1">
+      {active.map(([k, label, cls]) => (
+        <span key={k} className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${cls}`}>{label}</span>
+      ))}
+    </span>
+  );
+}
+
+// ── Merge-field preview (Feature 36) ──────────────────────────────────────────
+// Render a template body with {TOKEN} placeholders filled from `sampleVars`.
+// A token with a provided value shows the value; anything else shows [TOKEN] so
+// the operator can see exactly what the candidate will receive (the real merge +
+// per-candidate LINK are produced server-side at send time).
+const MERGE_TOKEN_RE = /\{([A-Za-z0-9_]+)\}/g;
+export function renderMergePreview(body, sampleVars = {}) {
+  return String(body || '').replace(MERGE_TOKEN_RE, (m, t) => (
+    sampleVars[t] != null && sampleVars[t] !== '' ? String(sampleVars[t]) : `[${t}]`
+  ));
+}
+
 // 1–10 skill slider used on the interviewer scoring screen.
 export function SkillSlider({ skill, value, comment, onScore, onComment }) {
   const min = skill.scaleMin ?? 1;
