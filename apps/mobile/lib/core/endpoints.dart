@@ -111,4 +111,34 @@ class Api {
   static String redemptionCancel(String id) => '/api/hr/me/redemptions/$id/cancel'; // POST (own + PENDING only)
   static const awardCycles = '/api/hr/me/award-cycles'; // { items:[{id,name,awardType,nominateCloseAt,…}] } open cycles
   static const awardNominations = '/api/hr/me/award-nominations'; // GET { made, won } + POST { cycleId, nomineeEmployeeId, citation }
+
+  // ── Parity wave 2 — Helpdesk · Documents · Directory profiles · Comp-off ──────
+  // Every path below is a real backend route (verified against the meHelpdesk /
+  // documents / meDirectory / meCompOff controllers). SELF-scope: the subject
+  // employee is resolved server-side, so no employeeId is ever sent from here.
+
+  // HR Helpdesk — raise + track tickets.
+  static const helpdeskReference = '/api/hr/me/helpdesk/reference'; // { categories:[{id,name,slaHours}], priorities:['LOW','NORMAL','HIGH','URGENT'] }
+  static const helpdeskTickets = '/api/hr/me/helpdesk/tickets'; // GET { items:[ticket + category + _count.messages + breached], total } + POST { subject, description?, priority?, categoryId? }
+  static String helpdeskTicket(String id) => '/api/hr/me/helpdesk/tickets/$id'; // { ...ticket, category, messages:[{id,authorUserId,body,createdAt}], breached }
+  static String helpdeskReply(String id) => '/api/hr/me/helpdesk/tickets/$id/reply'; // POST { body }
+  static String helpdeskReopen(String id) => '/api/hr/me/helpdesk/tickets/$id/reopen'; // POST { reason? }
+  static String helpdeskRate(String id) => '/api/hr/me/helpdesk/tickets/$id/rate'; // POST { rating(1-5), comment? }
+
+  // My HR documents. Each row carries a `fileUrl` (an S3 URL or a base64 data URL)
+  // — there is NO dedicated /download route; the client opens the fileUrl itself.
+  static const documents = '/api/hr/me/documents'; // GET { items:[{id,name,category,mimeType,sizeBytes,fileUrl,expiresAt,expired,expiringSoon,verifiedAt,signatureStatus,createdAt}], total }
+  static String document(String id) => '/api/hr/me/documents/$id';
+
+  // Company directory — profile detail + my own contact-visibility preferences.
+  // (The colleague search list reuses `directory` above.)
+  static String directoryProfile(String id) => '/api/hr/me/directory/$id'; // { ...card, reportsCount, orgChart }
+  static const directoryFilters = '/api/hr/me/directory/filters'; // { departments, entities, locations }
+  static const directoryPreferences = '/api/hr/me/directory/preferences'; // GET { hideWorkPhone, hasWorkPhone, linked } / PATCH { hideWorkPhone }
+
+  // Comp-off — read-only balance + credit lots. Availing a comp-off is an ordinary
+  // leave application on the COMP_OFF leave type (POST /me/leave/requests), so there
+  // is no apply endpoint here.
+  static const compOffBalance = '/api/hr/me/comp-off/balance'; // { available, lotCount, soonestExpiry }
+  static const compOffCredits = '/api/hr/me/comp-off/credits'; // { credits:[{id,quantity,consumed,remaining,earnedOn,expiresOn,status,sourceKind,reason}] }
 }

@@ -105,6 +105,30 @@ class AppShell extends ConsumerWidget {
                 onTap: () => _go(sheetContext, '/recognition'),
               ),
               _MoreTile(
+                icon: Icons.support_agent_outlined,
+                title: 'Helpdesk',
+                subtitle: 'Raise & track HR/IT tickets',
+                onTap: () => _go(sheetContext, '/helpdesk'),
+              ),
+              _MoreTile(
+                icon: Icons.groups_outlined,
+                title: 'Directory',
+                subtitle: 'Find colleagues & profiles',
+                onTap: () => _go(sheetContext, '/directory'),
+              ),
+              _MoreTile(
+                icon: Icons.folder_outlined,
+                title: 'Documents',
+                subtitle: 'View & download HR documents',
+                onTap: () => _go(sheetContext, '/documents'),
+              ),
+              _MoreTile(
+                icon: Icons.beach_access_outlined,
+                title: 'Comp-off',
+                subtitle: 'Balance & earned credits',
+                onTap: () => _go(sheetContext, '/comp-off'),
+              ),
+              _MoreTile(
                 icon: Icons.fact_check_outlined,
                 title: 'Approvals',
                 subtitle: 'Decisions waiting for you',

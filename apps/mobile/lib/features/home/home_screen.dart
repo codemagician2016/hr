@@ -347,6 +347,8 @@ class _QuickLinks extends ConsumerWidget {
       (Icons.event_available_outlined, 'Leave', '/leave'),
       if (isIndia) (Icons.calculate_outlined, 'Tax', '/tax'),
       (Icons.receipt_long_outlined, 'Expenses', '/expenses'),
+      (Icons.support_agent_outlined, 'Helpdesk', '/helpdesk'),
+      (Icons.groups_outlined, 'Directory', '/directory'),
       (Icons.description_outlined, 'Letters', '/letters'),
       (Icons.person_outline, 'Profile', '/profile'),
     ];

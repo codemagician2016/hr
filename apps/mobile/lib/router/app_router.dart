@@ -18,7 +18,14 @@ import '../features/attendance/attendance_screen.dart';
 import '../features/attendance/face_enrollment_screen.dart';
 import '../features/auth/login_screen.dart';
 import '../features/auth/splash_screen.dart';
+import '../features/compoff/compoff_screen.dart';
+import '../features/directory/directory_profile_screen.dart';
+import '../features/directory/directory_screen.dart';
+import '../features/documents/documents_screen.dart';
 import '../features/expenses/expenses_screen.dart';
+import '../features/helpdesk/helpdesk_create_screen.dart';
+import '../features/helpdesk/helpdesk_detail_screen.dart';
+import '../features/helpdesk/helpdesk_screen.dart';
 import '../features/feed/feed_detail_screen.dart';
 import '../features/feed/feed_screen.dart';
 import '../features/home/home_screen.dart';
@@ -181,6 +188,45 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/recognition/give',
         parentNavigatorKey: _rootKey,
         builder: (_, __) => const GiveRecognitionScreen(),
+      ),
+
+      // Parity wave 2 — Helpdesk (list + create + ticket thread), Documents,
+      // Directory (search + profile), Comp-off. Static paths precede the `/:id`
+      // param routes so /helpdesk/new is not swallowed by /helpdesk/:id.
+      GoRoute(
+        path: '/helpdesk',
+        parentNavigatorKey: _rootKey,
+        builder: (_, __) => const HelpdeskScreen(),
+      ),
+      GoRoute(
+        path: '/helpdesk/new',
+        parentNavigatorKey: _rootKey,
+        builder: (_, __) => const HelpdeskCreateScreen(),
+      ),
+      GoRoute(
+        path: '/helpdesk/:id',
+        parentNavigatorKey: _rootKey,
+        builder: (_, state) => HelpdeskDetailScreen(ticketId: state.pathParameters['id']!),
+      ),
+      GoRoute(
+        path: '/documents',
+        parentNavigatorKey: _rootKey,
+        builder: (_, __) => const DocumentsScreen(),
+      ),
+      GoRoute(
+        path: '/directory',
+        parentNavigatorKey: _rootKey,
+        builder: (_, __) => const DirectoryScreen(),
+      ),
+      GoRoute(
+        path: '/directory/:id',
+        parentNavigatorKey: _rootKey,
+        builder: (_, state) => DirectoryProfileScreen(employeeId: state.pathParameters['id']!),
+      ),
+      GoRoute(
+        path: '/comp-off',
+        parentNavigatorKey: _rootKey,
+        builder: (_, __) => const CompOffScreen(),
       ),
     ],
   );
