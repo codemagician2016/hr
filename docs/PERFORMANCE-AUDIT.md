@@ -152,8 +152,11 @@ behaviour broken.
   not a waterfall.
 
 ## 5. Secondary observations (not causing the current slowness)
-- `drifthr-hms-backend` shows **65 restarts** (platform 44, ess 50, chat 48). Worth
-  investigating for stability/cold starts, though uptime is currently 1788 min.
+- ~~`drifthr-hms-backend` shows 65 restarts — worth investigating.~~ **Investigated:
+  FALSE ALARM.** PM2 reports `unstable_restarts=0` on every process, there are no
+  crash signatures in the error log and no OOM kills, and all six counters
+  incremented by **exactly 1** when a deploy ran. These are `pm2 reload`s from
+  shipping, not crashes. Nothing to fix.
 - `cloudflared` is on 2026.5.2 with 2026.7.3 available, and the tunnel log shows
   intermittent QUIC resets (`failed to dial to edge with quic: timeout`). Upgrading
   is low-risk hygiene.
