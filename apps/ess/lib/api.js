@@ -26,13 +26,54 @@ async function jsonOrThrow(res) {
   return body;
 }
 
-export async function apiGet(path) {
+// ── PERF: in-flight dedupe + short-TTL cache for session-stable lookups ───────
+// Every avoided round-trip is ~one RTT of page time on a high-latency link.
+// Concurrent GETs of the same URL share one promise, and a small allowlist of
+// session-stable reads (tenant brand, enum/meta, country context) is reused
+// instead of refetched on every screen. Any write clears the cache. Guarded to
+// the browser so a module-level map can never be shared across users.
+const isBrowser = typeof window !== 'undefined';
+const CACHEABLE = [
+  /^\/api\/tenant\/resolve(\?|$)/,
+  /^\/api\/hr\/meta(\?|$)/,
+  /^\/api\/hr\/me\/meta(\?|$)/,
+  /^\/api\/hr\/me\/country-context(\?|$)/,
+];
+const TTL_MS = 30000;
+const _cache = new Map();
+const _inflight = new Map();
+
+function isCacheable(p) { return isBrowser && CACHEABLE.some((re) => re.test(p)); }
+function clone(v) {
+  try { return typeof structuredClone === 'function' ? structuredClone(v) : JSON.parse(JSON.stringify(v)); }
+  catch { return v; }
+}
+/** Drop every cached lookup. Called automatically after any write. */
+export function invalidateApiCache() { _cache.clear(); _inflight.clear(); }
+
+async function rawGet(path) {
   const res = await fetch(`${BASE}${path}`, {
     method: 'GET',
     credentials: 'include',
     headers: { Accept: 'application/json' },
   });
   return jsonOrThrow(res);
+}
+
+export function apiGet(path) {
+  if (!isCacheable(path)) return rawGet(path);
+
+  const hit = _cache.get(path);
+  if (hit && Date.now() - hit.t < TTL_MS) return Promise.resolve(clone(hit.v));
+
+  const pending = _inflight.get(path);
+  if (pending) return pending.then(clone);
+
+  const p = rawGet(path)
+    .then((v) => { _cache.set(path, { t: Date.now(), v }); _inflight.delete(path); return v; })
+    .catch((e) => { _inflight.delete(path); throw e; });
+  _inflight.set(path, p);
+  return p.then(clone);
 }
 
 export async function apiSend(path, method, body) {
@@ -45,6 +86,8 @@ export async function apiSend(path, method, body) {
     },
     body: body == null ? undefined : JSON.stringify(body),
   });
+  // Any write may invalidate a cached lookup — clear defensively.
+  if (isBrowser) invalidateApiCache();
   return jsonOrThrow(res);
 }
 

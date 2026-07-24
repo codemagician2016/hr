@@ -62,12 +62,20 @@ export default function AdminShell({ children }) {
   useEffect(() => {
     let alive = true;
     (async () => {
-      try {
-        const me = await get('/api/auth/me');
-        if (!alive) return;
-        setSession(me?.user || me);
-      } catch (err) {
-        if (!alive) return;
+      // PERF: these two reads are INDEPENDENT (/api/tenant/resolve never uses the
+      // /api/auth/me result), so they run in PARALLEL. Awaiting them in sequence
+      // cost an extra full round-trip on EVERY page load in the console — the
+      // dominant cost on a high-latency link. allSettled keeps the per-call error
+      // semantics below (auth 401 redirects; brand is optional and failure-tolerant).
+      const [meRes, brandRes] = await Promise.allSettled([
+        get('/api/auth/me'),
+        get('/api/tenant/resolve'),
+      ]);
+      if (!alive) return;
+      if (meRes.status === 'fulfilled') {
+        setSession(meRes.value?.user || meRes.value);
+      } else {
+        const err = meRes.reason || {};
         if (err.status === 401) {
           setStatus('unauth');
           router.replace(`/login?redirect=${encodeURIComponent(pathname || '/')}`);
@@ -77,9 +85,9 @@ export default function AdminShell({ children }) {
         // page can show its own error rather than trapping the operator.
         setSession(null);
       }
-      try {
-        const resolved = await get('/api/tenant/resolve');
-        if (alive) {
+      {
+        const resolved = brandRes.status === 'fulfilled' ? brandRes.value : null;
+        if (alive && resolved) {
           // Keep the whole resolve payload: `brand` carries the white-label
           // logo/name/colour, while subscription.themeStyle / themeColors carry
           // the style. Merge into one object the Sidebar + theme memo both read.
@@ -95,8 +103,7 @@ export default function AdminShell({ children }) {
             features: resolved?.features,
           });
         }
-      } catch {
-        // brand is optional — fall back to default tokens.
+        // brand is optional — a rejected resolve falls back to default tokens.
       }
       if (alive) setStatus('ready');
     })();
