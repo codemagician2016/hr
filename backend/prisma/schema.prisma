@@ -587,6 +587,9 @@ model Business {
   jobStages                    JobStage[]
   pipelineTemplates            PipelineTemplate[]
   pipelineTemplateStages       PipelineTemplateStage[]
+  screeningFormTemplates          ScreeningFormTemplate[]
+  screeningFormTemplateQuestions  ScreeningFormTemplateQuestion[]
+  screeningFormTemplateOptions    ScreeningFormTemplateOption[]
   candidates                   Candidate[]
   applications                 Application[]
   interviews                   Interview[]
@@ -12678,6 +12681,62 @@ model PipelineTemplateStage {
 
   @@unique([templateId, sortOrder])
   @@index([businessId, templateId])
+}
+
+// A REUSABLE application-form (screening) template — the same "template → apply to
+// job" pattern as PipelineTemplate, but for the candidate-facing screening questions
+// instead of the interview stages. Author once, apply to many jobs; a different
+// template can be applied to each job. Applying stamps COPIES onto the job's
+// ScreeningQuestion rows (snapshot semantics — later edits to the template do not
+// mutate jobs already built from it).
+model ScreeningFormTemplate {
+  id          String                          @id @default(uuid())
+  businessId  String
+  business    Business                        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  isDefault   Boolean                         @default(false)
+  createdAt   DateTime                        @default(now())
+  updatedAt   DateTime                        @updatedAt
+  deletedAt   DateTime?
+  questions   ScreeningFormTemplateQuestion[]
+
+  @@unique([businessId, name])
+  @@index([businessId, isDefault])
+}
+
+model ScreeningFormTemplateQuestion {
+  id            String                        @id @default(uuid())
+  businessId    String
+  business      Business                      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  templateId    String
+  template      ScreeningFormTemplate         @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  prompt        String
+  kind          ScreeningKind // BOOLEAN | SINGLE_CHOICE | MULTI_CHOICE | NUMBER | TEXT | QUALIFICATION
+  required      Boolean                       @default(true)
+  isKnockout    Boolean                       @default(false)
+  knockoutValue Json?
+  maxPoints     Decimal?                      @db.Decimal(7, 2)
+  sortOrder     Int
+  options       ScreeningFormTemplateOption[]
+  createdAt     DateTime                      @default(now())
+
+  @@unique([templateId, sortOrder])
+  @@index([businessId, templateId])
+}
+
+model ScreeningFormTemplateOption {
+  id         String                        @id @default(uuid())
+  businessId String
+  business   Business                      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  questionId String
+  question   ScreeningFormTemplateQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  label      String
+  value      String
+  points     Decimal                       @default(0) @db.Decimal(7, 2)
+  sortOrder  Int
+
+  @@index([businessId, questionId])
 }
 
 model Candidate {

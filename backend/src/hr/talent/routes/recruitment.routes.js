@@ -19,6 +19,7 @@ const c = require('../controllers/recruitment.controller');
 const s = require('../recruitment/recruitment.scoring.controller');
 // Phase 4 — reusable pipeline templates (named stage sets applied onto a job).
 const pt = require('../controllers/pipelineTemplates.controller');
+const sft = require('../controllers/screeningFormTemplates.controller');
 // Feature 36 — candidate communication (scheduling handshake, bulk message,
 // template library + comms config).
 const cc = require('../recruitment/candidateComms.controller');
@@ -93,6 +94,17 @@ router.patch('/pipeline-templates/:id', canManage, pt.updateTemplate);
 router.delete('/pipeline-templates/:id', canManage, pt.removeTemplate);
 router.post('/pipeline-templates/:id/apply', canManage, pt.applyTemplate);
 router.post('/jobs/:id/apply-template', canManage, pt.applyTemplateToJob);
+
+// Reusable APPLICATION-FORM (screening) templates — same template→apply-to-job
+// pattern as pipelines, for the candidate-facing screening questions. A different
+// template can be applied to each job.
+router.get('/screening-form-templates', canView, sft.listTemplates);
+router.post('/screening-form-templates/seed-defaults', canManage, sft.seedDefaults);
+router.post('/screening-form-templates', canManage, sft.createTemplate);
+router.get('/screening-form-templates/:id', canView, sft.getTemplate);
+router.patch('/screening-form-templates/:id', canManage, sft.updateTemplate);
+router.delete('/screening-form-templates/:id', canManage, sft.removeTemplate);
+router.post('/jobs/:id/apply-screening-template', canManage, sft.applyTemplateToJob);
 
 // ── Screening questions (config) + answers ──────────────────────────────────
 router.get('/jobs/:jobId/screening-questions', canView, s.listScreeningQuestions);

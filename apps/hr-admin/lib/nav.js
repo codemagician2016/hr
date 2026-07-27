@@ -93,6 +93,11 @@ export const NAV_ITEMS = [
   // read key OR canManageHiring (recruiters/HR) OR the legacy canManageEmployees
   // super-set. The server is the real boundary; this just hides the nav link.
   { key: 'recruitment', label: 'Talent Acquisition', href: '/recruitment', feature: 'talent_acquisition', anyPermission: ['canViewHiring', 'canManageHiring', 'canManageEmployees'], icon: 'people' },
+  // Application-form templates — reusable screening-question sets a recruiter
+  // authors once and applies to any job (a different template per job). Same
+  // gate/feature as the Talent Acquisition console (viewers see it read-only; the
+  // create/edit/seed writes are server-gated on canManageHiring/canManageEmployees).
+  { key: 'recruitment-form-templates', label: 'Form templates', href: '/recruitment/form-templates', feature: 'talent_acquisition', anyPermission: ['canViewHiring', 'canManageHiring', 'canManageEmployees'], icon: 'doc' },
   { key: 'payroll', label: 'Payroll', href: '/payroll', feature: 'payroll', permission: 'canRunPayroll', icon: 'wallet' },
   // Feature 22 — Statutory Bonus (annual Payment of Bonus Act cycles) + the Feature 21
   // Labour Welfare Fund read panel (tab inside the page). Gated on canRunPayroll; the
@@ -271,7 +276,7 @@ export const NAV_ITEMS = [
 // emitted as its own expandable section, so it is intentionally omitted here.
 export const NAV_GROUPS = [
   { key: 'people-org', label: 'People & Org', icon: 'people', items: ['people', 'org', 'profile-changes', 'profile-policy', 'helpdesk', 'announcements', 'surveys', 'recognition'] },
-  { key: 'talent', label: 'Talent', icon: 'onboarding', items: ['recruitment', 'onboarding', 'separations', 'performance'] },
+  { key: 'talent', label: 'Talent', icon: 'onboarding', items: ['recruitment', 'recruitment-form-templates', 'onboarding', 'separations', 'performance'] },
   { key: 'time', label: 'Time', icon: 'calendar', items: ['leave', 'comp-off', 'leave-encashment', 'attendance'] },
   { key: 'pay', label: 'Pay', icon: 'wallet', items: ['compensation', 'ctc-policies', 'fbp-plans', 'fbp-allocations', 'payroll', 'bonus', 'variable-pay', 'arrears', 'form16', 'compliance', 'registers', 'tax-declaration-window', 'tax-proof-verification', 'tax-regime', 'expenses', 'travel', 'loans', 'reports'] },
   // FLAG FOR MERGE: new Feature 10 group — approval chains + RBAC + reporting tree.

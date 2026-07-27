@@ -669,6 +669,86 @@ const SCREENING_KINDS = [
   { v: 'TEXT', label: 'Free text' },
 ];
 
+// Apply a saved screening-form template's questions onto this job in one click.
+// Appends when the job has no screening questions; if it already has some the
+// server returns 409 QUESTIONS_EXIST → we confirm and retry with replace:true.
+// On success the parent reloads so the applied set shows (still individually
+// editable below). Templates are authored under Recruitment → Form templates.
+function ApplyFormTemplateBar({ jobId, onApplied }) {
+  const [templates, setTemplates] = useState(null);
+  const [selectedId, setSelectedId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  useEffect(() => {
+    get('/api/hr/recruitment/screening-form-templates')
+      .then((r) => {
+        const items = asList(r);
+        setTemplates(items);
+        const def = items.find((t) => t.isDefault);
+        setSelectedId(def ? def.id : (items[0] ? items[0].id : ''));
+      })
+      .catch((e) => setError(e.data?.message || e.message || 'Failed to load form templates.'));
+  }, []);
+
+  async function apply() {
+    if (!selectedId) { setError('Pick a form template to apply.'); return; }
+    setBusy(true); setError(''); setNotice('');
+    const call = (replace) => post(`/api/hr/recruitment/jobs/${jobId}/apply-screening-template`, { templateId: selectedId, ...(replace ? { replace: true } : {}) });
+    try {
+      let res;
+      try {
+        res = await call(false);
+      } catch (e) {
+        if (e.data?.code === 'QUESTIONS_EXIST') {
+          if (!window.confirm('This job already has screening questions — replace them with the template?')) { setBusy(false); return; }
+          res = await call(true);
+        } else { throw e; }
+      }
+      const n = res?.questions?.length ?? 0;
+      setNotice(`Applied ${n} question${n === 1 ? '' : 's'}${res?.replaced ? ' (replaced the previous set)' : ''}.`);
+      onApplied && onApplied();
+    } catch (e) {
+      setError(e.data?.message || e.message || 'Failed to apply the template.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const chosen = (templates || []).find((t) => t.id === selectedId);
+
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm mb-4">
+      {error && <ErrorBanner message={error} />}
+      {notice && <div className="mb-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{notice}</div>}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center text-sm font-semibold text-gray-900">
+            Apply a form template
+            <Info text="Populate this job's screening questions from a reusable template in one click. The questions remain individually editable below." />
+          </div>
+          {templates === null ? (
+            <p className="text-xs text-gray-500 mt-1">Loading templates…</p>
+          ) : templates.length === 0 ? (
+            <p className="text-xs text-gray-500 mt-1">No form templates yet. Create some under Recruitment → Form templates.</p>
+          ) : (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)} className="rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white min-w-[16rem]">
+                {templates.map((t) => <option key={t.id} value={t.id}>{t.name}{t.isDefault ? ' (default)' : ''} · {(t.questions || []).length} Q</option>)}
+              </select>
+              {chosen?.description && <span className="text-xs text-gray-400 truncate max-w-xs">{chosen.description}</span>}
+            </div>
+          )}
+        </div>
+        {templates && templates.length > 0 && (
+          <PrimaryButton onClick={apply} disabled={busy || !selectedId}>{busy ? 'Applying…' : 'Apply'}</PrimaryButton>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ScreeningTab({ jobId }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -697,6 +777,7 @@ function ScreeningTab({ jobId }) {
         Questions a candidate answers when they apply. Choice/qualification answers carry <b>points</b> (e.g. Master's → 6, CS engineering → 20).
         Tick <b>Knockout</b> to auto-reject a wrong answer. These auto-score the application — no manual marking.
       </p>
+      <ApplyFormTemplateBar jobId={jobId} onApplied={load} />
       <div className="flex justify-end mb-3">
         <PrimaryButton onClick={() => setEditing({ prompt: '', kind: 'SINGLE_CHOICE', required: true, isKnockout: false, options: [{ label: '', value: '', points: 0 }] })}>Add question</PrimaryButton>
       </div>
