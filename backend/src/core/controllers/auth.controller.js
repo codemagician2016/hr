@@ -9,7 +9,9 @@ const { CURRENT_TERMS_VERSION } = require('../lib/legal');
 const { resolveRecipientLocale } = require('../lib/locale');
 
 function generateOtp() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  // CSPRNG — see otp.controller.js. Predictable OTPs would allow reset/verify
+  // guessing; crypto.randomInt is uniform over the 6-digit range.
+  return crypto.randomInt(100000, 1000000).toString();
 }
 
 // Safe projection for the authenticated user returned to the client — mirrors
@@ -257,7 +259,7 @@ async function forgotPassword(req, res) {
     return res.json({ sent: true, message: 'If an account exists, an OTP has been sent.' });
   }
 
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const otp = generateOtp();
   const expiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
   await prisma.user.update({

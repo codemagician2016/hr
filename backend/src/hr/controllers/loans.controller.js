@@ -6,6 +6,7 @@
 // (15,2) — amounts are passed through as numbers/strings, never parseInt'd; only
 // internal schedule arithmetic uses a fixed-scale helper to avoid float drift.
 const prisma = require('../../core/lib/prisma');
+const { scopeWhere, scopeAllows } = require('../lib/scopeResolver');
 // Program Phase 2 — LOAN rides the approval engine: submit opens an
 // ApprovalRequest (BUILT_IN_DEFAULT: one HR step) and the legacy direct
 // approve/reject/cancel routes drive engine.recordDecision/cancel (systemActor —
@@ -235,7 +236,8 @@ async function list(req, res, next) {
     const take = Math.min(Math.max(parseInt(pageSize, 10) || 25, 1), 100);
     const skip = (Math.max(parseInt(page, 10) || 1, 1) - 1) * take;
 
-    const where = { businessId, deletedAt: null };
+    // Restrict to the actor's reporting sub-tree (no-op for ALL-band roles).
+    const where = { businessId, deletedAt: null, ...scopeWhere(req.scope, 'employeeId') };
     if (status) where.status = status;
     if (employeeId) where.employeeId = employeeId;
     if (loanType) where.loanType = loanType;
@@ -279,6 +281,8 @@ async function get(req, res, next) {
       },
     });
     if (!loan) return res.status(404).json({ message: 'Loan not found' });
+    // Out-of-subtree loans resolve to 404 (IDOR-safe) for non-ALL comp roles.
+    if (!scopeAllows(req.scope, loan.employeeId)) return res.status(404).json({ message: 'Loan not found' });
     res.json(loan);
   } catch (e) { next(e); }
 }
@@ -289,9 +293,10 @@ async function listInstallments(req, res, next) {
     const { businessId } = req.user;
     const loan = await prisma.loan.findFirst({
       where: { id: req.params.id, businessId, deletedAt: null },
-      select: { id: true },
+      select: { id: true, employeeId: true },
     });
     if (!loan) return res.status(404).json({ message: 'Loan not found' });
+    if (!scopeAllows(req.scope, loan.employeeId)) return res.status(404).json({ message: 'Loan not found' });
     const items = await prisma.loanInstallment.findMany({
       where: { businessId, loanId: req.params.id },
       orderBy: { seq: 'asc' },

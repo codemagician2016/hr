@@ -10,6 +10,17 @@ jest.mock('@prisma/client', () => ({
   __mockWebhookDelivery: mockWebhookDelivery,
 }));
 
+// The dispatcher wraps its request in the SSRF egress guard (safeFetch), which
+// does a real DNS lookup. These tests assert signing/delivery behaviour with a
+// fixture host (merchant.example) that intentionally doesn't resolve, so mock
+// the guard to delegate straight to the mocked global.fetch. The guard itself
+// is covered by ssrfGuard.test.js.
+jest.mock('../src/core/lib/ssrfGuard', () => ({
+  safeFetch: (url, opts) => global.fetch(url, opts),
+  assertPublicUrl: async (u) => new URL(u),
+  SsrfBlockedError: class SsrfBlockedError extends Error {},
+}));
+
 const { signWebhookEnvelope, signWebhookPayload } = require('../src/core/lib/publicApi');
 const { deliverOne } = require('../src/core/lib/webhookDispatcher');
 

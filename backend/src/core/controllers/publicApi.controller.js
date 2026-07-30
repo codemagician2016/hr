@@ -11,6 +11,7 @@ const {
 } = require('../lib/publicApi');
 const { assertBooleanFeature } = require('../lib/entitlements');
 const { deliverOne } = require('../lib/webhookDispatcher');
+const { assertPublicUrl, SsrfBlockedError } = require('../lib/ssrfGuard');
 
 const prisma = new PrismaClient();
 async function bizId(req) { return req.user?.businessId || null; }
@@ -96,6 +97,14 @@ async function createSub(req, res) {
   if (!await ensureApiAccessFeature(businessId, res)) return undefined;
   const parsed = subSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: 'Invalid', issues: parsed.error.issues });
+  // Reject internal/private webhook targets up front (defence-in-depth; the
+  // dispatcher re-validates at send time to defeat DNS rebinding).
+  try {
+    await assertPublicUrl(parsed.data.url);
+  } catch (err) {
+    if (err instanceof SsrfBlockedError) return res.status(400).json({ message: `Webhook URL not allowed: ${err.message}` });
+    throw err;
+  }
   const secret = generateWebhookSecret();
   const sub = await prisma.webhookSubscription.create({
     data: { businessId, url: parsed.data.url, events: parsed.data.events, secret },

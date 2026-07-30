@@ -165,4 +165,6 @@ module.exports = {
   payrollMutationLimiter,
   honeypot,
   verifyTurnstile,
+  extractClientIp,
+  makeRateLimiter,
 };

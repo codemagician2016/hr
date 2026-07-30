@@ -60,10 +60,11 @@ function amt(arr, code) {
 //     ADMIN    = max(0.50%×15,000=75, ₹500 floor) = ₹500 = 50000
 //   ESI: gross ₹50,000 > ₹21,000 ceiling, not latched -> NO ESI line.
 //   PT (MH male, June, gross >₹10,000) -> ₹200 = 20000 paise.
+//   LWF (MH, June — one of the two June/Dec collection months) -> EE ₹25 = 2500 paise.
 //   TDS: projected annual = 50,000 × 12 = 6,00,000; taxable 5,25,000;
 //        ≤12L -> §87A nil -> NO TDS line.
-//   EE deductions = EPF 1,800 + PT 200 = ₹2,000 = 200000 paise.
-//   Net = gross 50,000 − 2,000 = ₹48,000 = 4800000 paise.
+//   EE deductions = EPF 1,800 + PT 200 + LWF 25 = ₹2,025 = 202500 paise.
+//   Net = gross 50,000 − 2,025 = ₹47,975 = 4797500 paise.
 // ===========================================================================
 {
   const inRows = {
@@ -100,10 +101,11 @@ function amt(arr, code) {
   check('IN gross ₹50,000', R(50000), r.grossMinor);
   check('IN EPF-EE (12%×15,000=₹1,800)', R(1800), amt(r.employeeDeductions, 'EPF'));
   check('IN PT MH male June (₹200)', R(200), amt(r.employeeDeductions, 'PT'));
+  check('IN LWF MH June EE (₹25)', R(25), amt(r.employeeDeductions, 'LWF'));
   check('IN no ESI line (gross >21k)', null, amt(r.employeeDeductions, 'ESI'));
   check('IN no TDS line (taxable ≤12L)', null, amt(r.employeeDeductions, 'TDS'));
-  check('IN total EE deductions ₹2,000', R(2000), r.totalEmployeeDeductionsMinor);
-  check('IN net ₹48,000', R(48000), r.netMinor);
+  check('IN total EE deductions ₹2,025 (EPF+PT+LWF)', R(2025), r.totalEmployeeDeductionsMinor);
+  check('IN net ₹47,975', R(47975), r.netMinor);
   // employer contributions (cost-to-company, not deducted)
   check('IN EPS-ER (₹1,250)', R(1250), amt(r.employerContributions, 'EPS_ER'));
   check('IN EPF-ER balance (₹550)', R(550), amt(r.employerContributions, 'EPF_ER'));

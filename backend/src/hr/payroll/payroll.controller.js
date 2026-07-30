@@ -351,6 +351,7 @@ async function getPayslip(req, res) {
 // a fetch failure renders the text header exactly as before). PDF password is
 // a tenant setting (featureFlags.payroll.payslipPdfPassword = 'NONE'|'DOB'):
 // DOB = the common Indian convention DDMMYYYY from the employee's birth date.
+const { safeFetch } = require('../../core/lib/ssrfGuard');
 const _logoCache = new Map(); // url -> Buffer|null
 async function fetchLogoBytes(url) {
   if (!url || !/^https:\/\//i.test(url)) return null;
@@ -358,7 +359,8 @@ async function fetchLogoBytes(url) {
   try {
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), 3000);
-    const resp = await fetch(url, { signal: ctl.signal });
+    // Tenant-controlled brand logo URL — SSRF guard blocks internal targets.
+    const resp = await safeFetch(url, { signal: ctl.signal });
     clearTimeout(t);
     if (!resp.ok) throw new Error(String(resp.status));
     const buf = Buffer.from(await resp.arrayBuffer());

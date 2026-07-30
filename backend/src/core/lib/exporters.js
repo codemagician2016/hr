@@ -15,10 +15,14 @@ const CSV_COLUMNS = [
 ];
 
 // Quote per RFC 4180: wrap in " when the field contains a comma, "
-// or newline; double any existing quotes.
+// or newline; double any existing quotes. Also neutralise formula-injection:
+// a leading = + - @ (customer-controlled name/notes) is prefixed with ' so the
+// tenant admin opening the CSV in Excel/Sheets sees text, not a live formula.
+const FORMULA_LEAD = new Set(['=', '+', '-', '@', '\t', '\r']);
 function csvCell(v) {
   if (v === null || v === undefined) return '';
-  const s = String(v);
+  let s = String(v);
+  if (s.length && FORMULA_LEAD.has(s[0])) s = `'${s}`;
   if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
   return s;
 }

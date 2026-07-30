@@ -11,12 +11,15 @@
 //
 const crypto = require('crypto');
 const { encrypt, decrypt } = require('./crypto');
+const { safeFetch } = require('./ssrfGuard');
 
 async function httpJson(url, { method = 'GET', headers = {}, body, timeoutMs = 10000 } = {}) {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
   try {
-    const res = await fetch(url, {
+    // SSRF guard: baseUrl is tenant-supplied. safeFetch blocks any target
+    // (and redirect hop) resolving to internal/private network space.
+    const res = await safeFetch(url, {
       method,
       headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...headers },
       body: body == null ? undefined : (typeof body === 'string' ? body : JSON.stringify(body)),

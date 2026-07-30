@@ -77,14 +77,20 @@ function assertRefreshToken(decoded) {
   }
 }
 
+// Pin the accepted algorithm to HS256 (our only signing alg). jsonwebtoken v9
+// already rejects `alg:none` for a string secret, but an explicit allow-list
+// is defence-in-depth against any future RS/HS confusion if a public key is
+// ever introduced elsewhere.
+const JWT_VERIFY_OPTS = { algorithms: ['HS256'] };
+
 function verifyAccessToken(token) {
-  const decoded = jwt.verify(token, getJwtSecret());
+  const decoded = jwt.verify(token, getJwtSecret(), JWT_VERIFY_OPTS);
   assertAccessToken(decoded);
   return decoded;
 }
 
 function verifyRefreshToken(token) {
-  const decoded = jwt.verify(token, getJwtSecret());
+  const decoded = jwt.verify(token, getJwtSecret(), JWT_VERIFY_OPTS);
   assertRefreshToken(decoded);
   return decoded;
 }
@@ -193,12 +199,19 @@ async function authenticateOperator(req, res) {
     }
   }
 
+  // Cookie rotation on a refresh must NOT happen until the principal has
+  // passed the isActive + password-change-revocation guards below. If we
+  // minted here, the very request that a stale (pre-password-reset) refresh
+  // token gets REJECTED on would still Set-Cookie a brand-new token whose
+  // iat is post-reset — the browser persists Set-Cookie regardless of the
+  // 401 status, silently re-establishing the session we just revoked.
+  let shouldRotateCookie = false;
   if (!decoded) {
     const refreshToken = readOperatorRefreshToken(req);
     if (!refreshToken) throw tokenError('Not authenticated');
     decoded = verifyRefreshToken(refreshToken);
     if (decoded?.type === 'customer') throw tokenError('Not authenticated');
-    setTokenCookie(res, { id: decoded.id }, req);
+    shouldRotateCookie = true;
   }
 
   if (!decoded?.id || decoded?.type === 'customer') throw tokenError('Not authenticated');
@@ -212,6 +225,8 @@ async function authenticateOperator(req, res) {
   if (tokenPredatesPasswordChange(decoded, user.passwordChangedAt)) {
     throw tokenError('Please sign in again — your password was changed.');
   }
+  // Guards passed — safe to rotate the access cookie for a refresh-driven request.
+  if (shouldRotateCookie) setTokenCookie(res, { id: decoded.id }, req);
   // Seed the HR system roles for this tenant on first operator login.
   // Idempotent; keeps existing tenants' system-role permissions in sync
   // with the rbac.js catalog. Role *assignment* to a user is an explicit
@@ -253,11 +268,15 @@ async function authenticateCustomer(req, res) {
     }
   }
 
+  // Defer cookie rotation until after the isActive + anonymised + password
+  // -change guards below (see the operator path for why minting early defeats
+  // password-change session revocation).
+  let shouldRotateCookie = false;
   if (!decoded) {
     const refreshToken = readCustomerRefreshToken(req);
     if (!refreshToken) throw tokenError('Not authenticated');
     decoded = verifyRefreshToken(refreshToken);
-    setCustomerTokenCookie(res, { id: decoded.id, businessId: decoded.businessId }, req);
+    shouldRotateCookie = true;
   }
 
   if (decoded?.type !== 'customer' || !decoded?.id || !decoded?.businessId) {
@@ -282,6 +301,9 @@ async function authenticateCustomer(req, res) {
   if (tenantBusinessId && tenantBusinessId !== customer.businessId) {
     throw tokenError('Customer session belongs to another business', 403);
   }
+
+  // Guards passed — safe to rotate the customer access cookie for a refresh.
+  if (shouldRotateCookie) setCustomerTokenCookie(res, { id: decoded.id, businessId: decoded.businessId }, req);
 
   return customer;
 }

@@ -135,6 +135,11 @@ function hostFromOrigin(origin) {
   }
 }
 
+// Bound the cache so an unauthenticated flood of unique `Origin` headers can't
+// grow it without limit (memory-exhaustion DoS). Simple size cap + insertion-
+// order eviction (Map preserves insertion order) keeps it dependency-free.
+const CUSTOM_DOMAIN_ORIGIN_CACHE_MAX = 5000;
+
 async function isAllowedCustomDomainOrigin(origin) {
   const host = hostFromOrigin(origin);
   if (!host || host === PLATFORM_DOMAIN || host.endsWith(`.${PLATFORM_DOMAIN}`)) return false;
@@ -148,6 +153,11 @@ async function isAllowedCustomDomainOrigin(origin) {
     select: { businessId: true },
   });
   const allowed = Boolean(match);
+  if (customDomainOriginCache.size >= CUSTOM_DOMAIN_ORIGIN_CACHE_MAX) {
+    // Evict the oldest entry (and opportunistically the stale one we just read).
+    const oldest = customDomainOriginCache.keys().next().value;
+    if (oldest !== undefined) customDomainOriginCache.delete(oldest);
+  }
   customDomainOriginCache.set(host, { allowed, expiresAt: now + 60_000 });
   return allowed;
 }
@@ -211,6 +221,8 @@ app.post('/api/integrations/:id/webhook', express.raw({ type: 'application/json'
 // rate limit guards a chatty/looping terminal. Idempotent by dedupKey (retry-safe).
 {
   const rateLimit = require('express-rate-limit');
+  const { ipKeyGenerator } = require('express-rate-limit');
+  const { extractClientIp } = require('./core/middleware/abuse.middleware');
   const biometricIngestLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 600, // a busy gate rarely exceeds ~10/s; well above real device cadence
@@ -219,8 +231,21 @@ app.post('/api/integrations/:id/webhook', express.raw({ type: 'application/json'
     keyGenerator: (req) => `biometric:${req.params.deviceSerial || 'unknown'}`,
     message: { message: 'rate limit exceeded for this device' },
   });
+  // Per-serial keying alone lets a distributed spray of DISTINCT random serials
+  // bypass the cap (each unknown serial still runs a DB lookup). A coarse
+  // per-IP ceiling in front bounds that: a real site's gateways behind one IP
+  // stay well under 3000/min, an attacker rotating serials from one IP does not.
+  const biometricIngestIpLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 3000,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => `biometric-ip:${ipKeyGenerator(extractClientIp(req))}`,
+    message: { message: 'rate limit exceeded' },
+  });
   app.post(
     '/api/hr/biometric/ingest/:deviceSerial',
+    biometricIngestIpLimiter,
     biometricIngestLimiter,
     express.text({ type: () => true, limit: '5mb' }),
     asyncHandler(require('./hr/attendance/biometric/webhook.controller').ingestPunch),
@@ -239,7 +264,13 @@ app.use(cookieParser());
 app.get('/health', async (req, res) => {
   try {
     const { runHealthCheck } = require('./core/lib/health');
-    const result = await runHealthCheck();
+    // Rich detail (env inventory, schema version, process info) is only for a
+    // trusted caller: a valid HEALTH_DETAIL_TOKEN (header or query). Everyone
+    // else gets the minimal status + DB up/down needed for uptime probes.
+    const token = process.env.HEALTH_DETAIL_TOKEN;
+    const provided = req.get('x-health-token') || req.query.token || '';
+    const detailed = Boolean(token) && provided === token;
+    const result = await runHealthCheck({ detailed });
     const httpStatus = result.status === 'ok' ? 200 : 503;
     res.status(httpStatus).json(result);
   } catch (err) {
@@ -414,9 +445,17 @@ Sentry.setupExpressErrorHandler(app);
 
 // Fallback handler so errors still return 500 after Sentry captures them.
 // Keeps our responses JSON instead of the default HTML error page.
+//
+// Info-disclosure guard: the full message + stack always go to the server log
+// / Sentry, but the CLIENT only sees err.message for deliberate client-facing
+// errors (4xx, or err.expose === true). Server-side faults (5xx) — including
+// raw Prisma/DB errors that leak schema, column names and query fragments —
+// return a generic message so the data model can't be mapped through errors.
 app.use((err, _req, res, _next) => {
   console.error('[Unhandled]', err.message, err.stack);
-  res.status(err.status || 500).json({ message: err.message || 'Internal server error' });
+  const status = err.status || err.statusCode || 500;
+  const clientSafe = status < 500 || err.expose === true;
+  res.status(status).json({ message: clientSafe ? (err.message || 'Error') : 'Internal server error' });
 });
 
 const PORT = process.env.PORT || 5000;

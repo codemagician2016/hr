@@ -182,7 +182,7 @@ async function main() {
     } else {
       const compRes = await callController(
         compensationController.components.create,
-        mkReq(user, { body: { code: compCode, name: 'E2E Basic', kind: 'BASIC', category: 'EARNING', calcMethod: 'FLAT', entityId } }),
+        mkReq(user, { body: { code: compCode, name: 'E2E Basic', kind: 'BASIC', category: 'EARNING', calcMethod: 'FLAT', calcValue: '50000.00', entityId } }),
       );
       ok(compRes.statusCode === 201 && compRes.body.code === compCode, 'payComponent.create → 201');
       ok(compRes.body.businessId === businessId, 'payComponent.create is tenant-scoped');

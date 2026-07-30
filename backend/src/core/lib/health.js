@@ -130,12 +130,26 @@ function envSummary() {
 
 // Run all checks in parallel for speed. Critical checks (DB) decide the
 // overall HTTP status.
-async function runHealthCheck() {
+// `detailed` gates the info-disclosure-sensitive body (env provider inventory,
+// migration/schema version, PID, Node version, memory). Unauthenticated callers
+// (UptimeRobot / load-balancer probes) only need the status + DB up/down, so
+// the default is the safe, minimal shape. index.js passes detailed:true only
+// for an authenticated super-admin or a matching HEALTH_DETAIL_TOKEN.
+async function runHealthCheck({ detailed = false } = {}) {
   const start = Date.now();
   const [db, migration] = await Promise.all([dbCheck(), migrationCheck()]);
 
   const ok = db.ok; // DB is the only "must-have" — migration check failure
                     // is informational (could be a fresh DB)
+
+  if (!detailed) {
+    return {
+      status: ok ? 'ok' : 'degraded',
+      timestamp: new Date().toISOString(),
+      checkLatencyMs: Date.now() - start,
+      checks: { db: { ok: db.ok, latencyMs: db.latencyMs }, migration: { ok: migration.ok } },
+    };
+  }
 
   return {
     status: ok ? 'ok' : 'degraded',

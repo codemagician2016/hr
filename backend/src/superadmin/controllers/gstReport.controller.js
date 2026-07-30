@@ -5,8 +5,14 @@
 //
 const { buildIndiaGstReport } = require('../../core/lib/subscriptionInvoice');
 
+// Formula-injection guard: a leading = + - @ (or tab/CR) is prefixed with a
+// quote so Excel/Sheets treat a tenant-set buyer name like `=HYPERLINK(...)`
+// as text, not a live formula, when the platform operator opens the export.
+const FORMULA_LEAD = new Set(['=', '+', '-', '@', '\t', '\r']);
 function csvCell(value) {
-  return `"${String(value == null ? '' : value).replace(/"/g, '""')}"`;
+  let s = String(value == null ? '' : value);
+  if (s.length && FORMULA_LEAD.has(s[0])) s = `'${s}`;
+  return `"${s.replace(/"/g, '""')}"`;
 }
 function money(minor) {
   return (Math.round(Number(minor) || 0) / 100).toFixed(2);

@@ -148,10 +148,14 @@ async function storeArtifact({ dataUrl, businessId, scope }) {
 }
 
 // The server secret the audit certificate is HMAC-sealed with. A dedicated
-// ESIGN_CERT_SECRET is preferred; it falls back to JWT_SECRET, then to a build-time
-// constant (dev/test only) so the cert is ALWAYS sealed and the HMAC is ALWAYS real.
+// ESIGN_CERT_SECRET is preferred; it falls back to JWT_SECRET. There is NO
+// hardcoded constant fallback — a publicly-known key would let anyone forge a
+// valid HMAC over a tampered legal certificate. JWT_SECRET is required for the
+// app to boot, so this always resolves to a real secret in every real context.
 function getCertSecret() {
-  return process.env.ESIGN_CERT_SECRET || process.env.JWT_SECRET || 'drifthr-esign-cert-dev-secret';
+  const secret = process.env.ESIGN_CERT_SECRET || process.env.JWT_SECRET;
+  if (!secret) throw new Error('ESIGN_CERT_SECRET (or JWT_SECRET) is required to seal e-sign certificates');
+  return secret;
 }
 
 // HMAC-SHA256 of the certificate body (hex). This is the tamper seal: a verifier

@@ -8,6 +8,7 @@
 
 const { PrismaClient } = require('@prisma/client');
 const { signWebhookEnvelope, signWebhookPayload } = require('./publicApi');
+const { safeFetch, SsrfBlockedError } = require('./ssrfGuard');
 const prisma = new PrismaClient();
 
 const MAX_ATTEMPTS = 5;
@@ -61,7 +62,10 @@ async function deliverOne(delivery) {
 
   let res;
   try {
-    res = await fetch(sub.url, {
+    // SSRF guard: the destination URL is tenant-controlled. safeFetch rejects
+    // (and re-validates every redirect hop of) any target resolving to
+    // internal/private network space before a single byte is sent.
+    res = await safeFetch(sub.url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -75,6 +79,18 @@ async function deliverOne(delivery) {
       body,
     });
   } catch (err) {
+    // A blocked destination is a permanent failure — don't waste retries.
+    if (err instanceof SsrfBlockedError) {
+      return prisma.webhookDelivery.update({
+        where: { id: delivery.id },
+        data: {
+          attempts: delivery.attempts + 1,
+          status: 'FAILED',
+          responseBody: 'destination URL blocked by egress policy',
+          nextRetryAt: null,
+        },
+      });
+    }
     const nextAttempt = delivery.attempts + 1;
     const isFinal = nextAttempt >= MAX_ATTEMPTS;
     return prisma.webhookDelivery.update({

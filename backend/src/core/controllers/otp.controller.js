@@ -1,10 +1,13 @@
+const crypto = require('crypto');
 const prisma = require('../lib/prisma');
 const { sendUserSignupOtpEmail, sendWelcomeEmail } = require('../utils/email');
 const { EMAIL_EVENTS } = require('../lib/emailEvents');
 const { generateToken, setTokenCookie } = require('../utils/generateToken');
 
 function generateOtp() {
-  return Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit
+  // CSPRNG — Math.random() is predictable (its state is recoverable from
+  // observed outputs), which would make verification/reset OTPs guessable.
+  return crypto.randomInt(100000, 1000000).toString(); // 6-digit, uniform
 }
 
 // POST /api/auth/send-otp — send OTP to email for verification

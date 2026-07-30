@@ -98,7 +98,21 @@ describe('envSummary', () => {
 });
 
 describe('runHealthCheck', () => {
-  test('returns ok status when DB is healthy', async () => {
+  test('detailed=true returns full body incl. process + env', async () => {
+    prisma.$queryRaw
+      .mockResolvedValueOnce([{ '?column?': 1 }]) // dbCheck
+      .mockResolvedValueOnce([{ migration_name: 'm1', finished_at: new Date() }]); // migrationCheck
+    const r = await health.runHealthCheck({ detailed: true });
+    expect(r.status).toBe('ok');
+    expect(r.checks.db.ok).toBe(true);
+    expect(r.checks.migration.ok).toBe(true);
+    expect(r.timestamp).toBeTruthy();
+    expect(r.process.uptimeSec).toBeGreaterThanOrEqual(0);
+    expect(r.env).toBeTruthy();
+    expect(r.env.has).toBeTruthy();
+  });
+
+  test('default (undetailed) response withholds env + process (info-disclosure guard)', async () => {
     prisma.$queryRaw
       .mockResolvedValueOnce([{ '?column?': 1 }]) // dbCheck
       .mockResolvedValueOnce([{ migration_name: 'm1', finished_at: new Date() }]); // migrationCheck
@@ -106,8 +120,10 @@ describe('runHealthCheck', () => {
     expect(r.status).toBe('ok');
     expect(r.checks.db.ok).toBe(true);
     expect(r.checks.migration.ok).toBe(true);
-    expect(r.timestamp).toBeTruthy();
-    expect(r.process.uptimeSec).toBeGreaterThanOrEqual(0);
+    // No provider inventory, schema version, PID or Node version for anon callers.
+    expect(r.env).toBeUndefined();
+    expect(r.process).toBeUndefined();
+    expect(r.checks.migration.name).toBeUndefined();
   });
 
   test('returns degraded status when DB is down', async () => {

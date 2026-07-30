@@ -1,4 +1,5 @@
 const { SESClient, SendEmailCommand, SendRawEmailCommand } = require('@aws-sdk/client-ses');
+const crypto = require('crypto');
 const prisma = require('../lib/prisma');
 const { EMAIL_EVENTS, categoryForEmailEvent } = require('../lib/emailEvents');
 const { generateGoogleCalendarLink, zonedDateTimeToUtc } = require('./calendarLinks');
@@ -108,8 +109,12 @@ function stripHtml(html) {
 }
 
 function buildRawMimeEmail({ to, subject, htmlBody, attachments = [], envHeader = null }) {
-  const mixedBoundary = `ae-mixed-${Date.now().toString(36)}`;
-  const altBoundary = `ae-alt-${Math.random().toString(36).slice(2, 10)}`;
+  // Boundaries only need to be unique, not secret — but Math.random() here
+  // leaked V8 PRNG state in every outbound email, which could be used to
+  // predict Math.random()-based OTPs elsewhere. Use CSPRNG bytes so no PRNG
+  // state ever crosses the trust boundary.
+  const mixedBoundary = `ae-mixed-${crypto.randomBytes(9).toString('hex')}`;
+  const altBoundary = `ae-alt-${crypto.randomBytes(9).toString('hex')}`;
   const headers = [
     `From: ${process.env.SES_FROM_EMAIL}`,
     `To: ${to}`,

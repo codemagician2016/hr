@@ -1,4 +1,5 @@
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const prisma = require('../lib/prisma');
 const { CURRENT_TERMS_VERSION } = require('../lib/legal');
 const { logActivity } = require('../lib/ecomActivityLogger');
@@ -23,7 +24,8 @@ function fireCartMerge({ customerId, businessId, sessionId }) {
 }
 
 function generate6DigitOtp() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  // CSPRNG — predictable OTPs would allow customer reset/verify guessing.
+  return crypto.randomInt(100000, 1000000).toString();
 }
 
 // Thin wrapper so existing call sites keep working while we delegate the
