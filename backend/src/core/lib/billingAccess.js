@@ -22,6 +22,17 @@ const { isPaidTier } = require('./featuresCatalog');
 
 const ACTIVE_STATUSES = new Set(['ACTIVE', 'TRIALING', 'CANCEL_SCHEDULED']);
 
+// FREEMIUM (owner decision reversed 2026-07-30): a never-paid Free-tier tenant
+// gets BASELINE platform access — core HR works immediately on signup — while
+// premium tiers and add-ons stay gated by per-tier ENTITLEMENTS (TierFeature +
+// add-on purchase), NOT by a hard billing wall. This intentionally supersedes
+// the 2026-06-03 paid-only model for the HR product. Flag-gated so ops can
+// restore the strict paid-only wall with PAID_ONLY_BILLING=true. Lapsed PAID
+// tenants are unaffected (they still hit grace/expired — see below).
+function freeTierBaselineAccessEnabled() {
+  return String(process.env.PAID_ONLY_BILLING || '').toLowerCase() !== 'true';
+}
+
 function future(value, now) {
   return value && new Date(value).getTime() > now.getTime();
 }
@@ -50,6 +61,14 @@ function billingAccessState(business, now = new Date()) {
   // (never cleared, survives a downgrade-to-free). A stale free-tier gateway id
   // does NOT count — that's the never-paid ONBOARDING placeholder.
   const everActivated = onPaidTier || !!sub?.activatedAt;
+
+  // FREEMIUM baseline: a NEVER-PAID tenant (free tier, or no subscription row)
+  // gets active baseline access. The `!everActivated` guard is deliberate — a
+  // tenant that once paid and then lapsed does NOT fall through to free access;
+  // they still hit grace/expired below so the renewal incentive is preserved.
+  if (freeTierBaselineAccessEnabled() && !everActivated) {
+    return { state: 'active' };
+  }
   if (!everActivated) return { state: 'onboarding' };
 
   // Lapsed: inside the dunning grace window → grace, else expired.

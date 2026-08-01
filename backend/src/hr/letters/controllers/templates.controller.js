@@ -334,6 +334,15 @@ async function createTemplate(req, res) {
     if (sigBox === undefined) return fail(res, 422, 'signatureBoxJson must be a normalized {x,y,w,h} object');
   }
 
+  // Feature 39 — stamp box on CREATE. Previously only updateTemplate read this,
+  // so placing a stamp on a brand-new template was silently dropped until a later
+  // edit. Mirror the signature-box handling here.
+  let stampBox;
+  if (b.stampBoxJson !== undefined) {
+    stampBox = sanitizeSigBox(b.stampBoxJson);
+    if (stampBox === undefined) return fail(res, 422, 'stampBoxJson must be a normalized {x,y,w,h} object');
+  }
+
   // Operators cannot mint system templates (isSystem is seed-only).
   const data = {
     businessId,
@@ -360,6 +369,7 @@ async function createTemplate(req, res) {
     categoryId: b.categoryId || null,
     signatureAssetId: b.signatureAssetId || null,
     stampAssetId: b.stampAssetId || null,
+    stampBoxJson: stampBox,
     isSystem: false,
     // New templates start as a DRAFT unless the caller explicitly publishes.
     isActive: b.isActive === true,

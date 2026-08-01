@@ -113,10 +113,18 @@ try { ({ hostForSlug: _hostForSlug } = require('../../../core/lib/subdomainProvi
 // slug (Business.slug). Returns null when the job has no public slug yet.
 function publicCareersLink(businessSlug, job) {
   if (!job || !job.publicSlug || !businessSlug) return null;
-  const careersPath = `/careers/${businessSlug}`;
+  // The shareable link points at the tenant careers HOST ({slug}-staging.drifthr.com
+  // / {slug}.drifthr.com), which is served by the ESS app. ESS resolves the tenant
+  // from the host, so its careers routes carry NO business-slug segment:
+  //   board  /careers            (GET /api/careers/:slug/jobs)
+  //   detail /careers/jobs/:pubS  (GET /api/careers/:slug/jobs/:publicSlug)
+  //   apply  POST /api/careers/:slug/jobs/:publicSlug/apply
+  // Emitting the old admin-host shape (/careers/:businessSlug/jobs/:pubS) 404'd on
+  // the ESS host (no matching route), so every shared job link was dead.
+  const careersPath = `/careers`;
   const jobPath = `${careersPath}/jobs/${job.publicSlug}`;
   // API apply path the public page (and any portal that wires a direct POST) hits.
-  const apiApplyPath = `/api/public/careers/${businessSlug}/jobs/${job.publicSlug}`;
+  const apiApplyPath = `/api/careers/${businessSlug}/jobs/${job.publicSlug}/apply`;
   let host = null;
   try { host = _hostForSlug ? _hostForSlug(businessSlug) : null; } catch { host = null; }
   const origin = host ? `https://${host}` : null;
