@@ -10,6 +10,8 @@ const {
   dashboardAnalytics,
   businessAnalytics,
   toggleSuspend,
+  setBusinessPlan,
+  setBusinessAddOn,
   deleteBusiness,
   getSettings,
   updateSetting,
@@ -43,6 +45,9 @@ router.post('/billing/invoices/:transactionId', billingInvoice);
 router.get('/dashboard', dashboardAnalytics);
 router.get('/businesses/:id/analytics', businessAnalytics);
 router.put('/businesses/:id/suspend', toggleSuspend);
+// Comp levers: set a tenant's plan / grant-revoke an add-on without a gateway.
+router.post('/businesses/:id/plan', wrap(setBusinessPlan));
+router.post('/businesses/:id/addon', wrap(setBusinessAddOn));
 router.delete('/businesses/:id', deleteBusiness);
 router.get('/settings', getSettings);
 router.put('/settings', updateSetting);

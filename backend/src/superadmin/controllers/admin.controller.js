@@ -790,6 +790,86 @@ async function toggleSuspend(req, res) {
   res.json({ business: updated });
 }
 
+// POST /api/admin/businesses/:id/plan — super-admin COMP plan set (no gateway).
+// The reliable lever to put ANY tenant on ANY tier for support / testing / a
+// comped account, WITHOUT a payment gateway round-trip. Sets the subscription to
+// the chosen tier, ACTIVE, with a far-future period so it never lapses; stamps
+// activatedAt for a paid tier so billingAccessState reads 'active'. The self-serve
+// gateway checkout (BillingTab plan change) remains the customer-paid path.
+// Body: { tierSlug, billingCycle? }.
+async function setBusinessPlan(req, res) {
+  const { id } = req.params;
+  const tierSlug = String(req.body?.tierSlug || '').trim();
+  const billingCycle = String(req.body?.billingCycle || 'MONTHLY').toUpperCase() === 'YEARLY' ? 'YEARLY' : 'MONTHLY';
+  if (!tierSlug) return res.status(422).json({ message: 'tierSlug is required' });
+
+  const business = await prisma.business.findUnique({ where: { id }, select: { id: true, name: true, slug: true } });
+  if (!business) return res.status(404).json({ message: 'Business not found' });
+
+  const tier = await prisma.pricingTier.findUnique({ where: { slug: tierSlug }, select: { id: true, slug: true, name: true } });
+  if (!tier) return res.status(422).json({ message: `Unknown tier: ${tierSlug}` });
+
+  const { isPaidTier } = require('../../core/lib/featuresCatalog');
+  const paid = isPaidTier(tier.slug);
+  const FOREVER = new Date(Date.now() + 100 * 365 * 24 * 60 * 60 * 1000);
+  const existing = await prisma.subscription.findUnique({ where: { businessId: id }, select: { id: true, activatedAt: true } });
+
+  const common = {
+    tierId: tier.id,
+    status: 'ACTIVE',
+    billingCycle,
+    currentPeriodEnd: FOREVER,
+    // A comped paid tier must read as a genuine activation.
+    activatedAt: paid ? (existing?.activatedAt || new Date()) : (existing?.activatedAt || null),
+    // Clear any pending change / dunning left over from a prior gateway state.
+    pendingTierSlug: null,
+    pendingBillingCycle: null,
+    pendingChangeEffectiveAt: null,
+    pastDueSince: null,
+    accessGraceUntil: null,
+  };
+
+  const sub = existing
+    ? await prisma.subscription.update({ where: { businessId: id }, data: common, include: { tier: true } })
+    : await prisma.subscription.create({ data: { businessId: id, theme: 'default', seatsUsed: 1, ...common }, include: { tier: true } });
+
+  try {
+    const { writeAudit } = require('../../core/lib/audit');
+    await writeAudit({ businessId: id, actorId: req.user.id, action: 'admin.plan.set', entityType: 'Subscription', entityId: sub.id, meta: { tierSlug, billingCycle, comp: true } });
+  } catch { /* audit is best-effort */ }
+
+  res.json({
+    business: { id: business.id, name: business.name, slug: business.slug },
+    subscription: { status: sub.status, billingCycle: sub.billingCycle, currentPeriodEnd: sub.currentPeriodEnd, tier: { slug: sub.tier.slug, name: sub.tier.name } },
+  });
+}
+
+// POST /api/admin/businesses/:id/addon — super-admin grant/revoke an HR add-on
+// (e.g. talent_acquisition) as a comp, mirroring the self-serve purchase result.
+// Body: { key, enabled? (default true) }.
+async function setBusinessAddOn(req, res) {
+  const { id } = req.params;
+  const key = String(req.body?.key || '').trim();
+  const enabled = !(req.body && req.body.enabled === false);
+  const { HR_ADDON_KEYS, hrEntitlements } = require('../../core/lib/entitlements');
+  if (!HR_ADDON_KEYS.includes(key)) return res.status(422).json({ message: `Unknown add-on: ${key}` });
+
+  const business = await prisma.business.findUnique({ where: { id }, select: { id: true, featureFlags: true } });
+  if (!business) return res.status(404).json({ message: 'Business not found' });
+
+  const flags = (business.featureFlags && typeof business.featureFlags === 'object') ? business.featureFlags : {};
+  const addOns = (flags.addOns && typeof flags.addOns === 'object') ? { ...flags.addOns } : {};
+  addOns[key] = enabled;
+  await prisma.business.update({ where: { id }, data: { featureFlags: { ...flags, addOns } } });
+
+  try {
+    const { writeAudit } = require('../../core/lib/audit');
+    await writeAudit({ businessId: id, actorId: req.user.id, action: enabled ? 'admin.addon.grant' : 'admin.addon.revoke', entityType: 'Business', entityId: id, meta: { key, comp: true } });
+  } catch { /* best-effort */ }
+
+  res.json({ entitlements: await hrEntitlements(id) });
+}
+
 // DELETE /api/admin/businesses/:id — permanently delete a business and all its
 // linked data (users, appointments, products, pages, etc.). Cascade rules in
 // schema.prisma do the heavy lifting; we just delete the Business row.
@@ -896,6 +976,8 @@ module.exports = {
   dashboardAnalytics,
   businessAnalytics,
   toggleSuspend,
+  setBusinessPlan,
+  setBusinessAddOn,
   deleteBusiness,
   getSettings,
   updateSetting,
