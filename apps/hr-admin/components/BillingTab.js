@@ -509,6 +509,64 @@ function InvoicesCard({ transactions }) {
 }
 
 // ─── BillingTab (default export) ─────────────────────────────────────────────
+// ─── AddOnsCard ──────────────────────────────────────────────────────────────
+// Sellable modules that stack on any plan (Talent Acquisition, …). "Add" hits
+// the self-serve subscribe endpoint — a gateway checkout where an add-on price
+// is configured, otherwise a time-boxed trial so the module works immediately.
+function AddOnsCard({ canEdit }) {
+  const [addOns, setAddOns] = useState(null);
+  const [busy, setBusy] = useState('');
+  const [msg, setMsg] = useState('');
+  const [err, setErr] = useState('');
+
+  const load = useCallback(async () => {
+    try { const r = await get('/api/subscription/add-ons'); setAddOns(r?.addOns || []); }
+    catch { setAddOns([]); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  async function add(key) {
+    setBusy(key); setErr(''); setMsg('');
+    try {
+      const r = await post(`/api/subscription/add-ons/${key}/subscribe`, {});
+      if (r?.checkoutUrl) { window.location.assign(r.checkoutUrl); return; }
+      setMsg(r?.status === 'trial_started' ? `Added — you’re on a ${r.trialDays}-day trial.` : 'Added to your plan.');
+      await load();
+    } catch (e) { setErr(e.data?.message || e.message || 'Could not add this module.'); }
+    finally { setBusy(''); }
+  }
+
+  if (!addOns || addOns.length === 0) return null;
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-5">
+      <h3 className="text-sm font-semibold text-gray-900">Add-ons</h3>
+      <p className="text-xs text-gray-500 mt-0.5">Extra modules you can add to any plan.</p>
+      {msg && <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 mt-3">{msg}</p>}
+      {err && <div className="mt-3"><ErrorBanner message={err} /></div>}
+      <div className="mt-3 space-y-3">
+        {addOns.map((a) => (
+          <div key={a.key} className="flex items-start justify-between gap-3 border border-gray-100 rounded-xl p-3">
+            <div>
+              <div className="font-medium text-gray-900 text-sm">{a.name}</div>
+              <div className="text-xs text-gray-500 mt-0.5 max-w-md">{a.blurb}</div>
+              {a.price && <div className="text-[11px] text-gray-400 mt-1">{a.price.INR} · {a.price.NZD}</div>}
+            </div>
+            {a.enabled ? (
+              <span className="shrink-0 text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">Included ✓</span>
+            ) : (
+              <button onClick={() => add(a.key)} disabled={!canEdit || busy === a.key}
+                className="shrink-0 px-3 py-1.5 text-sm font-semibold rounded-lg text-white disabled:opacity-50"
+                style={{ background: 'var(--theme-primary, #16B6A6)' }}>
+                {busy === a.key ? '…' : 'Add'}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function BillingTab() {
   const [billing, setBilling] = useState(null);
   const [workspace, setWorkspace] = useState(null);
@@ -648,6 +706,8 @@ export default function BillingTab() {
           disabled={!!actionBusy}
         />
       ) : null}
+
+      <AddOnsCard canEdit={canEdit} />
 
       <BillingProfileCard profile={profile} canEdit={canEdit} onSaved={setProfile} />
 

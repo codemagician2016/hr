@@ -1111,6 +1111,39 @@ function BusinessesTab({ businesses, onReload }) {
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteTyped, setDeleteTyped] = useState('');
+  const [planModal, setPlanModal] = useState(null); // the business being edited
+  const [planTier, setPlanTier] = useState('');
+  const [planBusy, setPlanBusy] = useState(false);
+
+  // Comp plan tiers (mirror the seeded HR catalog). Setting one is a gateway-free
+  // super-admin override; the tenant's own paid checkout stays the customer path.
+  const PLAN_TIERS = [
+    { slug: 'free', name: 'Free' },
+    { slug: 'starter', name: 'Starter' },
+    { slug: 'growth', name: 'Growth' },
+    { slug: 'enterprise', name: 'Enterprise' },
+  ];
+
+  async function setPlan(id, tierSlug) {
+    setPlanBusy(true);
+    try {
+      await axios.post(`/api/admin/businesses/${id}/plan`, { tierSlug }, { withCredentials: true });
+      setPlanModal(null);
+      onReload?.();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to set plan');
+    } finally { setPlanBusy(false); }
+  }
+
+  async function setAddOn(id, key, enabled) {
+    setPlanBusy(true);
+    try {
+      await axios.post(`/api/admin/businesses/${id}/addon`, { key, enabled }, { withCredentials: true });
+      alert(`Talent Acquisition ${enabled ? 'granted' : 'revoked'} for this tenant.`);
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to update add-on');
+    } finally { setPlanBusy(false); }
+  }
 
   async function deleteBusiness(target, typedSlug) {
     if (typedSlug !== target.slug) return;
@@ -1272,6 +1305,11 @@ function BusinessesTab({ businesses, onReload }) {
                             Pause
                           </button>
                         )}
+                        <button onClick={() => { setPlanModal(b); setPlanTier(b.subscription?.tier?.slug || 'free'); }} disabled={pendingId === b.id}
+                          className="px-2.5 py-1 text-[10px] font-semibold rounded-lg border border-teal-300 text-teal-700 hover:bg-teal-50 disabled:opacity-50"
+                          title="Set this tenant's plan or grant/revoke add-ons (comp — no gateway)">
+                          Plan
+                        </button>
                         <button onClick={() => { setDeleteTarget(b); setDeleteTyped(''); }} disabled={pendingId === b.id}
                           className="px-2.5 py-1 text-[10px] font-semibold rounded-lg border border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-50"
                           title="Permanently delete this tenant and ALL its data">
@@ -1284,6 +1322,50 @@ function BusinessesTab({ businesses, onReload }) {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Plan & add-ons modal (comp — no gateway) */}
+      {planModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => !planBusy && setPlanModal(null)}>
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold text-gray-900">Plan &amp; add-ons</h3>
+            <p className="text-sm text-gray-500 mt-1">{planModal.name} <span className="text-gray-400">/{planModal.slug}</span></p>
+
+            <div className="mt-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Plan (comp — no payment)</label>
+              <div className="flex items-center gap-2">
+                <select value={planTier} onChange={(e) => setPlanTier(e.target.value)}
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500">
+                  {PLAN_TIERS.map((t) => <option key={t.slug} value={t.slug}>{t.name}</option>)}
+                </select>
+                <button onClick={() => setPlan(planModal.id, planTier)} disabled={planBusy}
+                  className="px-3 py-2 text-sm font-semibold rounded-lg bg-teal-600 hover:bg-teal-700 text-white disabled:opacity-50">
+                  {planBusy ? '…' : 'Set'}
+                </button>
+              </div>
+              <p className="text-[11px] text-gray-400 mt-1">Currently: {planModal.subscription?.tier?.name || '—'}. Enterprise includes Talent Acquisition.</p>
+            </div>
+
+            <div className="mt-5 pt-4 border-t border-gray-100">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Talent Acquisition add-on</label>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setAddOn(planModal.id, 'talent_acquisition', true)} disabled={planBusy}
+                  className="flex-1 px-3 py-2 text-sm font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50">
+                  Grant
+                </button>
+                <button onClick={() => setAddOn(planModal.id, 'talent_acquisition', false)} disabled={planBusy}
+                  className="flex-1 px-3 py-2 text-sm font-semibold rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+                  Revoke
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-end">
+              <button onClick={() => setPlanModal(null)} disabled={planBusy}
+                className="px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 disabled:opacity-50">Close</button>
+            </div>
+          </div>
         </div>
       )}
 

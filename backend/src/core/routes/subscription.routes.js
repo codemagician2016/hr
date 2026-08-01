@@ -72,6 +72,13 @@ router.post('/cancel', requireBusinessAdmin, cancelSubscriptionPlan);
 router.post('/resume', requireBusinessAdmin, resumeSubscriptionPlan);
 router.post('/select', requireBusinessAdmin, selectPlan);
 router.post('/start-trial', requireBusinessAdmin, startTrial);
+// Self-serve add-ons (Talent Acquisition, …). List is readable by any operator;
+// subscribe is BUSINESS_ADMIN.
+{
+  const addOns = require('../controllers/subscriptionAddOns.controller');
+  router.get('/add-ons', addOns.listAddOns);
+  router.post('/add-ons/:key/subscribe', requireBusinessAdmin, addOns.subscribeAddOn);
+}
 router.post('/sync-from-paddle', requireBusinessAdmin, syncFromPaddle);
 router.post('/sync-from-stripe', requireBusinessAdmin, syncFromStripe);
 router.post('/sync-from-razorpay', requireBusinessAdmin, syncFromRazorpay);

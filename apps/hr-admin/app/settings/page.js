@@ -549,8 +549,15 @@ export default function SettingsPage() {
     return out;
   }, [perms]);
 
-  // Default to the first available tab once permissions resolve.
+  // Default to the first available tab once permissions resolve — OR honor a
+  // ?tab=<key> deep-link (e.g. the recruitment add-on upsell links to
+  // /settings?tab=billing). Read from the URL directly to avoid a Suspense
+  // boundary around useSearchParams.
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const wanted = new URLSearchParams(window.location.search).get('tab');
+      if (wanted && tabs.some((t) => t.key === wanted)) { setTab(wanted); return; }
+    }
     if (tab === null || !tabs.some((t) => t.key === tab)) setTab(tabs[0]?.key || 'branding');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabs]);

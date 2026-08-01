@@ -49,9 +49,16 @@ export default function RecruitmentPage() {
           <h2 className="text-lg font-semibold text-gray-900">Talent Acquisition isn’t on your plan yet</h2>
           <p className="text-sm text-gray-500 mt-2 max-w-md mx-auto">
             Post jobs on your careers page, screen and score candidates objectively, run
-            interviews, and hire straight into onboarding — all in one place. Add it to your
-            plan from <b>Settings › Billing</b>, or ask your administrator to enable it.
+            interviews, and hire straight into onboarding — all in one place.
           </p>
+          <div className="mt-5 flex items-center justify-center gap-3">
+            <Link href="/settings?tab=billing"
+              className="inline-flex items-center px-4 py-2 rounded-xl text-sm font-semibold text-white"
+              style={{ background: 'var(--theme-primary, #16B6A6)' }}>
+              Add Talent Acquisition
+            </Link>
+          </div>
+          <p className="text-xs text-gray-400 mt-3">Or ask your administrator to enable it.</p>
         </div>
       </div>
     );
