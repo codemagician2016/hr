@@ -27,6 +27,7 @@ import { DataTable, PageHeader, ActionButton } from '@/lib/ui';
 import { InfoTip, SectionTitle } from '@/lib/widgets';
 import { permissionsFromSession, hasAnyPermission } from '@/lib/nav';
 import ModuleGuide from '@/components/ModuleGuide';
+import AddOnUpsell from '@/components/AddOnUpsell';
 
 /* ── helpers ──────────────────────────────────────────────────────────────── */
 
@@ -300,6 +301,13 @@ export default function CandidateMessagesPage() {
   const [canManage, setCanManage] = useState(true);
   const [notice, setNotice] = useState('');
   const [editing, setEditing] = useState(null);
+  const [talentGated, setTalentGated] = useState(false);
+
+  useEffect(() => {
+    get('/api/hr/entitlements')
+      .then((r) => setTalentGated(!(r?.entitlements?.talent_acquisition?.enabled)))
+      .catch(() => {});
+  }, []);
 
   const flash = (msg) => { setNotice(msg); setTimeout(() => setNotice(''), 4000); };
 
@@ -347,6 +355,8 @@ export default function CandidateMessagesPage() {
     },
     ...(canManage ? [{ key: 'actions', header: '', render: (t) => <ActionButton onClick={() => setEditing(t)}>Edit</ActionButton> }] : []),
   ];
+
+  if (talentGated) return <AddOnUpsell title="Talent Acquisition" cta="Add Talent Acquisition" />;
 
   return (
     <div className="p-6 sm:p-8 space-y-8">

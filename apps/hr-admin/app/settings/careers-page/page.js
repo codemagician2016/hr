@@ -27,6 +27,7 @@ import { PageHeader } from '@/lib/ui';
 import { InfoTip, SectionTitle } from '@/lib/widgets';
 import { permissionsFromSession, hasAnyPermission } from '@/lib/nav';
 import ModuleGuide from '@/components/ModuleGuide';
+import AddOnUpsell from '@/components/AddOnUpsell';
 
 // The social links the backend accepts (careersPage.lib SOCIAL_KEYS). Only http(s)
 // URLs survive the server's write-time cleaner — anything else is silently dropped.
@@ -86,6 +87,7 @@ export default function CareersPageEditor() {
   const [notice, setNotice] = useState('');
   const [canManage, setCanManage] = useState(true);
   const [slug, setSlug] = useState('');
+  const [talentGated, setTalentGated] = useState(false);
 
   // Editable form state.
   const [headline, setHeadline] = useState('');
@@ -133,6 +135,9 @@ export default function CareersPageEditor() {
         // The operator's own tenant slug → the public preview link (/careers/<slug>).
         if (session?.businessSlug) setSlug(session.businessSlug);
       })
+      .catch(() => {});
+    get('/api/hr/entitlements')
+      .then((r) => setTalentGated(!(r?.entitlements?.talent_acquisition?.enabled)))
       .catch(() => {});
   }, [load]);
 
@@ -194,6 +199,8 @@ export default function CareersPageEditor() {
   }
 
   const previewHref = slug ? `/careers/${slug}` : null;
+
+  if (talentGated) return <AddOnUpsell title="Talent Acquisition" cta="Add Talent Acquisition" />;
 
   if (loading) {
     return <div className="p-6 sm:p-8"><Spinner /></div>;

@@ -18,6 +18,7 @@ import { get, post, patch } from '@/lib/api';
 import { asList, DataTable, PageHeader, Tabs, StatusBadge, ActionButton } from '@/lib/ui';
 import { permissionsFromSession, hasPermission } from '@/lib/nav';
 import { useHrMeta, labelize } from '@/lib/useHrMeta';
+import AddOnUpsell from '@/components/AddOnUpsell';
 import { Info, FieldLabel, Pager, NumberInput } from './_components';
 import ModuleGuide from '@/components/ModuleGuide';
 
@@ -41,27 +42,7 @@ export default function RecruitmentPage() {
   }, []);
 
   if (gated === true) {
-    return (
-      <div className="p-6 max-w-3xl mx-auto">
-        <PageHeader title="Talent Acquisition" subtitle="A DriftHR add-on." />
-        <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center">
-          <div className="text-3xl mb-2">🚀</div>
-          <h2 className="text-lg font-semibold text-gray-900">Talent Acquisition isn’t on your plan yet</h2>
-          <p className="text-sm text-gray-500 mt-2 max-w-md mx-auto">
-            Post jobs on your careers page, screen and score candidates objectively, run
-            interviews, and hire straight into onboarding — all in one place.
-          </p>
-          <div className="mt-5 flex items-center justify-center gap-3">
-            <Link href="/settings?tab=billing"
-              className="inline-flex items-center px-4 py-2 rounded-xl text-sm font-semibold text-white"
-              style={{ background: 'var(--theme-primary, #16B6A6)' }}>
-              Add Talent Acquisition
-            </Link>
-          </div>
-          <p className="text-xs text-gray-400 mt-3">Or ask your administrator to enable it.</p>
-        </div>
-      </div>
-    );
+    return <AddOnUpsell />;
   }
 
   return (

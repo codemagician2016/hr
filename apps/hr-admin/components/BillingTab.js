@@ -44,6 +44,28 @@ function statusLabel(status) {
   return capitalizeSlug(String(status || '').toLowerCase()) || '—';
 }
 
+// Brand check bullet used across the premium plan/add-on cards.
+function Check() {
+  return (
+    <svg viewBox="0 0 20 20" className="mt-0.5 h-4 w-4 shrink-0" fill="none" aria-hidden="true">
+      <circle cx="10" cy="10" r="10" fill="var(--theme-primary,#16B6A6)" opacity="0.12" />
+      <path d="M5.5 10.5l3 3 6-6.5" stroke="var(--theme-primary,#16B6A6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+// Marketing feature bullets for a plan card (defensive: strings or {label}).
+function planFeatureList(v) {
+  const raw = Array.isArray(v?.features) ? v.features : [];
+  const items = raw
+    .map((x) => (typeof x === 'string' ? x : (x && (x.label || x.name || x.text)) || null))
+    .filter(Boolean);
+  if (v?.includedStaff && !items.some((s) => /employee|staff|seat/i.test(s))) {
+    items.unshift(`Up to ${v.includedStaff} employees`);
+  }
+  return items.slice(0, 6);
+}
+
 // ─── ReadOnlyBanner ──────────────────────────────────────────────────────────
 function BillingReadOnlyBanner() {
   return (
@@ -64,49 +86,49 @@ function CurrentPlanCard({ overview }) {
   const promo = overview?.promo;
   const pending = overview?.pendingTierSlug;
 
+  const isFree = !plan?.slug || plan.slug === 'free';
   return (
-    <section className="rounded-2xl border border-gray-200 bg-white p-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-xs uppercase tracking-wide text-gray-500">Current plan</p>
-          <p className="mt-1 text-xl font-semibold text-gray-900">
-            {plan?.name || 'Free'}
-          </p>
-          {overview?.billingCycle && plan?.slug !== 'free' ? (
-            <p className="text-sm text-gray-500 mt-0.5">Billed {String(overview.billingCycle).toLowerCase()}</p>
-          ) : null}
-        </div>
-        {status ? (
-          <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${billingStatusClass(status)}`}>
-            {statusLabel(status)}
-          </span>
-        ) : null}
-      </div>
-
-      <dl className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
-        <div>
-          <dt className="text-gray-500">Next renewal</dt>
-          <dd className="text-gray-900 font-medium">
-            {lifetime ? 'No renewal — lifetime access' : renews ? formatAdminDate(renews) : 'No renewal'}
-          </dd>
-        </div>
-        {promo ? (
+    <section className="relative overflow-hidden rounded-3xl border border-gray-200/70 bg-white shadow-sm">
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{ background: 'radial-gradient(1200px 240px at 0% -20%, color-mix(in srgb, var(--theme-primary,#16B6A6) 14%, transparent), transparent 60%)' }}
+        aria-hidden="true"
+      />
+      <div className="relative p-6 sm:p-7">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <dt className="text-gray-500">Promotion</dt>
-            <dd className="text-emerald-700 font-medium">
-              {promo.label}{promo.code ? ` (${promo.code})` : ''}
-            </dd>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Your plan</p>
+            <div className="mt-1.5 flex items-center gap-3">
+              <h2 className="text-2xl font-bold tracking-tight text-gray-900">{plan?.name || 'Free'}</h2>
+              {status ? (
+                <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${billingStatusClass(status)}`}>
+                  {statusLabel(status)}
+                </span>
+              ) : null}
+            </div>
+            <p className="mt-1 text-sm text-gray-500">
+              {isFree ? 'Core HR, included free' : overview?.billingCycle ? `Billed ${String(overview.billingCycle).toLowerCase()}` : ' '}
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">{lifetime ? 'Access' : 'Renews'}</p>
+            <p className="mt-1.5 text-sm font-semibold text-gray-900">
+              {lifetime ? 'Lifetime' : renews ? formatAdminDate(renews) : '—'}
+            </p>
+            {promo ? (
+              <p className="mt-1 text-xs font-semibold text-emerald-600">★ {promo.label}{promo.code ? ` (${promo.code})` : ''}</p>
+            ) : null}
+          </div>
+        </div>
+
+        {pending ? (
+          <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-2.5 text-sm text-amber-800">
+            Scheduled change to <span className="font-semibold">{capitalizeSlug(overview.pendingTierSlug)}</span>
+            {overview.pendingBillingCycle ? ` (${String(overview.pendingBillingCycle).toLowerCase()})` : ''}
+            {overview.pendingChangeEffectiveAt ? ` on ${formatAdminDate(overview.pendingChangeEffectiveAt)}` : ''}.
           </div>
         ) : null}
-      </dl>
-
-      {pending ? (
-        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          A change to <span className="font-medium">{capitalizeSlug(overview.pendingTierSlug)}</span>
-          {overview.pendingBillingCycle ? ` (${String(overview.pendingBillingCycle).toLowerCase()})` : ''} is scheduled
-          {overview.pendingChangeEffectiveAt ? ` for ${formatAdminDate(overview.pendingChangeEffectiveAt)}` : ''}.
-        </div>
-      ) : null}
+      </div>
     </section>
   );
 }
@@ -125,68 +147,101 @@ function PlanPicker({ workspace, currentSlug, cycle, onCycle, onPick, disabled }
   if (!variants.length) return null;
 
   return (
-    <section className="rounded-2xl border border-gray-200 bg-white p-5">
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <h2 className="text-sm font-semibold text-gray-900">Change plan</h2>
-        <div className="inline-flex rounded-lg border border-gray-200 p-0.5" role="tablist" aria-label="Billing cycle">
-          {CYCLES.map((c) => {
-            const on = cycle === c.key;
-            return (
-              <button
-                key={c.key}
-                type="button"
-                role="tab"
-                aria-selected={on}
-                onClick={() => onCycle(c.key)}
-                disabled={disabled}
-                className={`px-3 py-1 text-sm font-medium rounded-md transition-colors disabled:opacity-50 ${
-                  on ? 'bg-gray-100 text-gray-900' : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                {c.label}
-              </button>
-            );
-          })}
+    <section className="rounded-3xl border border-gray-200/70 bg-white p-6 sm:p-7 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+        <div>
+          <h2 className="text-lg font-bold tracking-tight text-gray-900">Plans</h2>
+          <p className="text-sm text-gray-500">Upgrade or downgrade any time — changes are prorated.</p>
+        </div>
+        <div className="inline-flex items-center gap-2.5">
+          <div className="inline-flex rounded-full border border-gray-200 bg-gray-50 p-1" role="tablist" aria-label="Billing cycle">
+            {CYCLES.map((c) => {
+              const on = cycle === c.key;
+              return (
+                <button
+                  key={c.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={on}
+                  onClick={() => onCycle(c.key)}
+                  disabled={disabled}
+                  className={`px-3.5 py-1.5 text-sm font-semibold rounded-full transition-all disabled:opacity-50 ${
+                    on ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  {c.label === 'Yearly' ? 'Annual' : c.label}
+                </button>
+              );
+            })}
+          </div>
+          {cycle === 'YEARLY' ? (
+            <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 border border-emerald-200">Save ~17%</span>
+          ) : null}
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         {variants.map((v) => {
           const isCurrent = v.slug === currentSlug;
+          const isFreeTier = v.slug === 'free';
+          const popular = (v.badge && /popular/i.test(v.badge)) || v.slug === 'growth';
           const amountMinor = cycle === 'YEARLY' ? v.price?.displayAnnualMinor : v.price?.displayMonthlyMinor;
           const cur = v.price?.currencyCode;
+          const feats = planFeatureList(v);
+          const popularBorder = {
+            border: '2px solid transparent',
+            backgroundImage: 'linear-gradient(#fff,#fff), linear-gradient(160deg, var(--theme-primary,#16B6A6), #16243B)',
+            backgroundOrigin: 'border-box',
+            backgroundClip: 'padding-box, border-box',
+          };
           return (
             <div
               key={v.slug}
-              className={`rounded-xl border p-4 flex flex-col ${isCurrent ? 'border-transparent ring-2' : 'border-gray-200'}`}
-              style={isCurrent ? { boxShadow: '0 0 0 2px var(--theme-primary)' } : undefined}
+              className={`relative flex flex-col rounded-2xl bg-white p-5 transition-shadow ${popular ? 'shadow-lg' : 'border border-gray-200 shadow-sm hover:shadow-md'}`}
+              style={popular ? popularBorder : undefined}
             >
-              <div className="flex items-center justify-between gap-2">
-                <p className="font-semibold text-gray-900">{v.name}</p>
-                {v.badge ? (
-                  <span className="text-[10px] uppercase tracking-wide font-semibold text-gray-500">{v.badge}</span>
+              {popular ? (
+                <span className="absolute -top-2.5 left-5 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm" style={{ background: 'var(--theme-primary,#16B6A6)' }}>
+                  Most popular
+                </span>
+              ) : null}
+              <div className="flex items-center justify-between">
+                <p className="text-base font-bold text-gray-900">{v.name}</p>
+                {isCurrent ? (
+                  <span className="rounded-full bg-gray-900/5 px-2 py-0.5 text-[10px] font-semibold text-gray-500">Current</span>
                 ) : null}
               </div>
-              {v.tagline ? <p className="text-xs text-gray-500 mt-0.5">{v.tagline}</p> : null}
-              <p className="mt-3 text-lg font-semibold text-gray-900">
-                {v.isCustomPriced
-                  ? 'Custom'
-                  : amountMinor != null && cur
-                  ? `${formatMoneyMinor(amountMinor, cur)}`
-                  : '—'}
-                {!v.isCustomPriced && amountMinor != null ? (
-                  <span className="text-xs font-normal text-gray-500"> /{cycle === 'YEARLY' ? 'yr' : 'mo'}</span>
-                ) : null}
-              </p>
-              <div className="mt-auto pt-4">
+              <p className="mt-0.5 min-h-[2.25rem] text-xs leading-snug text-gray-500">{v.tagline || v.description || ''}</p>
+              <div className="mt-2">
+                {v.isCustomPriced ? (
+                  <p className="text-3xl font-extrabold tracking-tight text-gray-900">Custom</p>
+                ) : (
+                  <p className="flex items-baseline gap-1">
+                    <span className="text-3xl font-extrabold tracking-tight text-gray-900">
+                      {isFreeTier ? 'Free' : amountMinor != null && cur ? formatMoneyMinor(amountMinor, cur) : '—'}
+                    </span>
+                    {!isFreeTier && amountMinor != null ? (
+                      <span className="text-sm font-medium text-gray-400">/{cycle === 'YEARLY' ? 'yr' : 'mo'}</span>
+                    ) : null}
+                  </p>
+                )}
+              </div>
+              <ul className="mt-4 flex-1 space-y-2 text-sm text-gray-600">
+                {feats.length ? feats.map((f, i) => (
+                  <li key={i} className="flex items-start gap-2"><Check /><span>{f}</span></li>
+                )) : (
+                  <li className="text-xs text-gray-400">{isFreeTier ? 'Core HR essentials' : 'Everything to run HR & payroll'}</li>
+                )}
+              </ul>
+              <div className="mt-5">
                 {isCurrent ? (
-                  <span className="inline-flex w-full items-center justify-center rounded-lg bg-gray-100 px-3 py-2 text-sm font-medium text-gray-500">
-                    Current plan
+                  <span className="inline-flex w-full items-center justify-center rounded-xl bg-gray-100 px-3 py-2.5 text-sm font-semibold text-gray-500">
+                    Your plan
                   </span>
                 ) : v.isCustomPriced ? (
                   <a
                     href="mailto:support@drifthr.com?subject=Custom%20plan%20enquiry"
-                    className="inline-flex w-full items-center justify-center rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    className="inline-flex w-full items-center justify-center rounded-xl border border-gray-300 px-3 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50"
                   >
                     Contact sales
                   </a>
@@ -195,10 +250,10 @@ function PlanPicker({ workspace, currentSlug, cycle, onCycle, onPick, disabled }
                     type="button"
                     onClick={() => onPick(v)}
                     disabled={disabled}
-                    className="inline-flex w-full items-center justify-center rounded-lg px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-                    style={{ backgroundColor: 'var(--theme-primary)' }}
+                    className="inline-flex w-full items-center justify-center rounded-xl px-3 py-2.5 text-sm font-semibold text-white shadow-sm transition-transform active:scale-[0.98] disabled:opacity-50"
+                    style={{ background: popular ? 'linear-gradient(135deg, var(--theme-primary,#16B6A6), #0f9d8f)' : 'var(--theme-primary,#16B6A6)' }}
                   >
-                    Choose {v.name}
+                    {isFreeTier ? 'Switch to Free' : `Choose ${v.name}`}
                   </button>
                 )}
               </div>
@@ -538,32 +593,58 @@ function AddOnsCard({ canEdit }) {
 
   if (!addOns || addOns.length === 0) return null;
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-5">
-      <h3 className="text-sm font-semibold text-gray-900">Add-ons</h3>
-      <p className="text-xs text-gray-500 mt-0.5">Extra modules you can add to any plan.</p>
-      {msg && <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 mt-3">{msg}</p>}
-      {err && <div className="mt-3"><ErrorBanner message={err} /></div>}
-      <div className="mt-3 space-y-3">
+    <section className="rounded-3xl border border-gray-200/70 bg-white p-6 sm:p-7 shadow-sm">
+      <div>
+        <h2 className="text-lg font-bold tracking-tight text-gray-900">Add-ons</h2>
+        <p className="text-sm text-gray-500">Power up any plan with extra modules.</p>
+      </div>
+      {msg && <p className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-700">{msg}</p>}
+      {err && <div className="mt-4"><ErrorBanner message={err} /></div>}
+      <div className="mt-5 space-y-3">
         {addOns.map((a) => (
-          <div key={a.key} className="flex items-start justify-between gap-3 border border-gray-100 rounded-xl p-3">
-            <div>
-              <div className="font-medium text-gray-900 text-sm">{a.name}</div>
-              <div className="text-xs text-gray-500 mt-0.5 max-w-md">{a.blurb}</div>
-              {a.price && <div className="text-[11px] text-gray-400 mt-1">{a.price.INR} · {a.price.NZD}</div>}
+          <div key={a.key} className="relative overflow-hidden rounded-2xl border border-gray-200/70 p-5">
+            <div
+              className="pointer-events-none absolute inset-0"
+              style={{ background: 'radial-gradient(600px 140px at 100% -30%, color-mix(in srgb, var(--theme-primary,#16B6A6) 12%, transparent), transparent 60%)' }}
+              aria-hidden="true"
+            />
+            <div className="relative flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3.5">
+                <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl text-white shadow-sm" style={{ background: 'linear-gradient(135deg, var(--theme-primary,#16B6A6), #16243B)' }}>
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                    <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM22 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </div>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <p className="font-semibold text-gray-900">{a.name}</p>
+                    {a.price ? <span className="text-xs font-medium text-gray-400">from {a.price.NZD || a.price.INR}</span> : null}
+                  </div>
+                  <p className="mt-0.5 max-w-lg text-sm text-gray-500">{a.blurb}</p>
+                </div>
+              </div>
+              <div className="shrink-0">
+                {a.enabled ? (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                    <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7 7a1 1 0 01-1.4 0l-3-3a1 1 0 011.4-1.4l2.3 2.29 6.3-6.29a1 1 0 011.4 0z" clipRule="evenodd" /></svg>
+                    Active
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => add(a.key)}
+                    disabled={!canEdit || busy === a.key}
+                    className="rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-sm transition-transform active:scale-[0.98] disabled:opacity-50"
+                    style={{ background: 'linear-gradient(135deg, var(--theme-primary,#16B6A6), #0f9d8f)' }}
+                  >
+                    {busy === a.key ? 'Adding…' : 'Add'}
+                  </button>
+                )}
+              </div>
             </div>
-            {a.enabled ? (
-              <span className="shrink-0 text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">Included ✓</span>
-            ) : (
-              <button onClick={() => add(a.key)} disabled={!canEdit || busy === a.key}
-                className="shrink-0 px-3 py-1.5 text-sm font-semibold rounded-lg text-white disabled:opacity-50"
-                style={{ background: 'var(--theme-primary, #16B6A6)' }}>
-                {busy === a.key ? '…' : 'Add'}
-              </button>
-            )}
           </div>
         ))}
       </div>
-    </div>
+    </section>
   );
 }
 

@@ -23,6 +23,7 @@ import { DataTable, PageHeader, ActionButton } from '@/lib/ui';
 import { InfoTip, SectionTitle } from '@/lib/widgets';
 import { permissionsFromSession, hasAnyPermission } from '@/lib/nav';
 import ModuleGuide from '@/components/ModuleGuide';
+import AddOnUpsell from '@/components/AddOnUpsell';
 
 // StageKind enum (mirrors prisma enum StageKind). Each carries a friendly label +
 // a chip colour so the ordered pipeline reads at a glance.
@@ -198,6 +199,13 @@ export default function PipelineTemplatesPage() {
   const [editing, setEditing] = useState(undefined); // undefined = closed, null = create, object = edit
   const [seeding, setSeeding] = useState(false);
   const [busyId, setBusyId] = useState('');
+  const [talentGated, setTalentGated] = useState(false);
+
+  useEffect(() => {
+    get('/api/hr/entitlements')
+      .then((r) => setTalentGated(!(r?.entitlements?.talent_acquisition?.enabled)))
+      .catch(() => {});
+  }, []);
 
   const flash = (msg) => { setNotice(msg); setTimeout(() => setNotice(''), 4000); };
 
@@ -292,6 +300,8 @@ export default function PipelineTemplatesPage() {
       ),
     }] : []),
   ];
+
+  if (talentGated) return <AddOnUpsell title="Talent Acquisition" cta="Add Talent Acquisition" />;
 
   return (
     <div className="p-6 sm:p-8 space-y-8">
