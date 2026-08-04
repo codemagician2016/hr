@@ -59,7 +59,12 @@ run_suite() {
   # jest; running it with plain `node` throws "describe is not defined", which
   # looks like a broken feature and is really a dispatch mistake. Pick by content.
   if grep -qE "^\s*(describe|test|it)\(" "$file" 2>/dev/null; then
-    run_with_timeout "$PER_SUITE_TIMEOUT" npx jest --silent "$file"
+    # `npx jest <path>` filters against jest.config's testMatch, which only covers
+    # test/** — so a jest-style suite living under src/**/__tests__ matches nothing
+    # and jest exits non-zero, looking exactly like a failure. Scoping jest to the
+    # file's own directory and name runs it wherever it lives.
+    run_with_timeout "$PER_SUITE_TIMEOUT" \
+      npx jest --silent --roots "$(cd "$(dirname "$file")" && pwd)" --testMatch "**/$(basename "$file")"
   else
     run_with_timeout "$PER_SUITE_TIMEOUT" node "$file"
   fi
