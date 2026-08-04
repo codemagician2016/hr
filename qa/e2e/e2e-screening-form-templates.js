@@ -8,8 +8,8 @@
  * make Job1 public -> public board surfaces the questions -> public apply with answers
  * -> 201 -> operator sees the scored application. Cleanup: templates archived, jobs
  * deleted. 1 operator login (public apply is unauthenticated). fetch-retry harness. */
-const A = 'https://app-staging.drifthr.com';
-const pb = require('/Users/kp/hr/qa/playbook.json');
+const A = require('./config').ADMIN;
+const pb = require('./config');
 const cred = (l) => pb.logins.find((x) => x.label.includes(l));
 const results = [];
 function rec(name, ok, d = '') { results.push(ok); console.log(`${ok === true ? 'PASS' : ok === 'skip' ? 'SKIP' : 'FAIL'}  ${name}${d ? ' — ' + d : ''}`); }

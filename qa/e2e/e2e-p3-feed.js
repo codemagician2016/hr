@@ -6,9 +6,9 @@
  * (mention lands for the mentioned employee). Cleanup: comment deleted,
  * reaction removed, announcement archived. 3 logins (op + Priya + Meera) →
  * 26s spacing; ~6min cooldown before a full rerun. */
-const A = 'https://app-staging.drifthr.com';
-const M = 'https://m-demo-staging.drifthr.com';
-const pb = require('/Users/kp/hr/qa/playbook.json');
+const A = require('./config').ADMIN;
+const M = require('./config').MOBILE;
+const pb = require('./config');
 const cred = (l) => pb.logins.find((x) => x.label.includes(l));
 const results = [];
 function rec(name, ok, d = '') { results.push(ok); console.log(`${ok === true ? 'PASS' : ok === 'skip' ? 'SKIP' : 'FAIL'}  ${name}${d ? ' — ' + d : ''}`); }

@@ -7,9 +7,9 @@
  * Customer appear → filter userName eq → PATCH active=false → identities off
  * → active=true → DELETE (soft). Cleanup: SCIM user deactivated, token
  * revoked, connection deleted. Ops: 26s between logins; ~6min cooldown. */
-const A = 'https://app-staging.drifthr.com';
+const A = require('./config').ADMIN;
 const T_HOST = 'demo.staging.drifthr.com';
-const pb = require('/Users/kp/hr/qa/playbook.json');
+const pb = require('./config');
 const cred = (l) => pb.logins.find((x) => x.label.includes(l));
 const results = [];
 function rec(name, ok, d = '') { results.push(ok); console.log(`${ok === true ? 'PASS' : ok === 'skip' ? 'SKIP' : 'FAIL'}  ${name}${d ? ' — ' + d : ''}`); }

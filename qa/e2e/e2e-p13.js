@@ -2,8 +2,8 @@
 /* Program P1.3 E2E on live staging: full salary-component authoring — SLAB
  * component with band editor semantics, validation 400s, floor/cap, wage flags,
  * structure preview evaluating the slab, cleanup. Self-contained. */
-const A = 'https://app-staging.drifthr.com';
-const pb = require('/Users/kp/hr/qa/playbook.json');
+const A = require('./config').ADMIN;
+const pb = require('./config');
 const cred = (l) => pb.logins.find((x) => x.label.includes(l));
 const results = [];
 function rec(name, ok, d = '') { results.push(ok); console.log(`${ok === true ? 'PASS' : ok === 'skip' ? 'SKIP' : 'FAIL'}  ${name}${d ? ' — ' + d : ''}`); }

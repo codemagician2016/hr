@@ -2,10 +2,10 @@
 /* Program Phase-1 Wave-A E2E on live staging: pay-calendar CRUD, payslip
  * settings (DOB password → encrypted PDF bytes), per-line payslip hold →
  * invisible to the employee → release, OT + late rule CRUD. Self-contained. */
-const A = 'https://app-staging.drifthr.com';
-const M = 'https://m-demo-staging.drifthr.com';
+const A = require('./config').ADMIN;
+const M = require('./config').MOBILE;
 const TENANT = 'demo.staging.drifthr.com';
-const pb = require('/Users/kp/hr/qa/playbook.json');
+const pb = require('./config');
 const cred = (l) => pb.logins.find((x) => x.label.includes(l));
 const results = [];
 function rec(name, ok, d = '') { results.push(ok); console.log(`${ok === true ? 'PASS' : ok === 'skip' ? 'SKIP' : 'FAIL'}  ${name}${d ? ' — ' + d : ''}`); }

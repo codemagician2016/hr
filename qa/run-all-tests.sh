@@ -55,7 +55,14 @@ run_suite() {
   local file="$1" label="$2"
   [ -n "$FILTER" ] && [[ "$file" != *"$FILTER"* ]] && return 0
   OUT="$(mktemp)"
-  run_with_timeout "$PER_SUITE_TIMEOUT" node "$file"
+  # Two runners live in this repo. A suite written with describe()/it() needs
+  # jest; running it with plain `node` throws "describe is not defined", which
+  # looks like a broken feature and is really a dispatch mistake. Pick by content.
+  if grep -qE "^\s*(describe|test|it)\(" "$file" 2>/dev/null; then
+    run_with_timeout "$PER_SUITE_TIMEOUT" npx jest --silent "$file"
+  else
+    run_with_timeout "$PER_SUITE_TIMEOUT" node "$file"
+  fi
   local code=$?
   # A suite that prints an explicit skip (no DB, no toolchain) is NOT a pass.
   # Echo every verdict live as well as recording it — a run this long is

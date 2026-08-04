@@ -6,9 +6,9 @@
  * message, unknown-token save 422, the UNKNOWN_TEMPLATE interview-invite bug
  * fixed (invite leaves the router). Cleanup: withdraw slots, delete job,
  * reset template + config. Single operator login (no rate-limit cooldown). */
-const A = 'https://app-staging.drifthr.com';
-const P = 'https://app-staging.drifthr.com'; // public careers same origin /api/public/*
-const pb = require('/Users/kp/hr/qa/playbook.json');
+const A = require('./config').ADMIN;
+const P = require('./config').ADMIN; // public careers same origin /api/public/*
+const pb = require('./config');
 const cred = (l) => pb.logins.find((x) => x.label.includes(l));
 const results = [];
 function rec(name, ok, d = '') { results.push(ok); console.log(`${ok === true ? 'PASS' : ok === 'skip' ? 'SKIP' : 'FAIL'}  ${name}${d ? ' — ' + d : ''}`); }

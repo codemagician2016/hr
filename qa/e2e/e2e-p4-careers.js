@@ -4,8 +4,8 @@
  * public board, publish → page appears (content only, no draft fields),
  * unpublish → page gone. Cleanup: unpublish + reset. Public board is unauth.
  * fetch-retry harness for the flaky staging uplink. */
-const A = 'https://app-staging.drifthr.com';
-const pb = require('/Users/kp/hr/qa/playbook.json');
+const A = require('./config').ADMIN;
+const pb = require('./config');
 const cred = (l) => pb.logins.find((x) => x.label.includes(l));
 const results = [];
 function rec(name, ok, d = '') { results.push(ok); console.log(`${ok === true ? 'PASS' : ok === 'skip' ? 'SKIP' : 'FAIL'}  ${name}${d ? ' — ' + d : ''}`); }

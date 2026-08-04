@@ -5,8 +5,8 @@
  * schedule create + due-window run-now + lastRun stamps, fixed-report export,
  * legacy-permission OR-gate. Cleanup: delete schedule + definitions.
  * Ops: 26s between logins; ~6min cooldown between full runs. */
-const A = 'https://app-staging.drifthr.com';
-const pb = require('/Users/kp/hr/qa/playbook.json');
+const A = require('./config').ADMIN;
+const pb = require('./config');
 const cred = (l) => pb.logins.find((x) => x.label.includes(l));
 const results = [];
 function rec(name, ok, d = '') { results.push(ok); console.log(`${ok === true ? 'PASS' : ok === 'skip' ? 'SKIP' : 'FAIL'}  ${name}${d ? ' — ' + d : ''}`); }

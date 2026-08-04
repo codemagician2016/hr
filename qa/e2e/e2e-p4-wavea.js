@@ -4,8 +4,8 @@
  * installments) + recruitment pipeline templates (seed, create, apply to a
  * job → JobStage materialized, re-apply 409, exclusive default). Cleanup:
  * loans cancelled, template deleted, job removed. Single operator login. */
-const A = 'https://app-staging.drifthr.com';
-const pb = require('/Users/kp/hr/qa/playbook.json');
+const A = require('./config').ADMIN;
+const pb = require('./config');
 const cred = (l) => pb.logins.find((x) => x.label.includes(l));
 const results = [];
 function rec(name, ok, d = '') { results.push(ok); console.log(`${ok === true ? 'PASS' : ok === 'skip' ? 'SKIP' : 'FAIL'}  ${name}${d ? ' — ' + d : ''}`); }
