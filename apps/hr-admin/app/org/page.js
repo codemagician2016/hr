@@ -1,10 +1,14 @@
 'use client';
 
-// Org structure: legal entities, departments, designations and locations.
+// Org structure: legal entities, departments, designations, grades and locations.
 // Each section lists records from GET /api/hr/org/{entities,departments,
-// designations,locations} and offers an inline create form POSTing back to the
-// same endpoint, plus per-row edit (PATCH /api/hr/org/{resource}/{id}) and
+// designations,grades,locations} and offers an inline create form POSTing back to
+// the same endpoint, plus per-row edit (PATCH /api/hr/org/{resource}/{id}) and
 // delete (DELETE /api/hr/org/{resource}/{id}), refreshing the list after.
+//
+// Every section carries a stable `id` so the setup guide (and the compliance
+// screens) can deep-link to one of them — /org#grades lands on Grades rather
+// than the top of the page. scroll-mt keeps the anchor clear of page chrome.
 //
 // Entities have a richer required shape than departments/designations
 // (legalName + country + pay currency + timezone — the controller's allow-list),
@@ -249,7 +253,7 @@ function EntitySection() {
   }
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-5">
+    <div id="entities" className="scroll-mt-24 rounded-2xl border border-gray-200 bg-white p-5">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-sm font-semibold text-gray-900">Legal entities</h2>
         {!open && (
@@ -287,6 +291,15 @@ function EntitySection() {
                     {r.countryCode} · {r.payCurrency}
                   </span>
                   {r.code && <span className="text-gray-400 font-mono">{r.code}</span>}
+                  {/* EPFO / ESIC / PT / TAN numbers are held per entity — the
+                      compliance calendar and every statutory register are seeded
+                      from them, so the link belongs on the entity itself. */}
+                  <Link
+                    href={`/org/registrations?entityId=${encodeURIComponent(r.id)}`}
+                    className="font-medium text-[color:var(--theme-primary-dark)] hover:underline"
+                  >
+                    Registrations
+                  </Link>
                   <RowActions onEdit={() => startEdit(r)} onDelete={() => onDelete(r)} deleting={deletingId === r.id} />
                 </div>
               </li>
@@ -341,10 +354,13 @@ function EntitySection() {
   );
 }
 
-// Generic section for flat resources (departments, designations) whose records
-// are a set of text fields. displayKey is the primary label field (name/title).
+// Generic section for flat resources (departments, designations, grades) whose
+// records are a set of scalar fields. displayKey is the primary label field
+// (name/title). A field may declare `type: 'number'` (Grade.rank) — the org CRUD
+// controller hands the body straight to Prisma, so an Int column has to receive
+// a real number, never the "3" a text input would produce.
 // Supports create + per-row edit + delete against /api/hr/org/{resource}[/:id].
-function OrgSection({ title, resource, fields, displayKey = 'name' }) {
+function OrgSection({ id, title, resource, fields, displayKey = 'name', subtitle, secondary }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -376,11 +392,24 @@ function OrgSection({ title, resource, fields, displayKey = 'name' }) {
     setEditDraft((d) => ({ ...d, [key]: val }));
   }
 
+  const numericKeys = new Set(fields.filter((f) => f.type === 'number').map((f) => f.key));
+
   // On create drop empty fields so the backend applies its own defaults; on edit
-  // keep empties so a previously-set optional can be cleared.
+  // keep empties so a previously-set optional can be cleared. A numeric field is
+  // the exception both ways: it is coerced to a Number, and a blank one is always
+  // dropped — you cannot clear a non-nullable Int by sending "".
   function buildPayload(d, { keepEmpty } = {}) {
-    const entries = Object.entries(d).map(([k, v]) => [k, typeof v === 'string' ? v.trim() : v]);
-    return Object.fromEntries(keepEmpty ? entries : entries.filter(([, v]) => v !== ''));
+    const out = {};
+    for (const [k, raw] of Object.entries(d)) {
+      const v = typeof raw === 'string' ? raw.trim() : raw;
+      if (numericKeys.has(k)) {
+        const n = Number(v);
+        if (v !== '' && Number.isFinite(n)) out[k] = n;
+        continue;
+      }
+      if (v !== '' || keepEmpty) out[k] = v;
+    }
+    return out;
   }
 
   async function onCreate(e) {
@@ -436,8 +465,11 @@ function OrgSection({ title, resource, fields, displayKey = 'name' }) {
   const singular = title.replace(/s$/, '').toLowerCase();
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-5">
-      <h2 className="text-sm font-semibold text-gray-900 mb-4">{title}</h2>
+    <div id={id} className="scroll-mt-24 rounded-2xl border border-gray-200 bg-white p-5">
+      <div className="mb-4">
+        <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
+        {subtitle && <p className="mt-0.5 text-xs text-gray-500">{subtitle}</p>}
+      </div>
 
       {error && <ErrorBanner message={error} />}
 
@@ -454,6 +486,9 @@ function OrgSection({ title, resource, fields, displayKey = 'name' }) {
               <li key={r.id} className="py-2 flex items-center justify-between gap-3">
                 <span className="text-sm text-gray-900 truncate">{r[displayKey]}</span>
                 <div className="flex items-center gap-3 shrink-0">
+                  {secondary && secondary(r) && (
+                    <span className="text-xs text-gray-500">{secondary(r)}</span>
+                  )}
                   {r.code && <span className="text-xs text-gray-400 font-mono">{r.code}</span>}
                   <RowActions onEdit={() => startEdit(r)} onDelete={() => onDelete(r)} deleting={deletingId === r.id} />
                 </div>
@@ -471,6 +506,9 @@ function OrgSection({ title, resource, fields, displayKey = 'name' }) {
             value={draft[f.key]}
             onChange={(v) => setField(f.key, v)}
             required={f.required}
+            type={f.type}
+            min={f.min}
+            hint={f.hint}
           />
         ))}
         <PrimaryButton type="submit" loading={saving}>
@@ -489,6 +527,9 @@ function OrgSection({ title, resource, fields, displayKey = 'name' }) {
                 value={editDraft[f.key]}
                 onChange={(v) => setEditField(f.key, v)}
                 required={f.required}
+                type={f.type}
+                min={f.min}
+                hint={f.hint}
               />
             ))}
             <ModalActions>
@@ -688,7 +729,7 @@ function LocationSection() {
   ];
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-5">
+    <div id="locations" className="scroll-mt-24 rounded-2xl border border-gray-200 bg-white p-5">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-sm font-semibold text-gray-900">Locations</h2>
         {!open && (
@@ -776,6 +817,17 @@ function LocationSection() {
 }
 
 export default function OrgPage() {
+  // The sections paint before their rows arrive, so the browser's own hash
+  // scroll usually lands correctly — but a client-side <Link> carrying a hash
+  // (the setup guide's /org#grades) doesn't always trigger it. Re-assert it once
+  // on mount so a deep link never dumps the operator at the top of the page.
+  useEffect(() => {
+    const hash = typeof window === 'undefined' ? '' : window.location.hash.slice(1);
+    if (!hash) return;
+    const target = document.getElementById(hash);
+    if (target) target.scrollIntoView({ block: 'start' });
+  }, []);
+
   return (
     <div>
       <div className="flex items-start justify-between mb-6 gap-4">
@@ -794,11 +846,13 @@ export default function OrgPage() {
       <ModuleGuide
         id="org"
         title="Set up your org structure"
-        what="This is the backbone every other DriftHR module reads from: the legal entities you run payroll under, plus the departments, designations and work locations you slot employees into. Get it right once and hiring, payroll, PF/ESI registers and the org chart all line up."
+        what="This is the backbone every other DriftHR module reads from: the legal entities you run payroll under, plus the departments, designations, pay grades and work locations you slot employees into. Get it right once and hiring, payroll, PF/ESI registers and the org chart all line up."
         steps={[
           "Add a legal entity first (legal name, code, country IN, pay currency INR, Asia/Kolkata) — nothing else can be created until one exists.",
           "Add departments (e.g. Engineering, Finance) and designations (e.g. Senior Engineer) with short codes for reuse across the org.",
+          "Add grades (your pay levels) — the Level number is what per-grade expense caps and the travel hotel matrix compare on.",
           "Add locations, picking the legal entity each one belongs to plus its city and code.",
+          "Open Registrations on an entity to record its EPFO / ESIC / PT / TAN numbers — the compliance calendar and statutory registers are built from them.",
           "Use Edit / Delete on any row to correct a record; open View org chart to see the reporting tree.",
         ]}
         example={<>Onboarding <b>Acme India Pvt Ltd</b>: create the entity (code <b>IN-HQ</b>, INR, Asia/Kolkata), add departments <b>Engineering</b> and <b>Finance</b>, the designation <b>Senior Engineer</b>, then a location <b>Bangalore HQ</b> (code <b>BLR</b>). Now <b>Aarav Sharma</b> on ₹18,00,000 CTC can be hired into Engineering at Bangalore HQ.</>}
@@ -811,6 +865,7 @@ export default function OrgPage() {
       <div className="grid md:grid-cols-2 gap-4">
         <EntitySection />
         <OrgSection
+          id="departments"
           title="Departments"
           resource="departments"
           fields={[
@@ -819,12 +874,29 @@ export default function OrgPage() {
           ]}
         />
         <OrgSection
+          id="designations"
           title="Designations"
           resource="designations"
           displayKey="title"
           fields={[
             { key: 'title', label: 'Designation title', required: true },
             { key: 'code', label: 'Code', required: true },
+          ]}
+        />
+        {/* Grades have had backend CRUD since Feature 5 but no screen, which left
+            ExpenseGradeRule.gradeRank and TravelHotelRule.gradeRank impossible to
+            configure end-to-end: per-level expense caps and the travel hotel matrix
+            key off Grade.rank. Lowest rank = most junior. */}
+        <OrgSection
+          id="grades"
+          title="Grades"
+          subtitle="Your pay levels, from junior to senior. Expense and travel limits are set per level."
+          resource="grades"
+          secondary={(r) => (r.rank == null ? '' : `Level ${r.rank}`)}
+          fields={[
+            { key: 'name', label: 'Grade name', required: true, hint: 'e.g. L3 — Senior Engineer' },
+            { key: 'code', label: 'Code', required: true, hint: 'e.g. L3' },
+            { key: 'rank', label: 'Level', required: true, type: 'number', min: 1, hint: 'A whole number — 1 is the most junior. Expense and travel caps compare on this.' },
           ]}
         />
         <LocationSection />

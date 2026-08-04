@@ -345,6 +345,7 @@ export default function SsoSettingsPage() {
           'Choose where SSO signs in (employee portal, HR console, or both), then Save and run "Test connection".',
           'For provisioning, generate a SCIM token and add the SCIM base URL + token to your IdP\'s provisioning settings.',
         ]}
+        example={<>On <b>Microsoft Entra ID</b>: create an Enterprise application, choose <b>SAML</b>, and paste this page’s <b>Entity ID</b> and <b>ACS URL</b> into its Basic SAML Configuration. Copy Entra’s <b>Login URL</b> and <b>Base64 certificate</b> back into the fields here, set sign-in to <b>Employee portal + HR console</b>, save, then <b>Test connection</b>. Finally turn on Entra’s Provisioning tab with your <b>SCIM base URL + token</b> so joiners and leavers sync automatically.</>}
         tips={[
           'Secrets are write-only: they are stored encrypted and never shown again — leave the field blank to keep the stored value.',
           'Just-in-time provisioning auto-creates an employee on first SSO login when no matching account exists.',

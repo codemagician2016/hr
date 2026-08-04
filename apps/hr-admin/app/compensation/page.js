@@ -911,6 +911,15 @@ export default function CompensationPage() {
   const [me, setMe] = useState(null);
   const [perms, setPerms] = useState(null);
 
+  // Honour a ?tab= deep link (the setup guide sends the pay-component step to
+  // Components and the "give everyone a salary" step to Revisions). Read the URL
+  // directly, matching the settings page, so no Suspense boundary is needed.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const wanted = new URLSearchParams(window.location.search).get('tab');
+    if (wanted && TABS.some((t) => t.key === wanted)) setTab(wanted);
+  }, []);
+
   useEffect(() => {
     get('/api/auth/me').then((res) => {
       const session = res?.user || res;

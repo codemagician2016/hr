@@ -93,13 +93,25 @@ export default function FieldAccessPage() {
   return (
     <div className="space-y-4">
       <PageHeader title="Field access" subtitle="Control which employee fields each role can see and edit." />
-      <ModuleGuide title="How field access works">
-        For each role, choose the access level per group of employee fields.
-        <b> Full access</b> lets the role view and edit; <b>View only</b> shows the fields but blocks edits;
-        <b> Hidden</b> removes the fields from the record entirely. Any group left at Full access behaves
-        exactly as before, so existing roles are unaffected until you change something. This is on top of the
-        module permissions — a role still needs “manage employees” to reach these fields at all.
-      </ModuleGuide>
+      <ModuleGuide
+        id="settings-field-access"
+        title="Hide sensitive employee fields from a role"
+        what="Roles decide which SCREENS someone reaches; field access decides which FIELDS they see once they are there. For each role you set a level per group of employee fields — Full access (view and edit), View only (visible but locked), or Hidden (removed from the record entirely). This sits on top of module permissions: a role still needs “manage employees” to reach these fields at all. Every group starts at Full access, so nothing changes for your existing roles until you change it."
+        steps={[
+          'Pick the role you want to restrict — start with the roles that have the widest reach.',
+          'For each field group, choose Full access, View only or Hidden.',
+          'Use View only for things a role must check but must never change, like a bank account or PAN.',
+          'Use Hidden for anything the role has no business reason to see at all.',
+          'Save, then sign in as someone with that role and confirm the record looks the way you intended.',
+        ]}
+        example={<>Your <b>Recruiter</b> role needs to open employee records to check reporting lines, but has no reason to see personal identifiers. Set <b>Bank &amp; statutory</b> to <b>Hidden</b> and <b>Personal details</b> to <b>View only</b> — they keep the org information they need and lose the data they don’t.</>}
+        tips={[
+          'Hidden really is hidden: the fields are stripped server-side, not just greyed out in the browser.',
+          'Built-in roles are a sensible default — reach for this when a role\'s job genuinely doesn\'t require a field, not as a substitute for trusting your team.',
+          'The quickest way to verify a change is to view an employee record as someone holding that role.',
+          'Leaving a group at Full access is always safe — it is exactly how the role behaved before.',
+        ]}
+      />
 
       {notice && <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{notice}</div>}
       {error && <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">{error}</div>}

@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Spinner, ErrorBanner, formatAdminDate } from '@hr/ui';
 import { get } from '@/lib/api';
+import SetupWidget from '@/components/setup/SetupWidget';
 
 function Tile({ label, value, sub, href }) {
   const body = (
@@ -91,7 +92,14 @@ export default function DashboardPage() {
   return (
     <div>
       <h1 className="text-2xl font-semibold text-gray-900 mb-1">Dashboard</h1>
-      <p className="text-sm text-gray-500 mb-6">Headcount and operations overview</p>
+      <p className="text-sm text-gray-500 mb-4">Headcount and operations overview</p>
+
+      {/* Setup progress + the single next action. Renders nothing once setup is
+          complete, while it is snoozed, or for an operator the checklist
+          endpoint doesn't serve — so the headcount tiles stay at the top of the
+          page for everyone it isn't for. It reads the shell's shared setup
+          payload, so it costs no extra request. */}
+      <SetupWidget />
 
       {loading && <Spinner />}
       {error && <ErrorBanner message={error} />}

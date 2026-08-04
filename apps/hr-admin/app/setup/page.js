@@ -1,196 +1,249 @@
 'use client';
 
-// Setup guide — the first thing a new tenant should open. It probes the live
-// state of the workspace (country, entities, people, pay policy, payroll) and
-// shows, in order, what's done and what's next — each step with a plain-English
-// "what to do", a concrete example, and a deep link straight to the screen.
+// Setup guide — the staged, full-product view of what's still worth doing.
 //
-// The completion % is derived, never stored: every load re-checks the same
-// endpoints the modules themselves use, so the guide can't drift out of sync.
+// Everything on this page is READ-ONLY: it scores the workspace from
+// GET /api/hr/setup-checklist (which probes real data, so the guide can't drift
+// out of sync with reality) and then sends you to the actual feature screen.
+// It never operates a feature inline — a step you complete here would be a
+// second, divergent implementation of a screen we already ship.
+//
+// Gating is advisory by design. The percentage never blocks a pay run, a leave
+// approval or a letter; the only things it drives are which row we suggest next
+// and whether the dashboard widget is still worth showing.
+//
+// Four zones, in strict vertical order:
+//   1  score            — where you are, and why the denominator is what it is
+//   2  next best action — the one thing we're asking for; the only filled button
+//   3  stages           — the whole product, unfinished first, one stage open
+//   4  footer           — hidden steps + how the score is calculated
 
-import { useCallback, useEffect, useState } from 'react';
-import Link from 'next/link';
-import { get } from '@/lib/api';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ErrorBanner, Spinner } from '@hr/ui';
+import {
+  allSteps,
+  readOpenStages,
+  setupFullyComplete,
+  stageOfNextAction,
+  useSetup,
+  writeOpenStages,
+} from '@/lib/setup';
+import SetupHeader from '@/components/setup/SetupHeader';
+import NextActionCard from '@/components/setup/NextActionCard';
+import StageAccordion from '@/components/setup/StageAccordion';
+import HiddenSteps from '@/components/setup/HiddenSteps';
 
-function asList(res) {
-  if (Array.isArray(res)) return res;
-  if (Array.isArray(res?.items)) return res.items;
-  return [];
-}
-
-// Each step is checked from a real endpoint. `check` receives the loaded probe
-// data and returns true when the step is satisfied. Order = the path a tenant
-// should follow; earlier steps unblock later ones.
-const STEPS = [
-  {
-    key: 'country',
-    title: 'Set your payroll country',
-    href: '/settings/company-profile',
-    cta: 'Open Company profile',
-    what: 'Tells DriftHR which statutory rules to apply (tax, PF/ESI, payslip format). It is set once and locks the workspace to that country.',
-    example: <>Pick <b>India 🇮🇳</b> — DriftHR then computes TDS, EPF, ESI, PT and gratuity for you automatically.</>,
-    check: (d) => d.countrySet,
-  },
-  {
-    key: 'entity',
-    title: 'Add a legal entity & work locations',
-    href: '/org',
-    cta: 'Open Org structure',
-    what: 'The registered company employees are hired under, plus the offices/sites they work at. Payslips, PF/ESI filings and registers are issued per entity.',
-    example: <>Entity <b>Acme India Pvt Ltd</b> (code <b>IN-HQ</b>, INR, Asia/Kolkata) with a location <b>Bangalore HQ</b>.</>,
-    check: (d) => d.entities > 0,
-  },
-  {
-    key: 'structure',
-    title: 'Add departments & designations',
-    href: '/org',
-    cta: 'Open Org structure',
-    what: 'Departments and job titles power the reporting tree, approvals routing and team-scoped access for managers.',
-    example: <>Departments like <b>Engineering</b> and <b>Operations</b>; designations like <b>Software Engineer</b>, <b>HR Manager</b>.</>,
-    check: (d) => d.departments > 0,
-  },
-  {
-    key: 'people',
-    title: 'Add your people',
-    href: '/people',
-    cta: 'Add employees',
-    what: 'Onboard employees with their entity, department, manager and join date. You can add one by one or bulk-import a CSV.',
-    example: <>Add <b>Aarav Sharma</b> — Engineering, reports to the CTO, joined 1 Apr 2026 — or import everyone via Settings → Import.</>,
-    check: (d) => d.people > 0,
-  },
-  {
-    key: 'ctc',
-    title: 'Create a CTC policy',
-    href: '/compensation/policies',
-    cta: 'Build a CTC policy',
-    what: 'A reusable salary template that splits a CTC into Basic, HRA, allowances and statutory employer costs — so onboarding a hire is just "pick a policy + a number".',
-    example: <>Start from the <b>India template</b>: Basic 50%, HRA 20%, special allowance balance, with EPF/ESI auto-added.</>,
-    check: (d) => d.ctc > 0,
-  },
-  {
-    key: 'payroll',
-    title: 'Run your first payroll',
-    href: '/payroll',
-    cta: 'Go to Payroll',
-    what: 'Create a pay run for the month, review the computed payslips (maker), then approve for disbursement (checker). DriftHR handles TDS, PF, ESI and net pay.',
-    example: <>Run <b>June 2026</b> payroll for Acme India — review payslips, then Finance approves and disburses.</>,
-    check: (d) => d.payrollRuns > 0,
-  },
-];
+// How long a just-hidden row stays put with an Undo before it moves to the
+// footer. Long enough to notice a misclick, short enough not to look stuck.
+const UNDO_MS = 10000;
 
 export default function SetupGuidePage() {
-  const [probe, setProbe] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const { data, loading, error, stale, businessId, refresh, dismiss, restore, setUiState } = useSetup();
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    // Every probe is independent and best-effort: a 403 (no permission) or a
-    // 409 (country not set) must not blank the whole guide.
-    const [ctx, entities, locations, departments, people, ctc, runs] = await Promise.all([
-      get('/api/hr/country-context').then(() => true).catch(() => false),
-      get('/api/hr/org/entities').then(asList).catch(() => []),
-      get('/api/hr/org/locations').then(asList).catch(() => []),
-      get('/api/hr/org/departments').then(asList).catch(() => []),
-      get('/api/hr/employees', { pageSize: 1 }).catch(() => null),
-      get('/api/hr/ctc-policies').then(asList).catch(() => []),
-      get('/api/hr/payroll/runs').then(asList).catch(() => []),
-    ]);
-    const peopleCount = Array.isArray(people) ? people.length
-      : (people?.total ?? people?.totalCount ?? asList(people).length);
-    setProbe({
-      countrySet: ctx === true,
-      entities: entities.length,
-      locations: locations.length,
-      departments: departments.length,
-      people: peopleCount || 0,
-      ctc: ctc.length,
-      payrollRuns: runs.length,
+  // Landing on /setup is the one moment we WANT the freshest possible score —
+  // the operator has usually just come back from finishing something.
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const [openKeys, setOpenKeys] = useState(() => new Set());
+  const [doneOpenKeys, setDoneOpenKeys] = useState(() => new Set());
+  const [undoKey, setUndoKey] = useState(null);
+  const [actionError, setActionError] = useState('');
+  const [focusRequest, setFocusRequest] = useState(0);
+  const undoTimer = useRef(null);
+  const restoredStages = useRef(false);
+  const autoOpened = useRef(null);
+
+  useEffect(() => () => clearTimeout(undoTimer.current), []);
+
+  // Restore the operator's own expansions (30-day, per tenant) exactly once.
+  useEffect(() => {
+    if (restoredStages.current || !businessId) return;
+    restoredStages.current = true;
+    const stored = readOpenStages(businessId);
+    if (stored && stored.length) setOpenKeys((prev) => new Set([...prev, ...stored]));
+  }, [businessId]);
+
+  // …then union the stage holding the next action. Auto-opening is keyed on the
+  // stage itself, so a stage the operator deliberately closed stays closed until
+  // the next action genuinely moves elsewhere.
+  const nextStageKey = stageOfNextAction(data);
+  useEffect(() => {
+    if (!nextStageKey || autoOpened.current === nextStageKey) return;
+    autoOpened.current = nextStageKey;
+    setOpenKeys((prev) => new Set(prev).add(nextStageKey));
+  }, [nextStageKey]);
+
+  const toggleStage = useCallback((key) => {
+    setOpenKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      if (businessId) writeOpenStages(businessId, next);
+      return next;
     });
-    setLoading(false);
+  }, [businessId]);
+
+  const toggleDone = useCallback((key) => {
+    setDoneOpenKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  const steps = useMemo(() => allSteps(data), [data]);
+  const stepByKey = useMemo(() => new Map(steps.map((s) => [s.key, s])), [steps]);
 
-  const data = probe || {};
-  const states = STEPS.map((s) => ({ ...s, done: !!(probe && s.check(data)) }));
-  const doneCount = states.filter((s) => s.done).length;
-  const pct = Math.round((doneCount / STEPS.length) * 100);
-  const nextStep = states.find((s) => !s.done);
+  const labelOf = useCallback((key) => {
+    const step = stepByKey.get(key);
+    return step ? { label: step.label, done: step.state === 'done' } : null;
+  }, [stepByKey]);
+
+  const hidden = useMemo(
+    () => steps.filter((s) => s.state === 'dismissed' && s.key !== undoKey),
+    [steps, undoKey],
+  );
+
+  // The API's nextAction is a summary; the full row carries the explainer copy,
+  // so "What is this?" reads identically in the card and in the list.
+  const nextStep = useMemo(() => {
+    if (!data?.nextAction) return null;
+    const full = stepByKey.get(data.nextAction.key);
+    return full ? { ...full, ...data.nextAction, explain: full.explain } : data.nextAction;
+  }, [data, stepByKey]);
+
+  const handleDismiss = useCallback(async (step) => {
+    setActionError('');
+    try {
+      await dismiss(step.key);
+      setUndoKey(step.key);
+      clearTimeout(undoTimer.current);
+      undoTimer.current = setTimeout(() => setUndoKey(null), UNDO_MS);
+    } catch (err) {
+      setActionError(err?.data?.message || err?.message || 'Could not hide that step.');
+    }
+  }, [dismiss]);
+
+  const handleRestore = useCallback(async (key) => {
+    setActionError('');
+    clearTimeout(undoTimer.current);
+    setUndoKey(null);
+    try {
+      await restore(key);
+    } catch (err) {
+      setActionError(err?.data?.message || err?.message || 'Could not bring that step back.');
+    }
+  }, [restore]);
+
+  const handleCelebrated = useCallback(() => {
+    // Best-effort: a failure here only means the confetti may fire once more.
+    setUiState({ celebrated: true }).catch(() => {});
+  }, [setUiState]);
+
+  // "Not now" — open the next action's stage and drop the caret on its first
+  // pending row, rather than dumping the operator at the top of a long list.
+  const skipToList = useCallback(() => {
+    if (nextStageKey) setOpenKeys((prev) => new Set(prev).add(nextStageKey));
+    setFocusRequest((n) => n + 1);
+  }, [nextStageKey]);
+
+  useEffect(() => {
+    if (!focusRequest) return;
+    const panel = nextStageKey && document.getElementById(`setup-stage-panel-${nextStageKey}`);
+    const target = panel?.querySelector('[data-setup-todo]')
+      || document.querySelector(`[data-setup-stage-header="${nextStageKey}"]`);
+    // focus() honours the rows' scroll-margin-top, so the sticky chrome never
+    // ends up covering the thing we just pointed at.
+    target?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusRequest]);
+
+  // ── States ────────────────────────────────────────────────────────────────
+
+  if (loading && !data) {
+    return (
+      <div className="max-w-4xl">
+        <div className="py-16 flex justify-center"><Spinner /></div>
+      </div>
+    );
+  }
+
+  if (!data) {
+    return (
+      <div className="max-w-4xl">
+        <h1 className="text-2xl font-semibold text-gray-900">Setup guide</h1>
+        <p className="mt-1 text-sm text-gray-600">
+          We couldn’t load your setup just now. Nothing is blocked — everything in the console still works.
+        </p>
+        <div className="mt-4">
+          <ErrorBanner message={error?.message || 'The setup checklist is unavailable.'} />
+        </div>
+        <button
+          type="button"
+          onClick={refresh}
+          className="mt-2 inline-flex min-h-[44px] items-center rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-900 hover:bg-gray-50"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  // The done card and its confetti say the COMPANY is set up, so they wait on
+  // the whole tenant being finished — not on this operator having finished the
+  // slice their permissions let them see (see setupFullyComplete).
+  const celebrate = setupFullyComplete(data);
 
   return (
-    <div className="max-w-3xl">
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold" style={{ color: 'var(--theme-text)' }}>Setup guide</h1>
-        <p className="text-sm mt-0.5" style={{ color: 'var(--theme-muted)' }}>
-          Get your workspace ready to run HR &amp; payroll. Follow the steps in order — each links straight to where you do it.
-        </p>
-      </div>
+    // While `stale`, what's on screen is the <24h cached payload and the live
+    // read is still in flight — dimmed and flagged busy so nobody acts on a
+    // number we haven't re-confirmed yet.
+    <div className="max-w-4xl" aria-busy={stale || undefined} style={stale ? { opacity: 0.6 } : undefined}>
+      <SetupHeader
+        percent={data.percent}
+        completedCount={data.completedCount}
+        totalCount={data.totalCount}
+        requiredRemaining={data.requiredRemaining}
+        lockedCount={data.lockedCount}
+        probeDegraded={data.probeDegraded}
+        allComplete={data.allComplete}
+        tenantAllComplete={data.tenantAllComplete}
+        stepsNeedingSomeoneElse={data.stepsNeedingSomeoneElse}
+      />
 
-      {/* Progress card */}
-      <div className="rounded-2xl border bg-white p-5 mb-6" style={{ borderColor: 'var(--theme-border)' }}>
-        <div className="flex items-end justify-between mb-3">
-          <div>
-            <p className="text-sm font-medium" style={{ color: 'var(--theme-muted)' }}>Setup progress</p>
-            <p className="text-3xl font-bold mt-0.5" style={{ color: 'var(--theme-text)' }}>
-              {loading ? '…' : `${pct}%`}
-              <span className="text-base font-medium ml-2" style={{ color: 'var(--theme-muted)' }}>
-                {loading ? '' : `${doneCount} of ${STEPS.length} done`}
-              </span>
-            </p>
-          </div>
-          {!loading && nextStep && (
-            <Link
-              href={nextStep.href}
-              className="shrink-0 inline-flex items-center px-4 py-2 text-sm font-semibold rounded-lg text-white"
-              style={{ backgroundColor: 'var(--theme-primary)' }}
-            >
-              {pct === 0 ? 'Start setup' : 'Continue'} →
-            </Link>
-          )}
-          {!loading && !nextStep && (
-            <span className="shrink-0 inline-flex items-center px-3 py-1.5 text-sm font-semibold rounded-full"
-              style={{ backgroundColor: 'var(--theme-primary-soft)', color: 'var(--theme-primary)' }}>
-              🎉 All set
-            </span>
-          )}
-        </div>
-        <div className="h-2 w-full rounded-full overflow-hidden" style={{ backgroundColor: 'var(--theme-primary-soft)' }}>
-          <div className="h-full rounded-full transition-all" style={{ width: `${loading ? 0 : pct}%`, backgroundColor: 'var(--theme-primary)' }} />
-        </div>
-      </div>
+      {stale && <p className="-mt-4 mb-4 text-xs text-gray-600">Updating…</p>}
 
-      {/* Steps */}
-      <div className="space-y-3">
-        {states.map((s, i) => (
-          <div
-            key={s.key}
-            className="rounded-2xl border bg-white p-4 flex gap-4"
-            style={{ borderColor: s.done ? 'var(--theme-primary)' : 'var(--theme-border)' }}
-          >
-            <div
-              className="mt-0.5 h-7 w-7 shrink-0 rounded-full flex items-center justify-center text-sm font-bold"
-              style={s.done
-                ? { backgroundColor: 'var(--theme-primary)', color: '#fff' }
-                : { backgroundColor: 'var(--theme-primary-soft)', color: 'var(--theme-primary)' }}
-            >
-              {s.done ? '✓' : i + 1}
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="font-semibold" style={{ color: 'var(--theme-text)' }}>{s.title}</h3>
-                <Link href={s.href} className="shrink-0 text-sm font-medium hover:underline" style={{ color: 'var(--theme-primary)' }}>
-                  {s.done ? 'Review' : s.cta} →
-                </Link>
-              </div>
-              <p className="text-sm mt-1 leading-relaxed" style={{ color: 'var(--theme-muted)' }}>{s.what}</p>
-              <div className="mt-2 rounded-lg px-3 py-2 text-sm leading-relaxed" style={{ backgroundColor: 'var(--theme-primary-soft)', color: 'var(--theme-text)' }}>
-                <span className="text-[11px] font-bold uppercase tracking-wide mr-2" style={{ color: 'var(--theme-primary)' }}>Example</span>
-                {s.example}
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
+      {error && <div className="mb-4"><ErrorBanner message="We’re showing your last known setup — the live check didn’t answer." /></div>}
+      {actionError && <div className="mb-4"><ErrorBanner message={actionError} /></div>}
+
+      <NextActionCard
+        step={nextStep}
+        blocked={data.nextActionBlocked}
+        currency={data.currency}
+        country={data.country}
+        totalCount={data.totalCount}
+        allComplete={celebrate}
+        completedAt={data.completedAt}
+        celebratedAt={data.celebratedAt}
+        onSkipToList={skipToList}
+        onCelebrated={handleCelebrated}
+      />
+
+      <StageAccordion
+        stages={data.stages}
+        openKeys={openKeys}
+        onToggle={toggleStage}
+        doneOpenKeys={doneOpenKeys}
+        onToggleDone={toggleDone}
+        nextActionStageKey={nextStageKey}
+        currency={data.currency}
+        country={data.country}
+        undoKey={undoKey}
+        onDismiss={handleDismiss}
+        onRestore={handleRestore}
+        labelOf={labelOf}
+      />
+
+      <HiddenSteps steps={hidden} onRestore={handleRestore} />
     </div>
   );
 }

@@ -554,6 +554,16 @@ model Business {
   // Feature 36 — tenant-default candidate-comms config (auto-send toggles per
   // stage, careers reply-to, sender name). Per-job overrides live on Job.commsConfig.
   candidateCommsConfig         Json?
+  // Setup guide state. Tenant-level dismissals ("not needed for us"), the one-time
+  // completion stamp, and per-operator UI bookkeeping for the dashboard widget +
+  // post-login nudge. The per-user slice lives here rather than on User because
+  // User has no prefs column and adding one would touch a core model shared with
+  // three other verticals; the volume is a handful of keys per tenant.
+  //   { dismissed: { [stepKey]: { at, byUserId } },
+  //     completedAt: ISO|null,
+  //     ui: { [userId]: { widgetHiddenUntil, nudgeDismissals, nudgeShownCount,
+  //                       nudgeLastShownAt, nudgeCompletedCount, celebratedAt } } }
+  setupState                   Json?
   // Documents / assets
   employeeDocuments            EmployeeDocument[]
   documentTemplates            DocumentTemplate[]

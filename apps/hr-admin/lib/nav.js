@@ -14,7 +14,13 @@ export const NAV_ITEMS = [
   // Guided setup hub (top-level, ungrouped → renders standalone near the top).
   // Shows live setup completion + ordered next steps. Visible to the people who
   // configure the workspace (Owner / HR-Admin); links inside are themselves gated.
-  { key: 'setup', label: 'Setup guide', href: '/setup', permission: 'canManageCompanyProfile', icon: 'onboarding' },
+  // `badgeSource: 'setupPercent'` marks this item badge-bearing (the same purely
+  // informational idiom as Letters' 'lettersRequestCount'): AdminShell merges
+  // { setup: { kind:'percent', value } } from GET /api/hr/setup-checklist into
+  // the badge map, and <Sidebar> renders it as a "41%" pill. The item itself is
+  // PERMANENT — at 100% the badge goes away but the link stays, because this is
+  // also where an operator comes back to review what was configured.
+  { key: 'setup', label: 'Setup guide', href: '/setup', permission: 'canManageCompanyProfile', icon: 'onboarding', badgeSource: 'setupPercent' },
   { key: 'people', label: 'People', href: '/people', feature: 'hr', permission: 'canViewEmployees', icon: 'people' },
   // Employee lifecycle (Feature 4). The onboarding pipeline + checklist tasks are
   // visible to anyone who can view employees (a Manager sees only their reporting

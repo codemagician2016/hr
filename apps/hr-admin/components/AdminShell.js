@@ -27,7 +27,9 @@ import { get, post } from '@/lib/api';
 import { visibleNavItems, buildNavTree } from '@/lib/nav';
 import { useTenantCountries } from '@/lib/useTenantCountries';
 import { themeVarsFromResolved } from '@/lib/themeVars';
+import { SetupProvider, useSetup, resetSetupStore, setupFullyComplete } from '@/lib/setup';
 import Sidebar from '@/components/Sidebar';
+import SetupNudge from '@/components/setup/SetupNudge';
 import TopBar from '@/components/TopBar';
 
 // Apply the full --theme-* contract on <html> from the resolved tenant theme,
@@ -39,6 +41,33 @@ function applyThemeVars(theme) {
     document.documentElement.style.setProperty(key, value);
   }
   if (theme.styleKey) document.documentElement.setAttribute('data-theme', theme.styleKey);
+}
+
+// Sidebar + the live setup percentage folded into its badge map. The setup
+// subscription lives in this wrapper rather than in AdminShell so a checklist
+// refresh re-renders the rail only — subscribing in the shell itself would
+// re-run the theme + nav-tree work on every setup payload. Everything else
+// about the Sidebar contract is unchanged: it stays presentational and still
+// receives an already-permission-filtered tree.
+//
+// The badge is deliberately absent while loading and once the WORKSPACE is
+// finished: rendering "0%" before the payload lands would be a lie, and a badge
+// on a finished checklist is noise. It is NOT dropped merely because this
+// operator's own score reached 100 — `percent` is permission-scoped, so a
+// narrow admin can sit at 100% on a tenant that has not started, and clearing
+// their last pointer to the guide would hide the outstanding work from the one
+// person still looking. The nav ITEM never disappears — at the end it stays,
+// unbadged, as the place to review what was configured.
+function SidebarWithSetupBadge({ badges = {}, ...rest }) {
+  const { data } = useSetup();
+  const percent = Number(data?.percent);
+  const finished = setupFullyComplete(data);
+  const merged = useMemo(() => (
+    Number.isFinite(percent) && percent > 0 && !finished
+      ? { ...badges, setup: { kind: 'percent', value: Math.round(percent) } }
+      : badges
+  ), [badges, percent, finished]);
+  return <Sidebar badges={merged} {...rest} />;
 }
 
 export default function AdminShell({ children }) {
@@ -77,6 +106,10 @@ export default function AdminShell({ children }) {
       } else {
         const err = meRes.reason || {};
         if (err.status === 401) {
+          // The other end of a session, same hazard as handleLogout: an expired
+          // cookie sends us to /login client-side, and whoever signs in next
+          // must not inherit the previous session's setup payload.
+          resetSetupStore();
           setStatus('unauth');
           router.replace(`/login?redirect=${encodeURIComponent(pathname || '/')}`);
           return;
@@ -211,6 +244,12 @@ export default function AdminShell({ children }) {
     } catch {
       // ignore — clear client state regardless.
     }
+    // /login is a client-side navigation, so nothing re-evaluates the modules
+    // holding this session's data. Both caches must be dropped by hand or the
+    // next person to sign in on this machine — possibly another tenant — sees
+    // the last one's numbers. post() already invalidated the API cache; the
+    // setup store keeps its own.
+    resetSetupStore();
     router.replace('/login');
   }
 
@@ -231,7 +270,12 @@ export default function AdminShell({ children }) {
   }
 
   return (
-    <>
+    // Setup guide state is fetched ONCE here and shared by every surface that
+    // renders it — the nav % badge, the dashboard widget, the post-login nudge
+    // and the /setup page itself — so they can never disagree and never issue
+    // three copies of the same request. Mounted inside the auth gate so it
+    // never races /api/auth/me.
+    <SetupProvider>
       <a href="#main-content" className="skip-link">
         Skip to main content
       </a>
@@ -242,7 +286,7 @@ export default function AdminShell({ children }) {
 
         {/* Sidebar — fixed column on desktop, drawer on mobile */}
         <aside className="dh-sidebar-wrap" aria-label="Sidebar">
-          <Sidebar
+          <SidebarWithSetupBadge
             navTree={navTree}
             session={session}
             brand={brand}
@@ -261,8 +305,12 @@ export default function AdminShell({ children }) {
         </div>
       </div>
 
+      {/* Setup reminder for a young, unfinished workspace. Not a modal, never
+          focus-stealing, and gone for good once dismissed. */}
+      <SetupNudge />
+
       {/* Polite live region for async toasts/errors raised by pages. */}
       <div aria-live="polite" aria-atomic="true" className="sr-only" id="a11y-status" />
-    </>
+    </SetupProvider>
   );
 }

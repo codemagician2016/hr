@@ -47,6 +47,14 @@ router.use('/company-profile', require('./companyProfile.routes'));
 // the DriftHR vendor mark. Gated on canEditDomain OR canManageCompanyProfile OR
 // canEditBranding (Owner bypass). Tenant-scoped from the session.
 router.use('/branding', require('./branding.routes'));
+// Setup Guide — the staged, entitlement-aware "what's left to set up" checklist
+// (score + one next-best action + per-tenant dismissals). canManageCompanyProfile,
+// matching the nav gate on the Setup item. ADVISORY only: nothing reads it to block.
+router.use('/setup-checklist', require('./setupChecklist.routes'));
+// Entity → Registrations (EPFO / ESIC / PT / TAN …). The applicability source the
+// compliance calendar + statutory registers already read; it had no CRUD door until
+// now. Read = canViewPayrollReports OR canManageStatutory; write = canManageStatutory.
+router.use('/statutory-registrations', require('./statutoryRegistrations.routes'));
 router.use('/org', require('./org.routes'));
 router.use('/leave', require('./leave.routes'));
 // FLAG (Feature 30 — NEW mount): operator comp-off admin (earn grant/queue/ledger/

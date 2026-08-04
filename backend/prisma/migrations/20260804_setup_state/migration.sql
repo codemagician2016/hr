@@ -1,0 +1,19 @@
+-- Setup guide — Business.setupState. PURELY ADDITIVE: one new NULLABLE JSONB
+-- column, no backfill, no change to an existing column, so it is safe on a live
+-- tenant.
+--
+-- WHY this migration must exist and not just the schema.prisma field: deploys run
+-- `prisma migrate deploy` (scripts/deploy.sh), which applies prisma/migrations/*
+-- and nothing else. Without a migration the column would exist only where someone
+-- had run `db push` by hand (the test schema), and every setup-guide WRITE path —
+-- POST /setup-checklist/dismiss, /restore and /ui — would 500 in production while
+-- the GET kept working, because readSetupState() fails soft and would hide it.
+--
+-- Shape: { dismissed: { [stepKey]: { at, byUserId } },
+--          completedAt: ISO|null,
+--          ui: { [userId]: { widgetHiddenUntil, nudgeDismissals, nudgeShownCount,
+--                            nudgeLastShownAt, nudgeCompletedCount, celebratedAt } } }
+--
+-- IF NOT EXISTS keeps it idempotent for db-push parity + re-runs (the same idiom
+-- as the feature15 additive migrations).
+ALTER TABLE "Business" ADD COLUMN IF NOT EXISTS "setupState" JSONB;

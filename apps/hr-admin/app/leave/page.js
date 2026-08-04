@@ -1871,6 +1871,13 @@ function PoliciesTab({ types, typeById }) {
 function LeaveInner() {
   const [tab, setTab] = useState('requests');
   const [types, setTypes] = useState([]);
+  // Honour a ?tab= deep link — the setup guide points the leave-type, policy and
+  // assignment steps straight at the config tabs, which are the last two here.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const wanted = new URLSearchParams(window.location.search).get('tab');
+    if (wanted && TABS.some((t) => t.key === wanted)) setTab(wanted);
+  }, []);
   // The tenant's operating country (Feature 14) drives the leave-type Country
   // select — an India tenant only ever sees India.
   const { countries } = useTenantCountries();

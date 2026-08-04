@@ -36,10 +36,46 @@ function initialsOf(name) {
 const ACTIVE = { color: 'var(--theme-primary)', background: 'var(--theme-primary-soft)' };
 const IDLE = { color: 'var(--theme-text)' };
 
-// A small count badge (e.g. "Letters ②" = 2 pending letter requests). Renders
-// nothing for a falsy/zero count; caps the display at 99+.
-function NavBadge({ count }) {
-  const n = Number(count) || 0;
+// Read a percent badge value ({ kind:'percent', value }) — null unless it is a
+// real percentage. 0% renders NOTHING: that is what a still-loading payload
+// would look like. WHEN the badge stops is the shell's call, not ours (a
+// permission-scoped 100% does not mean the workspace is finished), so this
+// stays presentational and renders any percentage it is handed. Kept next to
+// NavBadge so the pill and the accessible name can never drift apart.
+function percentBadge(badge) {
+  if (!badge || typeof badge !== 'object' || badge.kind !== 'percent') return null;
+  const p = Math.round(Number(badge.value));
+  return Number.isFinite(p) && p > 0 && p <= 100 ? p : null;
+}
+
+// The percentage belongs in the LINK's accessible name, not in a second thing
+// announced after the label — so the pill itself is aria-hidden and this
+// supplies "Setup guide, 41 percent complete". Count badges keep their own
+// "n pending" label and return undefined here.
+function navAriaLabel(label, badge) {
+  const p = percentBadge(badge);
+  return p == null ? undefined : `${label}, ${p} percent complete`;
+}
+
+// A small nav badge. Two shapes:
+//   • a number  → pending-work count (e.g. "Letters ②"), capped at 99+;
+//   • { kind:'percent', value } → setup completion ("41%"). NEVER a bare "41"
+//     (that reads as 41 pending items) and never a red dot (red means something
+//     is wrong; an unfinished setup is not wrong — it is just unfinished).
+function NavBadge({ badge }) {
+  const percent = percentBadge(badge);
+  if (percent != null) {
+    return (
+      <span
+        className="ml-auto inline-flex h-5 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold"
+        style={{ background: 'var(--theme-primary-soft)', color: 'var(--theme-primary)' }}
+        aria-hidden="true"
+      >
+        {percent}%
+      </span>
+    );
+  }
+  const n = Number(badge) || 0;
   if (n <= 0) return null;
   return (
     <span
@@ -129,12 +165,13 @@ export default function Sidebar({ navTree = [], session, brand, theme, badges = 
                     href={n.href}
                     onClick={onNavigate}
                     aria-current={active ? 'page' : undefined}
+                    aria-label={navAriaLabel(n.label, badges[n.key])}
                     className={`dh-nav-link${active ? ' is-active' : ''}`}
                     style={active ? ACTIVE : IDLE}
                   >
                     <Icon name={n.icon} className="dh-nav-icon" />
                     <span className="truncate">{n.label}</span>
-                    <NavBadge count={badges[n.key]} />
+                    <NavBadge badge={badges[n.key]} />
                   </Link>
                 </li>
               );
@@ -155,7 +192,7 @@ export default function Sidebar({ navTree = [], session, brand, theme, badges = 
                   <span className="truncate flex-1 text-left">{n.label}</span>
                   {/* Collapsed-group badge (e.g. "Letters ②"). Hidden while open so
                       it isn't doubled with the child link's badge below. */}
-                  {!isOpen && <NavBadge count={badges[n.key]} />}
+                  {!isOpen && <NavBadge badge={badges[n.key]} />}
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"
                        stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
                        className={`dh-chevron${isOpen ? ' is-open' : ''}`}>
@@ -172,12 +209,13 @@ export default function Sidebar({ navTree = [], session, brand, theme, badges = 
                             href={c.href}
                             onClick={onNavigate}
                             aria-current={active ? 'page' : undefined}
+                            aria-label={navAriaLabel(c.label, badges[c.key])}
                             className={`dh-nav-link dh-subnav-link${active ? ' is-active' : ''}`}
                             style={active ? ACTIVE : IDLE}
                           >
                             <Icon name={c.icon} size={16} className="dh-nav-icon" />
                             <span className="truncate">{c.label}</span>
-                            <NavBadge count={badges[c.key]} />
+                            <NavBadge badge={badges[c.key]} />
                           </Link>
                         </li>
                       );

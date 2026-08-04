@@ -11,6 +11,7 @@ import Link from 'next/link';
 import { TextInput, PrimaryButton, ErrorBanner } from '@hr/ui';
 import { get, post } from '@/lib/api';
 import ManagerPicker from '@/components/ManagerPicker';
+import ModuleGuide from '@/components/ModuleGuide';
 import { InfoTip, FieldLabel } from '@/lib/widgets';
 
 function asList(res) {
@@ -104,6 +105,27 @@ export default function NewEmployeePage() {
         ← Back to People
       </Link>
       <h1 className="text-2xl font-semibold text-gray-900 mt-2 mb-6">Add employee</h1>
+
+      <ModuleGuide
+        id="people-new"
+        title="Adding your first employees"
+        what="This creates the person's core record — who they are, where they sit in the org, and who they report to. Pay is deliberately NOT set here: you attach a salary separately once the record exists, so hiring someone never depends on their compensation being finalised. If you're bringing over an existing workforce, import a spreadsheet instead of typing everyone in one at a time."
+        steps={[
+          'Leave Employee code blank to auto-generate the next number in your series — only type one if you are matching codes from your old system.',
+          'Enter their legal first and last name exactly as it should appear on payslips and letters.',
+          'Add their work email — this becomes their employee self-service (ESS) login, so they can see payslips and apply for leave.',
+          'Pick department, designation and location from the dropdowns. If they are empty, set up your org structure first.',
+          'Choose their manager — this builds the reporting tree that routes leave and expense approvals.',
+          'Set the joining date accurately: leave accrual, probation and payroll all count from it.',
+        ]}
+        example={<>Adding <b>Aarav Sharma</b>, joining <b>1 Apr 2026</b> as a <b>Software Engineer</b> in <b>Engineering</b> at <b>Bengaluru HQ</b>, reporting to <b>Meera Iyer</b>. Leave the code blank and he becomes <b>EMP-000042</b> automatically. His salary is attached afterwards from his profile.</>}
+        tips={[
+          'Adding a whole team? Settings → Import takes a CSV and creates everyone in one pass.',
+          'The joining date drives leave accrual and the first payroll — a wrong date here shows up as wrong leave balances later.',
+          'No departments or designations in the dropdowns yet? Add them under People & Org first, then come back.',
+          'You can edit everything here later. The one field worth getting right first time is the employee code, since it appears on payslips and statutory filings.',
+        ]}
+      />
 
       <form onSubmit={onSubmit} className="space-y-5">
         <div className="grid grid-cols-2 gap-4">

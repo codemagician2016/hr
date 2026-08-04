@@ -28,6 +28,7 @@ import {
 } from '@hr/ui';
 import { get, post, patch, request } from '@/lib/api';
 import { asList, PageHeader, Tabs } from '@/lib/ui';
+import ModuleGuide from '@/components/ModuleGuide';
 
 const SCOPE_BANDS = ['ALL', 'DEPARTMENT', 'TEAM', 'SELF', 'NONE'];
 
@@ -484,6 +485,26 @@ export default function RolesPage() {
             ← Settings
           </Link>
         }
+      />
+      <ModuleGuide
+        id="settings-roles"
+        title="Decide who can see and do what"
+        what="A role is a job description for the software. It answers two separate questions: WHICH ACTIONS someone can take (the permission grid — run payroll, approve leave, edit people) and WHOSE RECORDS they can act on (the data scope — everyone, their department, just their own team, or only themselves). A third setting, compensation visibility, controls whether they see real salary figures at all. Your built-in roles already cover the common cases, so most businesses only add a role when a real job doesn't fit one."
+        steps={[
+          'On Roles & permissions, open a role to see its permission grid and its data scope.',
+          'Built-in roles (Owner, HR-Admin, Finance, Manager) are read-only — they stay correct as new features ship. To change one, copy it into a custom role instead.',
+          'Create a custom role only when a real job needs a mix the built-ins don\'t have. Start from the closest built-in and adjust.',
+          'Set the data scope deliberately: ALL sees every employee, TEAM sees only that manager\'s reports, SELF sees only their own record.',
+          'Set compensation visibility separately — a manager can approve leave without ever seeing salaries.',
+          'Switch to the People tab and give each person their role.',
+        ]}
+        example={<>Your payroll executive needs to prepare pay runs but must not approve them (that’s separation of duties). Copy <b>Finance</b> to a custom role <b>Payroll Executive</b>, keep <b>Run payroll</b>, remove <b>Approve payroll</b>, set scope to <b>ALL</b> and compensation visibility to <b>Absolute</b>. Then assign <b>Meera</b> to it on the People tab.</>}
+        tips={[
+          'Separation of duties is deliberate: whoever prepares payroll should not be the one who approves it. Keep those two permissions in different roles.',
+          'Data scope is the stronger control. A permission with SELF scope still only ever touches that one person\'s record.',
+          'Every business needs at least one Owner — the system will not let you remove the last one.',
+          'New features add new permissions. Your built-in roles pick those up automatically on release; custom roles may need a quick review after a big update.',
+        ]}
       />
       <Tabs tabs={TABS} active={tab} onChange={setTab} />
       {tab === 'roles' && <RolesTab />}

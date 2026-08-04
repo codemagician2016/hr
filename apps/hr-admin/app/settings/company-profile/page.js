@@ -438,9 +438,24 @@ function DocumentsTab({ canEdit }) {
   );
 }
 
+const PROFILE_TABS = [
+  { key: 'profile', label: 'Profile' },
+  { key: 'country', label: 'Country' },
+  { key: 'documents', label: 'Documents' },
+];
+
 export default function CompanyProfilePage() {
   const [tab, setTab] = useState('profile');
   const [canEdit, setCanEdit] = useState(true);
+
+  // Honour a ?tab= deep link (the setup guide sends the country step here, and
+  // the profile step to a different tab). Read the URL directly rather than via
+  // useSearchParams so this page needs no Suspense boundary.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const wanted = new URLSearchParams(window.location.search).get('tab');
+    if (wanted && PROFILE_TABS.some((t) => t.key === wanted)) setTab(wanted);
+  }, []);
 
   useEffect(() => {
     get('/api/auth/me')
@@ -481,15 +496,7 @@ export default function CompanyProfilePage() {
         ]}
       />
       <div className="mt-4">
-        <Tabs
-          tabs={[
-            { key: 'profile', label: 'Profile' },
-            { key: 'country', label: 'Country' },
-            { key: 'documents', label: 'Documents' },
-          ]}
-          active={tab}
-          onChange={setTab}
-        />
+        <Tabs tabs={PROFILE_TABS} active={tab} onChange={setTab} />
       </div>
       <div className="mt-6">
         {tab === 'profile' && <ProfileTab canEdit={canEdit} />}
