@@ -59,6 +59,24 @@ const PROFILE_FIELDS = [
 ];
 const PROFILE_MAX_LEN = 240;
 
+// Sensible prefills from existing Business columns, used ONLY when the stored
+// profile field is empty. Every other PROFILE_FIELDS key reads straight out of
+// the JSON column — the read path iterates PROFILE_FIELDS rather than naming
+// fields, so a newly-added key (businessType, nzbn, …) can never be saved-but-
+// not-returned.
+const PROFILE_PREFILL = {
+  legalName: (b) => b.billingBusinessName ?? b.name,
+  tradeName: (b) => b.name,
+  registeredAddressLine1: (b) => b.address,
+  registeredAddressLine2: (b) => b.addressLine2,
+  registeredCity: (b) => b.city,
+  registeredState: (b) => b.state,
+  registeredPostalCode: (b) => b.postalCode,
+  registeredCountry: (b) => b.country,
+  contactEmail: (b) => b.email,
+  contactPhone: (b) => b.phone,
+};
+
 function cleanProfileValue(v) {
   if (v === null || v === undefined || v === '') return null;
   return String(v).trim().slice(0, PROFILE_MAX_LEN) || null;
@@ -128,25 +146,13 @@ async function getCompanyProfile(req, res, next) {
     if (!biz) return res.status(404).json({ message: 'Business not found' });
 
     const stored = (biz.companyProfile && typeof biz.companyProfile === 'object') ? biz.companyProfile : {};
-    // Sensible prefills from existing columns when the profile field is empty.
-    const profile = {
-      legalName: stored.legalName ?? biz.billingBusinessName ?? biz.name ?? null,
-      tradeName: stored.tradeName ?? biz.name ?? null,
-      registrationNo: stored.registrationNo ?? null,
-      gstin: stored.gstin ?? null,
-      pan: stored.pan ?? stored.tax ?? null,
-      tan: stored.tan ?? null,
-      registeredAddressLine1: stored.registeredAddressLine1 ?? biz.address ?? null,
-      registeredAddressLine2: stored.registeredAddressLine2 ?? biz.addressLine2 ?? null,
-      registeredCity: stored.registeredCity ?? biz.city ?? null,
-      registeredState: stored.registeredState ?? biz.state ?? null,
-      registeredPostalCode: stored.registeredPostalCode ?? biz.postalCode ?? null,
-      registeredCountry: stored.registeredCountry ?? biz.country ?? null,
-      contactName: stored.contactName ?? null,
-      contactEmail: stored.contactEmail ?? biz.email ?? null,
-      contactPhone: stored.contactPhone ?? biz.phone ?? null,
-      incorporationDate: stored.incorporationDate ?? null,
-    };
+    const profile = {};
+    for (const f of PROFILE_FIELDS) {
+      const prefill = PROFILE_PREFILL[f];
+      profile[f] = stored[f] ?? (prefill ? (prefill(biz) ?? null) : null);
+    }
+    // Legacy: an early build stored the company PAN under `tax`.
+    if (profile.pan === null && stored.tax) profile.pan = stored.tax;
     res.json({ profile });
   } catch (e) { next(e); }
 }

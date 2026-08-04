@@ -242,6 +242,44 @@ async function main() {
     assert(unique, `concurrent creates allocate DISTINCT codes (${codes.join(', ')})`);
   }
 
+  // ── C) Business profile round-trip ─────────────────────────────────────────
+  // C1 — REGRESSION: every PROFILE_FIELDS key that PATCH persists must come back
+  // out of GET. The read path used to name fields by hand, so keys added later
+  // (businessType, proprietorName, nzbn, irdEntityNumber) saved fine but were
+  // dropped on reload — the admin picked "Private Limited Company", saved, and
+  // the dropdown reset itself on the next page load.
+  log('\n-- C1: company profile saves and reads back --');
+  {
+    const before = await prisma.business.findUnique({ where: { id: businessId }, select: { companyProfile: true } });
+    const sent = {
+      businessType: 'private_limited', proprietorName: 'Anil Sharma',
+      legalName: 'CP-Test Technologies Private Limited', tradeName: 'CP-Test',
+      registrationNo: 'U72200MH2020PTC345678', gstin: '27AABCU9603R1ZM',
+      pan: 'AAMCP6969N', tan: 'MUMC12345D',
+      nzbn: '9429000000000', irdEntityNumber: '012-345-678',
+      registeredAddressLine1: '1 Test Road', registeredAddressLine2: 'Near Nothing',
+      registeredCity: 'Mumbai', registeredState: 'MH', registeredPostalCode: '400001',
+      registeredCountry: 'IN',
+      contactName: 'Aarav Sharma', contactEmail: 'aarav@cp-test.example', contactPhone: '+91 90000 00000',
+      incorporationDate: '2020-04-01',
+    };
+    const saved = await callController(company.updateCompanyProfile, { user: reqUser, body: sent });
+    assert(saved.statusCode === 200, 'profile PATCH → 200');
+
+    // A FRESH read — the reload the admin actually does.
+    const read = await callController(company.getCompanyProfile, { user: reqUser });
+    assert(read.statusCode === 200, 'profile GET → 200');
+    const got = read.body.profile || {};
+    const missing = Object.keys(sent).filter((k) => got[k] !== sent[k]);
+    assert(missing.length === 0, `every saved field survives a reload${missing.length ? ` (dropped: ${missing.join(', ')})` : ''}`);
+
+    // Restore whatever the seed tenant had so later runs / other tests are clean.
+    await prisma.business.update({
+      where: { id: businessId },
+      data: { companyProfile: before?.companyProfile ?? {} },
+    });
+  }
+
   await cleanup();
 
   log(`\n=== ${failures === 0 ? 'ALL PASS' : `${failures} FAILURE(S)`} ===\n`);
