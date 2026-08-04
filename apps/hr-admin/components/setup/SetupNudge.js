@@ -15,7 +15,9 @@
 //   • already shown today → not again until tomorrow,
 //   • shown 5 times in this operator's lifetime → never again,
 //   • the workspace is older than 90 days → the moment for a nudge has passed,
-//   • the operator is already on /setup, or a modal is open → not now.
+//   • the same prompt is already on screen — /setup, or the dashboard where
+//     SetupWidget shows the identical percentage and button → not now,
+//   • a modal is open → not now.
 // There are no email nudges anywhere in this feature (owner decision 4).
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -62,7 +64,11 @@ export default function SetupNudge() {
 
   const percent = Number.isFinite(Number(data?.percent)) ? Math.round(Number(data.percent)) : null;
   const step = data?.nextAction && data.nextAction.locked !== true ? data.nextAction : null;
-  const onSetupRoute = pathname === '/setup' || pathname.startsWith('/setup/');
+  // Suppress wherever the same nudge is already on screen in another form: the
+  // Setup page itself, and the dashboard, where SetupWidget (app/page.js) already
+  // shows the identical percentage and next-action button. Two cards side by side
+  // asking for the same click reads as a bug, not as encouragement.
+  const nudgeRedundantHere = pathname === '/setup' || pathname.startsWith('/setup/') || pathname === '/';
 
   // Tenant age gate. `tenantAgeDays` is the payload's only tenant-level age
   // signal (setupChecklist.controller derives it from Business.createdAt for
@@ -89,7 +95,7 @@ export default function SetupNudge() {
     && (Number(prefs.shownCount) || 0) < MAX_LIFETIME_SHOWS
     && prefs.lastShownDay !== todayKey()
     && tenantIsNew
-    && !onSetupRoute;
+    && !nudgeRedundantHere;
 
   // Delayed reveal. Re-checked at fire time so a modal opened during the delay,
   // or a step completed in that second, still suppresses it.
@@ -146,8 +152,8 @@ export default function SetupNudge() {
 
   // Reaching the guide (or finishing setup) makes the reminder redundant.
   useEffect(() => {
-    if (phase === 'shown' && (onSetupRoute || data?.allComplete === true)) setPhase('closed');
-  }, [phase, onSetupRoute, data]);
+    if (phase === 'shown' && (nudgeRedundantHere || data?.allComplete === true)) setPhase('closed');
+  }, [phase, nudgeRedundantHere, data]);
 
   if (phase !== 'shown' || !step) return null;
 
