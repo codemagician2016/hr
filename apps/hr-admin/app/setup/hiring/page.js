@@ -1,28 +1,26 @@
 'use client';
 
-// Setup guide — the staged, full-product view of what's still worth doing.
+// Hiring setup — the Talent Acquisition track, scored on its own.
 //
-// Everything on this page is READ-ONLY: it scores the workspace from
-// GET /api/hr/setup-checklist (which probes real data, so the guide can't drift
-// out of sync with reality) and then sends you to the actual feature screen.
-// It never operates a feature inline — a step you complete here would be a
-// second, divergent implementation of a screen we already ship.
+// A DELIBERATE second page rather than a section of /setup: a company that never
+// hires must be able to reach 100% on the core guide while this sits untouched
+// at 0%, and the only way to guarantee that is to keep the two denominators in
+// two places. The engine is shared (same registry shape, same probes, same
+// next-action ranking, same components) — only the registry differs.
 //
-// Gating is advisory by design. The percentage never blocks a pay run, a leave
-// approval or a letter; the only things it drives are which row we suggest next
-// and whether the dashboard widget is still worth showing.
+// Same rules as the core guide:
+//   • READ-ONLY — it scores the workspace from GET /api/hr/setup-checklist/talent
+//     and then sends you to the real screen. It never operates a feature inline.
+//   • ADVISORY — nothing here blocks posting a job, interviewing or hiring.
 //
-// Four zones, in strict vertical order:
-//   1  score            — where you are, and why the denominator is what it is
-//   2  next best action — the one thing we're asking for; the only filled button
-//   3  stages           — the whole product, unfinished first, one stage open
-//   4  other tracks     — pointers to separately-scored guides (Hiring setup)
-//   5  footer           — hidden steps + how the score is calculated
+// The one difference is the ending. The core guide finishes on "you're all set";
+// this one finishes on a LINK — the careers URL a recruiter can actually send to
+// candidates — which is what <ActivationCard> renders in place of the
+// next-action card once the page is live.
 //
-// Zone 4 is a POINTER, never a merge. A separate track's steps have their own
-// page, their own denominator and their own 100%, so a company that never hires
-// can finish this list outright. Tenants without the add-on get no card at all —
-// their single locked upsell row already lives in the stage list above.
+// A recruiter typically lacks canManageCompanyProfile, so they cannot open
+// /setup at all. This page therefore never reads the core payload for anything:
+// it fetches its own track and is reachable from its own nav item.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ErrorBanner, Spinner } from '@hr/ui';
@@ -31,24 +29,27 @@ import {
   readOpenStages,
   setupFullyComplete,
   stageOfNextAction,
-  useSetup,
+  useSetupTrack,
   writeOpenStages,
 } from '@/lib/setup';
+import AddOnUpsell from '@/components/AddOnUpsell';
 import SetupHeader from '@/components/setup/SetupHeader';
 import NextActionCard from '@/components/setup/NextActionCard';
+import ActivationCard from '@/components/setup/ActivationCard';
 import StageAccordion from '@/components/setup/StageAccordion';
 import HiddenSteps from '@/components/setup/HiddenSteps';
-import TrackCard from '@/components/setup/TrackCard';
+
+const TRACK = 'talent';
 
 // How long a just-hidden row stays put with an Undo before it moves to the
 // footer. Long enough to notice a misclick, short enough not to look stuck.
 const UNDO_MS = 10000;
 
-export default function SetupGuidePage() {
-  const { data, loading, error, stale, businessId, refresh, dismiss, restore, setUiState } = useSetup();
+export default function HiringSetupPage() {
+  const { data, loading, error, stale, businessId, refresh, dismiss, restore, setUiState } = useSetupTrack(TRACK);
 
-  // Landing on /setup is the one moment we WANT the freshest possible score —
-  // the operator has usually just come back from finishing something.
+  // Landing here is the one moment we WANT the freshest possible score — the
+  // recruiter has usually just come back from publishing something.
   useEffect(() => { refresh(); }, [refresh]);
 
   const [openKeys, setOpenKeys] = useState(() => new Set());
@@ -62,11 +63,12 @@ export default function SetupGuidePage() {
 
   useEffect(() => () => clearTimeout(undoTimer.current), []);
 
-  // Restore the operator's own expansions (30-day, per tenant) exactly once.
+  // Restore this operator's own expansions (30-day, per tenant AND per track, so
+  // opening "Go live" here never closes a stage on the core guide).
   useEffect(() => {
     if (restoredStages.current || !businessId) return;
     restoredStages.current = true;
-    const stored = readOpenStages(businessId);
+    const stored = readOpenStages(businessId, TRACK);
     if (stored && stored.length) setOpenKeys((prev) => new Set([...prev, ...stored]));
   }, [businessId]);
 
@@ -84,7 +86,7 @@ export default function SetupGuidePage() {
     setOpenKeys((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key); else next.add(key);
-      if (businessId) writeOpenStages(businessId, next);
+      if (businessId) writeOpenStages(businessId, next, TRACK);
       return next;
     });
   }, [businessId]);
@@ -104,6 +106,10 @@ export default function SetupGuidePage() {
     const step = stepByKey.get(key);
     return step ? { label: step.label, done: step.state === 'done' } : null;
   }, [stepByKey]);
+
+  // The activation card names the one outstanding half by step key, and needs
+  // that row's real label/route/cta to render a live button for it.
+  const stepFor = useCallback((key) => stepByKey.get(key) || null, [stepByKey]);
 
   const hidden = useMemo(
     () => steps.filter((s) => s.state === 'dismissed' && s.key !== undoKey),
@@ -143,6 +149,7 @@ export default function SetupGuidePage() {
 
   const handleCelebrated = useCallback(() => {
     // Best-effort: a failure here only means the confetti may fire once more.
+    // It writes the TALENT track's own slice — the core celebration is untouched.
     setUiState({ celebrated: true }).catch(() => {});
   }, [setUiState]);
 
@@ -174,31 +181,49 @@ export default function SetupGuidePage() {
     );
   }
 
+  // Not on the plan. The endpoint answers 200 with an upsell envelope rather
+  // than 403 precisely so we land here instead of in the error branch.
+  if (data && data.entitled === false) {
+    return <AddOnUpsell title="Talent Acquisition" cta="Add Talent Acquisition" href={data.upsell?.route || '/settings?tab=billing'} />;
+  }
+
   if (!data) {
+    // The nav item is gated on the same two keys the route is, so a 403 here means
+    // someone followed a link rather than a bug — say which access is missing
+    // instead of offering a "Try again" that will fail identically every time.
+    const forbidden = error?.status === 403;
     return (
       <div className="max-w-4xl">
-        <h1 className="text-2xl font-semibold text-gray-900">Setup guide</h1>
+        <h1 className="text-2xl font-semibold text-gray-900">Hiring setup</h1>
         <p className="mt-1 text-sm text-gray-600">
-          We couldn’t load your setup just now. Nothing is blocked — everything in the console still works.
+          {forbidden
+            ? 'This guide is for the people who run hiring. Ask an admin for the “Manage hiring” permission and it will appear in your sidebar.'
+            : 'We couldn’t load your hiring setup just now. Nothing is blocked — posting jobs, interviewing and offers all still work.'}
         </p>
         <div className="mt-4">
-          <ErrorBanner message={error?.message || 'The setup checklist is unavailable.'} />
+          <ErrorBanner message={forbidden
+            ? 'You don’t have permission to see the hiring setup guide.'
+            : (error?.message || 'The hiring checklist is unavailable.')}
+          />
         </div>
-        <button
-          type="button"
-          onClick={refresh}
-          className="mt-2 inline-flex min-h-[44px] items-center rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-900 hover:bg-gray-50"
-        >
-          Try again
-        </button>
+        {!forbidden && (
+          <button
+            type="button"
+            onClick={refresh}
+            className="mt-2 inline-flex min-h-[44px] items-center rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-900 hover:bg-gray-50"
+          >
+            Try again
+          </button>
+        )}
       </div>
     );
   }
 
-  // The done card and its confetti say the COMPANY is set up, so they wait on
-  // the whole tenant being finished — not on this operator having finished the
-  // slice their permissions let them see (see setupFullyComplete).
-  const celebrate = setupFullyComplete(data);
+  const activation = data.activation || null;
+  // The activation card OWNS the top of the page once there is something true to
+  // say about the public board — and it deliberately outranks the checklist, so a
+  // tenant whose page is live at 73% still sees "live" rather than "73% ready".
+  const showActivation = !!activation && (activation.state === 'live' || activation.state === 'almost');
 
   return (
     // While `stale`, what's on screen is the <24h cached payload and the live
@@ -206,6 +231,8 @@ export default function SetupGuidePage() {
     // number we haven't re-confirmed yet.
     <div className="max-w-4xl" aria-busy={stale || undefined} style={stale ? { opacity: 0.6 } : undefined}>
       <SetupHeader
+        eyebrow={data.trackTitle || 'Hiring setup'}
+        track={data.track}
         percent={data.percent}
         completedCount={data.completedCount}
         totalCount={data.totalCount}
@@ -219,21 +246,33 @@ export default function SetupGuidePage() {
 
       {stale && <p className="-mt-4 mb-4 text-xs text-gray-600">Updating…</p>}
 
-      {error && <div className="mb-4"><ErrorBanner message="We’re showing your last known setup — the live check didn’t answer." /></div>}
+      {error && <div className="mb-4"><ErrorBanner message="We’re showing your last known hiring setup — the live check didn’t answer." /></div>}
       {actionError && <div className="mb-4"><ErrorBanner message={actionError} /></div>}
 
-      <NextActionCard
-        step={nextStep}
-        blocked={data.nextActionBlocked}
-        currency={data.currency}
-        country={data.country}
-        totalCount={data.totalCount}
-        allComplete={celebrate}
-        completedAt={data.completedAt}
-        celebratedAt={data.celebratedAt}
-        onSkipToList={skipToList}
-        onCelebrated={handleCelebrated}
-      />
+      {showActivation ? (
+        <ActivationCard
+          activation={activation}
+          stepFor={stepFor}
+          celebratedAt={data.celebratedAt}
+          onCelebrated={handleCelebrated}
+        />
+      ) : (
+        <NextActionCard
+          step={nextStep}
+          blocked={data.nextActionBlocked}
+          currency={data.currency}
+          country={data.country}
+          totalCount={data.totalCount}
+          // The done card and its confetti say the COMPANY is set up, so they wait
+          // on the whole tenant being finished — not on this operator having
+          // finished the slice their permissions let them see.
+          allComplete={setupFullyComplete(data)}
+          completedAt={data.completedAt}
+          celebratedAt={data.celebratedAt}
+          onSkipToList={skipToList}
+          onCelebrated={handleCelebrated}
+        />
+      )}
 
       <StageAccordion
         stages={data.stages}
@@ -249,8 +288,6 @@ export default function SetupGuidePage() {
         onRestore={handleRestore}
         labelOf={labelOf}
       />
-
-      {(data.tracks || []).map((track) => <TrackCard key={track.key} track={track} />)}
 
       <HiddenSteps steps={hidden} onRestore={handleRestore} />
     </div>

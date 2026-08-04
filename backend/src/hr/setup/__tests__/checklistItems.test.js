@@ -39,11 +39,19 @@ ok(new Set(STAGES.map((s) => s.key)).size === STAGES.length, 'stage keys are uni
 }
 
 // ── Every step has a probe, and every probe has a step ─────────────────────────
+// EXCEPT an upsell-only row (`hideWhenEntitled`), which is an advert rather than a
+// task: it is locked while the tenant lacks the add-on and removed from the
+// registry outright once they hold it, so it is never probed either way.
 {
-  const noProbe = STEPS.filter((s) => !PROBES[s.key]).map((s) => s.key);
-  ok(noProbe.length === 0, `every step has a probe${noProbe.length ? ` (missing: ${noProbe})` : ''}`);
+  const probeable = STEPS.filter((s) => !s.hideWhenEntitled);
+  const noProbe = probeable.filter((s) => !PROBES[s.key]).map((s) => s.key);
+  ok(noProbe.length === 0, `every probeable step has a probe${noProbe.length ? ` (missing: ${noProbe})` : ''}`);
   const orphans = Object.keys(PROBES).filter((k) => !BY_KEY.has(k));
   ok(orphans.length === 0, `no orphan probes${orphans.length ? ` (${orphans})` : ''}`);
+  // The four recruitment probes moved to the talent track with their rows. A copy
+  // left behind here would be exactly the drift this split exists to prevent.
+  const moved = ['hiring_pipeline', 'careers_page', 'candidate_messages', 'careers_live'].filter((k) => PROBES[k]);
+  ok(moved.length === 0, `no recruitment probe survives in the core map${moved.length ? ` (${moved})` : ''}`);
 }
 
 // ── RBAC keys must exist, or the step is invisible to everyone ────────────────
@@ -56,13 +64,24 @@ ok(new Set(STAGES.map((s) => s.key)).size === STAGES.length, 'stage keys are uni
 }
 
 // ── Entitlements must be real add-on keys ─────────────────────────────────────
+// Hiring moved to its OWN track, so the core guide keeps exactly ONE add-on row —
+// the locked upsell that points at it. LockedRow takes its single-row branch and
+// renders inline rather than behind a "Not on your plan (4)" disclosure.
 {
   const gated = STEPS.filter((s) => s.entitlement);
   const bad = gated.filter((s) => !HR_ADDON_KEYS.includes(s.entitlement)).map((s) => s.key);
-  ok(gated.length === 4, `four steps are add-on gated (${gated.length})`);
+  ok(gated.length === 1 && gated[0].key === 'talent_acquisition_addon', `exactly one add-on row, and it is the upsell (${gated.map((s) => s.key)})`);
   ok(bad.length === 0, `every entitlement is a real HR add-on key${bad.length ? ` (bad: ${bad})` : ''}`);
   // The nav's feature: strings are NOT entitlement keys and are absent from the catalog.
   ok(!gated.some((s) => ['hr', 'payroll', 'leave', 'attendance'].includes(s.entitlement)), 'no nav `feature:` string is used as an entitlement key');
+  // hideWhenEntitled without an entitlement key is a no-op row that would never
+  // disappear — the filter reads `entitlements[s.entitlement]`.
+  const orphanHide = STEPS.filter((s) => s.hideWhenEntitled && !s.entitlement).map((s) => s.key);
+  ok(orphanHide.length === 0, `every hideWhenEntitled row names its add-on${orphanHide.length ? ` (${orphanHide})` : ''}`);
+  // Owner decision 1, asserted structurally: no recruitment step is left in core.
+  const recruitment = ['hiring_pipeline', 'careers_page', 'candidate_messages', 'first_job',
+    'careers_content', 'pipeline_template', 'job_public'].filter((k) => BY_KEY.has(k));
+  ok(recruitment.length === 0, `no hiring step sits in the core registry${recruitment.length ? ` (${recruitment})` : ''}`);
 }
 
 // ── Dependencies form a DAG that resolves ─────────────────────────────────────
@@ -83,11 +102,11 @@ ok(new Set(STAGES.map((s) => s.key)).size === STAGES.length, 'stage keys are uni
 
 // ── blocking is the transitive dependant count, computed once ─────────────────
 {
-  ok(BLOCKING.country === 60, `country blocks the most work (${BLOCKING.country} steps)`);
+  ok(BLOCKING.country === 57, `country blocks the most work (${BLOCKING.country} steps)`);
   ok(BLOCKING.entity > BLOCKING.employees, 'entity outranks employees (it is upstream of it)');
   ok(STEPS.every((s) => s.blocking === BLOCKING[s.key]), 'each step carries its own blocking count');
   // Leaves block nothing — a good sanity check that the closure is not counting self.
-  ok(BLOCKING.first_job === 0, 'a leaf step blocks nothing');
+  ok(BLOCKING.first_course === 0, 'a leaf step blocks nothing');
 }
 
 // ── Required / dismissible invariants ─────────────────────────────────────────
@@ -123,7 +142,7 @@ ok(new Set(STAGES.map((s) => s.key)).size === STAGES.length, 'stage keys are uni
   ok(inOnly.length === 8, `8 India-only steps (${inOnly.length})`);
   ok(STEPS.every((s) => !s.countryOnly || ['IN', 'NZ'].includes(s.countryOnly)), 'countryOnly is IN or NZ only');
   const nzTotal = STEPS.length - inOnly.length;
-  ok(STEPS.length === 70 && nzTotal === 62, `70 steps for India, 62 for New Zealand (${STEPS.length}/${nzTotal})`);
+  ok(STEPS.length === 67 && nzTotal === 59, `67 steps for India, 59 for New Zealand (${STEPS.length}/${nzTotal})`);
   // An India-only step must not depend on a step the NZ tenant would keep — that is
   // fine — but it MUST NOT be depended upon by a country-agnostic step.
   const leak = STEPS.filter((s) => !s.countryOnly && s.dependsOn.some((d) => BY_KEY.get(d).countryOnly)).map((s) => s.key);
@@ -142,8 +161,11 @@ ok(new Set(STAGES.map((s) => s.key)).size === STAGES.length, 'stage keys are uni
   const badWho = STEPS.filter((s) => !['HR', 'Finance', 'the Owner', 'your IT person'].includes(s.doneBy)).map((s) => s.key);
   ok(badWho.length === 0, `doneBy is one of the four known personas${badWho.length ? ` (${badWho})` : ''}`);
 
-  const badMins = STEPS.filter((s) => !Number.isFinite(s.minutes) || s.minutes < 1).map((s) => s.key);
-  ok(badMins.length === 0, `every step has a plausible minutes estimate${badMins.length ? ` (${badMins})` : ''}`);
+  // An upsell-only row has no time estimate because there is no work to do — it is
+  // a thing to buy, not a thing to finish.
+  const badMins = STEPS.filter((s) => !s.hideWhenEntitled && (!Number.isFinite(s.minutes) || s.minutes < 1)).map((s) => s.key);
+  ok(badMins.length === 0, `every actionable step has a plausible minutes estimate${badMins.length ? ` (${badMins})` : ''}`);
+  ok(STEPS.filter((s) => s.hideWhenEntitled).every((s) => s.minutes === null), 'an upsell-only row carries no time estimate');
 
   const noRoute = STEPS.filter((s) => !s.route || !s.route.startsWith('/')).map((s) => s.key);
   ok(noRoute.length === 0, `every step deep-links to a real screen path${noRoute.length ? ` (${noRoute})` : ''}`);

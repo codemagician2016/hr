@@ -7,7 +7,18 @@
  *   { dismissed: { [stepKey]: { at, byUserId } },
  *     completedAt: ISO|null,
  *     ui: { [userId]: { widgetHiddenUntil, nudgeDismissals, nudgeShownCount,
- *                       nudgeLastShownAt, nudgeCompletedCount, celebratedAt } } }
+ *                       nudgeLastShownAt, nudgeCompletedCount, celebratedAt } },
+ *     tracks: { [trackKey]: { completedAt: ISO|null, ui: { [userId]: {…} } } } }
+ *
+ * The top-level `completedAt`/`ui` ARE the core track's slice — that is the shape
+ * this column shipped with, and `sliceFor(state, 'core')` keeps reading it
+ * bit-for-bit rather than migrating a hot JSON column. Every OTHER track (hiring,
+ * and whatever comes next) lives under `tracks[key]`, so one track's completion
+ * stamp and confetti can never be read as another's.
+ *
+ * `dismissed` deliberately stays ONE flat map: step keys are globally unique across
+ * registries (checklistItems.test.js and talentChecklist.test.js both assert it), so
+ * the read-modify-write below needs no per-track branch to stay correct.
  *
  * Everything writes through `mergeSetupState`, which is a read-modify-write on a
  * HOT row (Business), so it MERGES and never replaces — the same discipline as
@@ -22,23 +33,64 @@
 
 const prisma = require('../../core/lib/prisma');
 
-const EMPTY = Object.freeze({ dismissed: {}, completedAt: null, ui: {} });
+const EMPTY = Object.freeze({ dismissed: {}, completedAt: null, ui: {}, tracks: {} });
+
+const CORE_TRACK = 'core';
 
 let columnWarned = false;
 
+const asMap = (v) => ((v && typeof v === 'object' && !Array.isArray(v)) ? v : {});
+
+/**
+ * normalise REBUILDS the state object key by key, and every write goes
+ * mergeSetupState → normalise → update. A branch it does not rebuild is therefore
+ * DROPPED by the next write of any other branch — which is why `tracks` has to be
+ * listed here: without it a core dismissal would silently erase the hiring track's
+ * completion stamp (and vice versa) the first time either was written.
+ */
 function normalise(raw) {
-  const src = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+  const src = asMap(raw);
   return {
-    dismissed: (src.dismissed && typeof src.dismissed === 'object') ? src.dismissed : {},
+    dismissed: asMap(src.dismissed),
     completedAt: src.completedAt || null,
-    ui: (src.ui && typeof src.ui === 'object') ? src.ui : {},
+    ui: asMap(src.ui),
+    tracks: asMap(src.tracks),
   };
+}
+
+/**
+ * sliceFor — one track's `{ completedAt, ui }`.
+ *
+ * 'core' resolves to the LEGACY top-level pair, so the shipped column keeps its
+ * exact meaning and no backfill is needed; any other track resolves to its
+ * namespaced slice.
+ */
+function sliceFor(state, trackKey = CORE_TRACK) {
+  const s = state || EMPTY;
+  if (!trackKey || trackKey === CORE_TRACK) {
+    return { completedAt: s.completedAt || null, ui: asMap(s.ui) };
+  }
+  const row = asMap(asMap(s.tracks)[trackKey]);
+  return { completedAt: row.completedAt || null, ui: asMap(row.ui) };
+}
+
+/**
+ * patchTrack — merge a patch into ONE track's slice, leaving every other track's
+ * alone. For 'core' that is a top-level merge (the legacy shape); for anything else
+ * it lands under `tracks[key]`.
+ */
+function patchTrack(state, trackKey, patch) {
+  if (!trackKey || trackKey === CORE_TRACK) return { ...state, ...patch };
+  const tracks = { ...asMap(state.tracks) };
+  tracks[trackKey] = { ...asMap(tracks[trackKey]), ...patch };
+  return { ...state, tracks };
 }
 
 // Per-user UI bookkeeping with every field defaulted, so callers never branch on
 // "has this operator ever been nudged?".
-function uiFor(state, userId) {
-  const row = (userId && state.ui && state.ui[userId] && typeof state.ui[userId] === 'object') ? state.ui[userId] : {};
+function uiFor(state, userId, trackKey = CORE_TRACK) {
+  const all = sliceFor(state, trackKey).ui;
+  const row = (userId && all[userId] && typeof all[userId] === 'object') ? all[userId] : {};
   return {
     widgetHiddenUntil: row.widgetHiddenUntil || null,
     nudgeDismissals: Number.isInteger(row.nudgeDismissals) ? row.nudgeDismissals : 0,
@@ -78,11 +130,16 @@ async function mergeSetupState(businessId, mutate) {
   return next;
 }
 
-// Merge a patch into ONE operator's slice, leaving every other operator's alone.
-function patchUi(state, userId, patch) {
-  const ui = { ...(state.ui || {}) };
-  ui[userId] = { ...uiFor(state, userId), ...patch };
-  return { ...state, ui };
+// Merge a patch into ONE operator's slice of ONE track, leaving every other
+// operator's — and every other track's — alone.
+function patchUi(state, userId, patch, trackKey = CORE_TRACK) {
+  const ui = { ...sliceFor(state, trackKey).ui };
+  ui[userId] = { ...uiFor(state, userId, trackKey), ...patch };
+  return patchTrack(state, trackKey, { ui });
 }
 
-module.exports = { EMPTY, normalise, uiFor, patchUi, readSetupState, mergeSetupState };
+module.exports = {
+  EMPTY, CORE_TRACK,
+  normalise, sliceFor, patchTrack, uiFor, patchUi,
+  readSetupState, mergeSetupState,
+};

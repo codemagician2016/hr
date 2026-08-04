@@ -38,8 +38,9 @@ function prefersReducedMotion() {
 
 // Purely decorative, aria-hidden, self-destructs. Suppressed wholesale under
 // prefers-reduced-motion — a celebration nobody asked for must never be a
-// vestibular problem.
-function Confetti() {
+// vestibular problem. Exported so the hiring track's ActivationCard celebrates
+// with the same animation rather than growing a second copy of it.
+export function Confetti() {
   const pieces = Array.from({ length: CONFETTI_PIECES }, (_, i) => ({
     left: `${(i * 100) / CONFETTI_PIECES + (i % 3) * 1.5}%`,
     delay: `${(i % 6) * 0.09}s`,

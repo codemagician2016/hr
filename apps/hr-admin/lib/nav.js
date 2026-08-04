@@ -99,6 +99,14 @@ export const NAV_ITEMS = [
   // read key OR canManageHiring (recruiters/HR) OR the legacy canManageEmployees
   // super-set. The server is the real boundary; this just hides the nav link.
   { key: 'recruitment', label: 'Talent Acquisition', href: '/recruitment', feature: 'talent_acquisition', anyPermission: ['canViewHiring', 'canManageHiring', 'canManageEmployees'], icon: 'people' },
+  // Hiring setup — the Talent Acquisition SETUP TRACK (get your careers page live
+  // and taking applications). Scored on its own denominator at /setup/hiring, never
+  // folded into the core "Setup guide" percentage. It is the recruiter's own entry
+  // point: they routinely lack canManageCompanyProfile, which gates the core guide's
+  // nav item and route, so this must not inherit that key. Hidden entirely without
+  // the talent_acquisition add-on — an unentitled tenant sees the single locked
+  // upsell row inside the core guide instead, not a second nav item that upsells.
+  { key: 'hiring-setup', label: 'Hiring setup', href: '/setup/hiring', feature: 'talent_acquisition', anyPermission: ['canManageHiring', 'canManageEmployees'], icon: 'globe' },
   // Application-form templates — reusable screening-question sets a recruiter
   // authors once and applies to any job (a different template per job). Same
   // gate/feature as the Talent Acquisition console (viewers see it read-only; the
@@ -282,7 +290,8 @@ export const NAV_ITEMS = [
 // emitted as its own expandable section, so it is intentionally omitted here.
 export const NAV_GROUPS = [
   { key: 'people-org', label: 'People & Org', icon: 'people', items: ['people', 'org', 'profile-changes', 'profile-policy', 'helpdesk', 'announcements', 'surveys', 'recognition'] },
-  { key: 'talent', label: 'Talent', icon: 'onboarding', items: ['recruitment', 'recruitment-form-templates', 'onboarding', 'separations', 'performance'] },
+  // 'hiring-setup' leads the group: it is the guided way IN to everything below it.
+  { key: 'talent', label: 'Talent', icon: 'onboarding', items: ['hiring-setup', 'recruitment', 'recruitment-form-templates', 'onboarding', 'separations', 'performance'] },
   { key: 'time', label: 'Time', icon: 'calendar', items: ['leave', 'comp-off', 'leave-encashment', 'attendance'] },
   { key: 'pay', label: 'Pay', icon: 'wallet', items: ['compensation', 'ctc-policies', 'fbp-plans', 'fbp-allocations', 'payroll', 'bonus', 'variable-pay', 'arrears', 'form16', 'compliance', 'registers', 'tax-declaration-window', 'tax-proof-verification', 'tax-regime', 'expenses', 'travel', 'loans', 'reports'] },
   // FLAG FOR MERGE: new Feature 10 group — approval chains + RBAC + reporting tree.

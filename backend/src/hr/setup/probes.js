@@ -90,7 +90,7 @@ async function loadContext(businessId, { prisma = realPrisma, now = new Date() }
     select: {
       id: true, createdAt: true,
       hrCountry: true, hrCountrySetAt: true, hrCurrency: true,
-      companyProfile: true, featureFlags: true, candidateCommsConfig: true,
+      companyProfile: true, featureFlags: true,
     },
   });
   if (!business) return null;
@@ -591,30 +591,11 @@ PROBES.performance_cycle = async (c) =>
 PROBES.first_course = async (c) =>
   (await c.prisma.course.count({ where: { businessId: c.businessId, deletedAt: null, status: 'PUBLISHED' } })) > 0;
 
-// No isActive on PipelineTemplate — deletedAt plus the default flag.
-PROBES.hiring_pipeline = async (c) =>
-  (await c.prisma.pipelineTemplate.count({ where: { businessId: c.businessId, deletedAt: null, isDefault: true } })) > 0;
-
-// businessId is @unique → findUnique. An unpublished row falls back to hard-coded
-// copy on the public board, so it is not "done".
-PROBES.careers_page = async (c) => {
-  const row = await c.prisma.careersPage.findUnique({
-    where: { businessId: c.businessId },
-    select: { isPublished: true },
-  });
-  return row ? row.isPublished === true : false;
-};
-
-PROBES.candidate_messages = (c) => {
-  const cfg = asObject(c.business.candidateCommsConfig);
-  return !!cfg && Object.keys(cfg).length > 0;
-};
-
-// No isActive on Job — deletedAt plus the status enum.
-PROBES.first_job = async (c) =>
-  (await c.prisma.job.count({
-    where: { businessId: c.businessId, deletedAt: null, status: { in: ['OPEN', 'ON_HOLD'] } },
-  })) > 0;
+// NOTE: recruitment has no probe here on purpose. Hiring is its own TRACK
+// (setup/talent/), scored on its own denominator, so that a company which does not
+// hire this quarter can still reach 100% on core HR. The core guide carries one
+// LOCKED upsell row (`talent_acquisition_addon`) instead — and that row is never
+// probed: it is either locked, or removed outright by `hideWhenEntitled`.
 
 /**
  * runProbes — evaluate `keys` CONCURRENTLY, each individually insulated.
@@ -622,10 +603,15 @@ PROBES.first_job = async (c) =>
  * Roughly thirty indexed count/findFirst queries fired in one batch. A rejection
  * is contained to its own step: `{ ok:false }` degrades that row to "Couldn't
  * check" and the endpoint still answers 200. Nothing here rethrows.
+ *
+ * The probe MAP is a parameter, not a closure, so a second track binds its own
+ * lookup table to this one runner rather than copying the concurrency, the
+ * per-probe try/catch and the `{ ok, completed, coverage }` envelope — which is how
+ * two tracks are guaranteed to degrade identically.
  */
-async function runProbes(ctx, keys) {
+async function runProbes(ctx, keys, probes = PROBES) {
   const entries = await Promise.all(keys.map(async (key) => {
-    const probe = PROBES[key];
+    const probe = probes[key];
     // A declared step with no probe is a registry bug, not a tenant problem —
     // report it as unknown rather than silently scoring it incomplete.
     if (!probe) {
@@ -650,7 +636,12 @@ module.exports = {
   ACTIVE_SET,
   PROBES,
   loadContext,
+  // runProbes is registry-agnostic — setup/talent/probes.js imports it verbatim
+  // rather than writing a second runner, so both tracks degrade identically.
   runProbes,
+  // shared value tests, reused by the talent probes so "filled" means one thing.
+  filled,
+  asObject,
   // exported for tests
   taxYearStart,
   coverageVerdict,

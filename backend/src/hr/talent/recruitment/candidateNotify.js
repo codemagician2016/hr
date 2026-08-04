@@ -106,6 +106,30 @@ function careersBaseUrl(slug) {
   return `https://${process.env.PLATFORM_DOMAIN || 'drifthr.com'}`;
 }
 
+/**
+ * The tenant's public careers BOARD — the one link a recruiter shares.
+ *
+ * Two shapes, both shipped and resolvable, and the caller must render exactly ONE:
+ *   hostForSlug resolves → https://<slug>-staging.drifthr.com/careers (staging) or
+ *     https://<slug>.drifthr.com/careers (prod). The tenant is resolved FROM THE
+ *     HOST, which is why the ESS careers routes carry no slug segment.
+ *   hostForSlug unavailable (env unset on a box) → <platformBase>/careers/<slug>,
+ *     the admin-app board, which carries the slug explicitly because the shared
+ *     platform host cannot resolve a tenant on its own.
+ * careersBaseUrl(null) is deliberate in the fallback: passing the slug would send
+ * it back through hostForSlug, which we already know did not resolve.
+ */
+function careersBoardUrl(slug) {
+  if (!slug) return null;
+  try {
+    if (_hostForSlug) {
+      const h = _hostForSlug(slug);
+      if (h) return `https://${h}/careers`;
+    }
+  } catch { /* fall through to the platform-host shape */ }
+  return `${careersBaseUrl(null)}/careers/${encodeURIComponent(slug)}`;
+}
+
 // The candidate status/timeline link carried as {LINK} in every candidate message.
 function candidateStatusLink(slug, token) {
   if (!slug || !token) return '';
@@ -269,6 +293,7 @@ module.exports = {
     candidateName,
     buildVars,
     careersBaseUrl,
+    careersBoardUrl,
     dispatchCandidate,
   },
 };

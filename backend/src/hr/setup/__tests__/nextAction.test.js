@@ -72,7 +72,7 @@ log('\n=== Setup checklist — next-action ranking ===\n');
   const list = withDone([]);
   const { nextAction, nextActionBlocked } = pickNextAction(list, list.map((r) => r.key));
   ok(nextAction && nextAction.key === 'country', `an empty tenant is sent to the country lock first (${nextAction && nextAction.key})`);
-  ok(nextAction.blocking === 60, 'because it blocks 60 other steps');
+  ok(nextAction.blocking === 57, 'because it blocks 57 other steps');
   ok(nextActionBlocked === null, 'nothing is blocked for an operator who holds every key');
   ok(nextAction.cta === 'Choose your country', `the card gets the authored verb+object CTA ("${nextAction.cta}")`);
   ok(nextAction.orderInScope === 1, 'orderInScope numbers the step within the operator\'s scored set');

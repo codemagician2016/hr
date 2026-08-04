@@ -329,6 +329,21 @@ export default function CandidateMessagesPage() {
       .catch(() => {});
   }, [load]);
 
+  // Hiring setup sends two of its steps here — "Choose which emails send
+  // themselves" to the auto-send toggles at the top and "Make the candidate
+  // emails sound like you" to #templates. The hash is processed before the
+  // library has rows, so re-apply it once the load settles; without this both
+  // rows land the operator at the top of the same page and read as duplicates.
+  useEffect(() => {
+    if (loading || typeof window === 'undefined') return;
+    const id = window.location.hash.slice(1);
+    if (!id) return;
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.scrollIntoView(); // instant by default — never a surprise scroll animation
+    el.focus({ preventScroll: true }); // put the caret there too, for keyboard + AT
+  }, [loading]);
+
   const overriddenCount = (items || []).filter((t) => t.overridden).length;
 
   const columns = [
@@ -397,7 +412,10 @@ export default function CandidateMessagesPage() {
 
       <AutoSendSection canManage={canManage} />
 
-      <div className="space-y-3">
+      {/* id="templates" is a deep-link target: Hiring setup's "Make the candidate
+          emails sound like you" step links to
+          /settings/candidate-messages#templates. */}
+      <div id="templates" tabIndex={-1} className="scroll-mt-24 space-y-3">
         <div className="flex items-center justify-between gap-3">
           <SectionTitle tip="The wording of each candidate-facing message. Overrides change the message body only; the variables are fixed.">Message library</SectionTitle>
           {!loading && items && <p className="text-xs text-gray-500">{items.length} message{items.length === 1 ? '' : 's'} · {overriddenCount} customised</p>}

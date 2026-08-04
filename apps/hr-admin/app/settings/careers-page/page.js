@@ -141,6 +141,21 @@ export default function CareersPageEditor() {
       .catch(() => {});
   }, [load]);
 
+  // Hiring setup sends two of its steps to this one screen — "Write your careers
+  // page" to the top and "Add your perks and your social links" to #perks. The
+  // hash arrives before the form exists (we render a spinner until the GET
+  // lands), so the browser's own hash scroll finds nothing and both rows would
+  // drop the operator in the same place. Re-apply it once the form is on screen.
+  useEffect(() => {
+    if (loading || typeof window === 'undefined') return;
+    const id = window.location.hash.slice(1);
+    if (!id) return;
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.scrollIntoView(); // instant by default — never a surprise scroll animation
+    el.focus({ preventScroll: true }); // put the caret there too, for keyboard + AT
+  }, [loading]);
+
   // ── custom-section helpers ──────────────────────────────────────────────────
   const setSection = (i, patch) => setSections((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   const addSection = () => setSections((rows) => [...rows, { title: '', bodyHtml: '' }]);
@@ -345,8 +360,11 @@ export default function CareersPageEditor() {
         )}
       </section>
 
-      {/* ── Perks ──────────────────────────────────────────────────────────── */}
-      <section className="space-y-3">
+      {/* ── Perks ──────────────────────────────────────────────────────────────
+          id="perks" is a deep-link target: Hiring setup's "Add your perks and
+          your social links" step links to /settings/careers-page#perks. tabIndex
+          lets the effect above move the caret here as well as the viewport. */}
+      <section id="perks" tabIndex={-1} className="scroll-mt-24 space-y-3">
         <div className="flex items-center justify-between">
           <SectionTitle tip="Short perk chips rendered as a row, e.g. “Remote-first”, “Health cover”. An optional icon/emoji shows before the label.">Perks</SectionTitle>
           {canManage && (

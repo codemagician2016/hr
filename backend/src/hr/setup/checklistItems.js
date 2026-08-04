@@ -23,6 +23,14 @@
  *   entitlement   an HR add-on key; when the plan lacks it the row renders LOCKED
  *                 (upsell) and is removed from BOTH sides of the percentage, so
  *                 100% is reachable on any plan.
+ *   hideWhenEntitled
+ *                 the mirror of `entitlement`: the row exists ONLY as an upsell and
+ *                 vanishes once the tenant owns the add-on. It is for rows that are
+ *                 an advert rather than a task — there is nothing to probe and
+ *                 nothing to finish — so leaving one in an entitled tenant's list
+ *                 would park an uncompletable row in their denominator forever.
+ *                 Today that is `talent_acquisition_addon`, which points at the
+ *                 SEPARATE hiring track (setup/talent/).
  *   permission    an RBAC key from core/lib/rbac.js. A step the operator cannot do
  *                 is omitted from their score entirely (it stays in tenantPercent).
  *
@@ -44,8 +52,6 @@ const STAGES = Object.freeze([
   { key: 'pay',        title: 'Pay & tax',         subtitle: 'Salary, payslips and government filings',    order: 4 },
   { key: 'engage',     title: 'Engage & grow',     subtitle: 'Letters, reviews, training and recognition', order: 5 },
 ]);
-
-const STAGE_ORDER = Object.freeze(Object.fromEntries(STAGES.map((s) => [s.key, s.order])));
 
 // ── Steps (declared order IS the display order; `order` is stamped below) ─────
 // Route values are BARE — the client appends ?from=setup / &from=setup itself.
@@ -1054,122 +1060,113 @@ const STEPS = [
     permission: 'canManageLearning', prismaModel: 'Course',
     dependsOn: ['portal_invites'], minutes: 30, doneBy: 'HR',
   },
+  // ── The one recruitment row in the core guide: an advert, not a task ────────
+  // Hiring is its own TRACK (setup/talent/) with its own denominator, because a
+  // company that does not hire must still be able to reach 100% here. What is left
+  // behind is a single LOCKED row explaining what the add-on does — and
+  // `hideWhenEntitled` deletes even that the moment they own it, so an entitled
+  // tenant never carries an unprobeable advert in its score.
   {
-    key: 'hiring_pipeline',
-    label: 'Set up your hiring stages',
-    description: 'The stages a candidate moves through, like applied, screening, interview and offer.',
-    why: 'Every job you post runs on these stages.',
+    key: 'talent_acquisition_addon',
+    label: 'Hire on your own careers page',
+    description: 'Post jobs to a careers page in your own branding, collect every application in one place, score candidates against the same scorecard, and turn the person you hire into an employee without re-typing anything.',
+    why: 'Hiring in inboxes and spreadsheets is where good candidates get lost.',
     explain: {
-      plain: 'You define the stages once and every role follows them, so you always know where a candidate is.',
-      example: 'Applied → screening → interview → offer → hired.',
-      ifYouSkip: 'Candidate status lives in a spreadsheet and people are ghosted.',
+      plain: 'Talent Acquisition adds a public careers page, an application pipeline, interview scorecards and candidate emails to your workspace. Nothing you already use changes.',
+      example: 'Post "Senior Engineer, Bengaluru", share one link, and every CV arrives in one ranked list instead of forty emails.',
+      ifYouSkip: 'Nothing breaks — the rest of your setup is unaffected, and this row never counts towards your 100%.',
     },
     stage: 'engage', required: false,
-    route: '/settings/pipeline-templates', cta: 'Set up stages',
-    permission: 'canManageHiring', entitlement: 'talent_acquisition', prismaModel: 'PipelineTemplate',
-    dependsOn: ['departments'], minutes: 10, doneBy: 'HR',
-  },
-  {
-    key: 'careers_page',
-    label: 'Publish your careers page',
-    description: 'Your public jobs page, in your own branding, that candidates apply through.',
-    why: 'A branded careers page is where applications actually come from.',
-    explain: {
-      plain: 'A public page, in your branding, listing your open roles. Candidates apply on it and land straight in your pipeline.',
-      example: 'Share one link on LinkedIn and every application arrives in one place.',
-      ifYouSkip: 'Applications arrive as email attachments.',
-    },
-    stage: 'engage', required: false,
-    route: '/settings/careers-page', cta: 'Publish the page',
-    permission: 'canManageHiring', entitlement: 'talent_acquisition', prismaModel: 'CareersPage',
-    dependsOn: ['branding'], minutes: 15, doneBy: 'HR',
-  },
-  {
-    key: 'candidate_messages',
-    label: 'Set up your candidate emails',
-    description: 'The standard replies you send candidates: interview invites, offers and rejections.',
-    why: 'Candidates remember how they were turned down far longer than how they applied.',
-    explain: {
-      plain: 'You write each standard message once and choose which ones send automatically as candidates move stage.',
-      example: 'An automatic acknowledgement on apply, a written rejection on decline.',
-      ifYouSkip: 'Every reply is typed by hand, so most are never sent.',
-    },
-    stage: 'engage', required: false,
-    route: '/settings/candidate-messages', cta: 'Write the emails',
-    permission: 'canManageHiring', entitlement: 'talent_acquisition', prismaModel: 'Business.candidateCommsConfig',
-    dependsOn: ['hiring_pipeline'], minutes: 20, doneBy: 'HR',
-  },
-  {
-    key: 'first_job',
-    label: 'Post your first job',
-    description: 'Open a role, share the link, and collect every application in one place.',
-    why: 'This is the point of the hiring module — one link, every application in one place.',
-    explain: {
-      plain: 'Open the role, publish it to your careers page, and share the link. Applications land in the pipeline you defined.',
-      example: 'Post "Senior Engineer, Bengaluru" and share the link on LinkedIn.',
-      ifYouSkip: 'Hiring stays in inboxes and spreadsheets.',
-    },
-    stage: 'engage', required: false,
-    route: '/recruitment', cta: 'Post a job',
-    permission: 'canManageHiring', entitlement: 'talent_acquisition', prismaModel: 'Job',
-    dependsOn: ['hiring_pipeline'], minutes: 15, doneBy: 'HR',
+    route: '/settings?tab=billing&highlight=talent_acquisition', cta: "See what's included",
+    permission: 'canManageHiring',
+    entitlement: 'talent_acquisition', // → renders LOCKED, out of BOTH sides of the fraction
+    hideWhenEntitled: true,            // → and out of the registry entirely once owned
+    prismaModel: null, dependsOn: [], minutes: null, doneBy: 'the Owner',
   },
 ];
 
-// ── Derived, computed ONCE at module load ─────────────────────────────────────
-// Stamp the global declared order (stable forever — the UI renders "Step 4 of 44"
-// against the operator's scoped position, but `order` itself never moves) and the
-// derived `dismissible` flag. Freeze so a controller bug can never mutate the
-// registry for every subsequent request in the process.
-STEPS.forEach((s, i) => {
-  s.order = i + 1;
-  s.stageOrder = STAGE_ORDER[s.stage];
-  // A required step is never dismissible — POST /dismiss rejects it with 422.
-  s.dismissible = !s.required;
-  Object.freeze(s.explain);
-});
+/**
+ * deriveRegistry — stamp the derived indexes onto a declared registry and freeze it.
+ *
+ * Exported and reused by setup/talent/checklistItems.js, because `order`,
+ * `stageOrder`, `dismissible` and above all `blocking` are the inputs to
+ * nextAction.js's ranking: if a second track derived them even slightly
+ * differently, "do this next" would mean two different things in one product.
+ * The step ARRAYS stay in physically separate modules — that separation is what
+ * makes it structurally impossible for a hiring step to land in the core
+ * denominator — but the arithmetic over them is this one function.
+ */
+function deriveRegistry(stages, steps) {
+  const stageOrder = Object.freeze(Object.fromEntries(stages.map((s) => [s.key, s.order])));
 
-const BY_KEY = new Map(STEPS.map((s) => [s.key, s]));
+  // Stamp the global declared order (stable forever — the UI renders "Step 4 of 44"
+  // against the operator's scoped position, but `order` itself never moves) and the
+  // derived `dismissible` flag. Freeze so a controller bug can never mutate the
+  // registry for every subsequent request in the process.
+  steps.forEach((s, i) => {
+    s.order = i + 1;
+    s.stageOrder = stageOrder[s.stage];
+    // A required step is never dismissible — POST /dismiss rejects it with 422.
+    s.dismissible = !s.required;
+    Object.freeze(s.explain);
+  });
 
-// Transitive dependency closure per step: every key this step (directly or
-// indirectly) waits on. Depth-first with a visited set — the declaration is a DAG,
-// and checklistItems.test.js asserts that (a cycle here would be a boot-time hang).
-function ancestorsOf(key, seen = new Set()) {
-  const step = BY_KEY.get(key);
-  if (!step) return seen;
-  for (const dep of step.dependsOn) {
-    if (seen.has(dep)) continue;
-    seen.add(dep);
-    ancestorsOf(dep, seen);
+  const byKey = new Map(steps.map((s) => [s.key, s]));
+
+  // Transitive dependency closure per step: every key this step (directly or
+  // indirectly) waits on. Depth-first with a visited set — the declaration is a DAG,
+  // and checklistItems.test.js asserts that (a cycle here would be a boot-time hang).
+  function ancestorsOf(key, seen = new Set()) {
+    const step = byKey.get(key);
+    if (!step) return seen;
+    for (const dep of step.dependsOn) {
+      if (seen.has(dep)) continue;
+      seen.add(dep);
+      ancestorsOf(dep, seen);
+    }
+    return seen;
   }
-  return seen;
+
+  // `blocking` = how many steps are (transitively) waiting on this one. It is the
+  // primary sort key of the next-best action, so finishing the step that unblocks
+  // nine others always outranks a leaf. Computed here, never per request, never
+  // randomised — the same operator sees the same next step on Monday and Friday.
+  const blocking = Object.create(null);
+  for (const s of steps) blocking[s.key] = 0;
+  for (const s of steps) {
+    for (const anc of ancestorsOf(s.key)) blocking[anc] += 1;
+  }
+  steps.forEach((s) => { s.blocking = blocking[s.key]; Object.freeze(s); });
+
+  Object.freeze(steps);
+  Object.freeze(blocking);
+
+  return {
+    STAGES: Object.freeze(stages),
+    STAGE_ORDER: stageOrder,
+    STEPS: steps,
+    BY_KEY: byKey,
+    BLOCKING: blocking,
+    ancestorsOf,
+  };
 }
 
-// `blocking` = how many steps are (transitively) waiting on this one. It is the
-// primary sort key of the next-best action, so finishing the step that unblocks
-// nine others always outranks a leaf. Computed here, never per request, never
-// randomised — the same operator sees the same next step on Monday and Friday.
-const BLOCKING = Object.create(null);
-for (const s of STEPS) BLOCKING[s.key] = 0;
-for (const s of STEPS) {
-  for (const anc of ancestorsOf(s.key)) BLOCKING[anc] += 1;
-}
-STEPS.forEach((s) => { s.blocking = BLOCKING[s.key]; Object.freeze(s); });
-
-Object.freeze(STEPS);
-Object.freeze(BLOCKING);
+// ── Derived, computed ONCE at module load ─────────────────────────────────────
+const CORE = deriveRegistry(STAGES, STEPS);
 
 // NOTE on serialisation: nothing here is spread into the response. The controller
 // builds each public step field-by-field from PUBLIC_STEP_FIELDS, so the internals
-// (the `includeWhen` predicate, the next-action CTA verb, the numeric stageOrder)
-// cannot leak the way a `{ ...step }` would — the same concern sitepresso solves
-// with its `const { includeWhen, verticals, ...rest }` strip, one step stricter.
+// (the `includeWhen` predicate, the `hideWhenEntitled` flag, the next-action CTA
+// verb, the numeric stageOrder) cannot leak the way a `{ ...step }` would — the
+// same concern sitepresso solves with its `const { includeWhen, verticals, ...rest }`
+// strip, one step stricter.
 
 module.exports = {
-  STAGES,
-  STAGE_ORDER,
-  STEPS,
-  BY_KEY,
-  BLOCKING,
-  ancestorsOf,
+  STAGES: CORE.STAGES,
+  STAGE_ORDER: CORE.STAGE_ORDER,
+  STEPS: CORE.STEPS,
+  BY_KEY: CORE.BY_KEY,
+  BLOCKING: CORE.BLOCKING,
+  ancestorsOf: CORE.ancestorsOf,
+  deriveRegistry,
 };

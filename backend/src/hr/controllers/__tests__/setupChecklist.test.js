@@ -12,7 +12,11 @@
  * Covers the four things that would be silently wrong in production:
  *   A) LOCKED steps are excluded from the percentage (both numerator AND
  *      denominator), so 100% is reachable on a plan without the add-on — and they
- *      are still RETURNED so the UI can render the upsell row.
+ *      are still RETURNED so the UI can render the upsell row. Since hiring became
+ *      its own TRACK, the only locked row left in the core guide is the
+ *      `talent_acquisition_addon` upsell that points at it — and `hideWhenEntitled`
+ *      removes even that once the tenant owns the add-on, so an entitled tenant
+ *      never carries an unprobeable advert in its denominator.
  *   B) TENANT SCOPING — a second tenant's entities/employees/pay runs never bleed
  *      into this tenant's score, and businessId is taken from the session only.
  *   C) A THROWING PROBE degrades that one step to "couldn't check" and the endpoint
@@ -139,30 +143,60 @@ async function main() {
     const lockedRows = allSteps(baseline).filter((s) => s.locked);
     assert(lockedRows.length === gated.length, `all ${gated.length} add-on steps render LOCKED without the entitlement (${lockedRows.length})`);
     assert(baseline.lockedCount === gated.length, `lockedCount reports them (${baseline.lockedCount})`);
+    assert(baseline.track === 'core' && baseline.entitled === true, 'the core track is never gated behind an add-on');
 
-    const hiring = step(baseline, 'hiring_pipeline');
-    assert(hiring !== null, 'a locked step is still RETURNED, so the UI can show the upsell row');
-    assert(hiring.state === 'locked' && hiring.completed === false, 'its state is "locked"');
-    assert(hiring.lockedReason && hiring.lockedReason.addOn === 'talent_acquisition', 'lockedReason names the add-on');
-    assert(hiring.lockedReason.route === '/settings?tab=billing&highlight=talent_acquisition', 'lockedReason deep-links to Billing');
-    assert(hiring.cta === "See what's included", `its CTA is the upsell, not "Set up" ("${hiring.cta}")`);
+    const upsell = step(baseline, 'talent_acquisition_addon');
+    assert(upsell !== null, 'a locked step is still RETURNED, so the UI can show the upsell row');
+    assert(upsell.state === 'locked' && upsell.completed === false, 'its state is "locked"');
+    assert(upsell.lockedReason && upsell.lockedReason.addOn === 'talent_acquisition', 'lockedReason names the add-on');
+    assert(upsell.lockedReason.route === '/settings?tab=billing&highlight=talent_acquisition', 'lockedReason deep-links to Billing');
+    assert(upsell.cta === "See what's included", `its CTA is the upsell, not "Set up" ("${upsell.cta}")`);
+    assert(lockedRows.length === 1, `it is the ONLY locked row, so LockedRow renders it inline rather than behind a disclosure (${lockedRows.length})`);
 
     // The denominator must not contain them — this is what makes 100% reachable.
     const scored = allSteps(baseline).filter((s) => !s.locked && s.state !== 'dismissed' && s.permitted);
     assert(baseline.totalCount === scored.length, `totalCount excludes locked steps (${baseline.totalCount} scored of ${allSteps(baseline).length} shown)`);
     assert(!allSteps(baseline).some((s) => s.locked && s.completed), 'a locked step is never counted as completed');
+
+    // Owner decision 1, at the API boundary: no hiring step is in the core payload.
+    const hiringKeys = ['careers_content', 'careers_live', 'pipeline_template', 'job_public', 'first_job',
+      'hiring_pipeline', 'careers_page', 'candidate_messages'];
+    const leaked = allSteps(baseline).map((s) => s.key).filter((k) => hiringKeys.includes(k));
+    assert(leaked.length === 0, `no recruitment step appears in the core guide at all${leaked.length ? ` (${leaked})` : ''}`);
   }
 
-  // Granting the add-on must GROW the denominator, not the score.
+  // Granting the add-on REMOVES the advert entirely — it is a thing to buy, not a
+  // thing to finish, so it must not park an uncompletable row in the denominator.
   {
     entitlementStub = { talent_acquisition: { enabled: true, source: 'add_on' } };
     const res = await callController(ctrl.getChecklist, req());
     const granted = res.body;
     assert(granted.lockedCount === 0, 'with the add-on granted, nothing is locked');
-    assert(granted.totalCount === baseline.totalCount + 4, `the denominator grows by the four unlocked steps (${baseline.totalCount} → ${granted.totalCount})`);
-    assert(granted.percent <= baseline.percent, `and the percentage does not go UP on a purchase (${baseline.percent}% → ${granted.percent}%)`);
-    assert(step(granted, 'hiring_pipeline').state === 'todo', 'the previously-locked step becomes an ordinary to-do');
+    assert(step(granted, 'talent_acquisition_addon') === null, 'and the upsell row does not exist at all (hideWhenEntitled)');
+    assert(granted.totalCount === baseline.totalCount, `the core denominator is UNCHANGED by the purchase (${baseline.totalCount} → ${granted.totalCount})`);
+    assert(granted.percent === baseline.percent, `so buying hiring cannot move the core percentage (${baseline.percent}% → ${granted.percent}%)`);
+    assert(granted.tracks[0].entitled === true, 'and the hiring track pointer flips to entitled');
     entitlementStub = { talent_acquisition: { enabled: false, source: 'fallback' } };
+  }
+
+  // The tracks POINTER — a title and a route, never a percentage or a step list.
+  {
+    const res = (await callController(ctrl.getChecklist, req())).body;
+    assert(Array.isArray(res.tracks) && res.tracks.length === 1, `the core payload points at one other track (${res.tracks && res.tracks.length})`);
+    const t = res.tracks[0];
+    assert(t.key === 'talent' && t.route === '/setup/hiring', `it is the hiring track at ${t.route}`);
+    assert(t.entitled === false, 'flagged unentitled, so the core page renders no TrackCard');
+    // The DESTINATION's gate travels with the pointer. /setup and /setup/hiring open
+    // on different keys, so a card gated on entitlement alone can offer a custom role
+    // a link into a 403 — the client hides it on exactly this list.
+    assert(
+      Array.isArray(t.anyPermission)
+        && t.anyPermission.includes('canManageHiring')
+        && t.anyPermission.includes('canManageEmployees'),
+      `it carries the hiring route's own permission gate (${t.anyPermission})`,
+    );
+    assert(!('percent' in t) && !('steps' in t), 'and it carries NO percentage and NO steps — no second probe run in this request');
+    assert(res.track === 'core' && res.entitled === true, 'the core payload names its own track');
   }
 
   // Country filtering: India-only rows exist here, and are absent for NZ.

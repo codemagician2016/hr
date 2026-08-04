@@ -20,6 +20,10 @@ const TRACK = '#EDF0F3';
 
 export default function SetupHeader(props) {
   const {
+    // Which guide this is. The hiring track scores a DIFFERENT denominator on a
+    // different page, so its header must not also say "Setup guide" — two
+    // percentages under one name is the one thing separate tracks must avoid.
+    eyebrow = 'Setup guide',
     percent,
     completedCount,
     totalCount,
@@ -41,7 +45,7 @@ export default function SetupHeader(props) {
       <div className="flex items-start justify-between gap-6">
         <div className="min-w-0">
           <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-gray-600">
-            Setup guide
+            {eyebrow}
           </p>
           <h1 className="mt-1 text-2xl font-semibold leading-snug text-gray-900 sm:text-[28px]">
             {headline(props)}
@@ -64,7 +68,7 @@ export default function SetupHeader(props) {
 
       <div
         role="progressbar"
-        aria-label="Setup completion"
+        aria-label={`${eyebrow} completion`}
         aria-valuemin={0}
         aria-valuemax={100}
         {...(unknown ? {} : { 'aria-valuenow': percent })}

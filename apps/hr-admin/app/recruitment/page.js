@@ -32,6 +32,15 @@ const TABS = [
 
 export default function RecruitmentPage() {
   const [tab, setTab] = useState('jobs');
+  // Honour a ?tab=<key> deep link (Hiring setup's "Build an interview scorecard"
+  // step links to /recruitment?tab=templates), falling back to Jobs for anything
+  // unrecognised. Read from the URL directly rather than via useSearchParams, so
+  // this page needs no Suspense boundary — the same idiom /settings uses.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const wanted = new URLSearchParams(window.location.search).get('tab');
+    if (wanted && TABS.some((t) => t.key === wanted)) setTab(wanted);
+  }, []);
   // Talent Acquisition is a paid add-on — check the tenant's entitlement so we show
   // a friendly upsell rather than raw 402s from every API. The server still enforces.
   const [gated, setGated] = useState(null); // null=loading, false=owned, true=needs add-on
