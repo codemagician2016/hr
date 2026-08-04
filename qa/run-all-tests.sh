@@ -31,7 +31,13 @@ else
   echo "WARNING: no DATABASE_URL in backend/.env — every DB-backed suite will SKIP, not pass."
 fi
 
-PASS=0; FAIL=0; SKIP=0
+PASS=0; FAIL=0; SKIP=0; THROTTLED=0
+# Seconds to pause between the LIVE-HOST qa/e2e suites. Each one logs in as the
+# same demo operator, and the API's authLimiter throttles that after enough
+# attempts — running all 23 back-to-back reliably ends in HTTP 429 about halfway
+# through, which looks exactly like a wall of broken features. Set to 0 when
+# pointing at a local stack with no limiter.
+E2E_GAP_SECONDS="${E2E_GAP_SECONDS:-20}"
 FAILED_SUITES=""
 RESULTS="$(mktemp)"
 
@@ -53,7 +59,9 @@ run_with_timeout() {
 
 run_suite() {
   local file="$1" label="$2"
+  RAN=0
   [ -n "$FILTER" ] && [[ "$file" != *"$FILTER"* ]] && return 0
+  RAN=1
   OUT="$(mktemp)"
   # Two runners live in this repo. A suite written with describe()/it() needs
   # jest; running it with plain `node` throws "describe is not defined", which
@@ -72,7 +80,11 @@ run_suite() {
   # A suite that prints an explicit skip (no DB, no toolchain) is NOT a pass.
   # Echo every verdict live as well as recording it — a run this long is
   # unreadable if the first sign of progress is the summary 40 minutes in.
-  if grep -qiE '^\[skip\]|\[skip\] ' "$OUT" && [ $code -eq 0 ]; then
+  # A suite the API throttled proves nothing either way — reporting it as FAIL is
+  # how a rate limit gets mistaken for a broken feature.
+  if grep -qE '429|Too many requests' "$OUT" && [ $code -ne 0 ]; then
+    THROTTLED=$((THROTTLED+1)); printf 'THROTTLED  %s  (HTTP 429 — rerun later or raise E2E_GAP_SECONDS)\n' "$label" | tee -a "$RESULTS"
+  elif grep -qiE '^\[skip\]|\[skip\] ' "$OUT" && [ $code -eq 0 ]; then
     SKIP=$((SKIP+1)); printf 'SKIP  %s\n' "$label" | tee -a "$RESULTS"
   elif [ $code -eq 0 ]; then
     PASS=$((PASS+1)); printf 'PASS  %s\n' "$label" | tee -a "$RESULTS"
@@ -96,15 +108,20 @@ while IFS= read -r f; do
 done < <(find ./test/e2e -name '*.js' | sort)
 
 echo "=== feature e2e (qa/e2e) ==="
+# Only the e2e-* files are suites. qa/e2e/config.js is the shared hosts/logins
+# module — running it as a suite would exit 0 and be counted as a passing test
+# that asserts nothing.
 while IFS= read -r f; do
   run_suite "$f" "qa/e2e/$(basename "$f")"
-done < <(find "$ROOT/qa/e2e" -name '*.js' | sort)
+  # Pause only when a suite actually ran, so a filtered run does not crawl.
+  [ "$RAN" -eq 1 ] && [ "$E2E_GAP_SECONDS" -gt 0 ] && sleep "$E2E_GAP_SECONDS"
+done < <(find "$ROOT/qa/e2e" -name 'e2e-*.js' | sort)
 
 echo
 echo "════════════════════ RESULTS ════════════════════"
 sort "$RESULTS" | grep '^FAIL' || true
 echo "─────────────────────────────────────────────────"
-printf 'PASS %s   FAIL %s   SKIP %s   (total %s)\n' "$PASS" "$FAIL" "$SKIP" "$((PASS+FAIL+SKIP))"
+printf 'PASS %s   FAIL %s   SKIP %s   THROTTLED %s   (total %s)\n' "$PASS" "$FAIL" "$SKIP" "$THROTTLED" "$((PASS+FAIL+SKIP+THROTTLED))"
 if [ -f "$RESULTS.detail" ]; then
   echo
   echo "════════════════════ FAILURE DETAIL ════════════════════"
