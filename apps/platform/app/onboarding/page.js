@@ -424,6 +424,25 @@ export default function OnboardingPage() {
         setSavedBusiness(business);
       }
 
+      // 1b) Lock the HR workspace to the country the admin just picked. This is
+      //     the ONLY place hrCountry gets set during signup — without it the
+      //     tenant lands with hrCountry NULL, so /api/hr/country-context 409s,
+      //     Setup guide step 1 reads "not done" even though they chose a
+      //     country, and useTenantCountries falls back to the India view (an NZ
+      //     tenant would be shown CIN/GSTIN/PAN). The endpoint is locked-once:
+      //     a 409 means it is already set, which is a success for our purposes.
+      let countryResult = { ok: false };
+      try {
+        await axios.post('/api/hr/setup/country', { country: s.country }, { withCredentials: true });
+        countryResult = { ok: true, country: s.country };
+      } catch (ctryErr) {
+        if (ctryErr.response?.status === 409) {
+          countryResult = { ok: true, country: ctryErr.response?.data?.country || s.country };
+        } else {
+          countryResult = { ok: false, message: 'Set your payroll country in Settings · Company profile · Country.' };
+        }
+      }
+
       // 2) Legal entity + statutory IDs. Non-fatal: if the endpoint shape
       //    differs or the entity already exists, surface a note but continue.
       let entityResult = { ok: false };
@@ -506,6 +525,7 @@ export default function OnboardingPage() {
         name: business.name || s.companyName,
         slug: business.slug,
         country: country.name,
+        countryLocked: countryResult,
         entity: entityResult,
         payFrequency: s.payFrequency,
         payDay: PAY_DAY_DEFAULT[s.payFrequency]?.label,
@@ -1091,6 +1111,11 @@ function CompletionScreen({ done }) {
 
         <ul className="mt-6 space-y-2 text-left text-sm">
           <li className="flex items-center gap-2 text-gray-700"><Icon name="check" className="h-4 w-4 text-emerald-600" /> Company created in {done.country}</li>
+          <li className="flex items-center gap-2 text-gray-700">
+            {done.countryLocked?.ok
+              ? <><Icon name="check" className="h-4 w-4 text-emerald-600" /> Payroll country locked to {done.country} — tax, PF/ESI and payslip rules are live</>
+              : <><span className="text-amber-500 font-bold">!</span> {done.countryLocked?.message || 'Set your payroll country in Settings · Company profile · Country.'}</>}
+          </li>
           <li className="flex items-center gap-2 text-gray-700">
             {done.entity?.ok
               ? <><Icon name="check" className="h-4 w-4 text-emerald-600" /> Legal entity {done.entity.code} with statutory IDs</>
