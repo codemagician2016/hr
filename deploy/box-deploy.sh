@@ -59,9 +59,28 @@ if [ ! -f "$SENTINEL" ]; then
   ) && touch "$SENTINEL" || true
 fi
 
+# ── backfill new permission keys into persisted roles ────────────────────────
+# SYSTEM_ROLES is the preset; a tenant's roles are COPIES made at provision time.
+# Any feature that adds a permission key leaves existing tenants a key short and
+# their admins get an unexplained 403 on the new screen. Additive + idempotent
+# (only adds keys a role has never seen), so it is safe on every deploy.
+log "sync role permissions (additive backfill)"
+( set -a; . "$ROOT/backend/.env" 2>/dev/null; set +a
+  node scripts/sync-role-permissions.js 2>&1 | tail -20 ) || log "WARN: role-permission sync failed (non-fatal)"
+
 cd "$ROOT"
 APPS="drifthr-hms-backend drifthr-hms-router drifthr-hms-platform drifthr-hms-hr-admin drifthr-hms-ess drifthr-hms-mobile-web"
 if [ "${DRIFTHR_ENV:-staging}" = "prod" ]; then
+  # Restart only the apps this box actually runs. prod has no mobile-web, and
+  # `pm2 restart` hard-fails on an unknown name — under `set -e` that aborted the
+  # deploy before `pm2 save`, leaving pm2's saved state stale after a prod ship.
+  # (Staging takes the startOrReload path below, which STARTS missing apps by
+  # design, so it must not be filtered down to what is already running.)
+  RUNNING=""
+  for a in $APPS; do
+    pm2 describe "$a" >/dev/null 2>&1 && RUNNING="$RUNNING $a"
+  done
+  [ -n "$RUNNING" ] || { echo "FATAL: no drifthr-hms-* app is running on this prod box"; exit 1; }
   # PROD reload BY NAME so each app keeps its LIVE env/ports exactly (43xx,
   # PLATFORM_DOMAIN=drifthr.com) — no ecosystem config imposed, so there is zero
   # risk of a port/domain drift on production. New code loads from the extracted
@@ -71,7 +90,7 @@ if [ "${DRIFTHR_ENV:-staging}" = "prod" ]; then
   # .next on `pm2 reload`, so restart to load the fresh build. Each app keeps its
   # LIVE env/ports (43xx / PLATFORM_DOMAIN=drifthr.com) — no ecosystem config imposed.
   log "pm2 restart (prod, by name — loads new build, preserves live env/ports)"
-  pm2 restart $APPS
+  pm2 restart $RUNNING
 else
   # STAGING uses the checked-in config (starts any missing app; siblings untouched).
   log "pm2 startOrReload — ONLY drifthr-hms-* (staging config)"
