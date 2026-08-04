@@ -5,11 +5,18 @@ const {
   resolveBilling,
   resolveGateway,
   resolvePresentmentCurrency,
-  resolveTenantPaymentRoute,
-  tenantGatewayCurrencyBlock,
-  tenantGatewayMismatch,
-  resolveTenantPaymentGateway,
 } = require('../src/core/lib/billing/gatewayRouter');
+
+// The tenant-order-payment helpers moved out of gatewayRouter into their own
+// module; this suite kept importing them from the old home, so they arrived
+// undefined and every call threw "is not a function" rather than failing an
+// assertion. No other suite covers them, so the import is repointed rather than
+// the tests dropped.
+const {
+  resolveTenantPaymentRoute,
+  resolveTenantPaymentGateway,
+  tenantGatewayCurrencyBlock,
+} = require('../src/core/lib/billing/tenantPaymentReadiness')._internals;
 
 describe('gatewayRouter', () => {
   const originalFlag = process.env.BILLING_MULTI_GATEWAY;
@@ -66,14 +73,9 @@ describe('gatewayRouter', () => {
       model: 'STRIPE_CONNECT',
       expectedCurrency: null,
     }));
-    expect(tenantGatewayMismatch({ provider: 'STRIPE', countryCode: 'IN', currency: 'INR' })).toEqual(expect.objectContaining({
-      code: 'TENANT_GATEWAY_COUNTRY_MISMATCH',
-      requiredProvider: GATEWAYS.RAZORPAY,
-    }));
-    expect(tenantGatewayMismatch({ provider: 'RAZORPAY', countryCode: 'US', currency: 'USD' })).toEqual(expect.objectContaining({
-      code: 'TENANT_GATEWAY_COUNTRY_MISMATCH',
-      requiredProvider: GATEWAYS.STRIPE,
-    }));
+    // The tenantGatewayMismatch assertions that used to sit here were dropped:
+    // that helper no longer exists anywhere in src/. The country-before-currency
+    // rule it guarded is still covered by resolveTenantPaymentGateway above.
     expect(tenantGatewayCurrencyBlock({ provider: 'RAZORPAY', currency: 'USD' })).toEqual(expect.objectContaining({
       code: 'TENANT_GATEWAY_CURRENCY_MISMATCH',
       requiredCurrency: 'INR',

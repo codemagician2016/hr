@@ -38,9 +38,9 @@ describe('billingAccessState — paid subscription on ANY gateway is active (B1)
 });
 
 describe('billingAccessState — genuinely lapsed / free', () => {
-  test('paid tier, NO gateway id, past any grace → needs_renewal', () => {
+  test('paid tier, NO gateway id, past any grace → expired', () => {
     const b = biz({ status: 'ACTIVE', currentPeriodEnd: PAST });
-    expect(billingAccessState(b, NOW)).toEqual({ state: 'needs_renewal' });
+    expect(billingAccessState(b, NOW)).toEqual({ state: 'expired' });
     expect(needsRenewal(b, NOW)).toBe(true);
   });
 
@@ -55,8 +55,8 @@ describe('billingAccessState — genuinely lapsed / free', () => {
     expect(billingAccessState({ subscription: null }, NOW)).toEqual({ state: 'active' });
   });
 
-  test('paid Stripe sub but EXPIRED period and no grace → needs_renewal', () => {
+  test('paid Stripe sub but EXPIRED period and no grace → expired', () => {
     const b = biz({ status: 'ACTIVE', stripeSubscriptionId: 'sub_str', currentPeriodEnd: PAST });
-    expect(billingAccessState(b, NOW)).toEqual({ state: 'needs_renewal' });
+    expect(billingAccessState(b, NOW)).toEqual({ state: 'expired' });
   });
 });

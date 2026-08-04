@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "test": "jest --testPathIgnorePatterns=auth-cookie-isolation",
+    "test": "jest",
     "test:auth-cookies": "node --test test/auth-cookie-isolation.test.js",
     "test:e2e": "DATABASE_URL=\"$(node -e \"process.stdout.write(require('fs').readFileSync('.env','utf8').match(/^DATABASE_URL=\\\"?(.+?)\\\"?\\s*$/m)[1]+'?schema=hr_test')\")\" node test/e2e/full-flow.test.js",
     "typecheck": "tsc --noEmit",

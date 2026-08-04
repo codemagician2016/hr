@@ -245,4 +245,13 @@ module.exports = {
   effectivePaymentMode,
   onlineModeBlock,
   paymentModeRequiresOnline,
+  // Exported for tests only — the country-before-currency routing these two
+  // implement is the rule buildTenantPaymentReadiness depends on, and it is
+  // worth asserting directly rather than only through the composed readiness
+  // payload. Same `_internals` idiom as candidateNotify.js; not a public API.
+  _internals: {
+    resolveTenantPaymentGateway,
+    resolveTenantPaymentRoute,
+    tenantGatewayCurrencyBlock,
+  },
 };

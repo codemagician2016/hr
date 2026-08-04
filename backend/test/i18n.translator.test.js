@@ -72,7 +72,7 @@ describe('i18n translator', () => {
   describe('tFor()', () => {
     test('binds locale once', () => {
       const tHi = tFor('hi');
-      expect(tHi('common.signOff')).toContain('Sitepresso');
+      expect(tHi('common.signOff')).toContain('DriftHR');
       expect(tHi('appointmentStatus.eyebrowConfirmed')).toContain('कन्फर्म');
     });
 

@@ -10,7 +10,14 @@ describe('custom domain routing helpers', () => {
     expect(normalizeCustomDomainHost('WWW.Example.COM:443.')).toBe('www.example.com');
   });
 
-  test('allows connected domains that are not SEO-active yet', () => {
+  // This used to assert that PENDING_SSL and FAILED domains route, which was the
+  // behaviour a later security fix deliberately removed: routing an unverified
+  // domain meant merely SAVING one would serve a tenant on it, before any
+  // ownership or certificate proof — the squat-routes-immediately hole named in
+  // customDomainRouting.js. src/core/__tests__/domain.test.js already asserts the
+  // corrected rule ("exactly ['ACTIVE']") and passes, so this suite was the only
+  // thing still demanding the insecure behaviour.
+  test('only ACTIVE (verified) domains route — unverified ones must not', () => {
     expect(routableCustomDomainWhere('www.customer.com')).toEqual({
       customDomain: { in: ['www.customer.com', 'customer.com'] },
       OR: [
@@ -18,8 +25,9 @@ describe('custom domain routing helpers', () => {
         { customDomainStatus: { in: ROUTABLE_CUSTOM_DOMAIN_STATUSES } },
       ],
     });
-    expect(ROUTABLE_CUSTOM_DOMAIN_STATUSES).toContain('FAILED');
-    expect(ROUTABLE_CUSTOM_DOMAIN_STATUSES).toContain('PENDING_SSL');
+    expect(ROUTABLE_CUSTOM_DOMAIN_STATUSES).toEqual(['ACTIVE']);
+    expect(ROUTABLE_CUSTOM_DOMAIN_STATUSES).not.toContain('FAILED');
+    expect(ROUTABLE_CUSTOM_DOMAIN_STATUSES).not.toContain('PENDING_SSL');
   });
 
   test('looks up apex and www pairs for customer domains', () => {

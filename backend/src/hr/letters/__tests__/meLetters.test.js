@@ -38,6 +38,12 @@ function fakeRes() {
   };
 }
 function callController(handler, req) {
+  // Express ALWAYS gives a handler a `req.query` object, so controllers read
+  // req.query.page directly and are right to. This fake req did not, so the very
+  // first paginated read threw "Cannot read properties of undefined" and the
+  // whole suite died — a harness gap reported as a product failure. Default it
+  // here rather than at every call site.
+  req = { query: {}, ...req };
   return new Promise((resolve, reject) => {
     const res = fakeRes();
     let settled = false;

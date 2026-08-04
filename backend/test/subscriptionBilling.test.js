@@ -116,11 +116,25 @@ describe('subscriptionBilling Paddle sync', () => {
     });
 
     expect(prisma.subscription.update.mock.calls[0][0].data).not.toHaveProperty('trialConvertedAt');
+    // KNOWN FAILING — DELIBERATELY NOT PAPERED OVER (2026-08-04).
+    // This asserts tierId stays `tier_free` for an unpaid past_due sub; the code
+    // now promotes it to `tier_starter` off the webhook's price id. That is a
+    // real behaviour question, not a stale expectation, so it is left red rather
+    // than rewritten to match:
+    //   - access is NOT wrongly granted either way — billingAccessState puts a
+    //     PAST_DUE sub in grace and then expired, whatever the tier says;
+    //   - but TierFeature limits are keyed off the TIER, so promoting an unpaid
+    //     tenant to starter may hand them starter feature limits before payment.
+    // Decide the intended rule, then either fix the promotion or update this line.
     expect(prisma.subscription.update.mock.calls[0][0].data).toEqual(expect.objectContaining({
       tierId: 'tier_free',
       status: 'PAST_DUE',
       pastDueSince: expect.any(Date),
-      accessGraceUntil: null,
+      // Going past_due OPENS the dunning grace window (pastDueAccessPatch); it
+      // does not leave access ungraced. This expected null before the grace
+      // window existed — the test's real subject, that an unpaid past-due sub is
+      // never marked trial-converted, is the assertion above and still holds.
+      accessGraceUntil: expect.any(Date),
     }));
   });
 

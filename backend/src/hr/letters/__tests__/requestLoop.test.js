@@ -50,6 +50,10 @@ function fakeRes() {
   };
 }
 function callController(handler, req) {
+  // Express always provides req.query, so controllers read req.query.page
+  // directly. This fake req did not, so a paginated read crashed the suite —
+  // the same harness gap that was masking meLetters.test.js.
+  req = { query: {}, ...req };
   return new Promise((resolve, reject) => {
     const res = fakeRes();
     let settled = false;

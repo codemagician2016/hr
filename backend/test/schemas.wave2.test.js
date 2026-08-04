@@ -248,26 +248,51 @@ describe('addHolidaySchema', () => {
 });
 
 // ─── leave ─────────────────────────────────────────────────────────────
-describe('requestLeaveSchema', () => {
-  test('full-day leave just needs a valid date', () => {
-    const r = requestLeaveSchema.safeParse({ date: '2026-05-10' });
-    expect(r.success).toBe(true);
-    expect(r.data.isFullDay).toBe(true);
+// These tests used to assert a booking-era shape — a single `date` plus
+// isFullDay/startTime/endTime — that leave.schema.js explicitly replaced (its
+// header says the old one "did NOT match the controller's real shape" and the
+// route never imported it). They were asserting a schema that no longer exists,
+// so they failed permanently and told us nothing. Rewritten against the real
+// createLeaveRequestSchema, which is what POST /api/hr/leave/requests validates:
+// a DATE RANGE for a named employee and leave type, with optional half-day
+// markers on each end.
+describe('requestLeaveSchema (createLeaveRequestSchema)', () => {
+  const valid = {
+    employeeId: 'emp-1',
+    leaveTypeId: 'lt-1',
+    startDate: '2026-05-10',
+    endDate: '2026-05-12',
+  };
+
+  test('a whole-day range for an employee and leave type is valid', () => {
+    expect(requestLeaveSchema.safeParse(valid).success).toBe(true);
   });
 
-  test('partial-day requires start + end times', () => {
-    expect(requestLeaveSchema.safeParse({ date: '2026-05-10', isFullDay: false }).success).toBe(false);
-    expect(requestLeaveSchema.safeParse({ date: '2026-05-10', isFullDay: false, startTime: '14:00' }).success).toBe(false);
-    expect(requestLeaveSchema.safeParse({ date: '2026-05-10', isFullDay: false, startTime: '14:00', endTime: '15:00' }).success).toBe(true);
+  test('employeeId and leaveTypeId are both required', () => {
+    expect(requestLeaveSchema.safeParse({ ...valid, employeeId: undefined }).success).toBe(false);
+    expect(requestLeaveSchema.safeParse({ ...valid, leaveTypeId: undefined }).success).toBe(false);
+    expect(requestLeaveSchema.safeParse({ ...valid, employeeId: '' }).success).toBe(false);
   });
 
-  test('partial-day with start >= end fails', () => {
-    expect(requestLeaveSchema.safeParse({ date: '2026-05-10', isFullDay: false, startTime: '15:00', endTime: '14:00' }).success).toBe(false);
+  test('a single-day request is a range whose ends are equal', () => {
+    expect(requestLeaveSchema.safeParse({ ...valid, endDate: valid.startDate }).success).toBe(true);
   });
 
-  test('reason > 500 chars rejected', () => {
-    const r = requestLeaveSchema.safeParse({ date: '2026-05-10', reason: 'x'.repeat(501) });
+  // The one cross-field rule the schema enforces itself (superRefine).
+  test('endDate before startDate is rejected', () => {
+    const r = requestLeaveSchema.safeParse({ ...valid, startDate: '2026-05-12', endDate: '2026-05-10' });
     expect(r.success).toBe(false);
+    expect(r.error.issues.some((i) => i.path.includes('endDate'))).toBe(true);
+  });
+
+  test('half-day markers accept only FIRST_HALF / SECOND_HALF', () => {
+    expect(requestLeaveSchema.safeParse({ ...valid, startHalf: 'SECOND_HALF', endHalf: 'FIRST_HALF' }).success).toBe(true);
+    expect(requestLeaveSchema.safeParse({ ...valid, startHalf: 'AFTERNOON' }).success).toBe(false);
+  });
+
+  test('reason is capped at 1000 characters', () => {
+    expect(requestLeaveSchema.safeParse({ ...valid, reason: 'x'.repeat(1000) }).success).toBe(true);
+    expect(requestLeaveSchema.safeParse({ ...valid, reason: 'x'.repeat(1001) }).success).toBe(false);
   });
 });
 

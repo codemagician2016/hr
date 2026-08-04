@@ -54,10 +54,18 @@ describe('subscriptionGrantsAccess is gateway-agnostic', () => {
     })).toBe(false);
   });
 
-  test('paid tier with NO gateway subscription id is denied', () => {
+  // This asserted the OPPOSITE of the block it sits in, and of what
+  // billingAccess.js documents: "The tier is the source of truth for 'paid',
+  // NOT a gateway subscription id" — because Razorpay stamps a subscription id
+  // at checkout CREATION, so a cancelled checkout leaves a stale id that must
+  // never read as paid. Gateway-agnostic cuts both ways: a stale id does not
+  // grant access, and a missing id does not withhold it. Requiring an id here
+  // would lock out every tenant put on a paid tier by an admin rather than by a
+  // gateway checkout.
+  test('paid tier with NO gateway subscription id still grants (tier is the source of truth)', () => {
     expect(subscriptionGrantsAccess({
       tier: paidTier, status: 'ACTIVE', currentPeriodEnd: FUTURE,
-    })).toBe(false);
+    })).toBe(true);
   });
 
   test('PAST_DUE within the grace window still grants (any gateway)', () => {
