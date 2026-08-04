@@ -26,6 +26,22 @@ on the box, so all deploys are "push a build to the box + reload PM2".
 - A commit being on `main` does NOT mean it is live. Live = "the artifact built
   from this commit was shipped and PM2 reloaded." Record the deployed commit
   (`BUILD_COMMIT`) so the ledger and the box agree.
+- **Never author a commit on `staging` or `main`.** They are a record of what
+  shipped; work is authored on `development` and promoted. This is easy to get
+  wrong because the ship scripts must be run from the deploy branch and used to
+  leave you parked there — the next commit then lands on `staging`/`main` and
+  silently inverts the ladder. Two guards now exist:
+  - `deploy/ship-staging.sh` / `ship-prod.sh` return you to `development` on the
+    way out, including when the ship fails.
+  - A pre-commit hook (`qa/check-branch.sh`) refuses commits on a deploy branch
+    and prints the recovery steps. Override for a genuine hotfix authored there:
+    `ALLOW_DEPLOY_BRANCH_COMMIT=1 git commit …`
+
+  `.git/hooks` is not version-controlled, so after cloning run once:
+
+  ```bash
+  bash qa/install-hooks.sh
+  ```
 
 ---
 

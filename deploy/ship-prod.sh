@@ -8,6 +8,18 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+
+# Must be run from `main`, and without this it LEAVES you there — so the next
+# commit silently lands on the production branch. That happened; four commits
+# ended up on main that were meant for development. Return on the way out,
+# including on failure. qa/check-branch.sh is the backstop if this is bypassed.
+_SHIP_RETURN_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')"
+_return_to_work_branch() {
+  [ "$_SHIP_RETURN_BRANCH" = "main" ] || return 0
+  git rev-parse --verify development >/dev/null 2>&1 || return 0
+  git checkout development >/dev/null 2>&1 && echo "[ship] returned to 'development'"
+}
+trap _return_to_work_branch EXIT
 export PATH="/Users/kp/Library/Python/3.9/bin:$PATH"
 export AWS_PROFILE="${AWS_PROFILE:-admin}"
 export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-ap-south-1}"

@@ -5,6 +5,19 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+
+# This script must be run from `staging`, and without this it LEAVES you there —
+# so the next commit silently lands on a deploy branch instead of development,
+# inverting the dev -> staging -> main ladder. Return on the way out, including
+# on failure (a failed ship is exactly when you'd otherwise be stranded).
+# qa/check-branch.sh is the backstop if this is ever bypassed.
+_SHIP_RETURN_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')"
+_return_to_work_branch() {
+  [ "$_SHIP_RETURN_BRANCH" = "staging" ] || return 0
+  git rev-parse --verify development >/dev/null 2>&1 || return 0
+  git checkout development >/dev/null 2>&1 && echo "[ship] returned to 'development'"
+}
+trap _return_to_work_branch EXIT
 export PATH="/Users/kp/Library/Python/3.9/bin:$PATH"
 export AWS_PROFILE="${AWS_PROFILE:-admin}"
 export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-ap-south-1}"
