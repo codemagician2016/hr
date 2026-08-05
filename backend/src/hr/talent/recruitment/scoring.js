@@ -94,7 +94,7 @@ function scoreScreening(questions, answers) {
     } else if (q.kind === 'NUMBER') {
       qMax = num(q.maxPoints, 0);
     } else {
-      qMax = 0; // TEXT — no auto points
+      qMax = 0; // TEXT / FILE — no auto points (an uploaded file has nothing to match)
     }
     if (q.maxPoints != null) qMax = Math.min(qMax, num(q.maxPoints));
     max += qMax;

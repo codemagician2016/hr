@@ -44,6 +44,22 @@ describe('billingAccessState — genuinely lapsed / free', () => {
     expect(needsRenewal(b, NOW)).toBe(true);
   });
 
+  // Regression: a comped/admin-granted plan can carry NO period boundary at all.
+  // That is not a lapse — there is nothing to have lapsed past — but it used to
+  // read as `expired` and revoked every add-on. It is how the prod demo tenant
+  // ended up on Growth/ACTIVE while Create Job 402'd.
+  test('paid + ACTIVE with NO period boundary at all → active (nothing has lapsed)', () => {
+    const b = biz({ status: 'ACTIVE' });
+    expect(billingAccessState(b, NOW)).toEqual({ state: 'active' });
+    expect(needsRenewal(b, NOW)).toBe(false);
+  });
+
+  // The narrowness matters: having a boundary and being past it is still expired.
+  test('paid + ACTIVE with a PAST boundary is still expired', () => {
+    expect(billingAccessState(biz({ status: 'ACTIVE', currentPeriodEnd: PAST }), NOW)).toEqual({ state: 'expired' });
+    expect(billingAccessState(biz({ status: 'ACTIVE', trialEndsAt: PAST }), NOW)).toEqual({ state: 'expired' });
+  });
+
   test('PAST_DUE with a future grace window → grace', () => {
     const b = biz({ status: 'PAST_DUE', stripeSubscriptionId: 'sub_str', currentPeriodEnd: PAST, accessGraceUntil: FUTURE });
     expect(billingAccessState(b, NOW)).toMatchObject({ state: 'grace' });

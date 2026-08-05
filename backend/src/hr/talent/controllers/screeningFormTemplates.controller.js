@@ -26,8 +26,16 @@ const TEMPLATE_INCLUDE = {
   },
 };
 
-const KINDS = new Set(['BOOLEAN', 'SINGLE_CHOICE', 'MULTI_CHOICE', 'NUMBER', 'TEXT', 'QUALIFICATION']);
+const KINDS = new Set(['BOOLEAN', 'SINGLE_CHOICE', 'MULTI_CHOICE', 'NUMBER', 'TEXT', 'QUALIFICATION', 'FILE']);
 const NEEDS_OPTIONS = new Set(['SINGLE_CHOICE', 'MULTI_CHOICE', 'QUALIFICATION']);
+// A FILE answer is an uploaded document's URL. There is nothing to compare it
+// against, so it can be neither a knockout nor points-scored — forcing those off
+// here rather than trusting the client keeps a mis-built form from silently
+// auto-rejecting every applicant.
+const NEVER_SCORED = new Set(['FILE']);
+// Only choice kinds can carry an "Other (please specify)" option; a free-text
+// flag on anything else would render a box the answer model has no slot for.
+const CAN_FREE_TEXT = new Set(['SINGLE_CHOICE', 'MULTI_CHOICE']);
 
 async function audit(businessId, actorId, action, entityId, meta) {
   return writeAudit({ businessId, actorId, action, entityType: 'ScreeningFormTemplate', entityId, meta }).catch(() => {});
@@ -54,6 +62,7 @@ function validateQuestions(input) {
       value: String(o.value ?? o.label ?? '').trim(),
       points: Number.isFinite(Number(o.points)) ? Number(o.points) : 0,
       sortOrder: Number.isInteger(o.sortOrder) ? o.sortOrder : oi,
+      allowsFreeText: CAN_FREE_TEXT.has(kind) ? !!o.allowsFreeText : false,
     }));
     if (options.some((o) => !o.value)) throw { error: `question[${i}] has an option with an empty value` };
     const sortOrder = Number.isInteger(q.sortOrder) ? q.sortOrder : i;
@@ -63,9 +72,11 @@ function validateQuestions(input) {
       prompt,
       kind,
       required: q.required !== undefined ? !!q.required : true,
-      isKnockout: !!q.isKnockout,
-      knockoutValue: q.knockoutValue !== undefined ? q.knockoutValue : null,
-      maxPoints: q.maxPoints != null && Number.isFinite(Number(q.maxPoints)) ? Number(q.maxPoints) : null,
+      isKnockout: NEVER_SCORED.has(kind) ? false : !!q.isKnockout,
+      knockoutValue: NEVER_SCORED.has(kind) ? null : (q.knockoutValue !== undefined ? q.knockoutValue : null),
+      maxPoints: NEVER_SCORED.has(kind)
+        ? null
+        : (q.maxPoints != null && Number.isFinite(Number(q.maxPoints)) ? Number(q.maxPoints) : null),
       sortOrder,
       options,
     });
@@ -123,7 +134,7 @@ async function createTemplate(req, res, next) {
           data: {
             businessId, templateId: tpl.id, prompt: q.prompt, kind: q.kind, required: q.required,
             isKnockout: q.isKnockout, knockoutValue: q.knockoutValue, maxPoints: q.maxPoints, sortOrder: q.sortOrder,
-            options: { create: q.options.map((o) => ({ businessId, label: o.label, value: o.value, points: o.points, sortOrder: o.sortOrder })) },
+            options: { create: q.options.map((o) => ({ businessId, label: o.label, value: o.value, points: o.points, sortOrder: o.sortOrder, allowsFreeText: o.allowsFreeText })) },
           },
         });
       }
@@ -168,7 +179,7 @@ async function updateTemplate(req, res, next) {
             data: {
               businessId, templateId: tpl.id, prompt: q.prompt, kind: q.kind, required: q.required,
               isKnockout: q.isKnockout, knockoutValue: q.knockoutValue, maxPoints: q.maxPoints, sortOrder: q.sortOrder,
-              options: { create: q.options.map((o) => ({ businessId, label: o.label, value: o.value, points: o.points, sortOrder: o.sortOrder })) },
+              options: { create: q.options.map((o) => ({ businessId, label: o.label, value: o.value, points: o.points, sortOrder: o.sortOrder, allowsFreeText: o.allowsFreeText })) },
             },
           });
         }
@@ -223,7 +234,7 @@ async function applyCore({ businessId, templateId, jobId, replace }) {
         data: {
           businessId, jobId, prompt: q.prompt, kind: q.kind, required: q.required,
           isKnockout: q.isKnockout, knockoutValue: q.knockoutValue, maxPoints: q.maxPoints, sortOrder: q.sortOrder,
-          options: { create: q.options.map((o) => ({ businessId, label: o.label, value: o.value, points: o.points, sortOrder: o.sortOrder })) },
+          options: { create: q.options.map((o) => ({ businessId, label: o.label, value: o.value, points: o.points, sortOrder: o.sortOrder, allowsFreeText: o.allowsFreeText })) },
         },
       });
     }
@@ -278,7 +289,7 @@ async function seedDefaults(req, res, next) {
             data: {
               businessId, templateId: t.id, prompt: q.prompt, kind: q.kind, required: q.required, isKnockout: q.isKnockout,
               knockoutValue: q.knockoutValue, maxPoints: q.maxPoints, sortOrder: q.sortOrder,
-              options: { create: q.options.map((o) => ({ businessId, label: o.label, value: o.value, points: o.points, sortOrder: o.sortOrder })) },
+              options: { create: q.options.map((o) => ({ businessId, label: o.label, value: o.value, points: o.points, sortOrder: o.sortOrder, allowsFreeText: o.allowsFreeText })) },
             },
           });
         }

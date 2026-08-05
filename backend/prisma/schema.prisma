@@ -12745,6 +12745,9 @@ model ScreeningFormTemplateOption {
   value      String
   points     Decimal                       @default(0) @db.Decimal(7, 2)
   sortOrder  Int
+  // Mirrors ScreeningOption.allowsFreeText so a template applied to a job keeps
+  // its "Other (please specify)" behaviour.
+  allowsFreeText Boolean                   @default(false)
 
   @@index([businessId, questionId])
 }
@@ -13055,6 +13058,9 @@ enum ScreeningKind {
   NUMBER
   TEXT
   QUALIFICATION
+  // Candidate uploads a document (CV, certificate, portfolio). The answer stores
+  // the uploaded file's URL, so it is never knockout- or points-scored.
+  FILE
 }
 
 model ScreeningOption {
@@ -13066,6 +13072,10 @@ model ScreeningOption {
   value      String // canonical value matched against answers / knockoutValue
   points     Decimal           @default(0) @db.Decimal(7, 2) // Master=6, Bachelor=4, "CS engineering"=20
   sortOrder  Int
+  // "Other (please specify)" — selecting this option reveals a free-text box and
+  // the typed value is stored alongside the choice. Scoring still uses `value`,
+  // so an "Other" answer cannot smuggle points.
+  allowsFreeText Boolean       @default(false)
 
   @@index([businessId, questionId])
 }
@@ -13077,7 +13087,11 @@ model ScreeningAnswer {
   application    Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   questionId     String
   questionPrompt String // snapshot (the question may be edited later)
-  answerValue    Json // bool / chosen value(s) / number / text
+  answerValue    Json // bool / chosen value(s) / number / text / uploaded file URL
+  // "Other (please specify)" — the candidate's typed explanation, kept BESIDE
+  // answerValue rather than inside it. Scoring canonicalises answerValue, so
+  // wrapping it in an object would silently break knockouts and points.
+  freeText       String?
   pointsAwarded  Decimal     @default(0) @db.Decimal(7, 2)
   knockoutFailed Boolean     @default(false)
   createdAt      DateTime    @default(now())

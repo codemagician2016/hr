@@ -65,14 +65,44 @@ function hashToken(rawToken) {
 // copyable link from window.location.origin.
 async function buildSetPasswordLink(businessId, rawToken) {
   const biz = await prisma.business
-    .findUnique({ where: { id: businessId }, select: { slug: true } })
+    .findUnique({
+      where: { id: businessId },
+      select: {
+        slug: true,
+        // The host that was ACTUALLY provisioned, not one re-derived from the
+        // slug. subdomainProvision writes these three together after the DNS
+        // record exists, so they are the only trustworthy answer to "does this
+        // tenant have a portal address that resolves?".
+        subscription: { select: { customDomain: true, customDomainStatus: true, customDomainVerified: true } },
+      },
+    })
     .catch(() => null);
   const slug = biz && biz.slug ? biz.slug : null;
   const path = `/set-password?token=${encodeURIComponent(rawToken)}`;
-  let host = null;
-  try { host = slug && _hostForSlug ? _hostForSlug(slug) : null; } catch { host = null; }
+
+  // Prefer the provisioned host. hostForSlug() only computes `{slug}.drifthr.com`
+  // from the slug — it never checks that the record exists, so on a tenant whose
+  // provisioning silently failed (it is best-effort and swallows every error) it
+  // returns a confident-looking URL that resolves nowhere. That is how a new
+  // tenant emails invites whose links report "not valid": the page never loads.
+  const sub = biz && biz.subscription ? biz.subscription : null;
+  const boundHost = sub && sub.customDomainVerified && sub.customDomainStatus === 'ACTIVE'
+    ? (sub.customDomain || null)
+    : null;
+
+  let derivedHost = null;
+  try { derivedHost = slug && _hostForSlug ? _hostForSlug(slug) : null; } catch { derivedHost = null; }
+
+  const host = boundHost || derivedHost;
   const origin = host ? `https://${host}` : null;
-  return { url: origin ? `${origin}${path}` : null, path, host: host || null };
+  return {
+    url: origin ? `${origin}${path}` : null,
+    path,
+    host: host || null,
+    // false → the host is a guess from the slug and may not resolve. Callers
+    // surface this so an admin finds out BEFORE the new hire does.
+    hostVerified: !!boundHost,
+  };
 }
 
 /**
@@ -262,12 +292,33 @@ async function createInvite({ businessId, employeeId, createdByUserId = null, al
     notified = { ok: false, reason: 'NOTIFY_THREW' };
   }
 
+  // An unverified host means the tenant's portal address was never provisioned,
+  // so this link almost certainly does not resolve. We still create and send the
+  // invite (refusing outright would break dev and self-hosted installs, where DNS
+  // provisioning is not configured at all), but we say so plainly in the response
+  // instead of reporting a clean success over a dead link.
+  if (!link.hostVerified) {
+    console.warn(
+      `[portalInvite] business ${businessId}: sending an invite to unverified host `
+      + `${link.host || '(none)'} — the tenant's portal subdomain is not provisioned, `
+      + 'so this link may not resolve. Set the portal address in Settings → Domain.',
+    );
+  }
+
   return {
     ok: true,
     invite: inviteMeta(invite),
     // The RAW token is intentionally NOT returned (only ever lives in the link).
     link: link.url || link.path,
     linkHost: link.host,
+    linkHostVerified: link.hostVerified,
+    ...(link.hostVerified ? {} : {
+      warning: 'PORTAL_HOST_UNVERIFIED',
+      warningMessage:
+        'This invite link points at a portal address we could not confirm is live, so the '
+        + 'employee may see an invalid-link page. Open Settings → Domain and save your portal '
+        + 'address to provision it, then re-send.',
+    }),
     notified,
     loginEmail,
   };

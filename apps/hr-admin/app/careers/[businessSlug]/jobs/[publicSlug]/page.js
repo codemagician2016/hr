@@ -99,12 +99,16 @@ function Centered({ children }) {
 function ApplyForm({ businessSlug, publicSlug, questions, onSubmitted }) {
   const [d, setD] = useState({ firstName: '', lastName: '', email: '', phone: '' });
   const [answers, setAnswers] = useState({}); // questionId -> value
+  // questionId -> the "Other (please specify)" text. Kept separate from `answers`
+  // so the choice value posted for scoring is never mixed with free prose.
+  const [freeTexts, setFreeTexts] = useState({});
   const [resume, setResume] = useState(null); // { dataUrl, name }
   const [consent, setConsent] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const set = (k) => (v) => setD((s) => ({ ...s, [k]: v }));
   const setAnswer = (qid, v) => setAnswers((s) => ({ ...s, [qid]: v }));
+  const setFreeText = (qid, v) => setFreeTexts((s) => ({ ...s, [qid]: v }));
 
   function onFile(e) {
     const file = e.target.files && e.target.files[0];
@@ -122,7 +126,13 @@ function ApplyForm({ businessSlug, publicSlug, questions, onSubmitted }) {
     if (!consent) { setError('Please consent to your data being processed for this application.'); return; }
     setSaving(true);
     const answerList = questions
-      .map((q) => ({ questionId: q.id, answerValue: answers[q.id] }))
+      .map((q) => ({
+        questionId: q.id,
+        answerValue: answers[q.id],
+        // Only sent when the candidate actually typed something into an
+        // "Other (please specify)" box.
+        freeText: freeTexts[q.id] ? String(freeTexts[q.id]).trim() || undefined : undefined,
+      }))
       .filter((a) => a.answerValue !== undefined && a.answerValue !== '');
     try {
       const res = await post(`/api/public/careers/${businessSlug}/jobs/${publicSlug}/apply`, {
@@ -159,7 +169,13 @@ function ApplyForm({ businessSlug, publicSlug, questions, onSubmitted }) {
           <div className="text-sm font-semibold text-gray-900">A few quick questions</div>
           {questions.map((q) => (
             <Field key={q.id} label={q.prompt} required={q.required}>
-              <ScreeningInput q={q} value={answers[q.id]} onChange={(v) => setAnswer(q.id, v)} />
+              <ScreeningInput
+                q={q}
+                value={answers[q.id]}
+                onChange={(v) => setAnswer(q.id, v)}
+                freeText={freeTexts[q.id]}
+                onFreeText={(v) => setFreeText(q.id, v)}
+              />
             </Field>
           ))}
         </div>
@@ -191,10 +207,60 @@ function Field({ label, required, children }) {
   );
 }
 
+// A FILE screening answer. Mirrors the resume field above it — read the file to a
+// data URL client-side and carry it in the answer — so a candidate uploading a
+// certificate works exactly like uploading a CV, with the same 10 MB ceiling.
+function ScreeningFileInput({ q, value, onChange }) {
+  const [err, setErr] = useState('');
+  const name = value && typeof value === 'object' ? value.name : null;
+  function pick(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) { onChange(null); setErr(''); return; }
+    if (file.size > 10 * 1024 * 1024) { setErr('That file is over 10 MB. Please upload a smaller one.'); return; }
+    setErr('');
+    const reader = new FileReader();
+    reader.onload = () => onChange({ dataUrl: reader.result, name: file.name });
+    reader.onerror = () => setErr('Could not read that file.');
+    reader.readAsDataURL(file);
+  }
+  return (
+    <div>
+      <input
+        type="file"
+        accept="application/pdf,image/png,image/jpeg"
+        onChange={pick}
+        aria-label={q.prompt}
+        className="block w-full text-sm text-gray-600 file:mr-3 file:rounded-lg file:border file:border-gray-300 file:bg-white file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-gray-700 hover:file:bg-gray-50"
+      />
+      {name && <div className="mt-1 text-xs text-gray-400">{name}</div>}
+      {err && <div className="mt-1 text-xs text-red-600">{err}</div>}
+      <p className="mt-1 text-[11px] text-gray-400">PDF, PNG or JPG · up to 10 MB</p>
+    </div>
+  );
+}
+
 // Renders the right input for each screening-question kind. Options carry only a
 // label + value (the public API strips points / knockout values).
-function ScreeningInput({ q, value, onChange }) {
+function ScreeningInput({ q, value, onChange, freeText, onFreeText }) {
   const opts = q.options || [];
+
+  // "Other (please specify)": an option flagged allowsFreeText reveals a text box
+  // when it is the chosen answer. The typed text travels beside the choice, never
+  // instead of it, so scoring still sees the option value it expects.
+  const freeTextOpt = opts.find((o) => o.allowsFreeText);
+  const freeTextChosen = !!freeTextOpt && (
+    Array.isArray(value) ? value.includes(freeTextOpt.value) : value === freeTextOpt.value
+  );
+  const FreeTextBox = () => (freeTextChosen ? (
+    <input
+      type="text"
+      value={freeText ?? ''}
+      onChange={(e) => onFreeText(e.target.value)}
+      placeholder={`Please specify — ${freeTextOpt.label}`}
+      aria-label={`Please specify: ${freeTextOpt.label}`}
+      className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+    />
+  ) : null);
   if (q.kind === 'BOOLEAN') {
     return (
       <div className="flex gap-4">
@@ -208,10 +274,13 @@ function ScreeningInput({ q, value, onChange }) {
   }
   if (q.kind === 'SINGLE_CHOICE' || q.kind === 'QUALIFICATION') {
     return (
-      <select value={value ?? ''} onChange={(e) => onChange(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
-        <option value="">Select…</option>
-        {opts.map((o) => <option key={o.id} value={o.value}>{o.label}</option>)}
-      </select>
+      <>
+        <select value={value ?? ''} onChange={(e) => onChange(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+          <option value="">Select…</option>
+          {opts.map((o) => <option key={o.id} value={o.value}>{o.label}</option>)}
+        </select>
+        <FreeTextBox />
+      </>
     );
   }
   if (q.kind === 'MULTI_CHOICE') {
@@ -224,8 +293,12 @@ function ScreeningInput({ q, value, onChange }) {
             <input type="checkbox" checked={arr.includes(o.value)} onChange={(e) => toggle(o.value, e.target.checked)} /> {o.label}
           </label>
         ))}
+        <FreeTextBox />
       </div>
     );
+  }
+  if (q.kind === 'FILE') {
+    return <ScreeningFileInput q={q} value={value} onChange={onChange} />;
   }
   if (q.kind === 'NUMBER') {
     return <input type="number" value={value ?? ''} onChange={(e) => onChange(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />;

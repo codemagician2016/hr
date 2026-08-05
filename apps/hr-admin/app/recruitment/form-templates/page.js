@@ -46,10 +46,17 @@ const KINDS = [
   ['NUMBER', 'Number'],
   ['TEXT', 'Free text'],
   ['QUALIFICATION', 'Qualification (degree points)'],
+  ['FILE', 'File upload (CV, certificate)'],
 ];
 const KIND_LABEL = Object.fromEntries(KINDS);
 const OPTION_KINDS = ['SINGLE_CHOICE', 'MULTI_CHOICE', 'QUALIFICATION']; // carry options
 const MAXPOINTS_KINDS = ['NUMBER', 'QUALIFICATION']; // maxPoints caps scoring
+// A FILE answer is an uploaded document's URL — there is nothing to match it
+// against, so knockout and points are hidden for it. The server enforces this
+// too; hiding it here just stops anyone building a form that cannot work.
+const NEVER_SCORED_KINDS = ['FILE'];
+// Only these can carry an "Other (please specify)" option.
+const FREE_TEXT_KINDS = ['SINGLE_CHOICE', 'MULTI_CHOICE'];
 
 const MANAGE_KEYS = ['canManageHiring', 'canManageEmployees'];
 
@@ -152,15 +159,20 @@ function QuestionCard({ q, index, total, onChange, onRemove, onMove }) {
               <input type="checkbox" checked={!!q.required} onChange={(e) => set('required', e.target.checked)} />
               Required
             </label>
-            <label className="flex items-center gap-2 text-sm text-gray-700">
-              <input type="checkbox" checked={!!q.isKnockout} onChange={(e) => set('isKnockout', e.target.checked)} />
-              Knockout
-              <Info text="A knockout auto-rejects the candidate unless they give the passing answer (e.g. 'Eligible to work → Yes')." />
-            </label>
+            {/* An uploaded file has no value to compare against, so it can never be
+                a knockout. Offering the checkbox would let someone build a form
+                that auto-rejects every applicant. */}
+            {!NEVER_SCORED_KINDS.includes(q.kind) && (
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <input type="checkbox" checked={!!q.isKnockout} onChange={(e) => set('isKnockout', e.target.checked)} />
+                Knockout
+                <Info text="A knockout auto-rejects the candidate unless they give the passing answer (e.g. 'Eligible to work → Yes')." />
+              </label>
+            )}
           </div>
         </div>
 
-        {q.isKnockout && (
+        {q.isKnockout && !NEVER_SCORED_KINDS.includes(q.kind) && (
           <div>
             <FieldLabel hint="The passing answer. A candidate who answers anything else is auto-rejected.">Passing answer</FieldLabel>
             {q.kind === 'BOOLEAN' ? (
@@ -199,6 +211,19 @@ function QuestionCard({ q, index, total, onChange, onRemove, onMove }) {
                   <div className="col-span-5"><input value={o.label} onChange={(e) => setOpt(i, 'label', e.target.value)} placeholder="label (shown)" className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm" /></div>
                   <div className="col-span-3"><input value={o.value} onChange={(e) => setOpt(i, 'value', e.target.value)} placeholder="value" className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm" /></div>
                   <div className="col-span-2"><NumberInput value={o.points} onChange={(v) => setOpt(i, 'points', v)} min={0} /></div>
+                  {FREE_TEXT_KINDS.includes(q.kind) && (
+                    <div className="col-span-12 -mt-1 pl-1">
+                      <label className="inline-flex items-center gap-1.5 text-[11px] text-gray-600">
+                        <input
+                          type="checkbox"
+                          checked={!!o.allowsFreeText}
+                          onChange={(e) => setOpt(i, 'allowsFreeText', e.target.checked)}
+                          className="h-3.5 w-3.5 rounded border-gray-300"
+                        />
+                        Picking <b>{o.label || 'this option'}</b> opens a text box for the candidate to explain
+                      </label>
+                    </div>
+                  )}
                   <div className="col-span-2 flex items-center justify-end gap-1">
                     <button type="button" onClick={() => moveOpt(i, -1)} disabled={i === 0} className="rounded-md border border-gray-300 px-1.5 py-1 text-[11px] text-gray-500 hover:bg-white disabled:opacity-30" aria-label="Move option up">▲</button>
                     <button type="button" onClick={() => moveOpt(i, 1)} disabled={i === options.length - 1} className="rounded-md border border-gray-300 px-1.5 py-1 text-[11px] text-gray-500 hover:bg-white disabled:opacity-30" aria-label="Move option down">▼</button>
@@ -208,7 +233,7 @@ function QuestionCard({ q, index, total, onChange, onRemove, onMove }) {
               ))}
             </div>
             <button type="button" onClick={addOpt} className="mt-2 rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-white">+ Add option</button>
-            <p className="mt-1 text-[11px] text-gray-400">Label = shown to the candidate · Value = stored (falls back to the label) · Points = awarded.</p>
+            <p className="mt-1 text-[11px] text-gray-400">Label = shown to the candidate · Value = stored (falls back to the label) · Points = awarded. Tick an option to turn it into &ldquo;Other (please specify)&rdquo; — the candidate&rsquo;s typed answer is stored with the choice, and scoring still uses Points.</p>
           </div>
         )}
       </div>

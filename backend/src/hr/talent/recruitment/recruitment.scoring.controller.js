@@ -250,6 +250,13 @@ async function recordAnswersAndScore(businessId, application, answers) {
         data: {
           businessId, applicationId: application.id, questionId: a.questionId,
           questionPrompt: q.prompt, answerValue: a.answerValue,
+          // "Other (please specify)" prose. Persisted beside answerValue, which
+          // scoring canonicalises — note scoreScreening above is deliberately
+          // passed only { questionId, answerValue }, so free text can never
+          // influence points or a knockout.
+          freeText: typeof a.freeText === 'string' && a.freeText.trim()
+            ? a.freeText.trim().slice(0, 2000)
+            : null,
           pointsAwarded: line.awarded || 0, knockoutFailed: !!line.knockoutFailed,
         },
       });

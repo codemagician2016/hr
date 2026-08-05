@@ -51,9 +51,22 @@ function billingAccessState(business, now = new Date()) {
   if (launchFreePlanGrantsAllowed()) return { state: 'active' };
 
   // Currently entitled: on a PAID tier, active/trialing, inside its period.
+  //
+  // "Inside its period" has to account for there being NO period at all. A paid,
+  // ACTIVE subscription carrying neither currentPeriodEnd nor trialEndsAt has not
+  // lapsed — there is no boundary for it to have lapsed past. Requiring a future
+  // date treated that as `expired` and silently revoked every add-on: the prod
+  // demo tenant sat on the Growth tier, status ACTIVE, and still 402'd on
+  // recruitment, which is how "Create job is not available" was reported.
+  // A plan comped by an admin is the common way to end up here.
+  //
+  // Deliberately narrow: a subscription that HAS a boundary and is past it still
+  // falls through to grace/expired exactly as before, so a genuine lapse is
+  // unaffected and the renewal incentive is preserved.
+  const hasPeriodBoundary = !!(sub?.currentPeriodEnd || sub?.trialEndsAt);
   const entitledNow = onPaidTier
     && ACTIVE_STATUSES.has(status)
-    && (future(sub?.currentPeriodEnd, now) || future(sub?.trialEndsAt, now));
+    && (!hasPeriodBoundary || future(sub?.currentPeriodEnd, now) || future(sub?.trialEndsAt, now));
   if (entitledNow) return { state: 'active' };
 
   // Not entitled now. Has this tenant EVER genuinely activated? Either they're
