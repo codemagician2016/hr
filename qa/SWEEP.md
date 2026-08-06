@@ -55,33 +55,55 @@ the user is stuck. Only walking the journey finds these.
   real production gap I nearly wrote off.
 - Never commit on `staging`/`main` (guard: `qa/check-branch.sh`).
 
-## Order
+## Status — feature sweep complete
 
-A new client's actual path through the product, so the client is never blocked by
-something further down the list.
+Two passes over every feature: a BROWSER JOURNEY (does a real user's path work?)
+and a CODE AUDIT (silent catches, un-awaited writes, unvalidated enums, ledger
+transaction/concurrency safety, statuses guarded but never written).
 
-| # | Module | Surfaces | Status |
-|---|--------|----------|--------|
-| 1 | Setup & org | company profile, entity, employee number, branding, domain, roles & access, reporting tree | pending |
-| 2 | People | add/invite employee, profile, org tree, documents, profile changes, field policy | pending |
-| 3 | Onboarding | journeys, tasks, pre-join self-onboarding, probation | pending |
-| 4 | Attendance & roster | punches, regularisation, shifts, open shifts, OT, biometric, face/geo | pending |
-| 5 | Leave | policies, apply/approve, comp-off, encashment, reconciliation | pending |
-| 6 | Compensation & CTC | CTC builder, revisions, policies, FBP plans + allocations | pending |
-| 7 | Payroll run | run, LOP, arrears, variable pay, disbursement, payslips | pending |
-| 8 | Statutory | PT/PF/ESI, bonus, Form 16/24Q, registers, compliance calendar, LWF | pending |
-| 9 | Reimbursement | claims, travel, loans, via-payroll | pending |
-| 10 | Talent Acquisition | jobs, careers, apply, pipeline, interviews, scorecards, offers | **DONE — 26/26 prod** |
-| 11 | Performance | reviews, goals/OKR, 9-box, competencies, talent pool | pending |
-| 12 | Letters | templates, letterheads, issue, register | pending |
-| 13 | Approvals | workflow engine, SoD, delegation | pending |
-| 14 | Separations | offboarding, clearance lanes, FnF, relieving letter | pending (known: `nz-earnings-required` blocker) |
-| 15 | Engagement | helpdesk, announcements, surveys/eNPS, R&R, feed | pending |
-| 16 | Learning | courses, lessons, quizzes | pending |
-| 17 | Reports | report platform, exports | pending |
-| 18 | ESS & mobile | employee portal + mobile hosts/app | pending |
-| 19 | Settings sweep | custom fields, field access, notifications, SSO/SCIM, lifecycle | pending |
-| 20 | Platform | signup, provisioning, billing, entitlements, tenant domains | pending |
+| # | Module | Journey | Code audit | Real defects |
+|---|--------|---------|-----------|--------------|
+| 1 | Setup & org | 19/19 | — | 0 |
+| 2 | People | 18/18 | — | invite link host (fixed) |
+| 3 | Onboarding | 17/17 | 1 HIGH | FnF settled while payroll unpaid |
+| 4 | Attendance | 17/17 | 0 of 20 candidates real | 0 |
+| 5 | Leave | 16/16 | 3 | no balances (CRITICAL) + 3 silent drops |
+| 6 | Compensation | 19/19 | 1 | invalid enum → 500; structure warning |
+| 7 | Payroll | 14/14 | 1 | stale approval stays actionable |
+| 8 | Statutory | 14/14 | 0 | 0 |
+| 9 | Reimbursement | 16/16 | 1 | receipt PII left in storage |
+| 10 | Talent Acquisition | 27/27 | — | 7 (incl. inverted knockout) |
+| 11 | Performance | 15/15 | — | launch left cycle DRAFT (CRITICAL) |
+| 12 | Letters | 14/14 | 0 | merge PROVEN correct |
+| 13 | Approvals | 9/9 | notifier (systemic) | undelivered notices left no trace |
+| 14 | Separations | 10/10 | see #3 | per-lane SoD verified working |
+| 15 | Engagement | 14/15 | covered by notifier fix | 0 |
+| 16 | Learning | 9/9 | 0 | 0 |
+| 17 | Reports | 18/18 | 0 | 0 |
+| 18 | ESS & mobile | 25/25 | — | 0 |
+| 19 | Settings | 16 pages via every-screen | — | 0 |
+| 20 | Platform | 7/9 public | 0 real | hydration on /login + /signup |
+
+Plus **every-screen**: 72 admin screens and 24 employee screens crawled, all clean.
+
+### Cross-cutting, not owned by one feature
+- 9 partial UNIQUE indexes MISSING from the production database (1264 indexes,
+  zero partial) — every data-integrity guard absent. Reapplied on every deploy.
+- Résumé uploads dead on a live careers page — now private R2 with presigned reads.
+- 2 live jobs with no pipeline + 4 applications stranded with no stage.
+- 4 candidates auto-rejected by an inverted knockout, restored.
+
+### What the audits CLEARED (do not re-audit)
+- `writeAudit` logs its own failures — the ~30 `.catch(() => {})` around it are
+  redundant, not silent.
+- `prisma.$transaction([...])` arrays are the correct API; the "no-await" hits in
+  lifecycle/templates, expenses/policy and attendance/fence are all correct.
+- Payroll computes in integer minor units throughout — no float money in 41 files.
+- Leave's balance CAS (`updateMany` on `{id, version}` + 409) is sound concurrency.
+- Compensation masks on 13/14 read paths; the 14th is a pure quote with nothing
+  to mask.
+- `catch {}` in subscription is DNS probing across resolvers — ignoring a failed
+  resolver is the point.
 
 ## Known open (found, not yet fixed)
 
