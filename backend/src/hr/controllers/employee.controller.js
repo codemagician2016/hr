@@ -4,6 +4,7 @@
 // Lifecycle transitions (terminate) set denormalized status fields — the
 // effective-dated history lives in EmploymentRecord (added by the service layer).
 const prisma = require('../../core/lib/prisma');
+const { seedLeaveBalancesForEmployee } = require('../leave/seedBalances');
 const { writeAudit } = require('../../core/lib/audit');
 const { scopeWhere, scopeAllows } = require('../lib/scopeResolver');
 const { allocateCode, SCOPE_DEFAULTS } = require('../lifecycle/lib/codes');
@@ -300,6 +301,19 @@ async function create(req, res, next) {
       // entity yet we skip the segment rather than 500 (HR can add it via Edit once
       // an entity exists). When the operator picked org context but we cannot anchor
       // an entity, surface a clear 400 instead of dropping their input silently.
+      // Open the leave ledger for this employee. Without LeaveBalance rows,
+      // createRequest refuses with 409 "No leave balance exists for this type" —
+      // and nothing ever repairs it: the nightly accrual only walks EXISTING
+      // balances, and assigning a policy does not create them. Employees added
+      // through this ordinary path could therefore never take a day off.
+      // Zero-value rows grant nothing; they just give accrual somewhere to land.
+      await seedLeaveBalancesForEmployee(tx, {
+        businessId,
+        employeeId: created.id,
+        countryCode: created.countryCode || null,
+        asOf: created.hireDate || new Date(),
+      });
+
       const entityId = await resolveEntityId(tx, { businessId, entityId: body.entityId, locationId });
       if (entityId) {
         const effectiveFrom = toDateOnly(created.hireDate) || toDateOnly(new Date());
