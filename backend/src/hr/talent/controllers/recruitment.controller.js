@@ -26,6 +26,7 @@ const { resolveAccessibleEmployeeIds, scopeAllows } = require('../../lib/scopeRe
 // Feature 36 — candidate stage messaging (best-effort, fire-and-forget). A move /
 // bulk-move / offer-send fires the mapped candidate event through the gated fan-out.
 const candidateNotify = require('../recruitment/candidateNotify');
+const { resolveScorecardTemplateId } = require('../recruitment/scorecardTemplateResolver');
 
 const DUP_MSG = 'A record with that code already exists';
 
@@ -1019,6 +1020,12 @@ async function createInterview(req, res, next) {
     if (data.scorecardTemplateId) {
       const tpl = await prisma.scorecardTemplate.findFirst({ where: { id: data.scorecardTemplateId, businessId, deletedAt: null }, select: { id: true } });
       if (!tpl) return res.status(404).json({ message: 'Scorecard template not found' });
+    } else {
+      // Attaching a template is optional here but MANDATORY downstream: with none,
+      // the panellist is shown no skills, every rating is rejected by the skill
+      // allowlist, and the card can never be submitted. Resolve one now so the
+      // interview is scoreable. Non-fatal — never fail a booking over this.
+      data.scorecardTemplateId = await resolveScorecardTemplateId(prisma, businessId, null);
     }
 
     const panel = parsePanel(data.interviewerIds);

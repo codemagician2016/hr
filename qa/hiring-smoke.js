@@ -336,6 +336,27 @@ const CAND_EMAIL = `smoke.candidate.${stamp}@example.com`;
       ok(iv.status < 400, 'interview can be scheduled for the application',
         `HTTP ${iv.status} ${String(iv.body).slice(0, 90)}`);
 
+      // A scheduled interview that cannot be SCORED is a dead end: the panellist
+      // is shown no skills, saveMyScorecard's allowlist rejects every rating, and
+      // the card can never be submitted — so interviewScore never computes and the
+      // candidate is stuck in the merit list forever. Assert the interview came
+      // back with a scorecard template that actually has rateable skills.
+      if (iv.body && iv.body.id) {
+        ok(!!iv.body.scorecardTemplateId,
+          'scheduled interview carries a scorecard template (it is scoreable)',
+          `interview ${iv.body.id} has scorecardTemplateId=${JSON.stringify(iv.body.scorecardTemplateId)}`);
+
+        if (iv.body.scorecardTemplateId) {
+          const tpl = await page.evaluate(async (tplId) => {
+            const r = await fetch(`/api/hr/recruitment/scorecard-templates/${tplId}`, { credentials: 'include' });
+            return { status: r.status, body: r.ok ? await r.json().catch(() => null) : null };
+          }, iv.body.scorecardTemplateId);
+          const skills = (tpl.body && (tpl.body.skills || (tpl.body.template && tpl.body.template.skills))) || [];
+          ok(skills.length > 0, 'that scorecard template has skills to rate',
+            `HTTP ${tpl.status}, ${skills.length} skill(s)`);
+        }
+      }
+
       const offer = await page.evaluate(async (appId) => {
         const r = await fetch('/api/hr/recruitment/offers', {
           method: 'POST', credentials: 'include',

@@ -26,6 +26,7 @@ const { fanOutCandidateStage } = require('./candidateNotify');
 const { appBaseUrl } = require('../../approvals/notify')._internals;
 // Feature 12 — F1 recruitment read-scope (requisition-scoped merit list).
 const { scopeAllowsJob } = require('./recruitmentScope');
+const { resolveScorecardTemplateId } = require('./scorecardTemplateResolver');
 
 // reuse the esign provider + onboarding seam from the spine
 let esign;
@@ -585,6 +586,18 @@ async function myScorecard(req, res, next) {
     if (!iv || !parseInterviewerIds(iv.interviewerIds).includes(me)) {
       return res.status(404).json({ message: 'Not found' });
     }
+    // Interviews booked before template resolution existed (or whose template was
+    // since deleted) have none — which leaves this panellist with nothing to rate
+    // and no way to ever submit. Heal the interview here so the card, the skill
+    // allowlist in saveMyScorecard and the hydration below all agree.
+    if (!iv.scorecardTemplateId) {
+      const healed = await resolveScorecardTemplateId(prisma, businessId, null);
+      if (healed) {
+        await prisma.interview.update({ where: { id: iv.id }, data: { scorecardTemplateId: healed } });
+        iv.scorecardTemplateId = healed;
+      }
+    }
+
     let card = await prisma.scorecard.findFirst({
       where: { businessId, interviewId: iv.id, interviewerEmployeeId: me }, include: { ratings: true },
     });
