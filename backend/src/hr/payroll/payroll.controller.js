@@ -235,7 +235,19 @@ async function closeOpenPayrunRequest(businessId, payRunId, actorUserId, comment
     where: { businessId, module: 'PAYRUN', entityId: payRunId, status: { in: ['PENDING', 'ESCALATED'] } },
   });
   if (!open) return;
-  await approvalsEngine.cancel({ approvalRequestId: open.id, actorUserId: actorUserId || 'SYSTEM', comment: comment || null }).catch(() => {});
+  await approvalsEngine.cancel({
+    approvalRequestId: open.id,
+    actorUserId: actorUserId || 'SYSTEM',
+    comment: comment || null,
+  }).catch((e) => {
+    // This runs when a payrun is SENT BACK, CANCELLED or REOPENED for recompute.
+    // Swallowing the failure leaves a PENDING approval live in an approver's inbox
+    // for a run that no longer exists in that form — so they can approve a
+    // cancelled or mid-recompute payroll. Not fatal to the transition (the run
+    // state has already moved), but it must never be invisible.
+    console.error(`[payroll] failed to cancel approval ${open.id} for run ${payRunId}: ${e.message}`
+      + ' — a stale PENDING approval may remain actionable.');
+  });
 }
 
 async function submitRun(req, res) {
