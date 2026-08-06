@@ -59,16 +59,19 @@ async function main() {
   for (const j of empty) {
     console.log(`  - ${nameOf[j.businessId] || j.businessId} :: "${j.title}" (${j.code}, ${j.status})`);
   }
-  if (!empty.length) { console.log('[pipelines] nothing to backfill'); return; }
+  // NOTE: do NOT return early when every job already has stages. Phase 2 below
+  // repairs APPLICATIONS left at currentStageId = null, and those outlive the job
+  // repair — an early return here silently skipped the half of the fix that makes
+  // a rejected candidate visible on the board.
+  if (!empty.length) console.log('[pipelines] all jobs already have stages');
 
-  if (!APPLY) {
+  if (empty.length && !APPLY) {
     console.log('\n[pipelines] DRY RUN — pass --apply to write these pipelines.');
-    return;
   }
 
   let ok = 0;
   const failed = [];
-  for (const j of empty) {
+  for (const j of (APPLY ? empty : [])) {
     try {
       const res = await autoApplyDefaultTemplate(prisma, j.businessId, j.id);
       if (res && res.applied) {
