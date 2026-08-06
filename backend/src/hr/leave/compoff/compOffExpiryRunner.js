@@ -130,7 +130,12 @@ async function runCompOffExpiry({ businessId = null, asOf = new Date(), dryRun =
               businessId: bId, event: 'comp-off.lapsed', recipientEmail: email,
               variables: { NAME: (emp && emp.firstName) || 'there', DAYS: String(lapsedQty), EXPIRES: isoDay(lot.expiresOn), BIZ: '' },
               triggeredBy: 'COMP_OFF_LAPSED',
-            }).catch(() => {});
+            }).catch((e) => {
+              // A LAPSE notice is the only warning an employee gets that earned
+              // comp-off is about to be lost. Dropping it silently means they find
+              // out by trying to book a day that is no longer there.
+              console.error(`[comp-off] lapse notice failed for employee ${lot.employeeId}: ${e.message}`);
+            });
           }
         }
       } catch (e) {

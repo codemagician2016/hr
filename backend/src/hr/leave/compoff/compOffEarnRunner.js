@@ -177,7 +177,12 @@ async function runCompOffEarn({ businessId = null, asOf = new Date(), lookbackDa
                 businessId: bId, event: 'comp-off.earn-pending', recipientEmail: mgrEmail,
                 variables: { BIZ: '', EMP: emp.firstName || 'An employee', SOURCE: sourceKind.replace('_', ' ').toLowerCase(), DATE: isoDay(earnedOn), DAYS: String(qty), LINK: '' },
                 triggeredBy: 'COMP_OFF_EARN_PENDING',
-              }).catch(() => {});
+              }).catch((e) => {
+                // The manager's approval is what turns an earned lot into usable
+                // credit. If this notice vanishes, the request sits unapproved and
+                // nobody knows to look at it.
+                console.error(`[comp-off] earn-pending notice failed for employee ${emp.id}: ${e.message}`);
+              });
             }
           }
         } else {

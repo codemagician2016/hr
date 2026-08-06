@@ -976,7 +976,12 @@ async function repairBalance(req, res, next) {
       businessId, actorId: req.user.id, action: 'leave.balance.repair',
       entityType: 'LeaveBalance', entityId: balance.id,
       meta: { before, after, employeeId: balance.employeeId, periodCode: balance.periodCode },
-    }).catch(() => {});
+    }).catch((e) => {
+      // A balance REPAIR edits an employee's leave ledger by hand. The audit row is
+      // the only record of who changed what and why; losing it silently leaves an
+      // unexplained movement in a compliance-sensitive ledger.
+      console.error(`[leave] audit write failed for balance repair ${balance.id}: ${e.message}`);
+    });
     res.json({ repaired: true, before, after });
   } catch (e) { next(e); }
 }
