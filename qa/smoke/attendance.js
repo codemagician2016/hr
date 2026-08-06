@@ -42,6 +42,7 @@ function resolvePlaywright() {
   throw new Error('Playwright not installed. Run npm i -D playwright, then retry.');
 }
 const { chromium } = resolvePlaywright();
+const { assertControlVisible } = require('./ui-lib');
 
 const ADMIN = process.env.E2E_ADMIN || 'https://app-staging.drifthr.com';
 const EMAIL = process.env.E2E_EMAIL || 'operator@demo.test';
@@ -204,6 +205,9 @@ const asList = (b) => (b && (b.items || b.data || b.rows)) || (Array.isArray(b) 
       await page.waitForTimeout(1500);
       const text = await page.evaluate(() => document.body.innerText || '').catch(() => '');
       ok(text.trim().length > 60, `${label} page renders content`, `${text.trim().length} chars`);
+    // A 200 page with no usable control is indistinguishable from a healthy
+    // one to every check except a browser looking for the control itself.
+    await assertControlVisible(page, ok, ['button:has-text("Punch")', 'button:has-text("Regular")', 'button:has-text("Add")', 'button', 'a[href*="attendance"]'], 'Attendance page exposes an actionable control');
     }
 
     // ── 8. cleanup ──────────────────────────────────────────────────────────

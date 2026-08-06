@@ -44,6 +44,7 @@ function resolvePlaywright() {
   throw new Error('Playwright not installed. Run npm i -D playwright, then retry.');
 }
 const { chromium } = resolvePlaywright();
+const { assertControlVisible, typeAndReadBack } = require('./ui-lib');
 
 const ADMIN = process.env.E2E_ADMIN || 'https://app-staging.drifthr.com';
 const EMAIL = process.env.E2E_EMAIL || 'operator@demo.test';
@@ -131,6 +132,18 @@ const EMP_EMAIL = `smoke.person.${stamp}@example.com`;
     // point a client needs is actually on screen, not merely that the page loaded.
     ok(addVisible > 0, 'People page offers a way to add an employee',
       `${addVisible} matching control(s)`);
+
+    // ── 2b. REAL UI: the Add-employee FORM must accept typing ───────────────
+    // Creating an employee over the API proves the server works. It does not prove
+    // a human can fill the form — the "unable to type" bug threw on every keystroke
+    // and merely looked like a disabled field.
+    await page.goto(`${ADMIN}/people/new`, { waitUntil: 'networkidle' }).catch(() => {});
+    await page.waitForTimeout(1800);
+    await typeAndReadBack(page, ok, 'input[type="text"]', `UIType${stamp}`,
+      'Add-employee form ACCEPTS TYPING and reads back');
+    await assertControlVisible(page, ok,
+      ['button:has-text("Add employee")', 'button[type="submit"]', 'button:has-text("Save")'],
+      'Add-employee form shows its submit control');
 
     // ── 3. create an employee ───────────────────────────────────────────────
     const created = await send(page, 'POST', '/api/hr/employees', {

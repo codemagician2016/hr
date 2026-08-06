@@ -42,6 +42,7 @@ function resolvePlaywright() {
   throw new Error('Playwright not installed. Run npm i -D playwright, then retry.');
 }
 const { chromium } = resolvePlaywright();
+const { assertControlVisible, typeAndReadBack } = require('./ui-lib');
 
 const ADMIN = process.env.E2E_ADMIN || 'https://app-staging.drifthr.com';
 const EMAIL = process.env.E2E_EMAIL || 'operator@demo.test';
@@ -171,6 +172,28 @@ const patch = (page, url, payload) => api(page, url, {
     const dropped = accepted.filter((k) => !returned.has(k));
     ok(dropped.length === 0, 'company profile GET returns every field it stores',
       dropped.length ? `dropped: ${dropped.join(', ')}` : 'all fields present');
+
+    // ── 2b. REAL UI: the form must accept typing and offer a save control ────
+    // The API round-trip above proves the server stores what it is sent. It does
+    // NOT prove a human can enter it. Two of the first bugs a tester reported were
+    // exactly this: a button that renders but is invisible, and a field that threw
+    // on every keystroke and so silently discarded input. Both are invisible to an
+    // API assertion and obvious to a browser that types and reads back.
+    await page.goto(`${ADMIN}/settings/company-profile`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(1800);
+
+    await typeAndReadBack(
+      page, ok,
+      'input:below(:text("Legal name")), input[value="' + (afterProf.legalName || '') + '"]',
+      `Typed Legal ${stamp}`,
+      'Legal name field ACCEPTS TYPING and reads back',
+    );
+
+    await assertControlVisible(
+      page, ok,
+      ['button:has-text("Save")', 'button:has-text("Update")', 'button[type="submit"]'],
+      'company profile page shows a Save control',
+    );
 
     // ── 3. employee numbering ───────────────────────────────────────────────
     const numBefore = await api(page, '/api/hr/company-profile/employee-number');
