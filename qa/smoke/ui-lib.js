@@ -101,7 +101,34 @@ async function signIn(page, { admin, email, password }) {
     page.click('button[type="submit"]'),
   ]);
   const signedIn = !page.url().includes('/login');
-  return { ok: signedIn, throttled: loginStatus === 429, status: loginStatus };
+  return {
+    ok: signedIn,
+    throttled: loginStatus === 429,
+    // 502/503 means the app is restarting — running a smoke immediately after a
+    // deploy hits this window. Every assertion then fails on 401 and the run looks
+    // like a total outage, when nothing is wrong with the product at all.
+    notUp: loginStatus === 502 || loginStatus === 503 || loginStatus === 504,
+    status: loginStatus,
+  };
 }
 
-module.exports = { assertControlVisible, typeAndReadBack, openInCleanBrowser, signIn };
+/**
+ * waitForHealthy(page, admin, {tries, gapMs}) -> boolean
+ *   Polls the login page until the app answers < 500. A deploy restarts PM2, so a
+ *   smoke started straight afterwards races the restart and reports a fleet of
+ *   false failures.
+ */
+async function waitForHealthy(page, admin, { tries = 12, gapMs = 5000 } = {}) {
+  for (let i = 0; i < tries; i += 1) {
+    try {
+      const r = await page.goto(`${admin}/login`, { waitUntil: 'domcontentloaded', timeout: 20000 });
+      if (r && r.status() < 500) return true;
+    } catch { /* keep waiting */ }
+    await page.waitForTimeout(gapMs);
+  }
+  return false;
+}
+
+module.exports = {
+  assertControlVisible, typeAndReadBack, openInCleanBrowser, signIn, waitForHealthy,
+};

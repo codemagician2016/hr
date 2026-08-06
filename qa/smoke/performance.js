@@ -39,7 +39,7 @@ function resolvePlaywright() {
   throw new Error('Playwright not installed. Run npm i -D playwright, then retry.');
 }
 const { chromium } = resolvePlaywright();
-const { assertControlVisible, signIn } = require('./ui-lib');
+const { assertControlVisible, signIn, waitForHealthy } = require('./ui-lib');
 
 const ADMIN = process.env.E2E_ADMIN || 'https://app-staging.drifthr.com';
 const EMAIL = process.env.E2E_EMAIL || 'operator@demo.test';
@@ -105,7 +105,15 @@ const asList = (b) => (b && (b.items || b.data || b.rows)) || (Array.isArray(b) 
   watch(page, 'admin', problems);
 
   try {
+    await waitForHealthy(page, ADMIN);
     const login = await signIn(page, { admin: ADMIN, email: EMAIL, password: PASSWORD });
+    if (login.notUp) {
+      // The app is restarting (a deploy just ran). Everything below would fail on
+      // 401 and look like an outage.
+      console.log(`\n  APP NOT UP — login returned ${login.status}. Wait for the deploy to settle and re-run.\n`);
+      await browser.close();
+      process.exit(2);
+    }
     if (login.throttled) {
       console.log('\n  THROTTLED — the auth rate limiter returned 429 (correct behaviour).');
       console.log('  Wait a minute and re-run; this is NOT a product failure.\n');
