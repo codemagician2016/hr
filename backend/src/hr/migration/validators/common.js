@@ -11,6 +11,20 @@ const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 const UAN_RE = /^[0-9]{12}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// ESIC insurance ("IP") number is 17 digits.
+const ESIC_RE = /^[0-9]{17}$/;
+// Deliberately permissive shape — must accept "+91 98765 43210" and "(022) 2345-6789".
+// KEEP IN LOCKSTEP with PHONE_DIGITS in hr/controllers/employee.controller.js: if the
+// importer is laxer than the controller, an imported employee carries a phone the edit
+// form then refuses to save, and HR hits the error on a field they never touched.
+const PHONE_RE = /^\+?[\d\s\-().]{7,20}$/;
+
+/** True when a phone cell has an acceptable shape AND 7-15 actual digits. */
+function isValidPhone(v) {
+  const raw = String(v).trim();
+  const digits = raw.replace(/\D/g, '');
+  return PHONE_RE.test(raw) && digits.length >= 7 && digits.length <= 15;
+}
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MONTH_RE = /^\d{4}-\d{2}$/;
 
@@ -68,7 +82,7 @@ function monthRange(periodMonth) {
 }
 
 module.exports = {
-  PAN_RE, IFSC_RE, UAN_RE, EMAIL_RE, DATE_RE, MONTH_RE,
-  finding, rollupStatus, isBlank, toBool, toMinor, toNumber,
+  PAN_RE, IFSC_RE, UAN_RE, EMAIL_RE, DATE_RE, MONTH_RE, ESIC_RE, PHONE_RE,
+  finding, rollupStatus, isBlank, toBool, toMinor, toNumber, isValidPhone,
   isValidDate, isValidMonth, monthRange,
 };

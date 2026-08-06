@@ -1632,7 +1632,13 @@ async function updateSettings(req, res) {
     // style). Mirror the Store Setup UI lock so the API can't bypass the plan.
     if (['CHAIN', 'REGIONAL', 'BOTH'].includes(mode)) {
       const ent = await numericEntitlement(req.user.businessId, 'branches_count').catch(() => null);
-      const allowsMultiBranch = ent && (ent.unlimited || Number(ent.limit) > 1);
+      // accessAllowed is NOT redundant with the limit: a past_due/never-activated
+      // tenant can carry a paid tierId on the subscription row (the webhook writes
+      // the tier off the price id; the downgrade happens at grace expiry), so the
+      // LIMIT alone would read as multi-branch for someone who has not paid.
+      // assertNumericLimit checks this first for the same reason — this call site
+      // resolves the entitlement directly, so it must make the same check itself.
+      const allowsMultiBranch = ent && ent.accessAllowed && (ent.unlimited || Number(ent.limit) > 1);
       if (!allowsMultiBranch) {
         return res.status(402).json({
           message: 'Selling from several branches is on the Business plan. Upgrade in Billing & Plan to unlock multi-branch.',

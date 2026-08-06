@@ -116,18 +116,19 @@ describe('subscriptionBilling Paddle sync', () => {
     });
 
     expect(prisma.subscription.update.mock.calls[0][0].data).not.toHaveProperty('trialConvertedAt');
-    // KNOWN FAILING — DELIBERATELY NOT PAPERED OVER (2026-08-04).
-    // This asserts tierId stays `tier_free` for an unpaid past_due sub; the code
-    // now promotes it to `tier_starter` off the webhook's price id. That is a
-    // real behaviour question, not a stale expectation, so it is left red rather
-    // than rewritten to match:
-    //   - access is NOT wrongly granted either way — billingAccessState puts a
-    //     PAST_DUE sub in grace and then expired, whatever the tier says;
-    //   - but TierFeature limits are keyed off the TIER, so promoting an unpaid
-    //     tenant to starter may hand them starter feature limits before payment.
-    // Decide the intended rule, then either fix the promotion or update this line.
+    // RESOLVED 2026-08-07 (was left red on 2026-08-04 pending this decision).
+    // The rule: the webhook writes the SUBSCRIBED tier off the price id and lets
+    // the scheduler downgrade to free when grace lapses. Promotion here is safe
+    // because nothing entitles off the tier alone — every path re-checks access,
+    // and a never-activated sub is ONBOARDING, not grace:
+    //   - booleanEntitlement → `enabledByTier && accessAllowed`;
+    //   - assertNumericLimit → throws 402 on !accessAllowed before comparing;
+    //   - the one direct numericEntitlement caller (branches_count multi-branch
+    //     in business.controller) was missing that check — fixed in this commit.
+    // So tier_starter on the row is correct, and the old `tier_free` expectation
+    // encoded the pre-grace behaviour (SUBSCRIPTION_PAST_DUE_GRACE_DAYS=0).
     expect(prisma.subscription.update.mock.calls[0][0].data).toEqual(expect.objectContaining({
-      tierId: 'tier_free',
+      tierId: 'tier_starter',
       status: 'PAST_DUE',
       pastDueSince: expect.any(Date),
       // Going past_due OPENS the dunning grace window (pastDueAccessPatch); it

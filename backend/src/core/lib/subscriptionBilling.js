@@ -381,7 +381,8 @@ async function syncBusinessSubscriptionFromPaddle({
   // F10: keep the PAID tier during a past_due dunning grace window so a transient
   // card failure doesn't instantly lock out a paying customer. Grace expiry is
   // enforced by the scheduler (expirePastDueGraceSubscriptions). Default grace is
-  // 0 days (SUBSCRIPTION_PAST_DUE_GRACE_DAYS) → immediate downgrade, unchanged.
+  // 7 days (SUBSCRIPTION_PAST_DUE_GRACE_DAYS); set it to 0 for the old behaviour,
+  // an immediate downgrade to free at sync time.
   const graceState = pastDueAccessPatch({ existing, eventAt, paddleStatus });
   const graceActive = paddleStatus === 'past_due'
     && graceState.accessGraceUntil

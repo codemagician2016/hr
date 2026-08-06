@@ -21,8 +21,8 @@
  */
 
 const {
-  PAN_RE, IFSC_RE, UAN_RE, EMAIL_RE,
-  finding, rollupStatus, isBlank, toBool, toMinor, toNumber,
+  PAN_RE, IFSC_RE, UAN_RE, EMAIL_RE, ESIC_RE,
+  finding, rollupStatus, isBlank, toBool, toMinor, toNumber, isValidPhone,
   isValidDate, isValidMonth,
 } = require('./common');
 
@@ -60,6 +60,17 @@ function validateEmployee(row, ctx) {
   }
   if (!isBlank(row.uan) && !UAN_RE.test(String(row.uan).trim())) f.push(finding('BAD_UAN', 'ERROR', `UAN "${row.uan}" must be 12 digits`, 'uan'));
   if (!isBlank(row.ifsc) && !IFSC_RE.test(String(row.ifsc).trim().toUpperCase())) f.push(finding('BAD_IFSC', 'ERROR', `IFSC "${row.ifsc}" is invalid`, 'ifsc'));
+  // ERROR, not WARN, and deliberately so: the employee controller REJECTS a phone of
+  // this shape, so letting one in here lands a record the edit form cannot save — HR
+  // discovers it while changing something unrelated.
+  if (!isBlank(row.phone) && !isValidPhone(row.phone)) {
+    f.push(finding('BAD_PHONE', 'ERROR', `phone "${row.phone}" must be 7-15 digits (an optional + and spaces, dashes or brackets are allowed)`, 'phone'));
+  }
+  // Only when ESI actually applies — an ESIC number on a non-ESI employee is inert,
+  // but a malformed one on a covered employee fails the ESI return.
+  if (!isBlank(row.esiNumber) && !ESIC_RE.test(String(row.esiNumber).trim())) {
+    f.push(finding('BAD_ESIC', 'ERROR', `ESIC number "${row.esiNumber}" must be 17 digits`, 'esiNumber'));
+  }
 
   // Update vs create: a present, known code is an update.
   const exists = code && ctx.employeeCodes && ctx.employeeCodes.has(code);
