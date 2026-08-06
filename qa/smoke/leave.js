@@ -128,7 +128,12 @@ function availableOf(row) {
     const typeList = asList(types.body);
     ok(types.status < 400 && typeList.length > 0, 'tenant has leave types configured',
       `HTTP ${types.status}, ${typeList.length} type(s)`);
-    const leaveType = typeList[0];
+    // Deliberately avoid COMP_OFF: it draws from earned comp-off LOTS, not the
+    // aggregate balance, so crediting a balance cannot make it approvable. Picking
+    // it by accident is what turned this smoke red on prod (and exposed a real 500).
+    const isCompOff = (t) => /COMP[_ -]?OFF/i.test(`${t.category || ''} ${t.code || ''} ${t.name || ''}`);
+    const leaveType = typeList.find((t) => !isCompOff(t)) || typeList[0];
+    note(`leave type under test: ${leaveType && (leaveType.name || leaveType.code)}`);
 
     // ── 2. an employee to take leave ────────────────────────────────────────
     const emp = await send(page, 'POST', '/api/hr/employees', {

@@ -278,7 +278,11 @@ async function getStatutoryFramework(req, res, next) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // 409 reason codes that map to a conflict rather than a 400 (balance/overlap).
-const CONFLICT_CODES = new Set(['INSUFFICIENT_BALANCE', 'NEGATIVE_CAP_EXCEEDED', 'OVERLAPPING_LEAVE']);
+const CONFLICT_CODES = new Set([
+  'INSUFFICIENT_BALANCE', 'NEGATIVE_CAP_EXCEEDED', 'OVERLAPPING_LEAVE',
+  // Raised by the comp-off lot allocator at APPROVE time (compOffLots.js).
+  'INSUFFICIENT_COMP_OFF',
+]);
 
 function toDate(v) {
   // accept "YYYY-MM-DD" (Zod-validated) → midnight-UTC @db.Date
@@ -659,6 +663,19 @@ async function approveRequest(req, res, next) {
   } catch (e) {
     if (isDecisionRace(e)) {
       return res.status(409).json({ message: 'Request changed concurrently; please retry', reason: 'CONCURRENT_UPDATE' });
+    }
+    // A comp-off approval draws from the FIFO comp-off LOTS, not just the aggregate
+    // balance, and the two can disagree: an HR balance adjustment credits the
+    // balance without minting any lot. When it does, allocateFromLots throws
+    // INSUFFICIENT_COMP_OFF — an ordinary business outcome that was reaching the
+    // client as a bare 500 "Internal server error", telling the approver nothing
+    // about why. Surface it the same way createRequest surfaces INSUFFICIENT_BALANCE.
+    if (e && CONFLICT_CODES.has(e.code)) {
+      return res.status(409).json({
+        message: e.message,
+        reason: e.code,
+        ...(e.shortfall != null ? { shortfall: e.shortfall } : {}),
+      });
     }
     next(e);
   }
