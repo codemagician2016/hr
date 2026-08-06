@@ -149,6 +149,30 @@ function availableOf(row) {
       const beforeAvail = availableOf(beforeRow);
       note(`balance before: ${beforeAvail == null ? 'n/a' : beforeAvail} (${beforeRows.length} row(s))`);
 
+      // ── 3b. credit some balance ──────────────────────────────────────────
+      // A brand-new employee has an OPEN ledger but ZERO accrued days, so a
+      // request is correctly refused with "Insufficient leave balance". Crediting
+      // opening balance is the real HR action (accrual does the same over time),
+      // and it exercises the adjust endpoint on the way.
+      const periodCode = beforeRow && beforeRow.periodCode;
+      ok(!!periodCode, 'balance rows carry a periodCode to adjust against',
+        `row: ${JSON.stringify(beforeRow).slice(0, 120)}`);
+      if (periodCode) {
+        const adj = await send(page, 'POST', '/api/hr/leave/balances/adjust', {
+          employeeId: empId, leaveTypeId: leaveType.id, periodCode,
+          delta: 5, reason: 'QA smoke — opening credit',
+        });
+        ok(adj.status < 400, 'HR can credit an opening leave balance',
+          `HTTP ${adj.status} ${JSON.stringify(adj.body).slice(0, 120)}`);
+      }
+
+      // re-read so the "before" we compare against includes the credit
+      const credited = await api(page, `/api/hr/leave/employees/${empId}/balances`);
+      const creditedRows = asList(credited.body);
+      const creditedRow = creditedRows.find((r) => r.leaveTypeId === leaveType.id) || creditedRows[0];
+      const creditedAvail = availableOf(creditedRow);
+      note(`balance after credit: ${creditedAvail == null ? 'n/a' : creditedAvail}`);
+
       // ── 4. raise a request ───────────────────────────────────────────────
       const start = d(7);
       const req = await send(page, 'POST', '/api/hr/leave/requests', {
@@ -184,13 +208,14 @@ function availableOf(row) {
         const afterAvail = availableOf(afterRow);
         note(`balance after: ${afterAvail == null ? 'n/a' : afterAvail}`);
 
-        if (beforeAvail == null || afterAvail == null) {
+        const baseline = creditedAvail != null ? creditedAvail : beforeAvail;
+        if (baseline == null || afterAvail == null) {
           ok(false, 'leave balance is reported in a comparable form',
-            `before=${JSON.stringify(beforeRow).slice(0, 100)} after=${JSON.stringify(afterRow).slice(0, 100)}`);
+            `before=${JSON.stringify(creditedRow || beforeRow).slice(0, 100)} after=${JSON.stringify(afterRow).slice(0, 100)}`);
         } else {
-          ok(afterAvail < beforeAvail,
+          ok(afterAvail < baseline,
             'approving leave DEBITS the balance (the ledger actually moved)',
-            `before ${beforeAvail} → after ${afterAvail}`);
+            `before ${baseline} → after ${afterAvail}`);
         }
 
         // ── 7. it shows up where people look for it ────────────────────────
