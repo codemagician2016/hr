@@ -51,15 +51,31 @@ async function seedLeaveBalancesForEmployee(tx, {
   if (!tx || !businessId || !employeeId) return { created: 0 };
   try {
     const periodCode = periodCodeFor(asOf, taxYearStartMonth || 4);
-    const leaveTypes = await tx.leaveType.findMany({
-      where: {
-        businessId, isActive: true, deletedAt: null,
-        // A type with no country applies everywhere; a country-specific type only
-        // to matching employees. Same rule provision.js uses.
-        OR: [{ countryCode: null }, ...(countryCode ? [{ countryCode }] : [])],
-      },
-      select: { id: true, unit: true },
-    });
+
+    // Country resolution matters more than it looks. provision.js resolves it from
+    // the tenant's ENTITY, not from the employee — Employee.countryCode is usually
+    // null on a plain create. Filtering on that null matched only types with a NULL
+    // country, so on a tenant whose leave types are all country-scoped (the normal
+    // case: IN) this seeded NOTHING and the bug survived the fix.
+    //
+    // Resolve the tenant country, and if it cannot be determined, fall back to
+    // EVERY active type rather than silently seeding none — an over-broad zero
+    // balance is harmless; no balance at all blocks leave permanently.
+    let cc = countryCode || null;
+    if (!cc) {
+      try {
+        const ent = await tx.entity.findFirst({
+          where: { businessId, deletedAt: null },
+          select: { countryCode: true },
+        });
+        cc = (ent && ent.countryCode) || null;
+      } catch { /* fall through to the all-types branch */ }
+    }
+
+    const where = { businessId, isActive: true, deletedAt: null };
+    if (cc) where.OR = [{ countryCode: null }, { countryCode: cc }];
+
+    const leaveTypes = await tx.leaveType.findMany({ where, select: { id: true, unit: true } });
 
     let created = 0;
     for (const lt of leaveTypes) {
