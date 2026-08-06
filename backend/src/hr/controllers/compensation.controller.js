@@ -334,12 +334,42 @@ const structures = {
           return res.status(400).json({ message: 'each line requires componentId and calcMethod' });
         }
       }
+
+      // A structure with NO Basic/DA component can never satisfy India's Code on
+      // Wages (Basic + DA >= 50% of gross). It saves happily, lists happily and
+      // previews happily — and only fails much later, when someone tries to assign
+      // it to an employee and createRevision refuses with WAGES_50_RULE. A
+      // production tenant had exactly such a structure: gross Rs 99,500/month with
+      // Basic+DA of ZERO.
+      //
+      // Not a hard block: structures are built incrementally and NZ structures are
+      // not subject to the rule. But it must not be silent, so the response carries
+      // a warning the builder can surface at the point the mistake is made.
+      const warnings = [];
+      const isIndia = String(req.body.countryCode || '').toUpperCase() === 'IN';
+      if (isIndia && Array.isArray(req.body.lines) && req.body.lines.length) {
+        const ids = req.body.lines.map((l) => l.componentId).filter(Boolean);
+        const comps = ids.length
+          ? await prisma.salaryComponent.findMany({
+            where: { id: { in: ids }, businessId },
+            select: { kind: true },
+          })
+          : [];
+        const hasBasicDa = comps.some((c) => c.kind === 'BASIC' || c.kind === 'DEARNESS_ALLOWANCE');
+        if (!hasBasicDa) {
+          warnings.push({
+            code: 'NO_BASIC_DA_COMPONENT',
+            message: 'This structure has no Basic or Dearness Allowance component, so it cannot satisfy the India Code on Wages 50% rule. Any employee assigned it will be refused at revision time.',
+          });
+          console.warn(`[compensation] structure "${req.body.code}" for business ${businessId} has no BASIC/DA component — it cannot produce a compliant India payslip`);
+        }
+      }
       data.lines = { create: req.body.lines.map((l) => ({ ...pickLine(l), businessId })) };
       const item = await prisma.salaryStructure.create({
         data,
         include: { lines: { orderBy: { sortOrder: 'asc' } } },
       });
-      res.status(201).json(item);
+      res.status(201).json(warnings.length ? { ...item, warnings } : item);
     } catch (e) { if (e.code === 'P2002') return dup(res); next(e); }
   },
   update: async (req, res, next) => {
