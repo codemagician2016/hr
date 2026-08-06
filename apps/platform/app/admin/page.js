@@ -114,7 +114,7 @@ function SuperAdminDashboardContent() {
           <h1 className="mt-6 text-2xl font-bold text-gray-900">Super admin only</h1>
           <p className="mt-2 text-sm text-gray-500">
             This area is restricted to platform administrators. If you manage a business, visit your{' '}
-            <a href="/dashboard/business" className="text-indigo-600 font-semibold hover:underline">business dashboard</a>.
+            <a href="/business" className="text-indigo-600 font-semibold hover:underline">business dashboard</a>.
           </p>
           <button onClick={performLogout}
             className="mt-8 inline-flex items-center justify-center px-5 py-2.5 text-sm font-semibold rounded-xl border border-gray-300 hover:border-gray-900 text-gray-900 transition-colors">

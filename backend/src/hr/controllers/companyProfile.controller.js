@@ -77,6 +77,42 @@ const PROFILE_PREFILL = {
   contactPhone: (b) => b.phone,
 };
 
+
+// ── statutory identifier formats (India) ─────────────────────────────────────
+// These three reach real filings: PAN and TAN appear on Form 16 and every TDS
+// return, GSTIN on every invoice. A typo is not caught here today — it is caught
+// by the income-tax or GST portal, AFTER a filing is rejected, which is a far
+// more expensive place to find it.
+//
+// Rules are the published formats:
+//   PAN   AAAAA9999A     5 letters, 4 digits, 1 letter
+//   TAN   AAAA99999A     4 letters, 5 digits, 1 letter
+//   GSTIN 99AAAAA9999A9Z9  2-digit state code, the holder's 10-char PAN,
+//                          entity number, a literal 'Z', then a checksum char
+//
+// Stored uppercase and trimmed, because the portals are case-sensitive and a
+// lowercase PAN is rejected on submission.
+const ID_FORMATS = {
+  pan: { re: /^[A-Z]{5}[0-9]{4}[A-Z]$/, label: 'PAN', example: 'AAAAA9999A' },
+  tan: { re: /^[A-Z]{4}[0-9]{5}[A-Z]$/, label: 'TAN', example: 'AAAA99999A' },
+  gstin: { re: /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/, label: 'GSTIN', example: '29AAAAA9999A1Z5' },
+};
+
+// Returns an error object, or null when every supplied identifier is well formed.
+// A CLEARED field (empty/null) is always allowed — this validates what is set, it
+// does not make the fields mandatory.
+function statutoryIdError(body) {
+  for (const [field, rule] of Object.entries(ID_FORMATS)) {
+    const raw = body[field];
+    if (raw === undefined || raw === null || String(raw).trim() === '') continue;
+    const v = String(raw).trim().toUpperCase();
+    if (!rule.re.test(v)) {
+      return { field, message: `${rule.label} must look like ${rule.example}` };
+    }
+  }
+  return null;
+}
+
 function cleanProfileValue(v) {
   if (v === null || v === undefined || v === '') return null;
   return String(v).trim().slice(0, PROFILE_MAX_LEN) || null;
@@ -168,12 +204,19 @@ async function updateCompanyProfile(req, res, next) {
     });
     if (!biz) return res.status(404).json({ message: 'Business not found' });
 
+    const idError = statutoryIdError(body);
+    if (idError) {
+      return res.status(400).json({ message: idError.message, field: idError.field });
+    }
+
     const current = (biz.companyProfile && typeof biz.companyProfile === 'object') ? biz.companyProfile : {};
     const next = { ...current };
     const changed = [];
     for (const f of PROFILE_FIELDS) {
       if (body[f] !== undefined) {
-        const v = cleanProfileValue(body[f]);
+        let v = cleanProfileValue(body[f]);
+        // Portals are case-sensitive; a lowercase PAN is refused on submission.
+        if (v !== null && ID_FORMATS[f]) v = v.toUpperCase();
         if (v !== (current[f] ?? null)) changed.push(f);
         if (v === null) delete next[f];
         else next[f] = v;
