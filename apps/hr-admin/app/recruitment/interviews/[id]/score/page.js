@@ -106,7 +106,7 @@ export default function ScoreInterviewPage() {
         </div>
         <div>
           <FieldLabel hint="Free-text notes so a busy HR can remember exactly how this interview went.">Notes</FieldLabel>
-          <TextArea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
+          <TextArea value={notes} onChange={(v) => setNotes(v)} rows={3} />
         </div>
       </div>
 

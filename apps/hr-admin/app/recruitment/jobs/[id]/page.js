@@ -179,7 +179,7 @@ function CloseJobModal({ jobId, onClose, onClosed }) {
         </div>
         <div>
           <FieldLabel hint="Optional free-text note added to the recorded reason.">Note (optional)</FieldLabel>
-          <TextInput value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. headcount moved to Q3" />
+          <TextInput value={note} onChange={(v) => setNote(v)} placeholder="e.g. headcount moved to Q3" />
         </div>
         <ModalActions>
           <button type="button" onClick={onClose} className="px-3 py-2 text-sm text-gray-600">Cancel</button>
@@ -313,7 +313,7 @@ function PipelineTab({ jobId }) {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div>
             <FieldLabel hint="Search by candidate name or email.">Search</FieldLabel>
-            <TextInput value={filters.skill} onChange={(e) => setFilter('skill')(e.target.value)} placeholder="name or email" />
+            <TextInput value={filters.skill} onChange={(v) => setFilter('skill')(v)} placeholder="name or email" />
           </div>
           <div>
             <FieldLabel hint="Filter to one application status.">Status</FieldLabel>
@@ -852,7 +852,7 @@ function QuestionModal({ jobId, question, onClose, onSaved }) {
       <form onSubmit={save} className="space-y-4">
         <div>
           <FieldLabel hint="The question the candidate answers, e.g. 'Do you have a Computer Science engineering degree?'">Question</FieldLabel>
-          <TextInput value={prompt} onChange={(e) => setPrompt(e.target.value)} required />
+          <TextInput value={prompt} onChange={(v) => setPrompt(v)} required />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -873,7 +873,7 @@ function QuestionModal({ jobId, question, onClose, onSaved }) {
         {isKnockout && (
           <div>
             <FieldLabel hint="The passing value(s). For Yes/No use 'true'. For choices, the option value(s) that pass — comma-separate multiple.">Passing answer(s)</FieldLabel>
-            <TextInput value={knockoutValue} onChange={(e) => setKnockoutValue(e.target.value)} placeholder={kind === 'BOOLEAN' ? 'true' : 'e.g. yes'} />
+            <TextInput value={knockoutValue} onChange={(v) => setKnockoutValue(v)} placeholder={kind === 'BOOLEAN' ? 'true' : 'e.g. yes'} />
           </div>
         )}
 
@@ -892,7 +892,7 @@ function QuestionModal({ jobId, question, onClose, onSaved }) {
             <div className="space-y-2">
               {options.map((o, i) => (
                 <div key={i} className="grid grid-cols-12 gap-2 items-center">
-                  <div className="col-span-7"><TextInput value={o.label} placeholder={`Option ${i + 1}`} onChange={(e) => setOpt(i, 'label', e.target.value)} /></div>
+                  <div className="col-span-7"><TextInput value={o.label} placeholder={`Option ${i + 1}`} onChange={(v) => setOpt(i, 'label', v)} /></div>
                   <div className="col-span-3"><NumberInput value={o.points} onChange={(v) => setOpt(i, 'points', v)} min={0} /></div>
                   <div className="col-span-2 text-right"><button type="button" onClick={() => removeOpt(i)} disabled={options.length === 1} className="text-xs text-red-600 hover:underline">Remove</button></div>
                 </div>

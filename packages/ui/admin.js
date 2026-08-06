@@ -77,6 +77,15 @@ export function PrimaryButton({ onClick, type = 'button', loading, disabled, chi
   );
 }
 
+// CONTRACT — read this before wiring one up:
+//   onChange receives the STRING VALUE, not the DOM event.
+//     right:  onChange={(v) => setName(v)}
+//     wrong:  onChange={(e) => setName(e.target.value)}   ← e is the string;
+//                                                          e.target is undefined
+//   The wrong form does not fail at build or on render — it throws on the FIRST
+//   KEYSTROKE, so the field simply refuses to accept typing and looks disabled.
+//   It cost a real "unable to type in new job form" report, across 18 call sites.
+//   TextArea, DateInput and TimeInput below share this contract.
 export function TextInput({ label, value, onChange, type = 'text', required, hint, min, max, step, maxLength, pattern, placeholder }) {
   return (
     <div>

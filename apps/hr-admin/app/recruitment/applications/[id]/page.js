@@ -537,10 +537,10 @@ function ScheduleModal({ applicationId, jobId, onClose, onScheduled }) {
           </div>
         </div>
         {mode === 'ONSITE' && (
-          <div><FieldLabel hint="Room / address shown to the candidate.">Location</FieldLabel><TextInput value={locationText} onChange={(e) => setLocationText(e.target.value)} /></div>
+          <div><FieldLabel hint="Room / address shown to the candidate.">Location</FieldLabel><TextInput value={locationText} onChange={(v) => setLocationText(v)} /></div>
         )}
         {mode === 'VIDEO' && (
-          <div><FieldLabel hint="The meeting link emailed to the candidate.">Video link</FieldLabel><TextInput value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)} placeholder="https://…" /></div>
+          <div><FieldLabel hint="The meeting link emailed to the candidate.">Video link</FieldLabel><TextInput value={videoUrl} onChange={(v) => setVideoUrl(v)} placeholder="https://…" /></div>
         )}
         <div>
           <FieldLabel hint="The employees on the interview panel. Each gets their own blank scorecard to fill in their portal — one card per interviewer.">Panel (interviewers)</FieldLabel>

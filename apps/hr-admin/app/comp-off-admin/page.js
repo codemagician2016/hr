@@ -264,7 +264,7 @@ function SettingsForm({ onSaved, onError }) {
         {NUMBER_FIELDS.map((f) => (
           <div key={f.key}>
             <label className="mb-1 block text-sm font-medium text-gray-700">{f.label}</label>
-            <TextInput type="number" min="0" value={config[f.key] == null ? '' : config[f.key]} onChange={(e) => setField(f.key, e.target.value)} />
+            <TextInput type="number" min="0" value={config[f.key] == null ? '' : config[f.key]} onChange={(v) => setField(f.key, v)} />
             <p className="mt-1 text-xs text-gray-500">{f.hint}</p>
           </div>
         ))}
@@ -306,21 +306,21 @@ function GrantForm({ onGranted, onError }) {
     <form onSubmit={submit} className="mt-4 max-w-lg rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
       <div className="mb-3">
         <label className="mb-1 block text-sm font-medium text-gray-700">Employee ID</label>
-        <TextInput value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} placeholder="employee uuid" />
+        <TextInput value={employeeId} onChange={(v) => setEmployeeId(v)} placeholder="employee uuid" />
       </div>
       <div className="mb-3 grid grid-cols-2 gap-3">
         <div>
           <label className="mb-1 block text-sm font-medium text-gray-700">Days</label>
-          <TextInput type="number" step="0.5" min="0.5" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
+          <TextInput type="number" step="0.5" min="0.5" value={quantity} onChange={(v) => setQuantity(v)} />
         </div>
         <div>
           <label className="mb-1 block text-sm font-medium text-gray-700">Custom expiry source date (optional)</label>
-          <TextInput type="date" value={sourceDate} onChange={(e) => setSourceDate(e.target.value)} />
+          <TextInput type="date" value={sourceDate} onChange={(v) => setSourceDate(v)} />
         </div>
       </div>
       <div className="mb-4">
         <label className="mb-1 block text-sm font-medium text-gray-700">Reason</label>
-        <TextInput value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. off-system weekend support" />
+        <TextInput value={reason} onChange={(v) => setReason(v)} placeholder="e.g. off-system weekend support" />
       </div>
       <PrimaryButton type="submit" disabled={busy || !employeeId.trim()}>{busy ? 'Granting…' : 'Grant comp-off'}</PrimaryButton>
     </form>

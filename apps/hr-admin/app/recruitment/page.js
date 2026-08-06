@@ -264,11 +264,11 @@ function NewJobModal({ onClose, onCreated }) {
         <div className="grid grid-cols-2 gap-3">
           <div>
             <FieldLabel hint="A short internal code for this requisition, e.g. ENG-001. Must be unique.">Job code</FieldLabel>
-            <TextInput value={d.code} onChange={(e) => set('code')(e.target.value)} required />
+            <TextInput value={d.code} onChange={(v) => set('code')(v)} required />
           </div>
           <div>
             <FieldLabel hint="The role title candidates will see on the careers page.">Title</FieldLabel>
-            <TextInput value={d.title} onChange={(e) => set('title')(e.target.value)} required />
+            <TextInput value={d.title} onChange={(v) => set('title')(v)} required />
           </div>
           <div>
             <FieldLabel hint="The hiring country. Drives the offer pre-flight (India 50% wage rule) and the onboarding template seeded on hire.">Country</FieldLabel>
@@ -296,7 +296,7 @@ function NewJobModal({ onClose, onCreated }) {
         </div>
         <div>
           <FieldLabel hint="A plain-language description of the role, shown to candidates.">Description</FieldLabel>
-          <TextArea value={d.description} onChange={(e) => set('description')(e.target.value)} rows={3} />
+          <TextArea value={d.description} onChange={(v) => set('description')(v)} rows={3} />
         </div>
 
         {/* ── Merit weighting (two sliders that must total 100) ── */}
@@ -403,7 +403,7 @@ function TemplateModal({ template, onClose, onSaved }) {
       <form onSubmit={save} className="space-y-4">
         <div>
           <FieldLabel hint="Name this reusable skill set, e.g. 'Backend Engineer — Tech Round'. You can attach it to any job/round.">Template name</FieldLabel>
-          <TextInput value={name} onChange={(e) => setName(e.target.value)} required />
+          <TextInput value={name} onChange={(v) => setName(v)} required />
         </div>
         <div>
           <FieldLabel hint="How multiple interviewers' cards combine into one interview score. MEAN = average; MEDIAN = middle; MAX = best; TRIMMED MEAN drops the highest and lowest when ≥4 cards.">Multi-interviewer aggregation</FieldLabel>
@@ -419,7 +419,7 @@ function TemplateModal({ template, onClose, onSaved }) {
             {skills.map((s, i) => (
               <div key={i} className="grid grid-cols-12 gap-2 items-center">
                 <div className="col-span-7">
-                  <TextInput value={s.name} placeholder={`Skill ${i + 1} (e.g. Data Structures)`} onChange={(e) => setSkill(i, 'name', e.target.value)} />
+                  <TextInput value={s.name} placeholder={`Skill ${i + 1} (e.g. Data Structures)`} onChange={(v) => setSkill(i, 'name', v)} />
                 </div>
                 <div className="col-span-3">
                   <NumberInput value={s.weight} onChange={(v) => setSkill(i, 'weight', v)} min={0} step={0.5} />

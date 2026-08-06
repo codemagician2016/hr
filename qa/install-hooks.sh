@@ -7,7 +7,8 @@
 #   bash qa/install-hooks.sh
 #
 # Installs a pre-commit hook that runs:
-#   qa/check-branch.sh    refuses commits on the staging/main deploy branches
+#   qa/check-branch.sh       refuses commits on the staging/main deploy branches
+#   qa/check-ui-contracts.sh catches value-vs-event misuse of the shared inputs
 #   qa/check-playbook.sh  retired playbook check (a no-op; kept so the hook
 #                         shape matches what the other repos expect)
 set -euo pipefail
@@ -20,6 +21,7 @@ cat > "$HOOK" <<'HOOK_EOF'
 ROOT="$(git rev-parse --show-toplevel)"
 # Deploy branches are a shipped-record, not a work branch — see qa/check-branch.sh.
 bash "$ROOT/qa/check-branch.sh" || exit 1
+bash "$ROOT/qa/check-ui-contracts.sh" || exit 1
 bash "$ROOT/qa/check-playbook.sh" || exit 1
 HOOK_EOF
 chmod +x "$HOOK"
