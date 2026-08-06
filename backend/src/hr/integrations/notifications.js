@@ -805,8 +805,20 @@ async function notifyHrEvent({
   triggeredBy,
 }) {
   const key = templateKey || templateKeyForEvent(event);
-  if (!key) return { ok: false, reason: 'NO_TEMPLATE_FOR_EVENT' };
-  return sendNotification({
+  if (!key) {
+    // This function NEVER THROWS by design, so a failure comes back as a result
+    // object — and no caller anywhere inspects it. ~40 call sites wrap it in
+    // `.catch(() => {})`, which is harmless (nothing is thrown) but also means a
+    // notification that was never sent leaves no trace at all.
+    //
+    // The people who notice are the ones who never got told: an employee whose
+    // comp-off is about to lapse, a manager sitting on an unapproved request, a
+    // candidate waiting on an interview invite. Log it here, once, rather than at
+    // every call site.
+    console.warn(`[notify] no template for event "${event}" (business ${businessId}) — NOTHING WAS SENT to ${recipientEmail || recipientPhone || 'unknown recipient'}`);
+    return { ok: false, reason: 'NO_TEMPLATE_FOR_EVENT' };
+  }
+  const result = await sendNotification({
     businessId,
     recipientPhone,
     recipientEmail,
@@ -815,6 +827,10 @@ async function notifyHrEvent({
     variables,
     triggeredBy: triggeredBy || `HR_${(event || key).toUpperCase()}`,
   });
+  if (result && result.ok === false) {
+    console.warn(`[notify] event "${event}" for business ${businessId} was NOT delivered: ${result.reason || 'unknown reason'}`);
+  }
+  return result;
 }
 
 module.exports = {

@@ -1044,8 +1044,31 @@ async function settleSeparation(req, res, next) {
         await tx.lifecycleJourney.update({ where: { id: journey.id }, data: { currentStage: adv.currentStage, status: adv.status, version: { increment: 1 } } });
       }
       // 5. Mark the FnF PayRun paid (settlement disbursed).
+      //
+      // This used to swallow the error with `.catch(() => {})` — INSIDE the
+      // settlement transaction, which meant the failure could not roll anything
+      // back. The separation would commit (employee TERMINATED, access revoked,
+      // relieving letter unlocked) while the payroll record still said the
+      // full-and-final had never been paid. The person is settled in one ledger
+      // and unpaid in the other, with nothing logged.
+      //
+      // A settlement that cannot record its own payment must NOT be treated as a
+      // success, so the error is surfaced and the transaction rolls back. The only
+      // realistic cause is fnfPayRunId pointing at a run that no longer exists —
+      // which is itself a data problem an operator needs to see.
       if (sep.fnfPayRunId) {
-        await tx.payRun.update({ where: { id: sep.fnfPayRunId }, data: { status: 'PAID', paidAt: new Date() } }).catch(() => {});
+        try {
+          await tx.payRun.update({
+            where: { id: sep.fnfPayRunId },
+            data: { status: 'PAID', paidAt: new Date() },
+          });
+        } catch (e) {
+          console.error(`[offboarding] could not mark FnF PayRun ${sep.fnfPayRunId} PAID for separation ${sep.id}: ${e.message}`);
+          const err = new Error(`Cannot settle: the full-and-final pay run (${sep.fnfPayRunId}) could not be marked paid. Settling would record the employee as settled while payroll still shows them unpaid.`);
+          err.status = 409;
+          err.reason = 'FNF_PAYRUN_NOT_MARKED_PAID';
+          throw err;
+        }
       }
       // 6. Leave-encashment write-back (§4.11): the FnF run already minted the
       //    FNF_LEAVE_ENCASH / FNF_NZ_HOLIDAY_PAYOUT earnings, but the leave ledger
