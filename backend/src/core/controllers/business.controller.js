@@ -510,9 +510,34 @@ async function setup(req, res) {
 
   // Provision the DriftHR subdomain for the freshly-created tenant (best-effort).
   // Runs after the auto-subscription so the host can bind onto it.
-  await provisionSubdomain({ businessId: business.id, slug: finalSlug, staging: isStaging() });
+  //
+  // Best-effort here means "never block signup", NOT "never tell anyone". This
+  // call swallows every failure — no CF token, zone unresolvable, host taken —
+  // and returns { provisioned: false }. Nothing used to read that, so a tenant
+  // could be created with no portal host and only find out weeks later when a
+  // new hire's invite and a shared job link both answered NXDOMAIN. That is
+  // exactly what happened to a live customer.
+  //
+  // We still do not fail signup on it: a workspace without a subdomain is fully
+  // usable (invites now route via the platform host, job links via the admin
+  // host). But the outcome is logged loudly and returned, so ops can see it and
+  // the client can surface "your portal address needs setting up".
+  const provision = await provisionSubdomain({ businessId: business.id, slug: finalSlug, staging: isStaging() });
+  if (!provision || !provision.provisioned) {
+    console.error(
+      `[setup] business ${business.id} (${finalSlug}) was created WITHOUT a portal subdomain`
+      + `${provision && provision.reason ? ` — reason: ${provision.reason}` : ''}. `
+      + 'Employee invites and shared job links will not be on the tenant host until this is '
+      + 'provisioned (Settings → Domain re-runs it).',
+    );
+  }
 
-  res.status(201).json({ business });
+  res.status(201).json({
+    business,
+    // false → the tenant has no portal address yet. The workspace works; the
+    // admin should set one in Settings → Domain so their people get branded links.
+    portalProvisioned: !!(provision && provision.provisioned),
+  });
 }
 
 // PATCH /api/business/slug  { slug }
