@@ -77,6 +77,10 @@ const BENIGN = [
   // navigation (or the context closes) it logs this and, as the message itself
   // says, falls back to a normal navigation. The user sees nothing.
   'Failed to fetch RSC payload',
+  // The scorecard step probes /me/scorecards deliberately. On a tenant whose
+  // operator has no linked Employee the server answers 403 "No linked employee",
+  // which is the correct answer and the documented skip signal — not a fault.
+  'recruitment/me/scorecards',
 ];
 const isBenign = (s) => BENIGN.some((b) => s.includes(b));
 
@@ -354,6 +358,100 @@ const CAND_EMAIL = `smoke.candidate.${stamp}@example.com`;
           const skills = (tpl.body && (tpl.body.skills || (tpl.body.template && tpl.body.template.skills))) || [];
           ok(skills.length > 0, 'that scorecard template has skills to rate',
             `HTTP ${tpl.status}, ${skills.length} skill(s)`);
+        }
+      }
+
+      // ── scoring: the step that turns an interview into a decision ──────
+      // Everything above proves an interview can be BOOKED. None of it proves it
+      // can be SCORED, which is what actually ranks a candidate. Submitting a card
+      // requires the panellist's OWN session (SoD: myScorecard 404s unless the
+      // caller is on the panel), so schedule a second interview with the operator
+      // as the panel and score that one.
+      const selfEmp = await page.evaluate(async (email) => {
+        const r = await fetch(`/api/hr/employees?search=${encodeURIComponent(email)}&pageSize=5`, { credentials: 'include' });
+        if (!r.ok) return null;
+        const j = await r.json().catch(() => null);
+        const list = Array.isArray(j) ? j : (j && (j.items || j.data)) || [];
+        return list.length ? list[0].id : null;
+      }, EMAIL);
+
+      if (!selfEmp) {
+        // Not a failure: this operator simply has no linked Employee, so it can
+        // never be a panellist. Say so rather than reporting a broken scorecard.
+        console.log('  ..    skip: scorecard submission (operator has no linked Employee to sit on a panel)');
+      } else {
+        const iv2 = await page.evaluate(async ([appId, empId]) => {
+          const r = await fetch('/api/hr/recruitment/interviews', {
+            method: 'POST', credentials: 'include',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ applicationId: appId, round: 2, mode: 'VIDEO', interviewerIds: [empId] }),
+          });
+          return { status: r.status, body: r.ok ? await r.json().catch(() => null) : await r.text().catch(() => '') };
+        }, [mineApp.id, selfEmp]);
+        ok(iv2.status < 400, 'interview can be scheduled with the operator on the panel',
+          `HTTP ${iv2.status} ${String(iv2.body).slice(0, 90)}`);
+
+        if (iv2.body && iv2.body.id) {
+          const card = await page.evaluate(async (ivId) => {
+            const r = await fetch(`/api/hr/recruitment/me/scorecards/${ivId}`, { credentials: 'include' });
+            return { status: r.status, body: r.ok ? await r.json().catch(() => null) : await r.text().catch(() => '') };
+          }, iv2.body.id);
+          const skills = (card.body && card.body.skills) || [];
+          if (card.status === 403) {
+            // 403 here is specifically "No linked employee for this user".
+            // attachSelfEmployee resolves the panellist by userId, and this
+            // operator account has no Employee row — so it can never sit on a
+            // panel. That is a property of the seed account, not a defect, so it
+            // must not be reported as a failure.
+            //
+            // The flow itself is NOT unverified: recruitment-ats.test.js drives
+            // open → rate → submit at controller level and asserts interviewScore
+            // AND meritScore are computed, plus SoD (a non-panellist gets 404) and
+            // the post-submit 409 lock.
+            console.log('  ..    skip: scorecard submission — operator has no linked Employee (covered by recruitment-ats.test.js)');
+          } else {
+            ok(card.status < 400 && skills.length > 0,
+              'panellist can open their scorecard and it has skills to rate',
+              `HTTP ${card.status}, ${skills.length} skill(s)`);
+          }
+
+          if (skills.length) {
+            const cardId = card.body.card.id;
+            const saved = await page.evaluate(async ([cid, ratings]) => {
+              const r = await fetch(`/api/hr/recruitment/me/scorecards/${cid}`, {
+                method: 'PATCH', credentials: 'include',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ ratings, recommendation: 'HIRE' }),
+              });
+              return { status: r.status, body: r.ok ? null : await r.text().catch(() => '') };
+            }, [cardId, skills.map((s) => ({ skillId: s.id, score: 8 }))]);
+            ok(saved.status < 400, 'ratings save against the skill allowlist',
+              `HTTP ${saved.status} ${String(saved.body).slice(0, 90)}`);
+
+            const sub = await page.evaluate(async (cid) => {
+              const r = await fetch(`/api/hr/recruitment/me/scorecards/${cid}/submit`, {
+                method: 'POST', credentials: 'include',
+              });
+              return { status: r.status, body: r.ok ? await r.json().catch(() => null) : await r.text().catch(() => '') };
+            }, cardId);
+            ok(sub.status < 400, 'scorecard submits',
+              `HTTP ${sub.status} ${String(sub.body).slice(0, 90)}`);
+
+            // The whole point of scoring: the application must come back RANKED.
+            // A submitted card that leaves interviewScore null means the candidate
+            // still sits in the merit list's "pending" bucket forever.
+            const merit = await page.evaluate(async ([jobId, appId]) => {
+              const r = await fetch(`/api/hr/recruitment/jobs/${jobId}/merit-list`, { credentials: 'include' });
+              if (!r.ok) return { status: r.status, found: null };
+              const j = await r.json().catch(() => null);
+              const rows = [...((j && j.ranked) || []), ...((j && j.pending) || [])];
+              const row = rows.find((x) => x.id === appId);
+              return { status: r.status, found: row ? { interviewScore: row.interviewScore, meritScore: row.meritScore } : null };
+            }, [jobId, mineApp.id]);
+            ok(merit.found && merit.found.interviewScore != null,
+              'submitted scorecard produces an interviewScore (candidate is ranked)',
+              `HTTP ${merit.status} ${JSON.stringify(merit.found)}`);
+          }
         }
       }
 
