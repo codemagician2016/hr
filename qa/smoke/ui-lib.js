@@ -81,4 +81,27 @@ async function openInCleanBrowser(browser, url, watch, sink, tag = 'anon') {
   return { status, text };
 }
 
-module.exports = { assertControlVisible, typeAndReadBack, openInCleanBrowser };
+/**
+ * signIn(page, {admin, email, password}) -> { ok, throttled, status }
+ *   Signs in through the real login form and DISTINGUISHES a rate-limit from a
+ *   failure. Running many smokes in a row trips the auth limiter (429), which is
+ *   the product defending itself against brute force — reporting that as "login
+ *   broken" would be exactly the cry-wolf that trains people to ignore results.
+ */
+async function signIn(page, { admin, email, password }) {
+  let loginStatus = 0;
+  page.on('response', (r) => {
+    if (r.url().includes('/api/auth/login')) loginStatus = r.status();
+  });
+  await page.goto(`${admin}/login`, { waitUntil: 'networkidle' });
+  await page.fill('input[type="email"]', email);
+  await page.fill('input[type="password"]', password);
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'networkidle' }).catch(() => {}),
+    page.click('button[type="submit"]'),
+  ]);
+  const signedIn = !page.url().includes('/login');
+  return { ok: signedIn, throttled: loginStatus === 429, status: loginStatus };
+}
+
+module.exports = { assertControlVisible, typeAndReadBack, openInCleanBrowser, signIn };
