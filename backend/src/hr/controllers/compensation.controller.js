@@ -372,6 +372,12 @@ const REVISION_FIELDS = [
   'revisionReason', 'approvalRequestId', 'notes',
 ];
 const REVISION_DATES = ['effectiveFrom', 'effectiveTo'];
+// Mirrors enum CompRevisionReason in schema.prisma. Kept here so an invalid value
+// is refused with a clear 400 listing the options, instead of reaching Prisma and
+// surfacing as an opaque 500.
+const COMP_REVISION_REASONS = new Set([
+  'HIRE', 'ANNUAL_REVISION', 'PROMOTION', 'CORRECTION', 'RESTRUCTURE', 'STATUTORY_ADJUSTMENT',
+]);
 const pickRevision = picker(REVISION_FIELDS, REVISION_DATES);
 
 // Resolve the target employee's Grade (for the band/compa-ratio view) via the
@@ -463,6 +469,19 @@ const revisions = {
       const { entityId, currencyCode, basis, effectiveFrom, revisionReason } = req.body;
       if (!entityId || !currencyCode || !basis || !effectiveFrom || !revisionReason) {
         return res.status(400).json({ message: 'entityId, currencyCode, basis, effectiveFrom and revisionReason are required' });
+      }
+      // revisionReason is a Prisma ENUM (CompRevisionReason), not free text. Its
+      // PRESENCE was checked but never its VALUE, so any other string reached
+      // prisma.compensationRevision.create() and came back as a bare 500
+      // "Internal server error" — telling the caller nothing about what was wrong
+      // with a field they had in fact supplied. Same shape as the comp-off crash:
+      // an ordinary bad-input condition surfacing as a server fault.
+      if (!COMP_REVISION_REASONS.has(String(revisionReason))) {
+        return res.status(400).json({
+          message: `revisionReason must be one of ${[...COMP_REVISION_REASONS].join(', ')}`,
+          reason: 'INVALID_REVISION_REASON',
+          allowed: [...COMP_REVISION_REASONS],
+        });
       }
 
       const emp = await prisma.employee.findFirst({ where: { id: employeeId, businessId, deletedAt: null } });
