@@ -120,6 +120,7 @@ const CAND_EMAIL = `smoke.candidate.${stamp}@example.com`;
   const problems = [];
   let jobId = null;
   let publicUrl = null;
+  let resumeAttached = false;
 
   // ── 1. admin session ──────────────────────────────────────────────────────
   const adminCtx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
@@ -264,6 +265,33 @@ const CAND_EMAIL = `smoke.candidate.${stamp}@example.com`;
           ok(false, 'candidate detail fields present', `found ${nCand} inputs`);
         }
 
+        // ATTACH A RÉSUMÉ. Applying without one is the easy path, and taking it is
+        // exactly why nobody noticed that résumé uploads were dead in production
+        // until a real applicant was told "Resume uploads are temporarily
+        // unavailable" on a live client's careers page. A tiny valid PDF is enough:
+        // the failure was a missing bucket, not a parsing problem.
+        const fileInput = cand.locator('input[type="file"]').first();
+        if (await fileInput.count().catch(() => 0)) {
+          const MINIMAL_PDF = Buffer.from(
+            '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n'
+            + '2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n'
+            + '3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\n'
+            + 'trailer<</Root 1 0 R>>\n%%EOF\n', 'utf8');
+          await fileInput.setInputFiles({
+            name: `smoke-resume-${stamp}.pdf`,
+            mimeType: 'application/pdf',
+            buffer: MINIMAL_PDF,
+          }).catch(() => {});
+          resumeAttached = true;
+          // The page shows this banner when the server refuses the upload. It is a
+          // 503 the candidate cannot work around, so treat it as a hard failure.
+          await cand.waitForTimeout(800);
+          const preSubmit = await cand.innerText('body').catch(() => '');
+          ok(!/uploads are temporarily unavailable|upload failed/i.test(preSubmit),
+            'résumé attach is not refused by the server',
+            preSubmit.slice(0, 140).replace(/\s+/g, ' '));
+        }
+
         // Consent is required server-side; an unticked box is a 400.
         const consent = cand.locator('input[type="checkbox"]').last();
         if (await consent.isVisible().catch(() => false)) {
@@ -275,7 +303,14 @@ const CAND_EMAIL = `smoke.candidate.${stamp}@example.com`;
         await submit.click().catch(() => {});
         await cand.waitForTimeout(4000);
         const after = await cand.innerText('body').catch(() => '');
-        const accepted = /thank you|received|we.ll be in touch|application/i.test(after);
+        // Match ONLY genuine success wording. The bare word "application" used to
+        // be in here, which made "Too many applications, please try again" and
+        // "Your application could not be submitted" both read as SUCCESS — the
+        // assertion would have hidden the very failures it exists to catch.
+        // Known error wording fails outright rather than falling through.
+        const rejected = /too many|could not|failed|unavailable|error|try again/i.test(after);
+        const accepted = !rejected
+          && /thank you|received|we.ll be in touch|application (has been |was )?(received|submitted)/i.test(after);
         ok(accepted, 'application submits and the candidate sees a confirmation',
           after.slice(0, 90).replace(/\n/g, ' '));
       }
