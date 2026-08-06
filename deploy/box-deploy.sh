@@ -45,6 +45,18 @@ fi
 
 log "prisma db push (additive schema sync; no --accept-data-loss → refuses drops)"
 npx prisma db push --skip-generate 2>&1 | tail -14
+# ── partial UNIQUE indexes ────────────────────────────────────────────────────
+# Prisma's schema language cannot express an index with a WHERE clause, so the
+# nine in prisma/sql/partial-indexes.sql exist ONLY in raw SQL — which `db push`
+# never executes. Result: on a box only ever deployed this way, none of them are
+# present. A prod audit found 1264 indexes and zero partial ones, meaning every
+# one of these data-integrity guards was missing on a live system (duplicate
+# onboarding journeys per offer, duplicate employees on one work email, duplicate
+# active Form 16s, duplicate arrear cycles...). Reapply them after every push.
+# Idempotent and non-fatal — see the script header.
+log "reapplying partial UNIQUE indexes (db push cannot create them)"
+node scripts/apply-partial-indexes.js 2>&1 | tail -20 || log "WARN: partial-index apply failed (non-fatal)"
+
 # realign any table the push created postgres-owned (belt-and-braces).
 [ -n "$APPUSER" ] && (sudo -u postgres psql -d "$DB" -tAc "SELECT format('ALTER TABLE %I OWNER TO %I;', tablename, '$APPUSER') FROM pg_tables WHERE schemaname='public' AND tableowner <> '$APPUSER'" 2>/dev/null | sudo -u postgres psql -d "$DB" -q -v ON_ERROR_STOP=0 >/dev/null 2>&1 || true)
 
