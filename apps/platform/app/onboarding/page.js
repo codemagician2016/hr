@@ -184,15 +184,6 @@ function slugSuggestions(base) {
 // Debounce a value by `delay` ms — used to throttle slug availability checks.
 function useDebouncedValue(value, delay = 400) {
   const [debounced, setDebounced] = useState(value);
-  // Locale is read AFTER mount, never during render — a render-time document.cookie
-  // read makes the server emit 'en' and the client emit the cookie value, which
-  // React reports as a hydration mismatch (#425) and which then fails the
-  // surrounding Suspense boundary (#422).
-  const [currentLocale, setCurrentLocale] = useState('en');
-  useEffect(() => {
-    const m = document.cookie.match(/(?:^|;\s*)NEXT_LOCALE=([^;]+)/);
-    if (m && m[1]) setCurrentLocale(m[1]);
-  }, []);
   useEffect(() => {
     const t = setTimeout(() => setDebounced(value), delay);
     return () => clearTimeout(t);
@@ -212,6 +203,15 @@ function Icon({ name, className = 'h-4 w-4' }) {
 
 export default function OnboardingPage() {
   const [authChecking, setAuthChecking] = useState(true);
+  // Locale is read AFTER mount, never during render. A render-time document.cookie
+  // read makes the server emit 'en' and the client emit the cookie value, which
+  // React reports as a hydration mismatch (#425) and which then fails the Suspense
+  // boundary around it (#422).
+  const [currentLocale, setCurrentLocale] = useState('en');
+  useEffect(() => {
+    const m = document.cookie.match(/(?:^|;\s*)NEXT_LOCALE=([^;]+)/);
+    if (m && m[1]) setCurrentLocale(m[1]);
+  }, []);
   const [draftReady, setDraftReady] = useState(false);
   const [step, setStep] = useState(0);
   const [s, setS] = useState(DEFAULT_STATE);
