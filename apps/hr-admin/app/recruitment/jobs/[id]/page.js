@@ -873,7 +873,22 @@ function QuestionModal({ jobId, question, onClose, onSaved }) {
         {isKnockout && (
           <div>
             <FieldLabel hint="The passing value(s). For Yes/No use 'true'. For choices, the option value(s) that pass — comma-separate multiple.">Passing answer(s)</FieldLabel>
-            <TextInput value={knockoutValue} onChange={(v) => setKnockoutValue(v)} placeholder={kind === 'BOOLEAN' ? 'true' : 'e.g. yes'} />
+            {kind === 'BOOLEAN' ? (
+              // A free-text box for a yes/no rule is how "Yes" became false. The
+              // template editor already uses a select; match it so the passing
+              // answer cannot be mistyped.
+              <select
+                value={String(knockoutValue).toLowerCase() === 'true' ? 'true' : String(knockoutValue).toLowerCase() === 'false' ? 'false' : ''}
+                onChange={(e) => setKnockoutValue(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white"
+              >
+                <option value="">— pick the passing answer —</option>
+                <option value="true">Yes</option>
+                <option value="false">No</option>
+              </select>
+            ) : (
+              <TextInput value={knockoutValue} onChange={(v) => setKnockoutValue(v)} placeholder="e.g. yes" />
+            )}
           </div>
         )}
 
@@ -912,9 +927,27 @@ function QuestionModal({ jobId, question, onClose, onSaved }) {
   );
 }
 
+// Words a person actually types for a yes/no question. The old parser was
+//     parts.map((p) => p.toLowerCase() === 'true')
+// so ANY word that was not literally "true" became FALSE. Typing "Yes" — the
+// obvious answer for a Yes/No question — silently configured the knockout as
+// "you pass ONLY if you answer No", and every candidate who answered correctly
+// was auto-rejected. That happened on a live job: candidates who answered Yes to
+// "Can you commit to a minimum internship duration of 3 months?" were rejected.
+const TRUE_WORDS = new Set(['true', 'yes', 'y', '1']);
+const FALSE_WORDS = new Set(['false', 'no', 'n', '0']);
+
 function parseKnockout(kind, raw) {
   const parts = String(raw || '').split(',').map((s) => s.trim()).filter(Boolean);
-  if (kind === 'BOOLEAN') return parts.map((p) => p.toLowerCase() === 'true');
+  if (kind === 'BOOLEAN') {
+    // Unrecognised words are DROPPED rather than silently coerced to false.
+    // An empty pass-set then leaves the knockout unset instead of inverting it —
+    // failing loudly beats rejecting real candidates for answering correctly.
+    return parts
+      .map((p) => p.toLowerCase())
+      .filter((p) => TRUE_WORDS.has(p) || FALSE_WORDS.has(p))
+      .map((p) => TRUE_WORDS.has(p));
+  }
   return parts;
 }
 
