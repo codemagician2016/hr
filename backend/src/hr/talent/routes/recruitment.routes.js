@@ -123,6 +123,10 @@ router.delete('/scorecard-templates/:id', canManage, s.removeScorecardTemplate);
 // ── Candidates ───────────────────────────────────────────────────────────────
 router.get('/candidates', canView, c.listCandidates);
 router.get('/candidates/:id', canView, c.getCandidate);
+// A résumé is PII held in the PRIVATE bucket, so it is never served from a public
+// URL. This mints a short-lived presigned GET for a recruiter who already holds
+// canViewHiring — the link expires, so forwarding it does not leak the CV forever.
+router.get('/candidates/:id/resume-link', canView, c.getResumeLink);
 router.post('/candidates', canManage, c.createCandidate);
 router.patch('/candidates/:id', canManage, c.updateCandidate);
 router.delete('/candidates/:id', canManage, c.removeCandidate);

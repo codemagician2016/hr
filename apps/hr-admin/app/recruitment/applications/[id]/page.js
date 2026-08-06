@@ -44,6 +44,16 @@ export default function ApplicationPage() {
     try { await post(`/api/hr/recruitment/applications/${id}/move`, { stageId }); load(); }
     catch (e) { setError(e.message); }
   }
+  // A résumé is PII and lives in the private bucket, so there is no URL to link at.
+  // Ask the API for a short-lived presigned link at click time and open that; it
+  // expires, so a forwarded link does not leak the CV indefinitely.
+  async function openResume(candidateId) {
+    try {
+      const r = await get(`/api/hr/recruitment/candidates/${candidateId}/resume-link`);
+      if (r && r.url) window.open(r.url, '_blank', 'noopener,noreferrer');
+      else setError('No résumé link was returned.');
+    } catch (e) { setError(e.message); }
+  }
   async function recompute() {
     try { await post(`/api/hr/recruitment/applications/${id}/recompute-score`, {}); load(); }
     catch (e) { setError(e.message); }
@@ -137,7 +147,7 @@ export default function ApplicationPage() {
             <div><b>Source:</b> {app.appliedSource || 'MANUAL'}</div>
             {cand.phone && <div><b>Phone:</b> {cand.phone}</div>}
             {cand.linkedinUrl && <div><a href={cand.linkedinUrl} target="_blank" rel="noreferrer" className="hover:underline" style={{ color: 'var(--theme-primary)' }}>LinkedIn ↗</a></div>}
-            {cand.resumeUrl && <div><a href={cand.resumeUrl} target="_blank" rel="noreferrer" className="hover:underline" style={{ color: 'var(--theme-primary)' }}>View resume ↗</a></div>}
+            {cand.resumeUrl && <div><button type="button" onClick={() => openResume(cand.id)} className="hover:underline" style={{ color: 'var(--theme-primary)' }}>View resume ↗</button></div>}
           </section>
 
           {/* Feature 38 — candidate portal profile (education / experience / skills). */}

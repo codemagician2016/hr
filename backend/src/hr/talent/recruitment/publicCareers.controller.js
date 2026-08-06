@@ -14,6 +14,7 @@
  *  - Consent is mandatory; the candidate is deduped by (businessId, email).
  */
 
+const crypto = require('crypto');
 const prisma = require('../../../core/lib/prisma');
 const s3 = require('../../../core/lib/s3');
 // Careers CMS — public projections (draft → null; only isPublished exposes content)
@@ -191,17 +192,36 @@ async function publicApply(req, res, next) {
     if (resumeDataUrl) {
       const chk = validateResumeDataUrl(resumeDataUrl);
       if (!chk.ok) return res.status(chk.status).json({ message: chk.message });
-      if (!s3.isConfigured()) {
+      // A résumé is PII — name, phone, address, education, work history. It goes to
+      // the dedicated PRIVATE bucket and is read back only through a short-lived
+      // presigned url minted after auth (see getResumeLink). It must never be
+      // written to the public assets bucket, where it would be world-readable to
+      // anyone who obtained the link, permanently.
+      //
+      // isPrivateConfigured() is fail-closed: false when no dedicated private
+      // bucket is set, so a misconfiguration refuses the upload rather than
+      // quietly publishing a candidate's CV.
+      if (!s3.isPrivateConfigured()) {
         // NEVER inline the raw base64 data URL into Candidate.resumeUrl (@db.Text,
         // unbounded): an unauthenticated caller rotating emails would write an
         // unbounded stream of ~10MB blobs and exhaust DB storage. Require a bounded
         // external store for public uploads; reject (not inline) when it is absent.
+        console.error('[careers] résumé upload refused — private object storage is not configured (set S3_BUCKET + a dedicated S3_EXPORTS_BUCKET)');
         return res.status(503).json({ message: 'Resume uploads are temporarily unavailable. Please apply without a resume, or try again later.' });
       }
       try {
-        const up = await s3.uploadDataUrl({ dataUrl: resumeDataUrl, businessId: biz.id, scope: 'resume' });
-        resumeUrl = up.url;
-      } catch {
+        const { buffer, mime, ext } = s3.parsePrivateDataUrl(resumeDataUrl, { maxBytes: MAX_RESUME_BYTES });
+        const rand = crypto.randomBytes(16).toString('hex');
+        const up = await s3.uploadPrivateObject({
+          key: `resumes/${biz.id}/${rand}.${ext}`,
+          body: buffer,
+          contentType: mime,
+        });
+        // Store the KEY, not a URL. Legacy rows hold an https:// public URL; the
+        // read path distinguishes them, so both keep working.
+        resumeUrl = up.key;
+      } catch (e) {
+        console.error(`[careers] résumé upload failed for business ${biz.id}: ${e.message}`);
         return res.status(503).json({ message: 'Resume upload failed. Please apply without a resume, or try again later.' });
       }
     }

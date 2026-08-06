@@ -4,10 +4,27 @@
 // back to embedding base64 inline (legacy behaviour).
 // ============================================================================
 
-const { S3Client, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+const { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const crypto = require('crypto');
 
 const BUCKET = process.env.S3_BUCKET || '';
+// PRIVATE bucket for candidate résumés and other PII documents. The main
+// S3_BUCKET serves PUBLIC assets (branding, logos), so anything written there is
+// world-readable by design. Point S3_EXPORTS_BUCKET at a dedicated PRIVATE bucket
+// (Block Public Access on / no public binding). Private objects are fetched
+// exclusively through short-lived presigned GET urls minted after auth — never
+// via PUBLIC_URL.
+const EXPORTS_BUCKET = process.env.S3_EXPORTS_BUCKET || BUCKET;
+// FAIL-CLOSED: a private object (a candidate's CV: name, phone, address,
+// education) must NEVER land in the PUBLIC assets bucket. When no dedicated
+// private bucket is configured, EXPORTS_BUCKET falls back to the public BUCKET —
+// so private writes are DISABLED (uploadPrivateObject throws) rather than
+// silently publishing PII at a guessable URL.
+const PRIVATE_BUCKET_OK = !!EXPORTS_BUCKET && EXPORTS_BUCKET !== BUCKET;
+if (BUCKET && !PRIVATE_BUCKET_OK) {
+  console.warn('[s3] ⚠️ S3_EXPORTS_BUCKET is not set to a dedicated private bucket — private object writes (résumés, candidate documents) are DISABLED (fail-closed) to avoid writing PII to the public assets bucket.');
+}
 const REGION = process.env.S3_REGION || process.env.AWS_REGION || 'ap-south-1';
 // Public URL base. Prefer a CloudFront distribution (faster, CDN'd, custom
 // domain) over the raw S3 endpoint. If neither is set, falls back to the
@@ -107,6 +124,74 @@ async function deleteByUrl(url) {
   }
 }
 
+// ============================================================================
+// PRIVATE objects — candidate résumés and other PII documents.
+//   • key namespaced under 'private/' so a bucket policy can lock the prefix
+//   • NO public CacheControl and NO public-read ACL (unlike uploadDataUrl)
+//   • written to the DEDICATED private bucket, never the public assets bucket
+//   • fetched only via short-lived presigned GET urls (presignedGetUrl below),
+//     so the object is never world-readable and a leaked link expires
+// ============================================================================
+
+// Normalise + guard a private-object key so every caller lands under private/.
+function normalisePrivateKey(key) {
+  const clean = String(key || '').replace(/^\/+/, '');
+  if (!clean) throw new Error('private object key required');
+  return clean.startsWith('private/') ? clean : `private/${clean}`;
+}
+
+// True when a dedicated PRIVATE bucket is configured (distinct from the public
+// assets bucket). Callers check this before offering an upload that stores PII.
+function isPrivateConfigured() {
+  return isConfigured() && PRIVATE_BUCKET_OK;
+}
+
+// PUT a private object. `body` may be a Buffer/Uint8Array/string. Returns { key }.
+async function uploadPrivateObject({ key, body, contentType }) {
+  if (!isConfigured()) throw new Error('S3 not configured');
+  if (!PRIVATE_BUCKET_OK) {
+    const e = new Error('Private object storage is not configured (set S3_EXPORTS_BUCKET to a dedicated private bucket). Refusing to write a private object to the public assets bucket.');
+    e.code = 'PRIVATE_BUCKET_NOT_CONFIGURED';
+    throw e;
+  }
+  const safeKey = normalisePrivateKey(key);
+  await getClient().send(new PutObjectCommand({
+    Bucket: EXPORTS_BUCKET,
+    Key: safeKey,
+    Body: body,
+    ContentType: contentType || 'application/octet-stream',
+    // Intentionally NO CacheControl / ACL: private, uncacheable object.
+  }));
+  return { key: safeKey };
+}
+
+// Time-limited presigned GET url for a private object. Default 15 min.
+async function presignedGetUrl(key, { expiresIn = 900 } = {}) {
+  if (!isConfigured()) throw new Error('S3 not configured');
+  const safeKey = normalisePrivateKey(key);
+  return getSignedUrl(
+    getClient(),
+    new GetObjectCommand({ Bucket: EXPORTS_BUCKET, Key: safeKey }),
+    { expiresIn },
+  );
+}
+
+// Delete a private object by key. Best-effort; never throws.
+async function deletePrivateObject(key) {
+  if (!isConfigured() || !key) return;
+  try {
+    await getClient().send(new DeleteObjectCommand({ Bucket: EXPORTS_BUCKET, Key: normalisePrivateKey(key) }));
+  } catch (err) {
+    console.warn('[s3] private delete failed for', key, err.message);
+  }
+}
+
+// Decode a data URL into a raw buffer for a PRIVATE upload (no public URL is
+// ever produced). Reuses parseDataUrl's type + size validation.
+function parsePrivateDataUrl(dataUrl, opts) {
+  return parseDataUrl(dataUrl, opts);
+}
+
 // The public URL prefix callers can check against (e.g. to allow-list
 // the proxy endpoint only for our own bucket and block SSRF).
 function getPublicUrlPrefix() { return PUBLIC_URL; }
@@ -126,4 +211,8 @@ function isOurUrl(url) {
   return false;
 }
 
-module.exports = { isConfigured, uploadDataUrl, deleteByUrl, parseDataUrl, getPublicUrlPrefix, isOurUrl };
+module.exports = {
+  isConfigured, uploadDataUrl, deleteByUrl, parseDataUrl, getPublicUrlPrefix, isOurUrl,
+  isPrivateConfigured, uploadPrivateObject, presignedGetUrl, deletePrivateObject,
+  parsePrivateDataUrl,
+};

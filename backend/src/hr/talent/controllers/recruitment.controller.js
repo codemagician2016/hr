@@ -26,6 +26,7 @@ const { resolveAccessibleEmployeeIds, scopeAllows } = require('../../lib/scopeRe
 // Feature 36 — candidate stage messaging (best-effort, fire-and-forget). A move /
 // bulk-move / offer-send fires the mapped candidate event through the gated fan-out.
 const candidateNotify = require('../recruitment/candidateNotify');
+const s3 = require('../../../core/lib/s3');
 const { resolveScorecardTemplateId } = require('../recruitment/scorecardTemplateResolver');
 
 const DUP_MSG = 'A record with that code already exists';
@@ -563,6 +564,42 @@ async function listCandidates(req, res, next) {
     if (!reach.all) where.applications = { some: { jobId: { in: reach.ids } } };
     const items = await prisma.candidate.findMany({ where, orderBy: { createdAt: 'desc' } });
     res.json({ items });
+  } catch (e) { next(e); }
+}
+
+// GET /candidates/:id/resume-link — mint a short-lived link to a candidate's CV.
+//
+// Résumés live in the PRIVATE bucket and are never world-readable, so the admin UI
+// cannot link straight at them. This returns a presigned GET valid for 10 minutes,
+// only for a recruiter who already passes canViewHiring AND the F1 requisition
+// scope — the same 404-on-out-of-scope rule as getCandidate, so this cannot become
+// an IDOR that leaks CVs across requisitions.
+//
+// Legacy rows hold a public https:// URL from before private storage existed;
+// those are returned as-is so old applications keep opening.
+async function getResumeLink(req, res, next) {
+  try {
+    const { businessId } = req.user;
+    const reach = await accessibleJobIds(businessId, req.recruitmentScope);
+    const where = { id: req.params.id, businessId, deletedAt: null };
+    if (!reach.all) where.applications = { some: { jobId: { in: reach.ids } } };
+
+    const cand = await prisma.candidate.findFirst({ where, select: { id: true, resumeUrl: true } });
+    if (!cand) return res.status(404).json({ message: 'Not found' });
+    if (!cand.resumeUrl) return res.status(404).json({ message: 'This candidate has no résumé on file' });
+
+    // Legacy public URL (pre-private-storage) — hand it back unchanged.
+    if (/^https?:\/\//i.test(cand.resumeUrl)) {
+      return res.json({ url: cand.resumeUrl, expiresIn: null, legacy: true });
+    }
+
+    if (!s3.isPrivateConfigured()) {
+      return res.status(503).json({ message: 'Résumé storage is not configured on this environment.' });
+    }
+    const expiresIn = 600;
+    const url = await s3.presignedGetUrl(cand.resumeUrl, { expiresIn });
+    await audit(businessId, req.user.id, 'recruitment.resume.view', 'Candidate', cand.id, {});
+    res.json({ url, expiresIn, legacy: false });
   } catch (e) { next(e); }
 }
 
@@ -1432,7 +1469,7 @@ module.exports = {
   // jobs — share link + funnel summary (Feature 12 enhancement)
   shareJob, setJobPublic, jobSummary,
   // candidates
-  listCandidates, getCandidate, createCandidate, updateCandidate, removeCandidate,
+  listCandidates, getCandidate, getResumeLink, createCandidate, updateCandidate, removeCandidate,
   // applications (+ server-side filters + bulk actions)
   listApplications, getApplication, createApplication, moveApplication, bulkApplicationAction,
   // interviews
