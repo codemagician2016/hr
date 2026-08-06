@@ -109,9 +109,17 @@ function slugify(s) {
 let _hostForSlug;
 try { ({ hostForSlug: _hostForSlug } = require('../../../core/lib/subdomainProvision')); } catch { _hostForSlug = null; }
 
+// The admin console host — the fallback that always resolves. Derived from
+// PLATFORM_DOMAIN so it tracks staging (app-staging.drifthr.com) and prod
+// (app.drifthr.com) without a second env var.
+function adminHost() {
+  const domain = process.env.PLATFORM_DOMAIN || 'drifthr.com';
+  return domain.startsWith('staging.') ? `app-${domain}` : `app.${domain}`;
+}
+
 // Build the public link bundle for a job. `businessSlug` is the tenant's careers
 // slug (Business.slug). Returns null when the job has no public slug yet.
-function publicCareersLink(businessSlug, job) {
+function publicCareersLink(businessSlug, job, provisionedHost = null) {
   if (!job || !job.publicSlug || !businessSlug) return null;
   // The shareable link points at the tenant careers HOST ({slug}-staging.drifthr.com
   // / {slug}.drifthr.com), which is served by the ESS app. ESS resolves the tenant
@@ -121,21 +129,49 @@ function publicCareersLink(businessSlug, job) {
   //   apply  POST /api/careers/:slug/jobs/:publicSlug/apply
   // Emitting the old admin-host shape (/careers/:businessSlug/jobs/:pubS) 404'd on
   // the ESS host (no matching route), so every shared job link was dead.
-  const careersPath = `/careers`;
-  const jobPath = `${careersPath}/jobs/${job.publicSlug}`;
-  // API apply path the public page (and any portal that wires a direct POST) hits.
-  const apiApplyPath = `/api/careers/${businessSlug}/jobs/${job.publicSlug}/apply`;
-  let host = null;
-  try { host = _hostForSlug ? _hostForSlug(businessSlug) : null; } catch { host = null; }
-  const origin = host ? `https://${host}` : null;
+  // The apply endpoint the public careers page actually POSTs to. Mounted at
+  // /api/public/careers (index.js) — NOT /api/careers, which is a DIFFERENT
+  // router (the Feature 38 candidate portal). Emitting the wrong one handed job
+  // boards an apply URL pointing at another module.
+  const apiApplyPath = `/api/public/careers/${businessSlug}/jobs/${job.publicSlug}/apply`;
+  // Use the host that was actually PROVISIONED. hostForSlug() only formats
+  // `{slug}.drifthr.com` — it never checks the DNS record exists, so on a tenant
+  // whose best-effort provisioning failed it hands back a confident URL that
+  // answers DNS_PROBE_FINISHED_NXDOMAIN. A job link is pasted onto job boards and
+  // sent to candidates, so a dead one is worse here than almost anywhere else.
+  //
+  // With no provisioned host, fall back to the ADMIN host, which serves the
+  // slug-carrying shape (/careers/:businessSlug/jobs/:publicSlug) and always
+  // resolves. Note the platform host does NOT serve that route — only the admin
+  // host and the tenant host do, which is why this fallback is not PLATFORM_DOMAIN.
+  // The two hosts serve DIFFERENT shapes, so the paths must follow the host we
+  // actually pick — returning tenant-shaped paths next to an admin-host URL is
+  // how a "copy link" button produces a 404.
+  //   tenant host : /careers            /careers/jobs/:publicSlug      (slug from host)
+  //   admin  host : /careers/:slug      /careers/:slug/jobs/:publicSlug
+  let host = provisionedHost || null;
+  let careersPath;
+  let jobPath;
+  if (host) {
+    careersPath = '/careers';
+    jobPath = `/careers/jobs/${job.publicSlug}`;
+  } else {
+    host = adminHost();
+    careersPath = `/careers/${businessSlug}`;
+    jobPath = `/careers/${businessSlug}/jobs/${job.publicSlug}`;
+  }
+  const origin = `https://${host}`;
   return {
     businessSlug,
     publicSlug: job.publicSlug,
     careersPath,            // tenant careers board (relative)
     jobPath,                // candidate-facing JD + apply page (relative)
     apiApplyPath,           // the unauth apply endpoint (relative)
-    careersUrl: origin ? `${origin}${careersPath}` : null,
-    url: origin ? `${origin}${jobPath}` : null, // the shareable absolute link
+    careersUrl: `${origin}${careersPath}`,
+    url: `${origin}${jobPath}`, // the shareable absolute link
+    // false → this link is on the shared admin host because the tenant has no
+    // provisioned portal address. It WORKS; it just is not on their own domain.
+    onTenantHost: !!provisionedHost,
     // only LIVE (OPEN + isPublic) jobs actually resolve on the public board.
     live: !!(job.isPublic && job.status === 'OPEN'),
   };
@@ -145,6 +181,28 @@ function publicCareersLink(businessSlug, job) {
 async function businessSlug(businessId) {
   const biz = await prisma.business.findUnique({ where: { id: businessId }, select: { slug: true } });
   return biz ? biz.slug : null;
+}
+
+// The tenant's slug PLUS the host that was actually provisioned for it. One read,
+// because publicCareersLink cannot tell a real host from a formatted string:
+// hostForSlug() just renders `{slug}.drifthr.com` whether or not that DNS record
+// was ever created. Subdomain provisioning at signup is best-effort and swallows
+// its failures, so a tenant can sit there emitting job links to a hostname that
+// answers NXDOMAIN — which is exactly what a candidate hit on a shared job link.
+async function businessPortal(businessId) {
+  const biz = await prisma.business.findUnique({
+    where: { id: businessId },
+    select: {
+      slug: true,
+      subscription: { select: { customDomain: true, customDomainStatus: true, customDomainVerified: true } },
+    },
+  });
+  if (!biz) return { slug: null, provisionedHost: null };
+  const sub = biz.subscription;
+  const provisionedHost = sub && sub.customDomainVerified && sub.customDomainStatus === 'ACTIVE'
+    ? (sub.customDomain || null)
+    : null;
+  return { slug: biz.slug, provisionedHost };
 }
 
 async function listJobs(req, res, next) {
@@ -170,8 +228,8 @@ async function getJob(req, res, next) {
     if (!scopeAllowsJob(req.recruitmentScope, item)) return res.status(404).json({ message: 'Not found' });
     // Surface the shareable public-careers link so the job page can render a
     // copyable URL + Publish/Unpublish without guessing the tenant host.
-    const slug = await businessSlug(businessId);
-    res.json({ ...item, publicLink: publicCareersLink(slug, item) });
+    const { slug, provisionedHost } = await businessPortal(businessId);
+    res.json({ ...item, publicLink: publicCareersLink(slug, item, provisionedHost) });
   } catch (e) { next(e); }
 }
 
@@ -187,11 +245,11 @@ async function shareJob(req, res, next) {
     });
     if (!job) return res.status(404).json({ message: 'Not found' });
     if (!scopeAllowsJob(req.recruitmentScope, job)) return res.status(404).json({ message: 'Not found' });
-    const slug = await businessSlug(businessId);
+    const { slug, provisionedHost } = await businessPortal(businessId);
     res.json({
       jobId: job.id, title: job.title, status: job.status, isPublic: job.isPublic,
       publicSlug: job.publicSlug,
-      publicLink: publicCareersLink(slug, job),
+      publicLink: publicCareersLink(slug, job, provisionedHost),
     });
   } catch (e) { next(e); }
 }
@@ -222,8 +280,8 @@ async function setJobPublic(req, res, next) {
         updated = await prisma.job.update({ where: { id: job.id }, data });
       } else { throw e; }
     }
-    const slug = await businessSlug(businessId);
-    res.json({ ...updated, publicLink: publicCareersLink(slug, updated) });
+    const { slug, provisionedHost } = await businessPortal(businessId);
+    res.json({ ...updated, publicLink: publicCareersLink(slug, updated, provisionedHost) });
   } catch (e) { next(e); }
 }
 
@@ -418,12 +476,12 @@ async function jobSummary(req, res, next) {
     const endAt = firstHireAt || (job.status === 'CLOSED' || job.status === 'FILLED' ? job.closedAt : new Date());
     const timeToFillDays = openedAt && endAt ? Math.max(0, Math.round((new Date(endAt) - new Date(openedAt)) / DAY)) : null;
 
-    const slug = await businessSlug(businessId);
+    const { slug, provisionedHost } = await businessPortal(businessId);
     res.json({
       job: {
         id: job.id, title: job.title, code: job.code, status: job.status, openings: job.openings,
         openedAt, closedAt: job.closedAt, closeReason: job.closeReason,
-        isPublic: job.isPublic, publicLink: publicCareersLink(slug, job),
+        isPublic: job.isPublic, publicLink: publicCareersLink(slug, job, provisionedHost),
       },
       totals: { total, ...outcomes, offerSent, waiting },
       funnel,

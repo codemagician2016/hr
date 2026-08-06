@@ -39,7 +39,11 @@ function partA() {
   {
     const link = publicCareersLink('acme', { publicSlug: 'backend-engineer-eng-001', isPublic: true, status: 'OPEN' });
     assert(link && link.jobPath === '/careers/acme/jobs/backend-engineer-eng-001', `jobPath built (got ${link && link.jobPath})`);
-    assert(link.apiApplyPath === '/api/public/careers/acme/jobs/backend-engineer-eng-001', 'apiApplyPath points at the unauth apply route');
+    // Must include the trailing /apply — the route is
+    // POST /api/public/careers/:businessSlug/jobs/:publicSlug/apply. Asserting it
+    // without /apply passed a URL that FETCHES the job to anything wiring a
+    // direct application POST.
+    assert(link.apiApplyPath === '/api/public/careers/acme/jobs/backend-engineer-eng-001/apply', `apiApplyPath points at the unauth apply route (got ${link.apiApplyPath})`);
     assert(link.careersPath === '/careers/acme', 'careersPath points at the tenant board');
     assert(link.live === true, 'OPEN + isPublic → link is LIVE');
     // a DRAFT public job is NOT live yet
@@ -173,7 +177,7 @@ async function partB() {
     const publicSlug = setPub.body.publicSlug;
 
     const share = await callController(spine.shareJob, withScope({ user: op, params: { id: job.id } }));
-    assert(share.statusCode === 200 && share.body.publicLink.apiApplyPath === `/api/public/careers/${businessSlug}/jobs/${publicSlug}`, 'shareJob returns the apply API path');
+    assert(share.statusCode === 200 && share.body.publicLink.apiApplyPath === `/api/public/careers/${businessSlug}/jobs/${publicSlug}/apply`, 'shareJob returns the apply API path');
 
     const getJ = await callController(spine.getJob, withScope({ user: op, params: { id: job.id } }));
     assert(getJ.body.publicLink && getJ.body.publicLink.publicSlug === publicSlug, 'getJob embeds the publicLink bundle');
