@@ -93,15 +93,30 @@ async function buildSetPasswordLink(businessId, rawToken) {
   let derivedHost = null;
   try { derivedHost = slug && _hostForSlug ? _hostForSlug(slug) : null; } catch { derivedHost = null; }
 
-  const host = boundHost || derivedHost;
-  const origin = host ? `https://${host}` : null;
+  // When the tenant has no PROVISIONED host, do not emit a link to a guessed one
+  // — a hostname that was never created returns DNS_PROBE_FINISHED_NXDOMAIN and
+  // the new hire simply cannot claim their account. Fall back to the platform
+  // host, which always resolves and now serves /set-password
+  // (apps/platform/app/set-password). That works because the invite token is the
+  // only thing identifying the tenant: acceptInvite looks the row up by tokenHash
+  // and reads businessId off it, so no host or slug context is needed.
+  //
+  // The tenant's own host stays PREFERRED whenever it genuinely exists, because
+  // that page is branded for them; this is the safety net, not the default.
+  const platformHost = process.env.PLATFORM_DOMAIN || 'drifthr.com';
+  const host = boundHost || platformHost;
+  const origin = `https://${host}`;
   return {
-    url: origin ? `${origin}${path}` : null,
+    url: `${origin}${path}`,
     path,
-    host: host || null,
-    // false → the host is a guess from the slug and may not resolve. Callers
-    // surface this so an admin finds out BEFORE the new hire does.
+    host,
+    // false → we fell back to the shared platform host because the tenant's own
+    // portal address is not provisioned. The link WORKS, but the admin should
+    // still set their portal address so employees get the branded experience.
     hostVerified: !!boundHost,
+    // Kept for diagnostics: what the slug WOULD have produced. Useful when an
+    // admin asks why the link is not on their own domain.
+    derivedHost: derivedHost || null,
   };
 }
 
@@ -299,9 +314,10 @@ async function createInvite({ businessId, employeeId, createdByUserId = null, al
   // instead of reporting a clean success over a dead link.
   if (!link.hostVerified) {
     console.warn(
-      `[portalInvite] business ${businessId}: sending an invite to unverified host `
-      + `${link.host || '(none)'} — the tenant's portal subdomain is not provisioned, `
-      + 'so this link may not resolve. Set the portal address in Settings → Domain.',
+      `[portalInvite] business ${businessId}: portal subdomain not provisioned `
+      + `(would have been ${link.derivedHost || 'unknown'}) — invite link falls back to `
+      + `${link.host}. It WORKS, but employees do not get the tenant-branded page. `
+      + 'Set the portal address in Settings → Domain to provision it.',
     );
   }
 
@@ -313,11 +329,11 @@ async function createInvite({ businessId, employeeId, createdByUserId = null, al
     linkHost: link.host,
     linkHostVerified: link.hostVerified,
     ...(link.hostVerified ? {} : {
-      warning: 'PORTAL_HOST_UNVERIFIED',
+      warning: 'PORTAL_HOST_UNPROVISIONED',
       warningMessage:
-        'This invite link points at a portal address we could not confirm is live, so the '
-        + 'employee may see an invalid-link page. Open Settings → Domain and save your portal '
-        + 'address to provision it, then re-send.',
+        'Your portal address is not set up yet, so this link uses our shared sign-in page. '
+        + 'It works — the employee can set their password now. To give your team a link on '
+        + 'your own address, open Settings → Domain and save your portal address.',
     }),
     notified,
     loginEmail,
