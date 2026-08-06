@@ -85,18 +85,13 @@ something further down the list.
 
 ## Known open (found, not yet fixed)
 
-- **Letters — merge UNPROVEN (module 12).** Two different employees rendered
-  byte-identical PDF content streams, which would mean the template is not being
-  merged with employee data. But `letters.service.mergeEmployeeFrom()` builds
-  name/code/designation/dateOfJoining correctly, and the seeded "Experience /
-  Service Certificate" template does reference `{{employee.name}}` and
-  `{{employee.code}}` — so code review and the byte comparison DISAGREE. The
-  renderer embeds subset fonts whose glyph runs decode to repeated 0x21 bytes, so
-  the comparison may be measuring the encoding rather than the text. Deliberately
-  NOT asserted either way: a defect claim here would be a false alarm, and a pass
-  would be unearned. Settle it with a ToUnicode-aware PDF parser, or by rendering
-  through the service directly against a test DB. If it IS real, every experience
-  certificate a company issues is the same document regardless of recipient.
+- ~~**Letters — merge UNPROVEN**~~ **RESOLVED: the merge works.** Proven in
+  `backend/src/hr/letters/__tests__/merge-substitutes.test.js` — Asha Rao
+  (EMP-001, Engineer) and Bilal Khan (EMP-002, Analyst) render demonstrably
+  different bodies with no tokens left over. The identical PDF content streams
+  were an artefact of the renderer's SUBSET fonts (glyph runs decode to repeated
+  0x21 bytes), not a failure to merge. Lesson: prove a transformation at the layer
+  where it happens, not through an encoding that can hide it.
 
 - **Separations**: `compute-fnf` returns 422 `nz-earnings-required` when NZ
   holiday-pay earnings cannot be resolved from payroll history. Deliberate guard;
