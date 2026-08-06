@@ -1096,6 +1096,10 @@ async function updateInterview(req, res, next) {
 // ─────────────────────────────────────────────────────────────────────────────
 const OFFER_FIELDS = [
   'ctcAnnual', 'grossMonthly', 'currencyCode', 'joiningDate', 'structureId',
+  // basicMonthly/daMonthly are validated by offerWageCheck at create time; they
+  // are persisted so provisioning can re-derive the split (see provision.js
+  // resolveBasicDaMonthly) instead of dead-ending an accepted offer.
+  'basicMonthly', 'daMonthly',
   'letterUrl', 'expiresAt',
 ];
 const OFFER_DATES = ['joiningDate', 'expiresAt'];

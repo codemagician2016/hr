@@ -12949,6 +12949,14 @@ model Offer {
   application         Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   ctcAnnual           Decimal?    @db.Decimal(15, 2)
   grossMonthly        Decimal?    @db.Decimal(15, 2)
+  // Basic / DA as PROPOSED on the offer. createOffer already validates the India
+  // Code-on-Wages 50% rule against these, then used to DISCARD them — so
+  // provisioning could not re-derive the split later and refused the hire with
+  // "no Basic/DA split is resolvable", even though the recruiter had supplied one.
+  // Persisted so those figures survive to provisioning. A salary structure, when
+  // one is attached, still wins as the authoritative source.
+  basicMonthly        Decimal?    @db.Decimal(15, 2)
+  daMonthly           Decimal?    @db.Decimal(15, 2)
   currencyCode        String      @db.Char(3)
   joiningDate         DateTime?   @db.Date
   structureId         String? // proposed SalaryStructure

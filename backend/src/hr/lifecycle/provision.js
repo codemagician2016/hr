@@ -203,6 +203,18 @@ async function resolveBasicDaMonthly(client, { offer, businessId, compSplit }) {
   if (split.basicMonthly != null) {
     return { basicMonthly: String(split.basicMonthly), daMonthly: split.daMonthly != null ? String(split.daMonthly) : null };
   }
+  // 3) The figures the recruiter put ON THE OFFER. createOffer validates the 50%
+  // rule against exactly these, so an offer that passed that check must remain
+  // provisionable. Without this tier, an offer raised WITHOUT a salary structure
+  // sailed through creation, sending and acceptance — seeding onboarding — and then
+  // dead-ended here with "no Basic/DA split is resolvable", blaming the recruiter
+  // for a value they had in fact supplied.
+  if (offer && offer.basicMonthly != null) {
+    return {
+      basicMonthly: String(offer.basicMonthly),
+      daMonthly: offer.daMonthly != null ? String(offer.daMonthly) : null,
+    };
+  }
   return null;
 }
 
