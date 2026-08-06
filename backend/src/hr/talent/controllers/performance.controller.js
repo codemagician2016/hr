@@ -176,8 +176,34 @@ async function launchCycle(req, res, next) {
         throw err;
       }
     }
-    await writeAudit({ businessId, actorId: req.user.id, action: 'cycle.launch', entityType: 'ReviewCycle', entityId: cycle.id, meta: { created: created.length, skipped: skipped.length } });
-    res.json({ created: created.length, skipped });
+    // Open the self-review window. Launch generated the review rows, but the CYCLE
+    // was left in DRAFT — and reviewStateMachine's submitSelf guard requires
+    // ACTIVE or SELF_REVIEW:
+    //
+    //   if (ctx.cycleStatus && !['ACTIVE','SELF_REVIEW'].includes(ctx.cycleStatus))
+    //     return `cycle is ${ctx.cycleStatus}; self-review window is closed`;
+    //
+    // Nothing anywhere in the backend ever wrote this field (the only
+    // reviewCycle.update sets releasedAt), so a launched cycle stayed DRAFT
+    // forever and EVERY employee's self-review was refused — an entire company's
+    // appraisal blocked, with review forms visibly sitting there. HR could only
+    // work around it by PATCHing the status by hand, and nothing said so.
+    //
+    // Only DRAFT is advanced: a cycle already in SELF_REVIEW / MANAGER_REVIEW /
+    // CALIBRATION must not be dragged backwards by a re-launch (launch is
+    // re-runnable to pick up new joiners).
+    let cycleStatus = cycle.status;
+    if (cycle.status === 'DRAFT') {
+      const updated = await prisma.reviewCycle.update({
+        where: { id: cycle.id },
+        data: { status: 'ACTIVE' },
+        select: { status: true },
+      });
+      cycleStatus = updated.status;
+    }
+
+    await writeAudit({ businessId, actorId: req.user.id, action: 'cycle.launch', entityType: 'ReviewCycle', entityId: cycle.id, meta: { created: created.length, skipped: skipped.length, cycleStatus } });
+    res.json({ created: created.length, skipped, status: cycleStatus });
   } catch (e) { next(e); }
 }
 
