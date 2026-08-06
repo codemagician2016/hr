@@ -409,10 +409,22 @@ const ALL_TRUE = Object.fromEntries(PERMISSION_KEYS.map((k) => [k, true]));
 // JSON wins; otherwise SUPER_ADMIN/BUSINESS_ADMIN get everything, others nothing.
 export function permissionsFromSession(session) {
   if (!session) return null; // unknown → allow-all (handled by hasPermission)
-  const rolePerms = session.businessRole?.permissions;
+  // GET /api/auth/me answers { user: {...} }, so `role` and `businessRole` live
+  // one level down. Call sites were split: some unwrapped (`me?.user || me`) and
+  // some passed the wrapper straight in. For the wrapper form every lookup below
+  // missed — session.role was undefined, so even a BUSINESS_ADMIN fell through to
+  // `{}` and the page hid its own controls. That is how a tenant owner was told
+  // "You don't have permission to post jobs (needs Manage hiring)" on a role that
+  // grants everything, across 13 pages.
+  //
+  // Accepting BOTH shapes here fixes every call site at once and stops the next
+  // page from reintroducing it — this is a read-only resolver, so being lenient
+  // about its input costs nothing. The server remains the real boundary.
+  const s = (session.user && typeof session.user === 'object') ? session.user : session;
+  const rolePerms = s.businessRole?.permissions;
   if (rolePerms && typeof rolePerms === 'object') return rolePerms;
-  if (session.role === 'SUPER_ADMIN' || session.role === 'BUSINESS_ADMIN') return ALL_TRUE;
-  if (session.permissions && typeof session.permissions === 'object') return session.permissions;
+  if (s.role === 'SUPER_ADMIN' || s.role === 'BUSINESS_ADMIN') return ALL_TRUE;
+  if (s.permissions && typeof s.permissions === 'object') return s.permissions;
   return {}; // authenticated but no permissions resolved → hide gated items
 }
 
