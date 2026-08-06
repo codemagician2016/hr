@@ -305,8 +305,21 @@ async function createJob(req, res, next) {
     if (!Array.isArray(req.body.stages)) {
       try {
         const pt = require('./pipelineTemplates.controller');
-        await pt.autoApplyDefaultTemplate(prisma, businessId, item.id);
-      } catch { /* default-template seeding is best-effort */ }
+        const seeded = await pt.autoApplyDefaultTemplate(prisma, businessId, item.id);
+        // A job with no stages cannot be worked: applications have nowhere to
+        // sit, nobody can be moved, and screening knockouts quietly no-op
+        // because auto-reject cannot find a REJECTED stage. autoApply now
+        // always seeds something, so reaching here means it genuinely failed.
+        if (!seeded || !seeded.applied) {
+          console.error(
+            `[recruitment] job ${item.id} (${item.code}) was created with NO pipeline stages`
+            + `${seeded && seeded.reason ? ` — ${seeded.reason}` : ''}. Applications to it cannot be moved.`,
+          );
+        }
+      } catch (seedErr) {
+        // Still never block job creation on this — but stop losing it in silence.
+        console.error(`[recruitment] pipeline seeding threw for job ${item.id}: ${seedErr.message}`);
+      }
     }
     res.status(201).json(item);
   } catch (e) { if (e.code === 'P2002') return res.status(409).json({ message: DUP_MSG }); next(e); }

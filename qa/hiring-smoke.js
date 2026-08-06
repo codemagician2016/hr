@@ -106,6 +106,9 @@ function watch(page, tag, sink) {
 const stamp = String(Date.now()).slice(-6);
 const JOB_CODE = `SMOKE-${stamp}`;
 const JOB_TITLE = `Smoke Test Engineer ${stamp}`;
+const CAND_FIRST = 'Smoke';
+const CAND_LAST = `Candidate${stamp}`;
+const CAND_EMAIL = `smoke.candidate.${stamp}@example.com`;
 
 (async () => {
   console.log(`\n=== hiring smoke — admin ${ADMIN} · tenant ${TENANT} ===\n`);
@@ -240,6 +243,38 @@ const JOB_TITLE = `Smoke Test Engineer ${stamp}`;
       const hasApply = await cand.locator('input[type="email"], button:has-text("Apply"), form').first()
         .isVisible().catch(() => false);
       ok(hasApply, 'apply form is present on the public job page');
+
+      // ── the candidate actually APPLIES ──────────────────────────────────
+      // The half of hiring that only a candidate exercises. Everything above
+      // this line can pass while applying is broken.
+      if (hasApply) {
+        const textBoxes = cand.locator('form input.ipt, input.ipt');
+        const nCand = await textBoxes.count().catch(() => 0);
+        if (nCand >= 3) {
+          await textBoxes.nth(0).fill(CAND_FIRST);
+          await textBoxes.nth(1).fill(CAND_LAST);
+          await textBoxes.nth(2).fill(CAND_EMAIL);
+          const backFirst = await textBoxes.nth(0).inputValue();
+          ok(backFirst === CAND_FIRST, 'candidate name field accepts typing', `got "${backFirst}"`);
+        } else {
+          ok(false, 'candidate detail fields present', `found ${nCand} inputs`);
+        }
+
+        // Consent is required server-side; an unticked box is a 400.
+        const consent = cand.locator('input[type="checkbox"]').last();
+        if (await consent.isVisible().catch(() => false)) {
+          await consent.check().catch(() => {});
+          ok(await consent.isChecked().catch(() => false), 'consent checkbox ticks');
+        }
+
+        const submit = cand.locator('button[type="submit"], button:has-text("Apply")').last();
+        await submit.click().catch(() => {});
+        await cand.waitForTimeout(4000);
+        const after = await cand.innerText('body').catch(() => '');
+        const accepted = /thank you|received|we.ll be in touch|application/i.test(after);
+        ok(accepted, 'application submits and the candidate sees a confirmation',
+          after.slice(0, 90).replace(/\n/g, ' '));
+      }
     }
     problems.push(...candProblems);
     await candCtx.close();
@@ -247,7 +282,49 @@ const JOB_TITLE = `Smoke Test Engineer ${stamp}`;
     ok(false, 'candidate journey reachable (skipped — no public URL)');
   }
 
-  // ── 6. cleanup ────────────────────────────────────────────────────────────
+  // ── 6. the ATS side: did the application actually arrive, and can it move? ─
+  // A candidate seeing "thank you" proves nothing if the application never
+  // reaches the recruiter. This is the seam between the public and internal
+  // halves of hiring, and nothing else in the suite crosses it.
+  if (jobId) {
+    await page.reload({ waitUntil: 'networkidle' }).catch(() => {});
+    const apps = await page.evaluate(async (id) => {
+      const r = await fetch(`/api/hr/recruitment/applications?jobId=${id}&pageSize=50`, { credentials: 'include' });
+      return r.ok ? r.json() : { error: r.status };
+    }, jobId);
+    const list = (apps && (apps.items || apps.applications || apps)) || [];
+    const mineApp = Array.isArray(list)
+      ? list.find((a) => JSON.stringify(a).includes(CAND_EMAIL) || JSON.stringify(a).includes(CAND_LAST))
+      : null;
+    ok(!!mineApp, 'application reaches the recruiter pipeline',
+      mineApp ? '' : `not found for ${CAND_EMAIL} — ${JSON.stringify(apps).slice(0, 120)}`);
+
+    if (mineApp) {
+      // Stages come from the job; moving one is the recruiter's core action.
+      const stages = await page.evaluate(async (id) => {
+        const r = await fetch(`/api/hr/recruitment/jobs/${id}`, { credentials: 'include' });
+        const j = r.ok ? await r.json() : null;
+        return (j && j.stages) || [];
+      }, jobId);
+      ok(stages.length > 0, 'job has a pipeline of stages', `${stages.length} stages`);
+
+      const target = stages.find((s2) => s2.kind === 'SCREENING') || stages[1] || stages[0];
+      if (target) {
+        const moved = await page.evaluate(async ([appId, stageId]) => {
+          const r = await fetch(`/api/hr/recruitment/applications/${appId}/move`, {
+            method: 'POST', credentials: 'include',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ stageId }),
+          });
+          return { status: r.status, body: r.ok ? await r.json().catch(() => null) : await r.text().catch(() => '') };
+        }, [mineApp.id, target.id]);
+        ok(moved.status < 400, `application moves to "${target.name || target.kind}"`,
+          `HTTP ${moved.status} ${String(moved.body).slice(0, 90)}`);
+      }
+    }
+  }
+
+  // ── 7. cleanup ────────────────────────────────────────────────────────────
   if (jobId && !KEEP) {
     const del = await page.evaluate(async (id) => {
       const r = await fetch(`/api/hr/recruitment/jobs/${id}`, { method: 'DELETE', credentials: 'include' });

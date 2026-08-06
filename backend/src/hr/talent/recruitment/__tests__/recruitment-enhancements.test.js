@@ -157,6 +157,13 @@ async function partB() {
     // ── Post a job + stages ──
     const jobRes = await callController(spine.createJob, withScope({ user: op, body: {
       code: `${PREFIX}-JOB`, title: 'Platform Engineer', countryCode: 'IN', employmentType: 'FULL_TIME', status: 'OPEN',
+      // Opt OUT of pipeline auto-seeding: this test builds its own stages below
+      // and asserts against those exact ids. createJob seeds a pipeline when
+      // `stages` is absent (a job with none is unusable), so without this the job
+      // would carry the seeded set AND the manual set — two stages per kind, and
+      // bulk actions would land on the seeded one while stageByKind pointed at
+      // the manual one. An explicit empty array is the documented opt-out.
+      stages: [],
     } }));
     assert(jobRes.statusCode === 201, 'B0) job created');
     const job = jobRes.body;

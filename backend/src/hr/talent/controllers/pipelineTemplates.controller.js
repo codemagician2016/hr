@@ -70,17 +70,55 @@ async function materializeStages(db, businessId, jobId, orderedStages) {
 // createJob auto-seed hook: if the tenant has a default template with stages and
 // the job has none, materialise the default onto the job. Best-effort — the
 // caller wraps it so a failure never blocks job creation. Returns a small summary.
+// The minimum viable pipeline. A job with NO stages is not merely unstyled — it
+// is unusable: applications arrive with nowhere to sit, the recruiter cannot move
+// anyone, and screening knockouts silently do nothing because auto-reject looks
+// for a REJECTED-kind stage and finds none.
+//
+// That is not hypothetical. A tenant had two pipeline templates and neither was
+// flagged isDefault, so every job it created came out with an empty pipeline and
+// nothing said so — autoApply is best-effort and returned { applied: false } to a
+// caller that discarded it.
+const FALLBACK_STAGES = [
+  { name: 'Applied', kind: 'SOURCED', sortOrder: 0 },
+  { name: 'Screening', kind: 'SCREENING', sortOrder: 1 },
+  { name: 'Interview', kind: 'INTERVIEW', sortOrder: 2 },
+  { name: 'Offer', kind: 'OFFER', sortOrder: 3 },
+  { name: 'Hired', kind: 'HIRED', sortOrder: 4 },
+  { name: 'Rejected', kind: 'REJECTED', sortOrder: 5 },
+];
+
 async function autoApplyDefaultTemplate(db, businessId, jobId) {
-  const tpl = await db.pipelineTemplate.findFirst({
+  const existing = await db.jobStage.count({ where: { businessId, jobId } });
+  if (existing > 0) return { applied: false, reason: 'job already has stages' };
+
+  // Preference order: the tenant's DEFAULT template, then ANY template they have
+  // (having built one, an empty pipeline is never what they wanted), then the
+  // built-in fallback. The middle step matters — flagging a default is easy to
+  // miss in the UI, and missing it should not silently break hiring.
+  let tpl = await db.pipelineTemplate.findFirst({
     where: { businessId, isDefault: true, deletedAt: null },
     include: TEMPLATE_INCLUDE,
   });
-  if (!tpl || !tpl.stages.length) return { applied: false };
-  const existing = await db.jobStage.count({ where: { businessId, jobId } });
-  if (existing > 0) return { applied: false };
-  const ordered = orderStagesForMaterialization(tpl.stages);
+  let source = 'default-template';
+  if (!tpl || !tpl.stages.length) {
+    tpl = await db.pipelineTemplate.findFirst({
+      where: { businessId, deletedAt: null },
+      include: TEMPLATE_INCLUDE,
+      orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+    });
+    source = 'first-template';
+  }
+
+  if (tpl && tpl.stages.length) {
+    const ordered = orderStagesForMaterialization(tpl.stages);
+    const count = await materializeStages(db, businessId, jobId, ordered);
+    return { applied: true, source, templateId: tpl.id, count };
+  }
+
+  const ordered = orderStagesForMaterialization(FALLBACK_STAGES);
   const count = await materializeStages(db, businessId, jobId, ordered);
-  return { applied: true, templateId: tpl.id, count };
+  return { applied: true, source: 'built-in-fallback', templateId: null, count };
 }
 
 // ── CRUD ─────────────────────────────────────────────────────────────────────
@@ -340,5 +378,5 @@ module.exports = {
   // Reused by recruitment.controller.createJob (default auto-seed).
   autoApplyDefaultTemplate,
   // Pure helpers for unit testing + reuse.
-  _internals: { STAGE_KINDS, validateStages, orderStagesForMaterialization, materializeStages, applyCore },
+  _internals: { STAGE_KINDS, FALLBACK_STAGES, validateStages, orderStagesForMaterialization, materializeStages, applyCore },
 };
