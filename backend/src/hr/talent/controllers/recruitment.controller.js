@@ -1001,8 +1001,16 @@ async function createInterview(req, res, next) {
     if (!app) return res.status(404).json({ message: 'Application not found' });
 
     const data = pickInterview(req.body);
-    // normalise the panel to a clean CSV
-    if (req.body.interviewerIds !== undefined) data.interviewerIds = parsePanel(req.body.interviewerIds).join(',');
+    // Normalise the panel to a clean CSV. `interviewerIds` is NON-NULL in the
+    // schema (String, no default), so it must ALWAYS be present — omitting it
+    // made prisma.interview.create() throw "Argument `interviewerIds` is
+    // missing" and the request 500'd. That is the ordinary case, not an exotic
+    // one: a recruiter books the slot first and names the panel afterwards.
+    // An empty panel is a legitimate state — the transaction below simply
+    // pre-creates no scorecards for it.
+    data.interviewerIds = req.body.interviewerIds !== undefined
+      ? parsePanel(req.body.interviewerIds).join(',')
+      : '';
     // default the round's scorecard template to the job's default if unset
     if (!data.scorecardTemplateId && app.job && app.job.scorecardTemplateId) {
       data.scorecardTemplateId = app.job.scorecardTemplateId;

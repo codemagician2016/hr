@@ -321,6 +321,40 @@ const CAND_EMAIL = `smoke.candidate.${stamp}@example.com`;
         ok(moved.status < 400, `application moves to "${target.name || target.kind}"`,
           `HTTP ${moved.status} ${String(moved.body).slice(0, 90)}`);
       }
+
+      // ── the rest of the funnel: interview → offer ──────────────────────
+      // Moving a stage is not hiring. These are the steps that turn a pipeline
+      // into an actual hire, and nothing else in the suite touches them.
+      const iv = await page.evaluate(async (appId) => {
+        const r = await fetch('/api/hr/recruitment/interviews', {
+          method: 'POST', credentials: 'include',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ applicationId: appId, round: 1, mode: 'VIDEO' }),
+        });
+        return { status: r.status, body: r.ok ? await r.json().catch(() => null) : await r.text().catch(() => '') };
+      }, mineApp.id);
+      ok(iv.status < 400, 'interview can be scheduled for the application',
+        `HTTP ${iv.status} ${String(iv.body).slice(0, 90)}`);
+
+      const offer = await page.evaluate(async (appId) => {
+        const r = await fetch('/api/hr/recruitment/offers', {
+          method: 'POST', credentials: 'include',
+          headers: { 'content-type': 'application/json' },
+          // India's Code on Wages requires basic >= 50% of gross, and the API
+          // enforces it (WAGES_50_RULE) — so an offer without these figures is
+          // CORRECTLY refused. Send a compliant pair so this exercises the happy
+          // path rather than re-proving the guard.
+          body: JSON.stringify({
+            applicationId: appId, currencyCode: 'INR',
+            grossMonthly: 100000, basicMonthly: 50000,
+          }),
+        });
+        return { status: r.status, body: r.ok ? await r.json().catch(() => null) : await r.text().catch(() => '') };
+      }, mineApp.id);
+      // An offer may legitimately require the app to sit on an OFFER stage or
+      // carry compensation — a 4xx with a REASON is healthy; a 5xx is not.
+      ok(offer.status < 400, 'offer can be raised for the application',
+        `HTTP ${offer.status} ${String(offer.body).slice(0, 130)}`);
     }
   }
 
