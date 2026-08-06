@@ -18,7 +18,7 @@
  */
 
 const { seedJourneyTasks, advanceJourney } = require('./journeyEngine');
-const { getDefaultOnboardingTemplate } = require('./templates/seed');
+const { getDefaultOnboardingTemplate, seedOnboardingTemplates } = require('./templates/seed');
 const { allocateCode } = require('./lib/codes');
 // Feature 14: onboarding template selection follows the TENANT country (single
 // source of truth), not `job.countryCode || 'IN'`.
@@ -66,11 +66,43 @@ async function seedOnboardingJourney(offer, tx, opts = {}) {
   }
 
   // Pull the default onboarding template + task defs for the market.
-  const bundle = await getDefaultOnboardingTemplate(tx, businessId, countryCode);
+  let bundle = await getDefaultOnboardingTemplate(tx, businessId, countryCode);
   if (!bundle) {
-    // No template seeded for this tenant yet — skip silently so accept never fails.
-    // (Templates are seeded per-tenant; absence is a config gap, not a hire blocker.)
-    return { journey: null, created: false };
+    // A brand-new tenant has NO lifecycle templates at all: seedOnboardingTemplates
+    // is only reachable through the manual POST /templates/seed-defaults button, and
+    // nothing calls it at signup. Skipping silently here meant the first hire of
+    // every new tenant "worked" — offer ACCEPTED, application HIRED — while
+    // onboarding simply did not exist: no tasks, no pre-join magic link for the
+    // new starter, and no signal to anyone that it was missing. The config gap only
+    // ever surfaced as "we hired them and nothing happened".
+    //
+    // So seed the defaults on demand. Only when the tenant has NO onboarding
+    // template whatsoever: seedOnboardingTemplates reconciles task defs with a
+    // deleteMany + createMany, so running it against a tenant that HAS templates
+    // would silently discard their customised tasks. If templates exist but none is
+    // default+active, that is a deliberate admin state we must not overwrite — say
+    // so loudly instead of guessing.
+    const anyTemplate = await tx.lifecycleTemplate.findFirst({
+      where: { businessId, direction: 'ONBOARDING', deletedAt: null },
+      select: { id: true },
+    });
+    if (anyTemplate) {
+      console.warn(`[onboarding] business ${businessId} has onboarding templates but none is default+active — offer ${offerId} accepted with NO journey. Mark one template as default to fix.`);
+      return { journey: null, created: false };
+    }
+    try {
+      await seedOnboardingTemplates(tx, businessId, { entityId });
+      bundle = await getDefaultOnboardingTemplate(tx, businessId, countryCode);
+      if (bundle) console.log(`[onboarding] seeded default lifecycle templates for business ${businessId} on first hire`);
+    } catch (e) {
+      // Non-fatal by design: a missing template must never roll back an accepted
+      // offer. The hire stands; onboarding can be seeded and started by hand.
+      console.error(`[onboarding] could not seed default templates for business ${businessId}: ${e.message}`);
+    }
+    if (!bundle) {
+      console.error(`[onboarding] offer ${offerId} accepted for business ${businessId} with NO onboarding journey (no usable template).`);
+      return { journey: null, created: false };
+    }
   }
   const { template, taskDefs } = bundle;
 
