@@ -84,6 +84,48 @@ async function main() {
 
   console.log(`\n[pipelines] ${ok} job(s) backfilled, ${failed.length} failed`);
   for (const f of failed) console.error(`  ! ${f}`);
+
+  // ── PHASE 2: place applications that have no stage ──────────────────────
+  // Creating the stages is only half the repair. Applications raised while the
+  // job had NO pipeline carry currentStageId = null, so they remain invisible on
+  // the board even once stages exist — including auto-rejected candidates whose
+  // rejection is recorded correctly in the database and shows up nowhere a
+  // recruiter looks.
+  //
+  // Placement follows STATUS, which is authoritative: REJECTED → the REJECTED
+  // stage, HIRED → HIRED, everything else → the first stage. Nothing else is
+  // touched; no status is changed.
+  await placeStagelessApplications();
+}
+
+async function placeStagelessApplications() {
+  const stageless = await prisma.application.findMany({
+    where: { currentStageId: null },
+    select: { id: true, businessId: true, jobId: true, status: true },
+  });
+  if (!stageless.length) { console.log('[pipelines] no stageless applications'); return; }
+
+  console.log(`\n[pipelines] ${stageless.length} application(s) with NO stage`);
+  if (!APPLY) { console.log('[pipelines] DRY RUN — pass --apply to place them.'); return; }
+
+  const wantKind = (status) => (status === 'REJECTED' || status === 'WITHDRAWN' ? 'REJECTED'
+    : status === 'HIRED' ? 'HIRED' : null);
+
+  let placed = 0;
+  for (const a of stageless) {
+    const stages = await prisma.jobStage.findMany({
+      where: { businessId: a.businessId, jobId: a.jobId },
+      orderBy: { sortOrder: 'asc' },
+      select: { id: true, name: true, kind: true },
+    });
+    if (!stages.length) continue; // job still has no pipeline — nothing to place onto
+    const kind = wantKind(a.status);
+    const target = (kind && stages.find((s) => s.kind === kind)) || stages[0];
+    await prisma.application.update({ where: { id: a.id }, data: { currentStageId: target.id } });
+    placed += 1;
+    console.log(`  ✓ application ${a.id.slice(0, 8)} (${a.status}) → "${target.name}" (${target.kind})`);
+  }
+  console.log(`[pipelines] ${placed} application(s) placed`);
 }
 
 main()
