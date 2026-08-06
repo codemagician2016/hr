@@ -45,6 +45,9 @@ fi
 
 log "prisma db push (additive schema sync; no --accept-data-loss → refuses drops)"
 npx prisma db push --skip-generate 2>&1 | tail -14
+# realign any table the push created postgres-owned (belt-and-braces).
+[ -n "$APPUSER" ] && (sudo -u postgres psql -d "$DB" -tAc "SELECT format('ALTER TABLE %I OWNER TO %I;', tablename, '$APPUSER') FROM pg_tables WHERE schemaname='public' AND tableowner <> '$APPUSER'" 2>/dev/null | sudo -u postgres psql -d "$DB" -q -v ON_ERROR_STOP=0 >/dev/null 2>&1 || true)
+
 # ── partial UNIQUE indexes ────────────────────────────────────────────────────
 # Prisma's schema language cannot express an index with a WHERE clause, so the
 # nine in prisma/sql/partial-indexes.sql exist ONLY in raw SQL — which `db push`
@@ -54,11 +57,12 @@ npx prisma db push --skip-generate 2>&1 | tail -14
 # onboarding journeys per offer, duplicate employees on one work email, duplicate
 # active Form 16s, duplicate arrear cycles...). Reapply them after every push.
 # Idempotent and non-fatal — see the script header.
+#
+# MUST run after the ownership realignment above: this connects as the APP db
+# user, and CREATE INDEX on a table still owned by postgres fails with "must be
+# owner of table".
 log "reapplying partial UNIQUE indexes (db push cannot create them)"
 node scripts/apply-partial-indexes.js 2>&1 | tail -20 || log "WARN: partial-index apply failed (non-fatal)"
-
-# realign any table the push created postgres-owned (belt-and-braces).
-[ -n "$APPUSER" ] && (sudo -u postgres psql -d "$DB" -tAc "SELECT format('ALTER TABLE %I OWNER TO %I;', tablename, '$APPUSER') FROM pg_tables WHERE schemaname='public' AND tableowner <> '$APPUSER'" 2>/dev/null | sudo -u postgres psql -d "$DB" -q -v ON_ERROR_STOP=0 >/dev/null 2>&1 || true)
 
 # ── one-time backfill: grant the Talent Acquisition add-on to EXISTING tenants so
 #    the new entitlement gate doesn't cut off tenants already using recruitment.
