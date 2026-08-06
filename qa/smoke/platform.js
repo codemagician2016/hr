@@ -49,7 +49,20 @@ const PLATFORM = process.env.E2E_PLATFORM
 // excluded: they require a session and belong to their own surface.
 // /legal is a layout-only directory — its real pages are the two below. Guessing
 // the parent path reported a healthy app as a 404.
-const PUBLIC_ROUTES = ['/', '/login', '/signup', '/forgot-password', '/legal/terms', '/legal/privacy'];
+// Every PUBLIC page on disk. The four extra legal pages (cookies, dpa, refund,
+// sub-processors) are linked from real contracts and were never being checked —
+// a 404 on a DPA page is the kind of thing a prospect's legal team finds.
+//
+// /superadmin, /admin, /billing/checkout, /business and /onboarding need a
+// session and are deliberately NOT crawled here: they are an authenticated
+// surface with real consequences (billing!), and belong in a session-bearing
+// smoke rather than a cold-browser public crawl. They remain UNTESTED — recorded
+// in qa/SWEEP.md rather than quietly skipped.
+const PUBLIC_ROUTES = [
+  '/', '/login', '/signup', '/forgot-password',
+  '/legal/terms', '/legal/privacy', '/legal/cookies', '/legal/dpa',
+  '/legal/refund', '/legal/sub-processors',
+];
 
 const BENIGN = ['tenant/resolve', 'Failed to fetch RSC payload', 'ResizeObserver loop'];
 const isBenign = (s) => BENIGN.some((b) => s.includes(b));

@@ -4,6 +4,7 @@
 // Lifecycle transitions (terminate) set denormalized status fields — the
 // effective-dated history lives in EmploymentRecord (added by the service layer).
 const prisma = require('../../core/lib/prisma');
+const { hasValidFormat } = require('../../core/lib/emailValidation');
 const { seedLeaveBalancesForEmployee } = require('../leave/seedBalances');
 const { writeAudit } = require('../../core/lib/audit');
 const { scopeWhere, scopeAllows } = require('../lib/scopeResolver');
@@ -82,6 +83,36 @@ const WRITABLE = [
   'photoUrl', 'preferredLanguage', 'status', 'hireDate', 'probationEndDate', 'managerEmployeeId',
 ];
 const DATE_FIELDS = ['dateOfBirth', 'hireDate', 'probationEndDate'];
+
+
+// ── contact-field format checks ──────────────────────────────────────────────
+// workEmail is not decoration: portalInvite links Employee↔Customer BY
+// (businessId, workEmail). A mistyped address saves happily, and the portal
+// invite then goes nowhere — which is exactly the "invitation link not working"
+// report we chased. Phone feeds SMS/WhatsApp notifications the same way.
+//
+// Employees can be international, so the phone rule is deliberately loose: digits
+// with optional +, spaces, dashes and brackets, 7-15 digits after stripping. It
+// rejects typos and stray text without imposing an India-only shape.
+const PHONE_DIGITS = /^\+?[\d\s\-().]{7,20}$/;
+function contactFieldError(body) {
+  for (const f of ['workEmail', 'personalEmail']) {
+    const v = body[f];
+    if (v === undefined || v === null || v === '') continue;
+    if (!hasValidFormat(String(v).trim())) {
+      return { field: f, message: `${f} is not a valid email address` };
+    }
+  }
+  const phone = body.phone;
+  if (phone !== undefined && phone !== null && String(phone).trim() !== '') {
+    const raw = String(phone).trim();
+    const digits = raw.replace(/\D/g, '');
+    if (!PHONE_DIGITS.test(raw) || digits.length < 7 || digits.length > 15) {
+      return { field: 'phone', message: 'phone must be 7-15 digits (an optional + and spaces, dashes or brackets are allowed)' };
+    }
+  }
+  return null;
+}
 
 function pickWritable(body) {
   const out = {};
@@ -251,6 +282,10 @@ async function create(req, res, next) {
     // compatible with manual codes. firstName/lastName remain required.
     if (!firstName || !lastName) {
       return res.status(400).json({ message: 'firstName and lastName are required' });
+    }
+    {
+      const bad = contactFieldError(req.body);
+      if (bad) return res.status(400).json({ message: bad.message, field: bad.field });
     }
     const autoCode = !code || !String(code).trim();
 
@@ -426,6 +461,9 @@ async function update(req, res, next) {
     const body = { ...req.body };
     if (body.email !== undefined && body.workEmail === undefined) body.workEmail = body.email;
     if (body.dateOfJoining !== undefined && body.hireDate === undefined) body.hireDate = body.dateOfJoining;
+
+    const badContact = contactFieldError(body);
+    if (badContact) return res.status(400).json({ message: badContact.message, field: badContact.field });
 
     const data = pickWritable(body);
 

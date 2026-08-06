@@ -69,7 +69,29 @@ function loadRoutes() {
   const src = fs.readFileSync(NAV_FILE, 'utf8');
   const found = [...src.matchAll(/href:\s*'(\/[^']*)'/g)].map((m) => m[1]);
   // Drop dynamic segments — they need a real id and belong to the module smokes.
-  const routes = [...new Set(found)].filter((r) => !r.includes('[') && !r.includes(':'));
+  // Nav is the SPINE, but it is not the whole app: 18 admin routes exist on disk
+  // that no nav entry points at — /org/chart, /org/registrations,
+  // /learning/compliance, /people/new and others. A screen with no nav link is
+  // still reachable (deep link, redirect, a button elsewhere) and is MORE likely
+  // to rot precisely because nobody clicks past it.
+  //
+  // So: take every static page.js on disk, not just the linked ones. Dynamic
+  // segments are excluded — they need a real id and belong to the module smokes,
+  // which drive them with records they created.
+  const fromNav = [...new Set(found)].filter((r) => !r.includes('[') && !r.includes(':'));
+  const appDir = path.resolve(__dirname, '..', '..', 'apps', 'hr-admin', 'app');
+  const onDisk = [];
+  (function walk(dir, prefix) {
+    for (const f of fs.readdirSync(dir)) {
+      const full = path.join(dir, f);
+      if (fs.statSync(full).isDirectory()) walk(full, `${prefix}/${f}`);
+      else if (f === 'page.js') onDisk.push(prefix || '/');
+    }
+  }(appDir, ''));
+  const routes = [...new Set([...fromNav, ...onDisk])]
+    .filter((r) => !r.includes('[') && !r.includes(':'))
+    // /login is the unauthenticated surface; the platform smoke owns it.
+    .filter((r) => r !== '/login');
   routes.sort();
   return routes;
 }

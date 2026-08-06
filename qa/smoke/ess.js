@@ -49,12 +49,25 @@ const PASSWORD = process.env.E2E_ESS_PASSWORD || process.env.E2E_PASSWORD || 'De
 // Employee-facing routes (apps/ess/app/*). login/set-password/careers are
 // deliberately excluded: they are the UNAUTHENTICATED surface and are covered by
 // the hiring and people smokes, which open them with no session at all.
-const ROUTES = [
-  '/', '/approvals', '/attendance', '/comp-off', '/compensation', '/directory',
-  '/documents', '/fbp', '/feed', '/helpdesk', '/learning', '/leave', '/letters',
-  '/onboarding', '/payslips', '/performance', '/profile', '/recognition',
-  '/reimbursements', '/separation', '/shifts', '/surveys', '/tax', '/team',
-];
+// Every static employee page on disk, not just the ones this file remembered.
+// /login, /set-password and /careers/* are the UNAUTHENTICATED surface and are
+// covered by the platform + hiring smokes, which open them with no session.
+const fs = require('fs');
+const ESS_APP = path.resolve(__dirname, '..', '..', 'apps', 'ess', 'app');
+const ROUTES = (function () {
+  const out = [];
+  (function walk(dir, prefix) {
+    for (const f of fs.readdirSync(dir)) {
+      const full = path.join(dir, f);
+      if (fs.statSync(full).isDirectory()) walk(full, `${prefix}/${f}`);
+      else if (f === 'page.js') out.push(prefix || '/');
+    }
+  }(ESS_APP, ''));
+  return out
+    .filter((r) => !r.includes('[') && !r.includes(':'))
+    .filter((r) => !/^\/(login|set-password|sso|careers)/.test(r))
+    .sort();
+}());
 
 const BENIGN = ['tenant/resolve', 'Failed to fetch RSC payload', 'ResizeObserver loop'];
 const isBenign = (s) => BENIGN.some((b) => s.includes(b));
