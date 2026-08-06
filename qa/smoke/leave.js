@@ -128,11 +128,25 @@ function availableOf(row) {
     const typeList = asList(types.body);
     ok(types.status < 400 && typeList.length > 0, 'tenant has leave types configured',
       `HTTP ${types.status}, ${typeList.length} type(s)`);
-    // Deliberately avoid COMP_OFF: it draws from earned comp-off LOTS, not the
-    // aggregate balance, so crediting a balance cannot make it approvable. Picking
-    // it by accident is what turned this smoke red on prod (and exposed a real 500).
-    const isCompOff = (t) => /COMP[_ -]?OFF/i.test(`${t.category || ''} ${t.code || ''} ${t.name || ''}`);
-    const leaveType = typeList.find((t) => !isCompOff(t)) || typeList[0];
+    // Pick a type that ACTUALLY DRAWS FROM THE BALANCE. Two types are special and
+    // must be excluded, both of which this smoke hit by accident before:
+    //
+    //   COMP_OFF  — debits earned comp-off LOTS, not the aggregate balance, so an
+    //               HR balance credit can never make it approvable.
+    //   LWP/UNPAID — Feature 16: the one type that applies with NO balance at all
+    //               (accrualMethod NONE, never minted). Approving it correctly does
+    //               NOT debit anything, so a "balance moved" assertion is wrong for
+    //               it by design, not broken.
+    //
+    // Asserting a debit against either would have been reporting correct behaviour
+    // as a defect.
+    const label = (t) => `${t.category || ''} ${t.code || ''} ${t.name || ''}`;
+    const isCompOff = (t) => /COMP[_ -]?OFF/i.test(label(t));
+    const isUnpaid = (t) => /UNPAID|WITHOUT PAY|\bLWP\b|LOSS OF PAY/i.test(label(t));
+    const drawsFromBalance = (t) => !isCompOff(t) && !isUnpaid(t);
+    const leaveType = typeList.find(drawsFromBalance) || typeList[0];
+    ok(drawsFromBalance(leaveType), 'a balance-drawing leave type is available to test',
+      `picked "${label(leaveType).trim()}" from ${typeList.map((t) => label(t).trim()).join(' | ')}`);
     note(`leave type under test: ${leaveType && (leaveType.name || leaveType.code)}`);
 
     // ── 2. an employee to take leave ────────────────────────────────────────
