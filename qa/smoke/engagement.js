@@ -122,8 +122,19 @@ const stamp = String(Date.now()).slice(-6);
     ok(cats.status < 400, 'helpdesk categories load', `HTTP ${cats.status}`);
     // With no category an employee cannot raise a ticket at all — the same
     // "config absent, feature unusable" shape found repeatedly in this sweep.
-    ok(catList.length > 0, 'the tenant has helpdesk categories',
-      `${catList.length} category(ies) — with none, no ticket can be raised`);
+    // Ordinary tenant config with an admin UI, exactly like expense categories —
+    // a company defines its own. Create one rather than reporting normal setup as
+    // a defect, so the ticket path is still exercised.
+    if (!catList.length) {
+      note('no helpdesk categories — creating one so the ticket path is covered');
+      const mk = await send(page, 'POST', '/api/hr/helpdesk/categories', {
+        name: `QA Smoke Category ${stamp}`, isActive: true,
+      });
+      ok(mk.status < 400, 'a helpdesk category can be created',
+        `HTTP ${mk.status} ${JSON.stringify(mk.body).slice(0, 120)}`);
+    } else {
+      ok(true, 'the tenant has helpdesk categories', `${catList.length} category(ies)`);
+    }
 
     const tickets = await api(page, '/api/hr/helpdesk/tickets?pageSize=20');
     ok(tickets.status < 400, 'helpdesk tickets load',
@@ -148,11 +159,14 @@ const stamp = String(Date.now()).slice(-6);
       // silently blocked an entire company's appraisal.
       const made = await send(page, 'POST', '/api/hr/announcements', {
         title: `QA Smoke Announcement ${stamp}`,
-        body: 'Created by the engagement smoke. Safe to ignore.',
+        // bodyRichText, not body — the API named the field exactly in its 400.
+        bodyRichText: 'Created by the engagement smoke. Safe to ignore.',
       });
-      ok(made.status < 400 && made.body && made.body.id, 'an announcement can be created',
+      // The response NESTS the record: { announcement: { id, ... } }.
+      const annRow = (made.body && (made.body.announcement || made.body)) || {};
+      ok(made.status < 400 && annRow.id, 'an announcement can be created',
         `HTTP ${made.status} ${JSON.stringify(made.body).slice(0, 140)}`);
-      const aid = made.body && made.body.id;
+      const aid = annRow.id;
       if (aid) {
         const pub = await send(page, 'POST', `/api/hr/announcements/${aid}/publish`, {});
         ok(pub.status < 400, 'an announcement can be published', `HTTP ${pub.status}`);
@@ -173,13 +187,11 @@ const stamp = String(Date.now()).slice(-6);
       `HTTP ${surveys.status}, ${asList(surveys.body).length} survey(s)`);
 
     // ── 4. recognition ──────────────────────────────────────────────────────
-    const rec = await api(page, '/api/hr/recognition/awards?pageSize=10');
-    if (rec.status === 404) {
-      const rec2 = await api(page, '/api/hr/recognition');
-      ok(rec2.status < 400, 'recognition surface answers', `HTTP ${rec2.status}`);
-    } else {
-      ok(rec.status < 400, 'recognition awards load', `HTTP ${rec.status}`);
-    }
+    const recConfig = await api(page, '/api/hr/recognition/config');
+    ok(recConfig.status < 400, 'recognition config loads', `HTTP ${recConfig.status}`);
+    const badges = await api(page, '/api/hr/recognition/badges');
+    ok(badges.status < 400, 'recognition badges load',
+      `HTTP ${badges.status}, ${asList(badges.body).length} badge(s)`);
 
     // ── 5. the pages a client opens ─────────────────────────────────────────
     for (const [url, label] of [
