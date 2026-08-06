@@ -257,7 +257,15 @@ async function removeLine(req, res, next) {
     if (claim.status !== 'DRAFT') return res.status(409).json({ message: `Cannot edit a claim in status ${claim.status}` });
     const line = await prisma.expenseClaimLine.findFirst({ where: { id: req.params.lineId, businessId, claimId: claim.id } });
     if (!line) return res.status(404).json({ message: 'Bill line not found' });
-    if (line.receiptUrl && s3.isOurUrl(line.receiptUrl)) await s3.deleteByUrl(line.receiptUrl).catch(() => {});
+    if (line.receiptUrl && s3.isOurUrl(line.receiptUrl)) {
+      // A receipt is personal financial data. If the object delete fails we still
+      // remove the line — a storage error must not block the employee — but the
+      // FILE then survives in the bucket after the user deleted it, which is
+      // silent PII retention. Log it so it can be swept.
+      await s3.deleteByUrl(line.receiptUrl).catch((e) => {
+        console.error(`[expenses] receipt object NOT deleted for line ${line.id} (${line.receiptUrl}): ${e.message} — file remains in storage`);
+      });
+    }
     await prisma.expenseClaimLine.delete({ where: { id: line.id } });
     res.status(204).end();
   } catch (e) { next(e); }
