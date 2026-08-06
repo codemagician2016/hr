@@ -289,7 +289,11 @@ async function apply(req, res, next) {
       try {
         const appRow = await prisma.application.findFirst({ where: { id: application.id, businessId: biz.id }, include: { job: true } });
         await scoringCtl._internals.recordAnswersAndScore(biz.id, appRow, b.answers);
-      } catch { /* scoring never blocks apply */ }
+      } catch (e) {
+        // Never blocks the apply (see the F12 path) — but a silent failure means
+        // no screening score and no knockout, indistinguishable from a pass.
+        console.error(`[careers-portal] screening scoring failed for application ${application.id} (business ${biz.id}): ${e.message}`);
+      }
     }
 
     // guest apply → email a magic link so they can return + track status.

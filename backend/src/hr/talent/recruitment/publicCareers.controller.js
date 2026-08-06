@@ -242,7 +242,15 @@ async function publicApply(req, res, next) {
     try {
       const appRow = await prisma.application.findFirst({ where: { id: application.id, businessId: biz.id }, include: { job: true } });
       await scoringCtl._internals.recordAnswersAndScore(biz.id, appRow, ansList);
-    } catch { /* scoring failures never block the candidate's apply */ }
+    } catch (e) {
+      // Not blocking the apply is right — a scoring bug must never cost a real
+      // candidate their application. Swallowing it silently was not: screening
+      // scores and KNOCKOUTS are applied in here, so a failure leaves the
+      // application unscored and un-knocked-out, looking exactly like a candidate
+      // who passed. Recruiters would only notice by wondering why nobody is ever
+      // auto-rejected.
+      console.error(`[careers] screening scoring failed for application ${application.id} (business ${biz.id}): ${e.message}`);
+    }
 
     // Feature 36 — mint the candidate's public access token (idempotent) so the
     // thank-you can carry a "track your application" status link, and fire the
