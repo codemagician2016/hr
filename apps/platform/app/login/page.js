@@ -96,9 +96,18 @@ function normaliseRedirectForRole(path, role) {
 }
 
 function FloatingLanguagePicker() {
-  const currentLocale = typeof document !== 'undefined'
-    ? (document.cookie.match(/(?:^|;\s*)NEXT_LOCALE=([^;]+)/)?.[1] || 'en')
-    : 'en';
+  // Read the locale AFTER mount, never during render. Reading document.cookie in
+  // the render body makes the server emit 'en' while the client emits whatever the
+  // cookie says, and React reports that as a hydration mismatch (#425), which then
+  // fails the Suspense boundary around it (#422). Both were firing on /login and
+  // /signup — the two most valuable pages in the product — and a hydration failure
+  // makes React discard the server HTML and re-render the whole tree, so the page
+  // visibly flashes before it settles.
+  const [currentLocale, setCurrentLocale] = useState('en');
+  useEffect(() => {
+    const m = document.cookie.match(/(?:^|;\s*)NEXT_LOCALE=([^;]+)/);
+    if (m && m[1]) setCurrentLocale(m[1]);
+  }, []);
   return (
     <div className="fixed top-4 right-4 z-50">
       <LanguageSelector currentLocale={currentLocale} compact />

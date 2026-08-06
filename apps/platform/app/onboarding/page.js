@@ -184,6 +184,15 @@ function slugSuggestions(base) {
 // Debounce a value by `delay` ms — used to throttle slug availability checks.
 function useDebouncedValue(value, delay = 400) {
   const [debounced, setDebounced] = useState(value);
+  // Locale is read AFTER mount, never during render — a render-time document.cookie
+  // read makes the server emit 'en' and the client emit the cookie value, which
+  // React reports as a hydration mismatch (#425) and which then fails the
+  // surrounding Suspense boundary (#422).
+  const [currentLocale, setCurrentLocale] = useState('en');
+  useEffect(() => {
+    const m = document.cookie.match(/(?:^|;\s*)NEXT_LOCALE=([^;]+)/);
+    if (m && m[1]) setCurrentLocale(m[1]);
+  }, []);
   useEffect(() => {
     const t = setTimeout(() => setDebounced(value), delay);
     return () => clearTimeout(t);
@@ -567,7 +576,7 @@ export default function OnboardingPage() {
           </Link>
           <div className="flex items-center gap-3">
             <LanguageSelector
-              currentLocale={typeof document !== 'undefined' ? (document.cookie.match(/(?:^|;\s*)NEXT_LOCALE=([^;]+)/)?.[1] || 'en') : 'en'}
+              currentLocale={currentLocale}
               compact
             />
             <span className="hidden rounded-full border border-gray-200 px-3 py-1 text-xs font-semibold text-gray-500 sm:inline">Company setup</span>
