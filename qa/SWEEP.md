@@ -85,6 +85,19 @@ something further down the list.
 
 ## Known open (found, not yet fixed)
 
+- **Letters — merge UNPROVEN (module 12).** Two different employees rendered
+  byte-identical PDF content streams, which would mean the template is not being
+  merged with employee data. But `letters.service.mergeEmployeeFrom()` builds
+  name/code/designation/dateOfJoining correctly, and the seeded "Experience /
+  Service Certificate" template does reference `{{employee.name}}` and
+  `{{employee.code}}` — so code review and the byte comparison DISAGREE. The
+  renderer embeds subset fonts whose glyph runs decode to repeated 0x21 bytes, so
+  the comparison may be measuring the encoding rather than the text. Deliberately
+  NOT asserted either way: a defect claim here would be a false alarm, and a pass
+  would be unearned. Settle it with a ToUnicode-aware PDF parser, or by rendering
+  through the service directly against a test DB. If it IS real, every experience
+  certificate a company issues is the same document regardless of recipient.
+
 - **Separations**: `compute-fnf` returns 422 `nz-earnings-required` when NZ
   holiday-pay earnings cannot be resolved from payroll history. Deliberate guard;
   the test expects 200 without seeding history. 16 assertions cascade from it.
