@@ -58,11 +58,12 @@ function hashToken(rawToken) {
   return crypto.createHash('sha256').update(String(rawToken)).digest('hex');
 }
 
-// Build the tenant ESS set-password link the SAME way careers/letters links do:
-// the tenant's ESS host (hostForSlug → {slug}[-staging].drifthr.com) + the public
-// /set-password path carrying the raw token. Best-effort: if the host helper is
-// unavailable we return a relative path so the admin UI can still render a
-// copyable link from window.location.origin.
+// Build the set-password link a new hire clicks to claim their login.
+//
+// Unlike the careers/letters links, this one is deliberately NOT on the tenant's
+// own host — see the long note in the body. A credential-claim link has to
+// survive sitting in an inbox while an admin renames their portal or binds a
+// domain, and the tenant host does not survive either.
 async function buildSetPasswordLink(businessId, rawToken) {
   const biz = await prisma.business
     .findUnique({
@@ -101,21 +102,38 @@ async function buildSetPasswordLink(businessId, rawToken) {
   // only thing identifying the tenant: acceptInvite looks the row up by tokenHash
   // and reads businessId off it, so no host or slug context is needed.
   //
-  // The tenant's own host stays PREFERRED whenever it genuinely exists, because
-  // that page is branded for them; this is the safety net, not the default.
+  // WHY THE PLATFORM HOST IS ALWAYS USED, even when the tenant has its own:
+  //
+  // An invite sits in an inbox for days. The tenant's portal host is NOT stable
+  // over that window — changing the slug, or binding a custom domain,
+  // deprovisions the old hostname (changeSlug calls deprovisionSubdomain). Any
+  // invite already sent to the old host dies the moment the admin does either,
+  // and nobody finds out until a new hire reports a broken link. A branded URL is
+  // not worth a credential-claim link that silently expires on a settings change.
+  //
+  // The platform host is the only host-stable option: it resolves before a domain
+  // is bound, after one is bound, and after one is CHANGED, because the token —
+  // not the hostname — identifies the tenant.
+  //
+  // `boundHost` is still resolved above and returned as `tenantHost` so callers
+  // can show the admin their branded portal address; it is just not what the
+  // one-shot claim link depends on.
   const platformHost = process.env.PLATFORM_DOMAIN || 'drifthr.com';
-  const host = boundHost || platformHost;
+  const host = platformHost;
   const origin = `https://${host}`;
   return {
     url: `${origin}${path}`,
     path,
     host,
-    // false → we fell back to the shared platform host because the tenant's own
-    // portal address is not provisioned. The link WORKS, but the admin should
-    // still set their portal address so employees get the branded experience.
+    // The tenant's own portal address when it exists — for display, not routing.
+    tenantHost: boundHost || null,
+    // Whether the TENANT has a provisioned portal address at all. It no longer
+    // affects the link (that is always the platform host now) — it drives the
+    // nudge telling an admin their employees have no branded address to sign in
+    // at afterwards.
     hostVerified: !!boundHost,
-    // Kept for diagnostics: what the slug WOULD have produced. Useful when an
-    // admin asks why the link is not on their own domain.
+    // Diagnostics: what the slug WOULD have produced. Answers "why isn't this on
+    // my domain?" without anyone having to read hostForSlug.
     derivedHost: derivedHost || null,
   };
 }
@@ -314,10 +332,10 @@ async function createInvite({ businessId, employeeId, createdByUserId = null, al
   // instead of reporting a clean success over a dead link.
   if (!link.hostVerified) {
     console.warn(
-      `[portalInvite] business ${businessId}: portal subdomain not provisioned `
-      + `(would have been ${link.derivedHost || 'unknown'}) — invite link falls back to `
-      + `${link.host}. It WORKS, but employees do not get the tenant-branded page. `
-      + 'Set the portal address in Settings → Domain to provision it.',
+      `[portalInvite] business ${businessId}: no provisioned portal address `
+      + `(would have been ${link.derivedHost || 'unknown'}). The invite link itself is fine — `
+      + `it is on ${link.host}, which does not depend on tenant DNS — but employees have `
+      + 'nowhere branded to sign in afterwards. Set it in Settings → Domain.',
     );
   }
 
@@ -331,9 +349,10 @@ async function createInvite({ businessId, employeeId, createdByUserId = null, al
     ...(link.hostVerified ? {} : {
       warning: 'PORTAL_HOST_UNPROVISIONED',
       warningMessage:
-        'Your portal address is not set up yet, so this link uses our shared sign-in page. '
-        + 'It works — the employee can set their password now. To give your team a link on '
-        + 'your own address, open Settings → Domain and save your portal address.',
+        'This invite link works — it uses our shared sign-in page, which keeps working even '
+        + 'if you change your portal address later. You have not set a portal address yet, '
+        + 'though, so your team has nowhere branded to sign in afterwards. Set one in '
+        + 'Settings → Domain.',
     }),
     notified,
     loginEmail,
