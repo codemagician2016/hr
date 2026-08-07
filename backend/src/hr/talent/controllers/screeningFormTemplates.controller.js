@@ -229,6 +229,14 @@ async function applyCore({ businessId, templateId, jobId, replace }) {
       // (no FK to the question), so replacing the job's questions never orphans them.
       await tx.screeningQuestion.deleteMany({ where: { businessId, jobId } });
     }
+    // Deleting a screening question is a SOFT delete, but @@unique([businessId,
+    // jobId, sortOrder]) is a FULL unique — it still counts the tombstones. So a
+    // job whose questions were all deleted reads as empty on screen ("No screening
+    // questions yet"), `existing` is 0, and applying a template then inserts
+    // sortOrder 0..n straight into rows that are invisible but still indexed →
+    // P2002 → 500, with no way for the user to see why. Clear the tombstones for
+    // this job first; by the invariant above they hold nothing anyone can reach.
+    await tx.screeningQuestion.deleteMany({ where: { businessId, jobId, deletedAt: { not: null } } });
     for (const q of template.questions) {
       await tx.screeningQuestion.create({
         data: {
@@ -238,7 +246,7 @@ async function applyCore({ businessId, templateId, jobId, replace }) {
         },
       });
     }
-    return tx.screeningQuestion.findMany({ where: { businessId, jobId }, include: { options: { orderBy: { sortOrder: 'asc' } } }, orderBy: { sortOrder: 'asc' } });
+    return tx.screeningQuestion.findMany({ where: { businessId, jobId, deletedAt: null }, include: { options: { orderBy: { sortOrder: 'asc' } } }, orderBy: { sortOrder: 'asc' } });
   });
   return { status: 200, body: { jobId, templateId, replaced: existing > 0 && !!replace, questions } };
 }
