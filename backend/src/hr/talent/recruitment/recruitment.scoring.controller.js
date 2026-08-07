@@ -79,6 +79,26 @@ async function recomputeAndPersist(tx, businessId, applicationId) {
     orderBy: { createdAt: 'asc' },
   });
 
+  // A ScreeningAnswer is keyed by questionId but has no FK to the question, so
+  // replacing a job's screening form (delete the questions, apply a template)
+  // leaves every existing answer pointing at a question that no longer exists.
+  // Rescoring then finds NO answer for any current question: the candidate scores
+  // 0, and every required knockout fails CLOSED on "unanswered" — so a recompute
+  // silently converts a shortlisted candidate into a knocked-out one with a zero.
+  // Observed on a live job: 10 candidates, 8 answers each, 0 matching a live
+  // question.
+  //
+  // Their stored score is the honest one — it was computed against the form they
+  // actually answered — so it is PRESERVED rather than overwritten with a fiction.
+  // Not an exception: this also runs as a side effect of submitting an interview
+  // scorecard, and refusing there would block the interviewer. The interview score
+  // and merit are still recomputed; only the screening half is held.
+  let staleForm = false;
+  if (answers.length && questions.length) {
+    const liveIds = new Set(questions.map((q) => q.id));
+    staleForm = !answers.some((a) => liveIds.has(a.questionId));
+  }
+
   // submitted scorecards across all of this application's interviews
   const interviews = await db.interview.findMany({
     where: { businessId, applicationId },
@@ -101,7 +121,40 @@ async function recomputeAndPersist(tx, businessId, applicationId) {
   }
   job.scorecardAggregation = aggregation;
 
-  const result = scoring.recomputeApplicationScore(application, questions, answers, scorecards, job);
+  let result = scoring.recomputeApplicationScore(application, questions, answers, scorecards, job);
+
+  if (staleForm) {
+    // Keep the screening half exactly as it was scored against the form the
+    // candidate filled in, and blend the FRESH interview score with it.
+    const screeningScore = Number(application.screeningScore ?? 0);
+    const screeningMax = Number(application.screeningMaxScore ?? 0);
+    const knockedOut = !!application.knockedOut;
+    const merit = scoring.computeMeritScore(
+      { screeningScore, screeningMax, interviewScore: result.interviewScore, knockedOut },
+      { applicationWeightPct: job.applicationWeightPct, interviewWeightPct: job.interviewWeightPct },
+    );
+    const prevSnapshot = (application.scoreSnapshot && typeof application.scoreSnapshot === 'object')
+      ? application.scoreSnapshot : {};
+    result = {
+      ...result,
+      screeningScore,
+      screeningMaxScore: screeningMax,
+      knockedOut,
+      meritScore: merit.merit,
+      scoreSnapshot: {
+        ...result.scoreSnapshot,
+        // keep the ORIGINAL per-question breakdown; the current form's questions
+        // are not the ones this candidate answered.
+        screening: prevSnapshot.screening || result.scoreSnapshot.screening,
+        merit: merit.merit,
+        staleForm: true,
+        staleFormNote:
+          'The job\'s screening questions were replaced after this candidate applied. '
+          + 'Their application score is the one computed against the form they actually '
+          + 'answered and is preserved as-is; only the interview score and merit are updated.',
+      },
+    };
+  }
 
   await db.application.update({
     where: { id: applicationId },
