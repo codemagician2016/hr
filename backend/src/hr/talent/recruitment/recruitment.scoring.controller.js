@@ -456,7 +456,9 @@ async function inviteInterview(req, res, next) {
     const job = iv.application && iv.application.job;
     // Careers reply-to (ICS organizer) — tenant override else a per-domain default.
     const biz = await prisma.business.findUnique({
-      where: { id: businessId }, select: { name: true, slug: true, candidateCommsConfig: true },
+      // timezone: an interview time without a zone is not an appointment anyone
+      // can act on — the candidate may be in a different one from the tenant.
+      where: { id: businessId }, select: { name: true, slug: true, candidateCommsConfig: true, timezone: true },
     }).catch(() => null);
     const organizer = careersOrganizer(biz);
 
@@ -465,9 +467,25 @@ async function inviteInterview(req, res, next) {
     // registered → every invite silently failed UNKNOWN_TEMPLATE. Repoint to the
     // real HR_CAND_INTERVIEW_INVITE via the candidate fan-out (adds the status
     // {LINK} + rides the dedupe/STOP-list). Explicit action → force past the gate.
-    const slotline = iv.scheduledAt
-      ? `Proposed time: ${new Date(iv.scheduledAt).toISOString()}.`
+    // DRIFTHR-1002 — the invite carried only a raw ISO timestamp and the mode, so
+    // a candidate could not see when to turn up, in which timezone, or how to
+    // join. Render a human date/time WITH the zone (an ISO string in UTC is not an
+    // appointment anyone can act on) and pass the joining details through.
+    const tz = (biz && biz.timezone) || process.env.DEFAULT_TIMEZONE || 'Asia/Kolkata';
+    const when = iv.scheduledAt ? new Date(iv.scheduledAt) : null;
+    const fmt = (opts) => {
+      if (!when) return '';
+      try { return new Intl.DateTimeFormat('en-GB', { timeZone: tz, ...opts }).format(when); }
+      catch { return when.toISOString(); }
+    };
+    const dateStr = fmt({ weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
+    const timeStr = fmt({ hour: '2-digit', minute: '2-digit', hour12: true });
+    const slotline = when
+      ? `${dateStr} at ${timeStr} (${tz})`
       : 'We will confirm a time shortly.';
+    const joinLine = iv.mode === 'VIDEO'
+      ? (iv.videoUrl ? `Join here: ${iv.videoUrl}` : 'The meeting link will follow before the interview.')
+      : (iv.locationText ? `Where: ${iv.locationText}` : '');
     if (iv.application) {
       await fanOutCandidateStage({
         businessId,
@@ -477,7 +495,16 @@ async function inviteInterview(req, res, next) {
         candidate: cand,
         job,
         biz,
-        extraVars: { MODE: iv.mode, SLOTLINE: slotline },
+        extraVars: {
+          MODE: iv.mode,
+          SLOTLINE: slotline,
+          DATE: dateStr,
+          TIME: timeStr,
+          TIMEZONE: tz,
+          MEETING_LINK: iv.videoUrl || '',
+          LOCATION: iv.locationText || '',
+          JOINLINE: joinLine,
+        },
       });
     }
 
@@ -491,8 +518,17 @@ async function inviteInterview(req, res, next) {
         where: { id: { in: panel }, businessId },
         select: { id: true, firstName: true, lastName: true, workEmail: true, personalEmail: true, phone: true, countryCode: true },
       });
-      const scorecardLink = `${appBaseUrl()}/me/scorecards/${iv.id}`;
+      // DRIFTHR-1001. This was `${appBaseUrl()}/me/scorecards/${iv.id}` — wrong on
+      // BOTH counts: /me/scorecards exists in no app (404 on every host), and the
+      // base resolved to the marketing site rather than the HR console. The real
+      // page is the interview's score screen in the admin app.
+      const scorecardLink = `${appBaseUrl()}/recruitment/interviews/${iv.id}/score`;
       const when = iv.scheduledAt ? new Date(iv.scheduledAt).toISOString() : 'TBD';
+      // The interviewer cannot join from an email that omits the joining details:
+      // the meeting URL for a VIDEO round, the room/address for an ONSITE one.
+      const joinLine = iv.mode === 'VIDEO'
+        ? (iv.videoUrl ? `Join: ${iv.videoUrl}` : 'Meeting link to be confirmed.')
+        : (iv.locationText ? `Where: ${iv.locationText}` : '');
       for (const e of emps) {
         const email = e.workEmail || e.personalEmail || null;
         if (!email && !e.phone) continue;
@@ -507,6 +543,10 @@ async function inviteInterview(req, res, next) {
             ROLE: job ? job.title : 'the role',
             WHEN: when,
             LINK: scorecardLink,
+            MODE: iv.mode,
+            MEETING_LINK: iv.videoUrl || '',
+            LOCATION: iv.locationText || '',
+            JOINLINE: joinLine,
           },
           triggeredBy: `HR_INTERVIEW_PANEL:${iv.id}:${e.id}`,
         });

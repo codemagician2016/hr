@@ -45,10 +45,25 @@ async function onApprove(approvalRequest, tx) {
   // outside this tx — a mail failure must never roll back the envelope).
   try {
     const { notifyHrEvent } = require('../integrations/notifications');
-    // Mirrors approvals/notify.js appBaseUrl precedence.
-    const rawBase = process.env.NEXT_PUBLIC_PLATFORM_URL || process.env.FRONTEND_URL
-      || `https://${process.env.PLATFORM_DOMAIN || 'drifthr.com'}`;
-    const base = String(rawBase).replace(/\/$/, '');
+    // The /onboarding?signToken=… page that consumes this link lives in the ESS
+    // app, which is served on the TENANT host and resolves the tenant FROM that
+    // host. This used to mirror approvals/notify.js and build the link on the
+    // PLATFORM host, where /onboarding is the tenant-SIGNUP page — so a signer
+    // clicking through was dropped into "create your company" instead of the
+    // document they were asked to sign. Measured: drifthr.com/onboarding → 307
+    // (signup), demo.drifthr.com/onboarding → 200 (the signing page).
+    const { tenantAppBaseUrl, adminAppBaseUrl } = require('../../core/lib/appUrls');
+    // This module has no module-level prisma — it works through the passed `tx`.
+    // Required here rather than assumed; a bare `prisma.` would have thrown
+    // "prisma is not defined" the first time a real signer link was sent, and no
+    // test covers this path.
+    const prisma = require('../../core/lib/prisma');
+    const signerBiz = await prisma.business.findUnique({
+      where: { id: businessId }, select: { slug: true },
+    }).catch(() => null);
+    // No slug → admin host rather than the platform host: still not the signing
+    // page, but it does not hand the signer a company-signup form.
+    const base = tenantAppBaseUrl(signerBiz && signerBiz.slug) || adminAppBaseUrl();
     for (const s of out.signers || []) {
       if (!s.email || !s.rawToken) continue;
       notifyHrEvent({

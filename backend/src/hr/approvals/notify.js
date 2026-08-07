@@ -38,12 +38,17 @@ const { notifyHrEvent } = require('../integrations/notifications');
 
 const BIZ_FALLBACK = 'DriftHR';
 
-// Resolve the app base URL for deep-links. Mirrors core/lib/inbox.js precedence so
-// links point at the same surface the rest of the platform uses. Trailing slash trimmed.
+// Resolve the app base URL for deep-links.
+//
+// This used to prefer NEXT_PUBLIC_PLATFORM_URL / PLATFORM_DOMAIN — the MARKETING
+// host. Every page these links open (/approvals, /leave/<id>, …) is served by the
+// HR ADMIN app, so they resolved to a host with no such route and 404'd. Measured
+// on production: drifthr.com/approvals → 404, app.drifthr.com/approvals → 200.
+// Every approval notification link was dead.
+const { adminAppBaseUrl } = require('../../core/lib/appUrls');
+
 function appBaseUrl() {
-  const base = process.env.NEXT_PUBLIC_PLATFORM_URL || process.env.FRONTEND_URL;
-  if (base) return String(base).replace(/\/$/, '');
-  return `https://${process.env.PLATFORM_DOMAIN || 'drifthr.com'}`;
+  return adminAppBaseUrl();
 }
 
 // Deep-link for an approver: the approvals inbox, focused on this request.

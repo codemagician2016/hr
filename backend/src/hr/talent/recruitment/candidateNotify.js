@@ -30,6 +30,7 @@
 
 const crypto = require('crypto');
 const prisma = require('../../../core/lib/prisma');
+const { adminAppBaseUrl } = require('../../../core/lib/appUrls');
 const { notifyHrEvent } = require('../../integrations/notifications');
 // REUSE the approvals fan-out internals verbatim: dispatchOne (contact → prefs →
 // atomic dedupe → router) + the claimDedupe/releaseDedupe helpers over HrNotifyDedupe.
@@ -131,9 +132,23 @@ function careersBoardUrl(slug) {
 }
 
 // The candidate status/timeline link carried as {LINK} in every candidate message.
+//
+// DRIFTHR-1002. This used careersBaseUrl(slug) — the TENANT host — and ALSO kept
+// the /<slug>/ segment, mixing the two shapes careersBoardUrl documents above as
+// mutually exclusive. The result, https://<slug>.drifthr.com/careers/<slug>/c/…,
+// 404'd: the tenant host serves the ESS careers routes, which carry no slug
+// segment AND have no /c/<token> page at all. Only the admin app has it. Measured:
+//
+//   demo.drifthr.com/careers/demo/c/<tok>      404   <- what we were sending
+//   demo.drifthr.com/careers/c/<tok>           404   (no such ESS route)
+//   drifthr.com/careers/demo/c/<tok>           404   (platform host)
+//   app.drifthr.com/careers/demo/c/<tok>       200   <- the page that exists
+//
+// The BOARD link is unaffected and still correctly tenant-hosted
+// (demo.drifthr.com/careers → 200) — only this per-candidate page moves.
 function candidateStatusLink(slug, token) {
   if (!slug || !token) return '';
-  return `${careersBaseUrl(slug)}/careers/${encodeURIComponent(slug)}/c/${encodeURIComponent(token)}`;
+  return `${adminAppBaseUrl()}/careers/${encodeURIComponent(slug)}/c/${encodeURIComponent(token)}`;
 }
 
 // Mint (or return the existing) single-candidate public access token. One live

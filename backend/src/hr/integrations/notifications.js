@@ -654,8 +654,11 @@ const HR_TEMPLATES = Object.freeze([
     displayName: 'Candidate — interview invitation',
     category: 'TRANSACTIONAL',
     vertical: 'HR',
-    body: "Hi {NAME}, you're invited to interview for {ROLE} at {BIZ} ({MODE}). {SLOTLINE} Details + calendar: {LINK}",
-    variables: ['NAME', 'ROLE', 'BIZ', 'MODE', 'SLOTLINE', 'LINK'],
+    // DRIFTHR-1002 — {SLOTLINE} now carries a human date/time WITH the timezone,
+    // and {JOINLINE} the meeting link (VIDEO) or the address (ONSITE). Without
+    // them the candidate got an invitation that never said how to attend.
+    body: "Hi {NAME}, you're invited to interview for {ROLE} at {BIZ} ({MODE}). When: {SLOTLINE} {JOINLINE} Full details: {LINK}",
+    variables: ['NAME', 'ROLE', 'BIZ', 'MODE', 'SLOTLINE', 'LINK', 'DATE', 'TIME', 'TIMEZONE', 'MEETING_LINK', 'LOCATION', 'JOINLINE'],
     channels: { sms: false, whatsapp: true, email: true },
   },
   {
@@ -690,8 +693,10 @@ const HR_TEMPLATES = Object.freeze([
     displayName: 'Interview panel notice (interviewer)',
     category: 'TRANSACTIONAL',
     vertical: 'HR',
-    body: "Hi {NAME}, you're on the panel for {ROLE} on {WHEN}. Open scorecard: {LINK}",
-    variables: ['NAME', 'ROLE', 'WHEN', 'LINK'],
+    // DRIFTHR-1001 — {JOINLINE} carries the meeting link (VIDEO) or room (ONSITE).
+    // Without it the interviewer could not join from the notification at all.
+    body: "Hi {NAME}, you're on the panel for {ROLE} on {WHEN}. {JOINLINE} Open scorecard: {LINK}",
+    variables: ['NAME', 'ROLE', 'WHEN', 'LINK', 'MODE', 'MEETING_LINK', 'LOCATION', 'JOINLINE'],
     channels: { sms: false, whatsapp: true, email: true },
   },
   {
