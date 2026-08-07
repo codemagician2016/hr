@@ -14,7 +14,7 @@ import { useParams } from 'next/navigation';
 import { ErrorBanner, PrimaryButton, TextInput, Modal, ModalActions, Spinner } from '@hr/ui';
 import { get, post } from '@/lib/api';
 import { asList, StatusBadge, ActionButton, PageHeader } from '@/lib/ui';
-import { Info, FieldLabel, ScoreBadge, NumberInput, ChannelChips, renderMergePreview } from '../../_components';
+import { Info, FieldLabel, ScoreBadge, NumberInput, ChannelChips, renderMergePreview, MeritExplainer } from '../../_components';
 
 export default function ApplicationPage() {
   const { id } = useParams();
@@ -92,8 +92,15 @@ export default function ApplicationPage() {
                 <ul className="text-xs text-gray-600 space-y-0.5">
                   {(snap.screening.lines || []).map((l, i) => (
                     <li key={i} className="flex justify-between">
-                      <span>{l.q}{l.label ? ` — ${l.label}` : ''}{l.isKnockout ? (l.knockoutFailed ? ' · KNOCKOUT FAILED' : ' · knockout passed') : ''}</span>
-                      <span className="tabular-nums">+{l.awarded}</span>
+                      <span>
+                        {l.q}{l.label ? ` — ${l.label}` : ''}
+                        {l.isKnockout ? (l.knockoutFailed ? ' · KNOCKOUT FAILED' : ' · knockout passed') : ''}
+                        {/* A question with no scored options counts for nothing AND adds
+                            nothing to the denominator — it looks like it is being scored
+                            when it is not. Say so, or the total is unexplainable. */}
+                        {!l.max && !l.isKnockout && <span className="text-gray-400"> · no points configured</span>}
+                      </span>
+                      <span className="tabular-nums">+{l.awarded}{l.max ? <span className="text-gray-400">{`/${l.max}`}</span> : null}</span>
                     </li>
                   ))}
                 </ul>
@@ -113,6 +120,7 @@ export default function ApplicationPage() {
               <span>Merit (weighted)</span>
               <span style={{ color: 'var(--theme-primary)' }}>{app.meritScore != null ? Number(app.meritScore) : '—'}</span>
             </div>
+            <MeritExplainer snap={snap} />
           </section>
 
           {/* Interviews */}

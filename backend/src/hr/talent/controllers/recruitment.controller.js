@@ -12,6 +12,7 @@
 //       check (computeStatutoryWages from payroll/compliance/india.js) — never a
 //       re-implementation. A breach blocks the offer with WAGES_50_RULE.
 const prisma = require('../../../core/lib/prisma');
+const { writeAudit } = require('../../../core/lib/audit');
 // Reuse the SAME wage check the payroll engine uses (do NOT re-implement the
 // 50% rule). Exported via india.js `_internals.computeStatutoryWages`.
 const indiaCompliance = require('../../payroll/compliance/india.js');
@@ -598,7 +599,18 @@ async function getResumeLink(req, res, next) {
     }
     const expiresIn = 600;
     const url = await s3.presignedGetUrl(cand.resumeUrl, { expiresIn });
-    await audit(businessId, req.user.id, 'recruitment.resume.view', 'Candidate', cand.id, {});
+    // The presign has already SUCCEEDED by this point, so a failure to record the
+    // access must not cost the user the URL — that is what turned this line into a
+    // 500 on every single "View resume" click (it called an `audit` that was never
+    // imported). writeAudit swallows its own errors; the catch is belt-and-braces
+    // so this can never again fail the request it is only observing.
+    await writeAudit({
+      businessId,
+      actorId: req.user.id,
+      action: 'recruitment.resume.view',
+      entityType: 'Candidate',
+      entityId: cand.id,
+    }).catch(() => {});
     res.json({ url, expiresIn, legacy: false });
   } catch (e) { next(e); }
 }

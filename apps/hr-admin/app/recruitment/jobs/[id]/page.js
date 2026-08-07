@@ -17,7 +17,7 @@ import { useParams } from 'next/navigation';
 import { ErrorBanner, PrimaryButton, TextInput, TextArea, Modal, ModalActions, Spinner } from '@hr/ui';
 import { get, post, patch, del } from '@/lib/api';
 import { asList, PageHeader, Tabs, ActionButton } from '@/lib/ui';
-import { Info, FieldLabel, ScoreBadge, Pager, NumberInput, StatusPill, CopyField, Check, StatCard, FunnelChart, ChannelChips, renderMergePreview } from '../../_components';
+import { Info, FieldLabel, ScoreBadge, Pager, NumberInput, StatusPill, CopyField, Check, StatCard, FunnelChart, ChannelChips, renderMergePreview, MeritExplainer } from '../../_components';
 
 const TABS = [
   { key: 'summary', label: 'Summary' },
@@ -1076,8 +1076,14 @@ function WhyDrawer({ app, onClose }) {
             <ul className="text-xs text-gray-600 space-y-0.5">
               {(snap.screening.lines || []).map((l, i) => (
                 <li key={i} className="flex justify-between">
-                  <span>{l.q}{l.label ? ` — ${l.label}` : ''}{l.isKnockout ? (l.knockoutFailed ? ' (knockout FAILED)' : ' (knockout passed)') : ''}</span>
-                  <span className="tabular-nums">+{l.awarded}</span>
+                  <span>
+                    {l.q}{l.label ? ` — ${l.label}` : ''}
+                    {l.isKnockout ? (l.knockoutFailed ? ' (knockout FAILED)' : ' (knockout passed)') : ''}
+                    {/* see the applications breakdown — a question with no scored
+                        options contributes to neither the score nor the total. */}
+                    {!l.max && !l.isKnockout && <span className="text-gray-400"> · no points configured</span>}
+                  </span>
+                  <span className="tabular-nums">+{l.awarded}{l.max ? <span className="text-gray-400">{`/${l.max}`}</span> : null}</span>
                 </li>
               ))}
             </ul>
@@ -1098,6 +1104,7 @@ function WhyDrawer({ app, onClose }) {
           <span>Merit (weighted)</span>
           <span style={{ color: 'var(--theme-primary)' }}>{snap.merit ?? (app.meritScore != null ? Number(app.meritScore) : '—')}</span>
         </div>
+        <MeritExplainer snap={snap} />
       </div>
     </Modal>
   );

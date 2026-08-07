@@ -36,6 +36,58 @@ export function Info({ text }) {
   );
 }
 
+// ── why the merit number is what it is ──────────────────────────────────────
+// Merit blends the application % and the interview score using the job's weights,
+// but it RENORMALISES over the components that exist yet. So before any interview
+// is scored, merit collapses to exactly the application % — and the screen looked
+// like it had ignored the configured weight. Worse, a 3/20 application is 15%, so
+// "(15%)" and a merit of 15 are two unrelated quantities that print the same.
+// Showing the weights actually applied is what makes the number checkable by hand.
+export function MeritExplainer({ snap }) {
+  if (!snap) return null;
+  const cfgApp = snap.applicationWeightPct;
+  const cfgIv = snap.interviewWeightPct;
+  const effApp = snap.effectiveApplicationWeightPct;
+  const effIv = snap.effectiveInterviewWeightPct;
+  if (effApp == null || effIv == null) return null;
+
+  const renormalised = (cfgApp != null && cfgIv != null)
+    && (Math.round(effApp) !== Math.round(cfgApp) || Math.round(effIv) !== Math.round(cfgIv));
+  const pending = snap.interview && snap.interview.pending;
+  const appPct = snap.screening ? snap.screening.pct : null;
+
+  return (
+    <p className="mt-1 text-[11px] leading-snug text-gray-500">
+      {snap.screening && snap.screening.knockedOut ? (
+        <>Merit is <strong>0</strong> because a knockout question failed — weights are not applied.</>
+      ) : (
+        <>
+          {effApp > 0 && appPct != null && (
+            <>{`${round1(effApp)}% × ${appPct}% (application)`}</>
+          )}
+          {effIv > 0 && snap.interview && snap.interview.score != null && (
+            <>{` + ${round1(effIv)}% × ${snap.interview.score} (interview)`}</>
+          )}
+          {renormalised && (
+            <>
+              {' — '}
+              {pending
+                ? `the interview is not scored yet, so the application carries the full weight (configured ${round1(cfgApp)}/${round1(cfgIv)})`
+                : `weights renormalised from ${round1(cfgApp)}/${round1(cfgIv)} over the components present`}
+            </>
+          )}
+        </>
+      )}
+    </p>
+  );
+}
+
+function round1(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '—';
+  return Math.round(v * 10) / 10;
+}
+
 // A field label with an inline ⓘ hint.
 export function FieldLabel({ children, hint }) {
   return (

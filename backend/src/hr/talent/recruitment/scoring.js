@@ -318,6 +318,15 @@ function recomputeApplicationScore(application, questions, answers, scorecards, 
     formula: merit.breakdown.formula,
     applicationWeightPct: weights.applicationWeightPct,
     interviewWeightPct: weights.interviewWeightPct,
+    // The weights ACTUALLY applied, after renormalising over the components that
+    // exist yet. Without these the merit number is unexplainable on screen: with
+    // no interview, merit collapses to the application % and looks like the
+    // configured weight was ignored (reported as "merit weight is 15 but it's
+    // showing wrong" — 3/20 = 15% and merit = 15 are two different quantities that
+    // happen to coincide). This module promises a reproducible, auditable number;
+    // that promise only holds if the reader can see which weights were used.
+    effectiveApplicationWeightPct: merit.breakdown.effectiveApplicationWeightPct,
+    effectiveInterviewWeightPct: merit.breakdown.effectiveInterviewWeightPct,
     screening: {
       score: screening.score,
       max: screening.max,
