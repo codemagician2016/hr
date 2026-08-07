@@ -9,7 +9,15 @@ const apiOrigin = String(
 // messages without per-page boilerplate. See platform/i18n/request.js.
 const withNextIntl = createNextIntlPlugin('./i18n/request.js');
 
+// Identity of this build — baked into the CLIENT bundle (NEXT_PUBLIC_BUILD_ID) and
+// reported by the running SERVER at /app-version. A deploy makes the two differ,
+// which is how an already-open tab learns it is running a dead bundle.
+const { resolveBuildId } = require('./lib/buildId');
+
+const buildId = resolveBuildId();
+
 const nextConfig = {
+  generateBuildId: () => buildId,
   transpilePackages: [
     '@hr/admin-core',
     '@hr/theme-engine',
@@ -18,6 +26,7 @@ const nextConfig = {
   ],
   env: {
     NEXT_PUBLIC_API_URL: apiOrigin,
+    NEXT_PUBLIC_BUILD_ID: buildId,
   },
   async rewrites() {
     return [

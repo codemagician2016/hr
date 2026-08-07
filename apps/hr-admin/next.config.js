@@ -6,14 +6,27 @@ const apiOrigin = String(
   process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || ''
 ).replace(/\/$/, '');
 
+// Identity of this build. Baked into the CLIENT bundle (NEXT_PUBLIC_BUILD_ID) and
+// reported by the running SERVER at /api/app-version. When a deploy swaps the
+// server underneath an open tab, the two stop matching — that difference is what
+// tells the browser to offer an update instead of silently breaking on a chunk
+// that no longer exists.
+const { resolveBuildId } = require('./lib/buildId');
+
+const buildId = resolveBuildId();
+
 const nextConfig = {
   transpilePackages: [
     '@hr/theme-engine',
     '@hr/types',
     '@hr/ui',
   ],
+  // Next's own build id — also what names the /_next/static/<buildId>/ directory,
+  // so pinning it keeps the served asset paths consistent with what we report.
+  generateBuildId: () => buildId,
   env: {
     NEXT_PUBLIC_API_URL: apiOrigin,
+    NEXT_PUBLIC_BUILD_ID: buildId,
   },
   // Proxy /api/* to the backend so cookie auth shares the app origin and
   // fetches can use same-origin relative paths (credentials:'include').

@@ -1,6 +1,7 @@
 import './globals.css';
 import { Manrope } from 'next/font/google';
 import TenantProvider from '@/components/TenantProvider';
+import UpdateAvailable from '@/components/UpdateAvailable';
 
 // DriftHR brand typeface. Exposed as --font-manrope (see tailwind.config.js + globals.css).
 const manrope = Manrope({
@@ -49,6 +50,9 @@ export default function RootLayout({ children }) {
     <html lang="en" className={manrope.variable}>
       <body className="min-h-screen">
         <TenantProvider>{children}</TenantProvider>
+        {/* Outside the provider on purpose: a tab left on the sign-in screen
+            across a deploy is just as stale as a signed-in one. */}
+        <UpdateAvailable />
       </body>
     </html>
   );

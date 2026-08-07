@@ -1,6 +1,7 @@
 import './globals.css';
 import { Manrope } from 'next/font/google';
 import ShellGate from '@/components/ShellGate';
+import UpdateAvailable from '@/components/UpdateAvailable';
 
 // DriftHR brand typeface. Exposed as --font-manrope (see tailwind.config.js + globals.css).
 const manrope = Manrope({
@@ -45,6 +46,10 @@ export default function RootLayout({ children }) {
     <html lang="en" className={manrope.variable}>
       <body className="bg-gray-50 min-h-screen text-gray-900">
         <ShellGate>{children}</ShellGate>
+        {/* Outside ShellGate on purpose: a tab sitting on the LOGIN page across a
+            deploy is just as stale as a signed-in one, and its chunks break the
+            same way. */}
+        <UpdateAvailable />
       </body>
     </html>
   );

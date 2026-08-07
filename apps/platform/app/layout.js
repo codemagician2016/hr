@@ -7,6 +7,7 @@ import { ConfirmDialogProvider } from '@/components/ConfirmDialog';
 import { NextIntlClientProvider } from 'next-intl';
 import { getLocale, getMessages } from 'next-intl/server';
 import { SITE_URL, SITE_NAME, DEFAULT_TITLE, DEFAULT_DESCRIPTION, DEFAULT_OG_IMAGE, brandJsonLd } from '@/lib/seo';
+import UpdateAvailable from '@/components/UpdateAvailable';
 
 // DriftHR brand typeface. Exposed as --font-manrope (see tailwind.config.js).
 const manrope = Manrope({
@@ -73,6 +74,9 @@ export default async function RootLayout({ children }) {
             <CookieConsent />
           </ConfirmDialogProvider>
         </NextIntlClientProvider>
+        {/* Outside the intl provider: a tab on the signed-out marketing/login
+            pages goes stale across a deploy exactly like an app page. */}
+        <UpdateAvailable />
       </body>
     </html>
   );
