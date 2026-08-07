@@ -49,7 +49,12 @@ const KINDS = [
   ['FILE', 'File upload (CV, certificate)'],
 ];
 const KIND_LABEL = Object.fromEntries(KINDS);
-const OPTION_KINDS = ['SINGLE_CHOICE', 'MULTI_CHOICE', 'QUALIFICATION']; // carry options
+// BOOLEAN belongs here: a Yes/No question scores through its options exactly like
+// a choice question, and the per-job editor has always offered them. Leaving it
+// out made the SAME question type scoreable on one screen and not the other, so a
+// form built here could never award points for Yes — which is how forms full of
+// unscorable Yes/No questions got created.
+const OPTION_KINDS = ['SINGLE_CHOICE', 'MULTI_CHOICE', 'QUALIFICATION', 'BOOLEAN']; // carry options
 const MAXPOINTS_KINDS = ['NUMBER', 'QUALIFICATION']; // maxPoints caps scoring
 // A FILE answer is an uploaded document's URL — there is nothing to match it
 // against, so knockout and points are hidden for it. The server enforces this
@@ -105,7 +110,12 @@ function QuestionCard({ q, index, total, onChange, onRemove, onMove }) {
     // Seed a first option row when switching into a choice/qualification kind.
     const next = { ...q, kind };
     if (OPTION_KINDS.includes(kind) && (!next.options || next.options.length === 0)) {
-      next.options = [{ label: '', value: '', points: 0 }];
+      // Yes/No has exactly two answers and the candidate form submits true/false,
+      // so fill them in rather than making someone guess the wording. Points stay
+      // 0 — the author decides what Yes is worth, and the hint says so.
+      next.options = kind === 'BOOLEAN'
+        ? [{ label: 'Yes', value: 'true', points: 0 }, { label: 'No', value: 'false', points: 0 }]
+        : [{ label: '', value: '', points: 0 }];
     }
     onChange(next);
   }

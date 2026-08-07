@@ -880,7 +880,23 @@ function QuestionModal({ jobId, question, onClose, onSaved }) {
                 Yes/No questions expecting them to count and got 0. Yes/No DOES
                 carry points, exactly like the choice kinds. */}
             <FieldLabel hint="Single choice, Multiple choice, Qualification and Yes/No all carry points per option — add the options below. Number scores the value entered (capped by Max points). Text and File are information only and cannot be scored.">Answer type</FieldLabel>
-            <select value={kind} onChange={(e) => setKind(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+            <select
+              value={kind}
+              onChange={(e) => {
+                const k = e.target.value;
+                setKind(k);
+                // Yes/No has exactly two answers and the candidate form submits
+                // true/false — fill them in rather than leaving a blank row that
+                // makes it look like Yes/No cannot be scored at all.
+                if (k === 'BOOLEAN' && options.every((o) => !String(o.label || '').trim())) {
+                  setOptions([
+                    { label: 'Yes', value: 'true', points: 0 },
+                    { label: 'No', value: 'false', points: 0 },
+                  ]);
+                }
+              }}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+            >
               {SCREENING_KINDS.map((k) => <option key={k.v} value={k.v}>{k.label}</option>)}
             </select>
           </div>
