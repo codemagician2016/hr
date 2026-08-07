@@ -17,6 +17,7 @@ import { useParams } from 'next/navigation';
 import { ErrorBanner, PrimaryButton, TextInput, TextArea, Modal, ModalActions, Spinner } from '@hr/ui';
 import { get, post, patch, del } from '@/lib/api';
 import { asList, PageHeader, Tabs, ActionButton } from '@/lib/ui';
+import ModuleGuide from '@/components/ModuleGuide';
 import { Info, FieldLabel, ScoreBadge, Pager, NumberInput, StatusPill, CopyField, Check, StatCard, FunnelChart, ChannelChips, renderMergePreview, MeritExplainer } from '../../_components';
 
 const TABS = [
@@ -777,6 +778,24 @@ function ScreeningTab({ jobId }) {
         Questions a candidate answers when they apply. Choice/qualification answers carry <b>points</b> (e.g. Master's → 6, CS engineering → 20).
         Tick <b>Knockout</b> to auto-reject a wrong answer. These auto-score the application — no manual marking.
       </p>
+      <ModuleGuide
+        id="screening-questions"
+        title="How points and knockouts decide the application score"
+        what="Every answer option you create is worth points. The application score is the points a candidate earned out of the most that form could award — so the questions you attach points to are the ones that decide the ranking. Nothing is marked by hand."
+        steps={[
+          'Add a question and pick the answer type. Single choice, Multiple choice, Qualification and Yes/No all carry points per option. Number scores the value entered (capped by Max points). Text and File cannot be scored — use them for information only.',
+          'Type each answer option and the points it earns on the right. A new option starts at 0 — an option left at 0 earns nothing.',
+          'A question with NO scored options counts for nothing AND adds nothing to the total. It shows as "no points configured" on the score breakdown. That is fine for an information-only question, but a Yes/No you meant to reward needs options: Yes → 5, No → 0.',
+          'Tick Knockout to auto-reject anyone who gives the wrong answer, then choose the passing answer. A knockout is pass/fail — it drops merit to 0. If you also want the right answer to earn points, give its option points as well.',
+          'Give the points that matter the biggest numbers. The score is relative: a question worth 15 outweighs three questions worth 1.',
+        ]}
+        example={<>A <b>QA Intern</b> form: <b>Highest qualification</b> (Bachelor's → 1, PhD → 3), <b>Specialization</b> (Computer Science → 1), <b>Total experience</b> (1–2 years → 1) and four <b>Yes/No</b> questions each Yes → 1, No → 0. The most anyone can score is <b>3+1+1+1+1+1+1 = 9</b>. A candidate with a Bachelor's, CS, 1–2 years and four Yeses earns <b>7</b>, so the application is <b>7/9 = 77.78%</b>. With no interview scored yet, merit is that same <b>77.78</b>; once a panel scores them it becomes 40% × 77.78 + 60% × their interview.</>}
+        tips={[
+          'The score breakdown on each candidate shows every line as earned/possible, so you can always see which question moved the number.',
+          'Editing points later does not rescore past applicants automatically — use Recompute on a candidate to refresh their score.',
+          'Applying a form template replaces the whole question set; you will be asked to confirm if the job already has questions.',
+        ]}
+      />
       <ApplyFormTemplateBar jobId={jobId} onApplied={load} />
       <div className="flex justify-end mb-3">
         <PrimaryButton onClick={() => setEditing({ prompt: '', kind: 'SINGLE_CHOICE', required: true, isKnockout: false, options: [{ label: '', value: '', points: 0 }] })}>Add question</PrimaryButton>
@@ -856,7 +875,11 @@ function QuestionModal({ jobId, question, onClose, onSaved }) {
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <FieldLabel hint="The answer type. Single/Multiple choice and Qualification carry points per option; Yes/No is a simple boolean (great for knockouts).">Answer type</FieldLabel>
+            {/* This hint used to read "Yes/No is a simple boolean (great for
+                knockouts)", which reads as "Yes/No cannot score" — so people built
+                Yes/No questions expecting them to count and got 0. Yes/No DOES
+                carry points, exactly like the choice kinds. */}
+            <FieldLabel hint="Single choice, Multiple choice, Qualification and Yes/No all carry points per option — add the options below. Number scores the value entered (capped by Max points). Text and File are information only and cannot be scored.">Answer type</FieldLabel>
             <select value={kind} onChange={(e) => setKind(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
               {SCREENING_KINDS.map((k) => <option key={k.v} value={k.v}>{k.label}</option>)}
             </select>
@@ -865,7 +888,7 @@ function QuestionModal({ jobId, question, onClose, onSaved }) {
             <label className="flex items-center gap-2 text-sm text-gray-700">
               <input type="checkbox" checked={isKnockout} onChange={(e) => setIsKnockout(e.target.checked)} />
               Knockout question
-              <Info text="A knockout auto-rejects the candidate if they don't give a passing answer (e.g. 'Must be eligible to work in India → Yes'). Their merit drops to 0 but they stay visible." />
+              <Info text="A knockout auto-rejects the candidate if they don't give a passing answer (e.g. 'Eligible to work in India → Yes'). Their merit drops to 0 but they stay visible. Knockout is pass/fail on its own — if you also want the right answer to earn points, give that option points below." />
             </label>
           </div>
         </div>
@@ -915,6 +938,16 @@ function QuestionModal({ jobId, question, onClose, onSaved }) {
             </div>
             <button type="button" onClick={addOpt} className="text-sm mt-2 hover:underline" style={{ color: 'var(--theme-primary)' }}>+ Add option</button>
             <p className="text-[11px] text-gray-400 mt-1">Left = label shown to the candidate · Right = points awarded.</p>
+            {/* The single most common misunderstanding: options left at 0 look
+                configured but score nothing, and the question then vanishes from
+                the denominator too. Say it where the mistake is made. */}
+            <div className="mt-2 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 text-[11px] text-gray-600 leading-snug">
+              <b>How this scores.</b>{' '}
+              {kind === 'BOOLEAN'
+                ? <>Give <b>Yes</b> the points you want it worth and leave <b>No</b> at 0 — e.g. <i>Yes → 5, No → 0</i>. A Yes/No question with both options at 0 earns nothing and is left out of the total.</>
+                : <>The highest-points option is the most this question can add. e.g. <i>Master's → 6, Bachelor's → 4, Diploma → 2</i> means it is worth up to <b>6</b>, and a candidate picking Bachelor's earns <b>4</b>.</>}
+              {' '}Every option at 0 → the question counts for nothing <i>and</i> is excluded from the total.
+            </div>
           </div>
         )}
 

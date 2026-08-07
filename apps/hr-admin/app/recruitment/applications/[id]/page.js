@@ -81,7 +81,7 @@ export default function ApplicationPage() {
           <section className="rounded-2xl border border-gray-200 bg-white p-5">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-semibold text-gray-900">Score breakdown
-                <Info text="The exact, auditable maths behind this candidate's merit. Nothing is a black box." />
+                <Info text="The exact, auditable maths behind this candidate's merit. Each line shows points earned / the most that question could award. Application % = earned ÷ possible. Merit blends it with the interview using the job's weights — until a panel scores them, the application carries the full weight. A failed knockout forces merit to 0. Lines marked 'no points configured' have no scored options, so they count for nothing and are left out of the total." />
               </h2>
               <ActionButton onClick={recompute}>Recompute</ActionButton>
             </div>

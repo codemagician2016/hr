@@ -39,6 +39,22 @@ function canon(v) {
   return String(v).trim().toLowerCase();
 }
 
+// A Yes/No question has TWO sides that must agree, and they are written by
+// different people. The candidate form is hardcoded to submit a real boolean
+// (true/false), while HR types the option labels — and the editor defaults an
+// option's `value` to its LABEL, so a "Yes" option is stored as "Yes". Comparing
+// those literally, 'true' !== 'yes', so the answer matched no option: 0 points
+// and no answer label on the breakdown, even though the knockout passed (its
+// default pass set is [true]). Fold every spelling onto one token so both sides
+// meet, whichever wording HR used.
+const BOOL_TRUE = new Set(['true', 'yes', 'y', '1']);
+const BOOL_FALSE = new Set(['false', 'no', 'n', '0']);
+function boolCanon(token) {
+  if (BOOL_TRUE.has(token)) return 'true';
+  if (BOOL_FALSE.has(token)) return 'false';
+  return token; // not boolean-ish — leave it alone
+}
+
 // The set of "passing" values for a knockout question. knockoutValue may be a
 // scalar or an array; absent → for BOOLEAN a knockout defaults to requiring true.
 function knockoutPassSet(question) {
@@ -47,7 +63,9 @@ function knockoutPassSet(question) {
   if (Array.isArray(kv)) vals = kv;
   else if (kv === null || kv === undefined) vals = question.kind === 'BOOLEAN' ? [true] : [];
   else vals = [kv];
-  return new Set(vals.map(canon));
+  // A BOOLEAN knockout configured as "Yes" must accept the form's `true`.
+  const norm = question.kind === 'BOOLEAN' ? (v) => boolCanon(canon(v)) : canon;
+  return new Set(vals.map(norm));
 }
 
 // Normalise an application's submitted answer into an array of canonical tokens
@@ -109,8 +127,13 @@ function scoreScreening(questions, answers) {
           if (tokens.includes(canon(o.value))) awarded += num(o.points);
         }
       } else if (q.kind === 'SINGLE_CHOICE' || q.kind === 'BOOLEAN' || q.kind === 'QUALIFICATION') {
-        const tok = tokens[0];
-        const match = options.find((o) => canon(o.value) === tok);
+        // BOOLEAN only: the submitted value and the option's value are authored
+        // independently ('true' vs "Yes"), so compare them as booleans. Other kinds
+        // stay literal — an option genuinely labelled "No" on a SINGLE_CHOICE must
+        // not be rewritten.
+        const norm = q.kind === 'BOOLEAN' ? boolCanon : (t) => t;
+        const tok = norm(tokens[0]);
+        const match = options.find((o) => norm(canon(o.value)) === tok);
         if (match) { awarded = num(match.points); chosenLabel = match.label; }
       } else if (q.kind === 'NUMBER') {
         awarded = num(a.answerValue);

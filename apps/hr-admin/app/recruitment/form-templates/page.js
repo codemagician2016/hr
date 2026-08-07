@@ -149,7 +149,10 @@ function QuestionCard({ q, index, total, onChange, onRemove, onMove }) {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <FieldLabel hint="The answer type. Single/Multiple choice and Qualification carry points per option; Yes/No is a simple boolean (great for knockouts); Number/Free text are open answers.">Answer type</FieldLabel>
+            {/* Kept in step with the per-job editor: Yes/No DOES carry points. The
+                old wording read as "Yes/No cannot score" and people built Yes/No
+                questions expecting them to count. */}
+            <FieldLabel hint="Single choice, Multiple choice, Qualification and Yes/No all carry points per option — add the options below. Number scores the value entered (capped by Max points). Text and File are information only and cannot be scored.">Answer type</FieldLabel>
             <select value={q.kind} onChange={(e) => setKind(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white">
               {KINDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
@@ -203,7 +206,7 @@ function QuestionCard({ q, index, total, onChange, onRemove, onMove }) {
           <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-3">
             <div className="mb-2 flex items-center text-sm font-medium text-gray-700">
               Options + points
-              <Info text="Each answer option, the value stored, and the points it earns. e.g. 'Master's → 6', 'B.Tech CS → 20'. The application score sums these." />
+              <Info text="Each answer option, the value stored, and the points it earns. e.g. 'Master's → 6', 'B.Tech CS → 20'. The highest-points option is the most this question can add; an option left at 0 earns nothing, and a question whose options are ALL 0 is excluded from the total. For Yes/No, give Yes the points and leave No at 0." />
             </div>
             <div className="space-y-2">
               {options.map((o, i) => (
