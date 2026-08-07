@@ -35,7 +35,10 @@ const { chromium } = resolvePlaywright();
 const { waitForHealthy } = require('./ui-lib');
 
 const ADMIN = process.env.E2E_ADMIN || 'https://app-staging.drifthr.com';
-const ESS = process.env.E2E_ESS || ADMIN.replace('app-', 'my-').replace('//app.', '//my.');
+// ESS is served on the TENANT host (demo-staging.drifthr.com), not an "my-" host —
+// same convention qa/smoke/ess.js uses.
+const ESS = process.env.E2E_ESS || process.env.E2E_TENANT
+  || (ADMIN.includes('-staging') ? 'https://demo-staging.drifthr.com' : 'https://demo.drifthr.com');
 const PLATFORM = process.env.E2E_PLATFORM
   || (ADMIN.includes('-staging') ? 'https://staging.drifthr.com' : 'https://drifthr.com');
 

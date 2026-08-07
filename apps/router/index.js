@@ -170,8 +170,15 @@ function publicMicrocacheKey(host, url, cookieHeader, acceptLanguage) {
 // resolve to the ESS app: the employee dashboard/account surfaces are
 // customer-scoped, and /api & /_next/data carry request state. Only the
 // anonymous login/splash shell is cacheable.
+// /app-version is the deploy-detection probe: it reports the build id of the
+// server answering right now, and the browser compares it against the id baked
+// into its own bundle to decide whether to offer a reload. Edge-caching it hands
+// back the PREVIOUS build's id for the whole TTL, so the one request that exists
+// to notice a deploy would be answered by a response created before it — the
+// prompt would fire late or not at all. It is a ~30-byte JSON with no
+// personalization, so there is nothing to gain by caching it either.
 const ESS_NO_CACHE_PREFIXES = [
-  '/api', '/_next/data', '/dashboard', '/account', '/profile',
+  '/api', '/_next/data', '/dashboard', '/account', '/profile', '/app-version',
 ];
 
 function isPublicEssPath(pathname) {
